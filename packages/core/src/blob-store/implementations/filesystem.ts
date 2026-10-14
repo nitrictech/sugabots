@@ -26,6 +26,20 @@ export const fromFileSystem = (root: string) =>
 		/** Starts with `.`, so it is never taken for a key's segment. */
 		const temporaryName = Effect.map(ids.random, (id) => `.${id}.tmp`);
 
+		// A missing or read-only directory stops the server starting, rather than
+		// failing whichever feature first keeps a file.
+		yield* Effect.gen(function* () {
+			yield* fs.makeDirectory(root, { recursive: true });
+			const probe = join(root, yield* temporaryName);
+			yield* fs.writeFileString(probe, "");
+			yield* fs.remove(probe);
+		}).pipe(
+			Effect.mapError(
+				(cause) => new Error(`BLOB_STORE_FILESYSTEM_ROOT ${root} can't be written`, { cause }),
+			),
+			Effect.orDie,
+		);
+
 		const entryOf = (key: BlobStore.Key) =>
 			Effect.all({
 				contentType: fs.readFileString(join(directoryOf(root, key), CONTENT_TYPE_FILE)),
