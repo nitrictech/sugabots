@@ -34,6 +34,7 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
+import { SandboxCredentials } from "@sugabots/core/sandboxes/sandbox-credentials";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
@@ -146,6 +147,8 @@ const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(ConversationServices),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
+	// What pods' sandboxes are signed in to, which sandboxes leave to the edge.
+	Layer.provide(SandboxCredentials.none),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),
 );
