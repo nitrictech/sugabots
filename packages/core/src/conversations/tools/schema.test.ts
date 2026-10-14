@@ -137,8 +137,8 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		expect(await schema.validate?.({ query: "x", count: 0 })).toMatchObject({ success: false });
 	});
 
-	it.each(
-		Object.entries(
+	it.each([
+		...Object.entries(
 			artifactTools({
 				by: { workspaceId: "workspace", podId: "pod", agentId: "agent", threadId: "thread" },
 				turnId: "turn",
@@ -153,22 +153,19 @@ describe("native Effect tool schemas through the AI SDK", () => {
 				run: unexpectedExecution,
 			}),
 		),
-	)("gives %s an object input schema, as providers require", async (_name, artifactTool) => {
-		expect(await asSchema(artifactTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
-	});
-});
-
-describe("the routine tools' schemas", () => {
-	it("are each an object, which every provider takes for a tool's input", async () => {
-		const tools = routineTools({
-			bot: { agentId: "agent", askerId: undefined } as never,
-			timeZone: "UTC",
-			routines: {} as never,
-			run: unexpectedExecution,
-		});
-
-		for (const tool of Object.values(tools)) {
-			expect(await asSchema(tool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
-		}
+		...Object.entries(
+			routineTools({
+				bot: { agentId: "agent", askedBy: "user" },
+				timeZone: "UTC",
+				routines: {
+					list: unexpectedExecution,
+					create: unexpectedExecution,
+					update: unexpectedExecution,
+				},
+				run: unexpectedExecution,
+			}),
+		),
+	])("gives %s an object input schema, as providers require", async (_name, builtInTool) => {
+		expect(await asSchema(builtInTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
 	});
 });
