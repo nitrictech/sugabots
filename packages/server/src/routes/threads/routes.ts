@@ -1,4 +1,5 @@
-import { BadRequest, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
+import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { userText } from "@sugabots/errors";
@@ -12,6 +13,7 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 	Effect.gen(function* () {
 		const threads = yield* ThreadView.Service;
 		const turns = yield* Turns.Controls;
+		const reactions = yield* Reactions.Service;
 		return handlers
 			.handle("list", ({ params }) =>
 				threads.list(params.workspace).pipe(asSessionUser, asHttpError(threadErrors)),
@@ -23,6 +25,16 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 			)
 			.handle("activity", ({ params }) =>
 				threads.activity(params.threadId).pipe(asSessionUser, asHttpError(threadErrors)),
+			)
+			.handle("react", ({ params }) =>
+				reactions
+					.add(params.messageId, params.emoji)
+					.pipe(asSessionUser, asHttpError(threadErrors)),
+			)
+			.handle("unreact", ({ params }) =>
+				reactions
+					.remove(params.messageId, params.emoji)
+					.pipe(asSessionUser, asHttpError(threadErrors)),
 			)
 			.handle("cancelTurn", ({ params }) =>
 				Effect.gen(function* () {
@@ -40,4 +52,6 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 const threadErrors = {
 	...refusals,
 	InvalidThreadHistoryCursor: BadRequest,
+	MessageNotFinished: Conflict,
+	TooManyReactionEmoji: Conflict,
 };

@@ -5,6 +5,7 @@ import type { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
+import type { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/thread-view";
 import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
@@ -52,6 +53,7 @@ export type HttpServices =
 	| Usage.Service
 	| Chats.Service
 	| ChatView.Service
+	| Reactions.Service
 	| ThreadView.Service
 	| Turns.Controls
 	| Routines.Service

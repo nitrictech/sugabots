@@ -72,6 +72,7 @@ export class ResourceHidden
 			| "agent"
 			| "thread"
 			| "chat"
+			| "message"
 			| "turn"
 			| "member"
 			| "invitation"

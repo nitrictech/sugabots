@@ -1,6 +1,7 @@
 import type {
 	CollaborationPart,
 	Message,
+	MessageReaction,
 	PersonParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
@@ -27,6 +28,12 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly podId: string;
 		readonly message: Message;
+	};
+	/** Somebody reacted to a message or took a reaction back. `reactions` is all it has now. */
+	ReactionsChanged: {
+		readonly threadId: string;
+		readonly messageId: string;
+		readonly reactions: readonly MessageReaction[];
 	};
 	/** Agents were brought into the thread to answer in it. */
 	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };

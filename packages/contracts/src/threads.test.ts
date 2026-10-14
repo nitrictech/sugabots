@@ -1,4 +1,5 @@
 import { Result, Schema, SchemaIssue } from "effect";
+import emojibase from "emojibase-data/en/data.json" with { type: "json" };
 import { describe, expect, it } from "vitest";
 import { testPerson } from "./testing.ts";
 import {
@@ -11,6 +12,7 @@ import {
 	messagePreview,
 	messageSchema,
 	newMessageSchema,
+	reactionEmojiSchema,
 	textWithoutNarration,
 	threadHistoryQuerySchema,
 	threadParticipantSchema,
@@ -253,5 +255,36 @@ describe("messagePreview", () => {
 
 	it("skips lines that render no text", () => {
 		expect(messagePreview("---\n## Weekly `report`")).toBe("Weekly report");
+	});
+});
+
+describe("reactionEmojiSchema", () => {
+	const decode = Schema.decodeUnknownSync(reactionEmojiSchema);
+
+	it("reads an emoji with a variation selector it has no need of as the emoji alone", () => {
+		expect(decode("\u{1F44D}\uFE0F")).toBe("👍");
+	});
+
+	it("keeps the variation selectors an emoji needs", () => {
+		for (const emoji of ["❤️", "☺️", "1️⃣", "❤️‍🔥", "🏳️‍🌈", "👍🏽", "🇳🇿", "🇦"]) {
+			expect(decode(emoji)).toBe(emoji);
+		}
+	});
+
+	it("refuses anything but one emoji", () => {
+		for (const text of ["", "ok", "👍👍", "👍 ", "🇦🇧🇨"]) {
+			expect(() => decode(text)).toThrow();
+		}
+	});
+
+	it("takes every emoji the picker offers, in every skin tone", () => {
+		const offered = emojibase.flatMap(({ emoji, skins }) => [
+			emoji,
+			...(skins ?? []).map((skin) => skin.emoji),
+		]);
+		const refused = offered.filter((emoji) =>
+			Result.isFailure(Schema.decodeUnknownResult(reactionEmojiSchema)(emoji)),
+		);
+		expect(refused).toEqual([]);
 	});
 });

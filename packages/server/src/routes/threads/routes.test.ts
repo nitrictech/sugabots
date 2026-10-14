@@ -3,6 +3,7 @@ import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabo
 import { testPerson } from "@sugabots/contracts/testing";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
@@ -89,10 +90,12 @@ const seenBy = <A>(threadId: string, seen: A) =>
 	);
 
 let view: ThreadView.Interface;
+let reacted: Array<{ change: "add" | "remove"; messageId: string; emoji: string }>;
 let cancellation: { turnId: string; userId: string } | undefined;
 let requestedHistory: Parameters<ThreadView.Interface["get"]>[1] | undefined;
 
 beforeEach(() => {
+	reacted = [];
 	cancellation = undefined;
 	requestedHistory = undefined;
 	view = {
@@ -116,6 +119,18 @@ const app = () =>
 		Layer.mergeAll(
 			identifiedBy(resolveUser),
 			Layer.succeed(ThreadView.Service, view),
+			Layer.succeed(Reactions.Service, {
+				add: (messageId, emoji) => {
+					reacted.push({ change: "add", messageId, emoji });
+					return Effect.succeed([
+						{ emoji, people: [{ id: USER, name: "Sam", at: thread.createdAt }] },
+					]);
+				},
+				remove: (messageId, emoji) => {
+					reacted.push({ change: "remove", messageId, emoji });
+					return Effect.succeed([]);
+				},
+			}),
 			unimplemented(Turns.Controls, {
 				cancel: (turnId) =>
 					Effect.flatMap(CurrentActor.Service, ({ userId }) => {
@@ -192,6 +207,38 @@ describe("thread routes", () => {
 		expect((await app().request(`/threads/${THREAD}?limit=101`, as("member-token"))).status).toBe(
 			400,
 		);
+	});
+
+	it("reacts with the emoji the address names, and only with one emoji", async () => {
+		const message = details.messages[0]?.id;
+		const thumbsUp = encodeURIComponent("👍🏽");
+
+		const added = await app().request(
+			`/messages/${message}/reactions/${thumbsUp}`,
+			as("member-token", { method: "PUT" }),
+		);
+		expect(added.status).toBe(200);
+		expect(await added.json()).toEqual([
+			{ emoji: "👍🏽", people: [{ id: USER, name: "Sam", at: thread.createdAt }] },
+		]);
+		const removed = await app().request(
+			`/messages/${message}/reactions/${thumbsUp}`,
+			as("member-token", { method: "DELETE" }),
+		);
+		expect(await removed.json()).toEqual([]);
+		expect(reacted).toEqual([
+			{ change: "add", messageId: message, emoji: "👍🏽" },
+			{ change: "remove", messageId: message, emoji: "👍🏽" },
+		]);
+
+		for (const notOneEmoji of ["ok", encodeURIComponent("👍👍")]) {
+			const refused = await app().request(
+				`/messages/${message}/reactions/${notOneEmoji}`,
+				as("member-token", { method: "PUT" }),
+			);
+			expect(refused.status).toBe(400);
+		}
+		expect(reacted).toHaveLength(2);
 	});
 
 	it("requests cancellation only for a visible active turn", async () => {

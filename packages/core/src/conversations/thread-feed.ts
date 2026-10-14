@@ -31,6 +31,16 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			onThread(threadId, streamEvent("message.created", { threadId, message })),
 			listedThreadChanged(workspaceId, podId, threadId),
 		],
+		ReactionsChanged: ({ threadId, messageId, reactions }) => [
+			onThread(
+				threadId,
+				streamEvent("message.reactions_changed", {
+					threadId,
+					messageId,
+					reactions: [...reactions],
+				}),
+			),
+		],
 		AgentsJoined: ({ threadId }) => [
 			onThread(threadId, streamEvent("thread.changed", { threadId })),
 		],

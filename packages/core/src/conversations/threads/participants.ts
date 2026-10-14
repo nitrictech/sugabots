@@ -2,6 +2,7 @@ import type {
 	AgentColor,
 	Message,
 	MessagePart,
+	MessageReaction,
 	MessageReplyTo,
 	PersonParticipant,
 	ThreadParticipant,
@@ -163,6 +164,32 @@ export function withReplyTo(shown: Message, replyTo: MessageReplyTo | undefined)
 	return replyTo ? { ...shown, replyTo } : shown;
 }
 
+/** The columns and relations a relational query reads of a message's reactions, earliest first. */
+export const reactionColumns = {
+	columns: { emoji: true, createdAt: true },
+	orderBy: { createdAt: "asc", id: "asc" },
+	with: { user: { columns: { id: true, name: true } } },
+} as const;
+
+/** A reaction read with {@link reactionColumns}. */
+export interface ReactionRow {
+	emoji: string;
+	createdAt: Date;
+	user: { id: string; name: string };
+}
+
+/** Reactions, earliest first, grouped by emoji in the order each was first used. */
+export function toReactions(rows: readonly ReactionRow[]): MessageReaction[] {
+	const byEmoji = new Map<string, MessageReaction>();
+	for (const row of rows) {
+		const person = { id: row.user.id, name: row.user.name, at: row.createdAt.toISOString() };
+		const reaction = byEmoji.get(row.emoji);
+		if (reaction) reaction.people.push(person);
+		else byEmoji.set(row.emoji, { emoji: row.emoji, people: [person] });
+	}
+	return [...byEmoji.values()];
+}
+
 /** The relations a relational query follows to read a message as the API shows it. */
 export const messageRelations = {
 	authorUser: personColumns,
@@ -174,6 +201,7 @@ export const messageRelations = {
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
 	routineExecution: { columns: { id: true, threadId: true, routineName: true } },
 	replyTo: quotedMessageColumns,
+	reactions: reactionColumns,
 } as const;
 
 /** Who a person is, as read with {@link personColumns}. */
@@ -188,6 +216,7 @@ export interface MessageWithRelations extends schema.MessageRow {
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	routineExecution: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "routineName"> | null;
 	replyTo: QuotedMessage | null;
+	reactions: ReactionRow[];
 }
 
 /** A message read with `messageRelations`, as the API shows it. */
@@ -220,6 +249,7 @@ export function messageFromRelations(
 				}
 			: {}),
 		...(stored.replyTo ? { replyTo: toReplyTo(stored.replyTo) } : {}),
+		...(stored.reactions.length > 0 ? { reactions: toReactions(stored.reactions) } : {}),
 	};
 }
 

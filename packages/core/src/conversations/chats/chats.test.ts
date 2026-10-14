@@ -12,6 +12,7 @@ import {
 	event,
 	laneRequest,
 	message,
+	messageReaction,
 	pod,
 	podMember,
 	routineExecution,
@@ -25,6 +26,7 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
+import { Reactions } from "../reactions/reactions.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
 import { ThreadView } from "../thread-view.ts";
@@ -660,6 +662,95 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				replyTo: other.id,
 			}),
 		).rejects.toMatchObject({ _tag: "ReplyTargetNotFound" });
+	});
+
+	it("lets people react to a message once per emoji, announcing each change", async () => {
+		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const asked = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Ship it?",
+		});
+		const announced = () =>
+			onDatabase((db) =>
+				db
+					.select({ payload: event.payload })
+					.from(event)
+					.where(
+						and(
+							eq(event.channel, threadChannel(current.mainThreadId)),
+							eq(event.type, "message.reactions_changed"),
+						),
+					),
+			);
+
+		const added = await reactions.add(asked.id, "👍🏽");
+		expect(added).toEqual([
+			{ emoji: "👍🏽", people: [{ id: userId, name: "Chat member", at: expect.any(String) }] },
+		]);
+		expect(await reactions.add(asked.id, "👍🏽")).toEqual(added);
+		const page = await view.messages(current.id);
+		expect(page.items).toContainEqual(
+			expect.objectContaining({
+				message: expect.objectContaining({ id: asked.id, reactions: added }),
+			}),
+		);
+		expect(await reactions.remove(asked.id, "👍🏽")).toEqual([]);
+		expect(await reactions.remove(asked.id, "👍🏽")).toEqual([]);
+		expect((await announced()).map(({ payload }) => payload)).toEqual([
+			expect.objectContaining({ messageId: asked.id, reactions: added }),
+			expect.objectContaining({ messageId: asked.id, reactions: [] }),
+		]);
+
+		const [stranger] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Stranger", email: `stranger-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!stranger) throw new Error("Could not create a stranger");
+		const strangers = onPostgresAs(stranger.id)(Context.get(conversations, Reactions.Service));
+		await expect(strangers.add(asked.id, "👍🏽")).rejects.toMatchObject({ _tag: "ResourceHidden" });
+	});
+
+	it("refuses a reaction to a reply still being written, and a new emoji past the limit", async () => {
+		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const asked = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Ship it?",
+		});
+		const [writing] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: current.mainThreadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "streaming",
+					parts: [],
+					content: "",
+				})
+				.returning(),
+		);
+		if (!writing) throw new Error("Could not start a reply");
+		await expect(reactions.add(writing.id, "👍")).rejects.toMatchObject({
+			_tag: "MessageNotFinished",
+		});
+
+		const used = Array.from("😀😃😄😁😆😅😂🤣😊😇🙂🙃😉😌😍🥰😘😗😙😚");
+		await onDatabase((db) =>
+			db
+				.insert(messageReaction)
+				.values(used.map((emoji) => ({ messageId: asked.id, userId: administratorId, emoji }))),
+		);
+		await expect(reactions.add(asked.id, "🎉")).rejects.toMatchObject({
+			_tag: "TooManyReactionEmoji",
+		});
+		const joined = await reactions.add(asked.id, "😀");
+		expect(joined[0]?.people.map((person) => person.id)).toEqual([administratorId, userId]);
 	});
 
 	it("says which messages wait for the agent's next turn, and announces when one starts waiting", async () => {
