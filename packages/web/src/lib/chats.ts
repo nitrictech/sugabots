@@ -3,6 +3,7 @@ import {
 	type ChatList,
 	type ChatMessageItem,
 	handleFromName,
+	type MessageReplyTo,
 	type NewMessage,
 	type Pod,
 	type SessionUser,
@@ -359,13 +360,19 @@ export function useChatHistory(chatId: string | undefined) {
 	};
 }
 
+/** A message to send, with the whole quote it answers, so it shows quoting it before the API answers. */
+type SentChatMessage = Omit<NewMessage, "replyTo"> & { replyTo?: MessageReplyTo };
+
 export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 	const queries = useQueryClient();
 	return useMutation({
-		mutationFn: async (input: NewMessage) => {
+		mutationFn: async ({ replyTo, ...input }: SentChatMessage) => {
 			if (!chat) throw new NotReadyError();
 			return Effect.runPromise(
-				client.api.chats.send({ params: { chatId: chat.id }, payload: input }),
+				client.api.chats.send({
+					params: { chatId: chat.id },
+					payload: { ...input, replyTo: replyTo?.id },
+				}),
 			);
 		},
 		onMutate: async (input) => {
@@ -388,6 +395,7 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 					status: "complete",
 					parts: [{ type: "text", text: input.message }],
 					content: input.message,
+					...(input.replyTo ? { replyTo: input.replyTo } : {}),
 					createdAt: timestampAfter(
 						queries.getQueryData<ThreadDetails>(["thread", chat.mainThreadId])?.messages ?? [],
 					),
