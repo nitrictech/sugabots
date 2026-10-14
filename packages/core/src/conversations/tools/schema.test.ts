@@ -8,6 +8,7 @@ import {
 } from "../../providers/search-providers/backends.ts";
 import { artifactTools } from "./artifacts/tool.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
+import { routineTools } from "./routines/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
 import { webSearchTool } from "./web-search/tool.ts";
 
@@ -154,5 +155,20 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		),
 	)("gives %s an object input schema, as providers require", async (_name, artifactTool) => {
 		expect(await asSchema(artifactTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
+	});
+});
+
+describe("the routine tools' schemas", () => {
+	it("are each an object, which every provider takes for a tool's input", async () => {
+		const tools = routineTools({
+			bot: { agentId: "agent", askerId: undefined } as never,
+			timeZone: "UTC",
+			routines: {} as never,
+			run: unexpectedExecution,
+		});
+
+		for (const tool of Object.values(tools)) {
+			expect(await asSchema(tool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
+		}
 	});
 });

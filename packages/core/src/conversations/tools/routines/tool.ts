@@ -4,7 +4,7 @@ import {
 	MAX_ROUTINE_NAME_CHARACTERS,
 	routineResultsSchema,
 } from "@sugabots/contracts";
-import { type Tool, tool } from "ai";
+import { jsonSchema, type Tool, tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { BotRoutines } from "../../routines/bot-routines.ts";
@@ -98,7 +98,8 @@ export function routineTools({
 		[LIST_ROUTINES_TOOL]: tool({
 			description:
 				"List your routines: the jobs you do on a schedule or when a webhook calls, with when each runs, whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
-			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			// An empty Struct's JSON schema is `{ not: { type: "null" } }`, which OpenAI refuses for a tool.
+			inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
 			execute: () => answer(Effect.map(routines.list(bot), (listed) => ({ routines: listed }))),
 		}),
 		[CREATE_ROUTINE_TOOL]: tool({
