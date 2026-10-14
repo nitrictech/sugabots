@@ -194,10 +194,44 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		return sent.id;
 	}
 
-	const attach = (fileId: string, messageId: string) =>
-		onDatabase((db) =>
-			db.update(threadFile).set({ messageId, position: 0 }).where(eq(threadFile.id, fileId)),
+	/** Sends `fileIds`, uploaded by `userId`, in a new message of theirs. */
+	const send = async (threadId: string, userId: string, fileIds: string[]) =>
+		files.attach({
+			threadId,
+			messageId: await aMessage(threadId, userId),
+			uploaderId: userId,
+			fileIds,
+		});
+
+	it("attaches only the uploader's own unsent uploads, all of them or none", async () => {
+		const { threadId, userId } = await aThread();
+		const other = await aRoutineOwner();
+		const upload = (uploaderId: string, name: string) =>
+			files.upload({
+				threadId,
+				uploaderId,
+				name,
+				maxSize: 1024,
+				maxUnsent: 20,
+				content: text(name),
+			});
+		const mine = await upload(userId, "mine.txt");
+		const theirs = await upload(other.userId, "theirs.txt");
+
+		await expect(send(threadId, userId, [mine.id, theirs.id])).rejects.toBeInstanceOf(
+			ThreadFiles.UploadsNotFound,
 		);
+		// Refusing one attached none.
+		await expect(files.read({ threadId, fileId: mine.id })).rejects.toBeInstanceOf(
+			ThreadFiles.FileNotFound,
+		);
+
+		await expect(send(threadId, userId, [mine.id])).resolves.toEqual([mine]);
+		// Sent once, it is no longer an upload to send.
+		await expect(send(threadId, userId, [mine.id])).rejects.toBeInstanceOf(
+			ThreadFiles.UploadsNotFound,
+		);
+	});
 
 	it("keeps an upload unreadable until it is attached to a message", async () => {
 		const { threadId, userId } = await aThread();
@@ -214,7 +248,7 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 			ThreadFiles.FileNotFound,
 		);
 
-		await attach(uploaded.id, await aMessage(threadId, userId));
+		await send(threadId, userId, [uploaded.id]);
 		const read = await files.read({ threadId, fileId: uploaded.id });
 
 		expect(uploaded).toEqual({
@@ -268,7 +302,7 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		// Someone else's unsent uploads are theirs to count.
 		await expect(upload(other.userId, "theirs.txt")).resolves.toMatchObject({ name: "theirs.txt" });
 		// Sending one frees its place.
-		await attach(first.id, await aMessage(threadId, userId));
+		await send(threadId, userId, [first.id]);
 		await expect(upload(userId, "three.txt")).resolves.toMatchObject({ name: "three.txt" });
 	});
 
@@ -285,7 +319,7 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 			});
 		await upload("abandoned.txt");
 		const sent = await upload("sent.txt");
-		await attach(sent.id, await aMessage(threadId, userId));
+		await send(threadId, userId, [sent.id]);
 		const result = await files.write({ threadId, content: text("a tool's result") });
 		const blobsUnder = () =>
 			runOnPostgres(

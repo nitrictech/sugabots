@@ -1,5 +1,10 @@
-import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/contracts";
-import { and, eq, like } from "drizzle-orm";
+import {
+	type ChatMessageItem,
+	type FilePart,
+	handleFromName,
+	threadChannel,
+} from "@sugabots/contracts";
+import { and, desc, eq, like } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Visibility } from "../../authorization/visibility.ts";
@@ -29,7 +34,9 @@ import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Reactions } from "../reactions/reactions.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ThreadView } from "../thread-view.ts";
+import { ThreadRepository } from "../threads/repository.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { ChatFiles } from "./chat-files.ts";
@@ -1462,6 +1469,105 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					{ threadId: childThreadId, unread: false },
 				]),
 			);
+		});
+	});
+
+	describe("sending files", () => {
+		/** The chat, with the member's uploads to it. */
+		async function aChatWithFiles() {
+			const { id: chatId } = await chats.open({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
+			const upload = (name: string) =>
+				files.upload({
+					chatId,
+					name,
+					type: "text/plain",
+					stream: Stream.succeed(new TextEncoder().encode(name)),
+				});
+			return { chatId, files, upload };
+		}
+		const asPart = ({ id, name, contentType, size }: ThreadFiles.Upload): FilePart => ({
+			type: "file",
+			id,
+			name,
+			contentType,
+			size,
+		});
+		const shownMessage = async (chatId: string, messageId: string) =>
+			(await view.messages(chatId)).items.find(
+				(item) => item.kind === "message" && item.message.id === messageId,
+			);
+
+		it("sends the files with the message, in the order listed, for its readers to open", async () => {
+			const { chatId, files, upload } = await aChatWithFiles();
+			const first = await upload("a.txt");
+			const second = await upload("b.txt");
+
+			const sent = await chats.post({
+				chatId,
+				messageId: crypto.randomUUID(),
+				content: "",
+				attachments: [second.id, first.id],
+			});
+
+			expect(sent).toMatchObject({ content: "", parts: [asPart(second), asPart(first)] });
+			expect(await shownMessage(chatId, sent.id)).toMatchObject({
+				message: { parts: [asPart(second), asPart(first)] },
+			});
+			// Watching clients add the announced message as it is, so it must carry its files.
+			const [announced] = await onDatabase((db) =>
+				db
+					.select({ payload: event.payload })
+					.from(event)
+					.where(
+						and(eq(event.channel, threadChannel(sent.threadId)), eq(event.type, "message.created")),
+					)
+					.orderBy(desc(event.seq))
+					.limit(1),
+			);
+			expect(announced?.payload).toMatchObject({
+				message: { id: sent.id, parts: [asPart(second), asPart(first)] },
+			});
+			expect(await files.read({ chatId, fileId: first.id })).toMatchObject({ name: "a.txt" });
+		});
+
+		it("posts nothing when a file is not one of the sender's unsent uploads", async () => {
+			const { chatId, upload } = await aChatWithFiles();
+			const sentBefore = await upload("sent.txt");
+			await chats.post({
+				chatId,
+				messageId: crypto.randomUUID(),
+				content: "first",
+				attachments: [sentBefore.id],
+			});
+			const fresh = await upload("fresh.txt");
+			const messageId = crypto.randomUUID();
+
+			await expect(
+				chats.post({ chatId, messageId, content: "again", attachments: [fresh.id, sentBefore.id] }),
+			).rejects.toBeInstanceOf(ThreadFiles.UploadsNotFound);
+			expect(await shownMessage(chatId, messageId)).toBeUndefined();
+			// The fresh upload is still the sender's to send.
+			await expect(
+				chats.post({ chatId, messageId, content: "again", attachments: [fresh.id] }),
+			).resolves.toMatchObject({ parts: [{ type: "text" }, asPart(fresh)] });
+		});
+
+		it("returns a message sent again with its files, and refuses its id for other files", async () => {
+			const { chatId, upload } = await aChatWithFiles();
+			const attached = await upload("a.txt");
+			const other = await upload("b.txt");
+			const messageId = crypto.randomUUID();
+			const send = (attachments: string[]) =>
+				chats.post({ chatId, messageId, content: "files", attachments });
+			const sent = await send([attached.id]);
+
+			await expect(send([attached.id])).resolves.toEqual(sent);
+			await expect(send([other.id])).rejects.toBeInstanceOf(ThreadRepository.MessageIdConflict);
 		});
 	});
 

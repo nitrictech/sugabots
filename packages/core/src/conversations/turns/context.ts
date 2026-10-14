@@ -1,6 +1,7 @@
 import { type Message, messageAuthorName, quotedPreview } from "@sugabots/contracts";
 import type { Models } from "../../providers/models/models.ts";
 import {
+	describeAttachment,
 	describeCollaboration,
 	describeReplyTo,
 	describeToolCall,
@@ -167,9 +168,12 @@ function promptMessagesFor(
 	currentAgentId: string,
 	resultFiles: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
-	const authored = authoredMessage(message, currentAgentId);
+	const attachments = message.parts.flatMap((part) =>
+		part.type === "file" ? [describeAttachment(part)] : [],
+	);
+	const authored = authoredMessage(message, currentAgentId, attachments);
 	const records = message.parts.flatMap((part): string[] => {
-		if (part.type === "text") return [];
+		if (part.type === "text" || part.type === "file") return [];
 		if (part.type === "collaboration") return [describeCollaboration(part)];
 		return [describeToolCall(part, resultFiles.get(part.id))];
 	});
@@ -185,27 +189,31 @@ function promptMessagesFor(
 	return authored ? [authored, eventLog] : [eventLog];
 }
 
+/**
+ * What the message's author wrote, with a line for each file they attached,
+ * which is all a message that carries only files says.
+ */
 function authoredMessage(
 	message: Message,
 	currentAgentId: string,
+	attachments: readonly string[],
 ): Models.PromptMessage | undefined {
-	if (!message.content) return undefined;
+	const said = [message.content, ...attachments].filter((line) => line !== "").join("\n");
+	if (!said) return undefined;
 	if (message.author.kind === "agent" && message.author.id === currentAgentId) {
-		return { role: "assistant", content: message.content };
+		return { role: "assistant", content: said };
 	}
 	if (message.author.kind === "routine_trigger") {
 		return {
 			role: "user",
-			content: `[Routine trigger: ${message.author.routineName}]\n${message.content}`,
+			content: `[Routine trigger: ${message.author.routineName}]\n${said}`,
 		};
 	}
 	const agentMarker = message.author.kind === "agent" ? " (agent)" : "";
-	const said = message.replyTo
-		? `${describeReplyTo(message.replyTo)}\n${message.content}`
-		: message.content;
+	const replying = message.replyTo ? `${describeReplyTo(message.replyTo)}\n${said}` : said;
 	return {
 		role: "user",
-		content: `${message.author.name} (@${message.author.handle})${agentMarker}: ${said}`,
+		content: `${message.author.name} (@${message.author.handle})${agentMarker}: ${replying}`,
 	};
 }
 

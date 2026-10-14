@@ -14,6 +14,7 @@ import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, user } from "../../database/schema.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
+import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
 
@@ -101,6 +102,8 @@ export function toMessage(
 				: placed.toolCalls?.find((candidate) => candidate.id === part.toolCallId);
 		return made ? [made] : [];
 	});
+	// Files are attached to the message rather than placed in its text, so they follow it.
+	parts.push(...(placed.files ?? []));
 	return {
 		id: row.id,
 		threadId: row.threadId,
@@ -199,6 +202,7 @@ export const messageRelations = {
 		with: { decidedBy: { columns: { name: true } } },
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
+	files: { columns: fileColumns, orderBy: { position: "asc" } },
 	routineExecution: { columns: { id: true, threadId: true, routineName: true } },
 	replyTo: quotedMessageColumns,
 	reactions: reactionColumns,
@@ -214,6 +218,7 @@ export interface MessageWithRelations extends schema.MessageRow {
 	authorAgent: AgentIdentity | null;
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
+	files: AttachedFileRow[];
 	routineExecution: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "routineName"> | null;
 	replyTo: QuotedMessage | null;
 	reactions: ReactionRow[];
@@ -233,6 +238,7 @@ export function messageFromRelations(
 			collaborations: stored.collaborations.map((made) =>
 				toCollaborationPart(made, made.collaborator.name),
 			),
+			files: stored.files.map(toFilePart),
 		},
 		error,
 	);

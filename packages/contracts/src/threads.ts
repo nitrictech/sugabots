@@ -2,6 +2,11 @@ import { Effect, Schema, SchemaGetter } from "effect";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toString as mdastToString } from "mdast-util-to-string";
 import { agentColorSchema, agentFaceSchema } from "./agents.ts";
+import {
+	attachmentNameSchema,
+	MAX_ATTACHMENTS_PER_MESSAGE,
+	mediaTypeSchema,
+} from "./attachments.ts";
 import { emailSchema } from "./email.ts";
 import {
 	routineExecutionSchema,
@@ -258,10 +263,23 @@ export const toolCallPartSchema = Schema.Struct({
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
 
+/** A file attached to the message, served by the chat it was sent in. */
+export const filePartSchema = Schema.Struct({
+	type: Schema.Literal("file"),
+	id: uuidSchema,
+	name: attachmentNameSchema,
+	contentType: mediaTypeSchema,
+	/** In bytes. */
+	size: Schema.Int,
+});
+
+export type FilePart = typeof filePartSchema.Type;
+
 export const messagePartSchema = Schema.Union([
 	textPartSchema,
 	collaborationPartSchema,
 	toolCallPartSchema,
+	filePartSchema,
 ]);
 
 export type MessagePart = typeof messagePartSchema.Type;
@@ -550,11 +568,22 @@ export type ThreadActivity = typeof threadActivitySchema.Type;
 
 export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,
-	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
+	/** May be empty when the message carries files. */
+	message: Schema.Trim.check(Schema.isMaxLength(20_000)),
+	/** Files the sender uploaded to the chat and has not sent yet. They show in the order listed. */
+	attachments: Schema.optional(
+		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),
+	),
 	/** For the people in the thread only: the bots read it, but none replies. */
 	peopleOnly: Schema.optional(Schema.Boolean),
 	/** The id of the message in the same thread that this one quotes and answers. */
 	replyTo: Schema.optional(uuidSchema),
-});
+}).check(
+	Schema.makeFilter(({ message, attachments }) =>
+		message !== "" || (attachments?.length ?? 0) > 0
+			? undefined
+			: { issue: "A message needs text or a file", path: ["message"] },
+	),
+);
 
 export type NewMessage = typeof newMessageSchema.Type;

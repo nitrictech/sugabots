@@ -48,6 +48,7 @@ export const relations = defineRelations(schema, (r) => ({
 		authorAgent: r.one.agent({ from: r.message.authorAgentId, to: r.agent.id }),
 		turn: r.one.turn({ from: r.message.turnId, to: r.turn.id }),
 		toolCalls: r.many.toolCall({ from: r.message.id, to: r.toolCall.messageId }),
+		files: r.many.threadFile({ from: r.message.id, to: r.threadFile.messageId }),
 		collaborations: r.many.collaboration({
 			from: r.message.id,
 			to: r.collaboration.parentMessageId,

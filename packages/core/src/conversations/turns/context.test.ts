@@ -348,6 +348,35 @@ describe("modelPrompt", () => {
 		]);
 	});
 
+	it("lists the files a person attached after what they wrote, even with nothing written", () => {
+		const input = context();
+		const asked = input.messages[0];
+		if (!asked) {
+			throw new Error("Context fixture has no person's message");
+		}
+		const report = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f2",
+			name: "report.pdf",
+			contentType: "application/pdf",
+			size: 2_200_000,
+		} as const;
+		const line = `[Attached report.pdf (application/pdf, 2.1 MB) as file ${report.id}, which read_thread_file reads]`;
+
+		input.messages[0] = { ...asked, parts: [...asked.parts, report] };
+		expect(modelPrompt(input, environment()).messages[0]).toEqual({
+			role: "user",
+			content: `Sam (@sam): Check the release
+${line}`,
+		});
+
+		input.messages[0] = { ...asked, content: "", parts: [report] };
+		expect(modelPrompt(input, environment()).messages[0]).toEqual({
+			role: "user",
+			content: `Sam (@sam): ${line}`,
+		});
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];

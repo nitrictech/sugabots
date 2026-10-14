@@ -332,6 +332,8 @@ function segmentsOf(message: Message): Segment[] {
 			if (wasPutToSomeone(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
 			return;
 		}
+		// Attached files are not part of the message's text.
+		if (part.type === "file") return;
 		const followed = index < message.parts.length - 1 && part.text.trim() !== "";
 		const settled = finished || followed;
 		if (settled && !isNarration(message.parts, index)) {
