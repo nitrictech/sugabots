@@ -5,7 +5,8 @@ import { jsonSchema, type ToolSet, tool } from "ai";
 import { Data, Effect } from "effect";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
-import { type Image, type OpenSandbox, type Place, withImages } from "../sandbox/tools.ts";
+import { type Image, withImages } from "../images.ts";
+import type { OpenSandbox, Place } from "../sandbox/tools.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**

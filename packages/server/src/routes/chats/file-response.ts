@@ -1,3 +1,4 @@
+import { mediaTypeEssence } from "@sugabots/contracts";
 import type { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
 import { HttpServerResponse } from "effect/unstable/http";
 
@@ -21,7 +22,7 @@ const SHOWN_IN_PLACE = new Set([
  * its copy.
  */
 export function fileResponse(file: ThreadFiles.StoredFile): HttpServerResponse.HttpServerResponse {
-	const shownInPlace = SHOWN_IN_PLACE.has(essenceOf(file.contentType));
+	const shownInPlace = SHOWN_IN_PLACE.has(mediaTypeEssence(file.contentType));
 	return HttpServerResponse.stream(file.stream, {
 		contentType: file.contentType,
 		contentLength: file.size,
@@ -32,11 +33,6 @@ export function fileResponse(file: ThreadFiles.StoredFile): HttpServerResponse.H
 			"cache-control": "private, max-age=31536000, immutable",
 		},
 	});
-}
-
-/** `image/png` from `image/png; charset=binary`. */
-function essenceOf(mediaType: string): string {
-	return (mediaType.split(";")[0] ?? "").trim().toLowerCase();
 }
 
 /**

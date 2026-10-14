@@ -1,5 +1,6 @@
 import { Effect, Stream } from "effect";
 import type { ThreadFiles } from "../../thread-files/thread-files.ts";
+import { hasImages } from "../../tools/images.ts";
 import { READ_THREAD_FILE_TOOL, splitLines } from "../../tools/read-thread-file/tool.ts";
 
 /**
@@ -49,9 +50,6 @@ interface Keeping {
 }
 
 /** A result with images for the model, such as a screenshot, which the tool's `toModelOutput` gives it as image parts. */
-function hasImages(output: unknown): output is { images: unknown } & Record<string, unknown> {
-	return typeof output === "object" && output !== null && "images" in output;
-}
 
 /** What the model is given in place of `output`, or `undefined` when `output` is short enough to give whole. */
 const longResultFor = (

@@ -422,6 +422,7 @@ function context(): TurnContext {
 			disabledTools: [],
 			interviewing: false,
 			usesSandbox: false,
+			acceptsImages: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

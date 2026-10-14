@@ -4,7 +4,6 @@ import type { UserText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
-import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
@@ -92,14 +91,9 @@ export const make = Effect.gen(function* () {
 		},
 	});
 	return Service.of({
-		forTurn: ({ pod, turnId, threadId, agentId, model, usesSandbox }) =>
+		forTurn: ({ pod, turnId, threadId, agentId, acceptsImages, usesSandbox }) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
 				const place = placeOf({ threadId, agentId });
-				// Whether a model takes images shapes the tools, so it is asked even without a sandbox.
-				const acceptsImages = yield* operation(
-					"forTurn",
-					modelAcceptsImages(pod.workspaceId, model),
-				);
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
 				if (!provider) {
 					return {
@@ -202,8 +196,8 @@ export interface Turn {
 	readonly turnId: string;
 	readonly threadId: string;
 	readonly agentId: string;
-	/** The agent's model, which decides whether results may carry images. */
-	readonly model: string;
+	/** Whether the agent's model takes images, which results then may carry. */
+	readonly acceptsImages: boolean;
 }
 
 /** No sandbox tools, for cases that offer none. */

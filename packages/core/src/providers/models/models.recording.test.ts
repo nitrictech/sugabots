@@ -2,9 +2,11 @@ import { jsonSchema, tool } from "ai";
 import { Effect, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
+import { withImages } from "../../conversations/tools/images.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ProviderIdentity } from "../model-providers/dialects/index.ts";
+import { IMAGE_MOVED_NOTE } from "../model-providers/dialects/tool-images.ts";
 import { Models } from "./models.ts";
 import { resolvedModel } from "./testing.ts";
 
@@ -218,6 +220,47 @@ describe("a response at its step limit", () => {
 				role: "tool",
 				tool_call_id: "call-1",
 				content: expect.stringMatching(/^It is here\.\n\n\(This is your last step/),
+			},
+		]);
+	});
+});
+
+describe("images a tool returns", () => {
+	it("reach a model through OpenRouter in a message after the tool's result", async () => {
+		const { model, sent } = modelAnswering([toolCall, reply], {
+			preset: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			apiFormat: "openai",
+		});
+		const showing = tool({
+			description: "Looks it up.",
+			inputSchema: jsonSchema<Record<string, never>>({ type: "object", properties: {} }),
+			execute: async () => ({
+				text: "The image chart.png.",
+				images: [{ data: "iVBORw0KGgo=", mediaType: "image/png" }],
+			}),
+			toModelOutput: ({ output }) => withImages(output, true),
+		});
+
+		await answer(model, { ...input, model: "google/gemini-test", tools: { lookup: showing } });
+
+		const [, second = {}] = sent;
+		expect((second.messages as unknown[]).slice(-2)).toEqual([
+			{
+				role: "tool",
+				tool_call_id: "call-1",
+				name: "lookup",
+				content: [
+					{ type: "text", text: "The image chart.png." },
+					{ type: "text", text: IMAGE_MOVED_NOTE },
+				],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "What lookup returned:" },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
+				],
 			},
 		]);
 	});

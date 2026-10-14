@@ -27,6 +27,11 @@ export const mediaTypeSchema = Schema.Trim.check(
 	Schema.isPattern(/^[\w.+-]+\/[\w.+-]+(\s*;\s*[\w.+-]+=("[^"\r\n]*"|[\w.+-]+))*$/),
 );
 
+/** A media type without its parameters, lowercased: `image/png` from `image/PNG; charset=binary`. */
+export function mediaTypeEssence(mediaType: string): string {
+	return (mediaType.split(";")[0] ?? "").trim().toLowerCase();
+}
+
 export const uploadAttachmentQuerySchema = Schema.Struct({
 	name: attachmentNameSchema,
 	/** The file's media type, when the uploader knows it; otherwise it is taken from the name. */

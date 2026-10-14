@@ -170,7 +170,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					turnId: "turn-1",
 					threadId,
 					agentId,
-					model: "no-such-model",
+					acceptsImages: false,
 				}),
 			),
 		).then((offered) => offered.tools);

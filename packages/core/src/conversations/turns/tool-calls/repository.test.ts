@@ -207,6 +207,19 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(closed?.finishedAt).not.toBeNull();
 	});
 
+	it("keeps the images a call showed the model counted, not their data", async () => {
+		const opened = await calls.open(from(0));
+
+		const closed = await calls.close(opened.id, {
+			output: {
+				text: "The image chart.png.",
+				images: [{ data: "iVBORw0KGgo".repeat(10_000), mediaType: "image/png" }],
+			},
+		});
+
+		expect(closed?.output).toEqual({ text: "The image chart.png.", images: "1 shown" });
+	});
+
 	it("closes a failed call with the error and no output", async () => {
 		const opened = await calls.open(from(0));
 
