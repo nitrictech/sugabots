@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .temp/
 .claude/worktrees/
+# Files the filesystem blob store keeps, at .env.example's BLOB_STORE_FILESYSTEM_ROOT.
+data/

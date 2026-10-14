@@ -1,5 +1,5 @@
 import { rmdir } from "node:fs/promises";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { Effect, FileSystem, type PlatformError, Stream } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -39,6 +39,8 @@ export const fromFileSystem = (root: string) =>
 			),
 			Effect.orDie,
 		);
+		// A relative root depends on where the server was started, so say where it led.
+		yield* Effect.logInfo(`Keeping files under ${resolve(root)}`);
 
 		const entryOf = (key: BlobStore.Key) =>
 			Effect.all({
