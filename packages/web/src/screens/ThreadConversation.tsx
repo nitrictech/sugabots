@@ -27,6 +27,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
 import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
@@ -72,6 +73,7 @@ export function ThreadConversation({
 	approvalCapabilities,
 	compact = false,
 	queued = NONE_QUEUED,
+	sending = NONE_SENDING,
 	peopleTyping = [],
 	showsTyping = true,
 	highlightedMessageId,
@@ -79,6 +81,7 @@ export function ThreadConversation({
 	authorLinkOf,
 	onReply,
 	onJumpToMessage,
+	reacting,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -122,6 +125,11 @@ export function ThreadConversation({
 	 */
 	queued?: ReadonlySet<string>;
 	/**
+	 * The user's messages still on their way to the API. Until it has them they
+	 * cannot be replied or reacted to, as neither would find them there.
+	 */
+	sending?: ReadonlySet<string>;
+	/**
 	 * Other people typing in the thread. They join a bot typing the last reply,
 	 * or are shown after the last message on their own.
 	 */
@@ -138,6 +146,11 @@ export function ThreadConversation({
 	onReply?: (message: Message) => void;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
+	/**
+	 * How the person reacts to messages: from the hover toolbar, and by clicking
+	 * a reaction. Without it, reactions are only shown.
+	 */
+	reacting?: Reacting;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -175,12 +188,14 @@ export function ThreadConversation({
 								compact={compact}
 								arrivedLive={watchedWritten.has(message.id)}
 								queued={queued.has(message.id)}
+								sending={sending.has(message.id)}
 								queuedNote={queuedNote}
 								highlighted={message.id === highlightedMessageId}
 								threadActivityAt={threadActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
 								onReply={onReply}
 								onJumpToMessage={onJumpToMessage}
+								reacting={reacting}
 								onOpenThread={onOpenThread}
 								onOpenArtifact={onOpenArtifact}
 								onOpenDesktop={onOpenDesktop}
@@ -251,6 +266,7 @@ function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySe
 }
 
 const NONE_QUEUED: ReadonlySet<string> = new Set();
+const NONE_SENDING: ReadonlySet<string> = new Set();
 
 /** Screens that cannot hover, which is to say touch screens. */
 const NO_HOVER = "(hover: none)";
@@ -345,8 +361,9 @@ const ROW = {
  * One message as a row: at the head of a group its author's face, name and
  * time, then its words, any collaboration it opened as a thread line, and any
  * call somebody was asked to approve as its card. A reply has the message it
- * quotes over its author's name. Hovered, it lifts slightly, shows its time
- * beside a follow-up, and offers to reply to it and to copy its words.
+ * quotes over its author's name, and people's reactions under its words.
+ * Hovered, it lifts slightly, shows its time beside a follow-up, and offers to
+ * react to it, reply to it and copy its words.
  */
 function MessageRow({
 	message,
@@ -358,12 +375,14 @@ function MessageRow({
 	compact,
 	arrivedLive,
 	queued,
+	sending,
 	queuedNote,
 	highlighted,
 	threadActivityAt,
 	authorLink,
 	onReply,
 	onJumpToMessage,
+	reacting,
 	onOpenThread,
 	onOpenArtifact,
 	onOpenDesktop,
@@ -381,6 +400,8 @@ function MessageRow({
 	arrivedLive: boolean;
 	/** Whether this message waits for the next reply, because one is still being written. */
 	queued: boolean;
+	/** Whether it is still on its way to the API, so it cannot be replied or reacted to yet. */
+	sending: boolean;
 	/** Whether it ends a run of waiting messages, which says so once under the last of them. */
 	queuedNote: boolean;
 	/** Whether it is pointed out for a moment, as one jumped to is. */
@@ -390,6 +411,7 @@ function MessageRow({
 	authorLink?: AuthorLink;
 	onReply?: (message: Message) => void;
 	onJumpToMessage?: (messageId: string) => void;
+	reacting?: Reacting;
 	onOpenThread: (threadId: string) => void;
 	onOpenArtifact?: (artifactId: string) => void;
 	onOpenDesktop?: () => void;
@@ -397,6 +419,8 @@ function MessageRow({
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
+	// The toolbar stays up while its emoji picker is open, as the pointer has left the row for it.
+	const [picking, setPicking] = useState(false);
 	const { author } = message;
 	if (author.kind === "routine_trigger") return null;
 
@@ -417,7 +441,9 @@ function MessageRow({
 		calls.length > 0 || segments.some((segment) => segment.type !== "text" || segment.text);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (message.status === "streaming" && !showsSomething) return null;
-	const replyable = onReply !== undefined && message.status === "complete";
+	const finished = message.status === "complete" && !sending;
+	const replyable = onReply !== undefined && finished;
+	const reactable = reacting !== undefined && finished;
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
 		<article
@@ -555,6 +581,7 @@ function MessageRow({
 						className="pt-2"
 					/>
 				)}
+				<MessageReactions message={message} reacting={reacting} addable={finished} />
 				{message.routineResultOf && (
 					<RowNote className="text-subtle-foreground">
 						<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />
@@ -571,8 +598,21 @@ function MessageRow({
 				)}
 				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
 			</div>
-			{(words || replyable) && (
-				<div className="pointer-events-none absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 opacity-0 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only">
+			{(words || replyable || reactable) && (
+				<div
+					className={cn(
+						"absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
+						picking ? "opacity-100" : "pointer-events-none opacity-0",
+					)}
+				>
+					{reactable && (
+						<AddReactionButton
+							message={message}
+							reacting={reacting}
+							onOpenChange={setPicking}
+							className={TOOLBAR_BUTTON}
+						/>
+					)}
 					{replyable && (
 						<IconButton
 							label="Reply"

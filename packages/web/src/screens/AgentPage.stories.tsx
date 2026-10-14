@@ -1,7 +1,7 @@
 import type { Message, ThreadDetails } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
-import { HttpResponse, http } from "msw";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { delay, HttpResponse, http } from "msw";
+import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -185,6 +185,112 @@ export const ReplyToAMessage = meta.story({
 		// A message the chat reloads with rises into place.
 		await waitFor(() => expect(quote).toBeVisible());
 		await expect(canvas.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+	},
+});
+
+/**
+ * Reacting from a message's hover toolbar: the emoji shows under it at once
+ * as yours, and clicking it takes it back.
+ */
+export const ReactToAMessage = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...reactionHandlers(conversation.map((message) => ({ ...message }))));
+	},
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const asked = (await within(log).findByText(/Want me to draft replies/)).closest("article");
+		if (!asked) throw new Error("The bot's question is not a message row");
+		within(asked).getByRole("button", { name: "Add reaction" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		await waitFor(() =>
+			expect(within(picker).getByRole("searchbox", { name: "Search emoji" })).toHaveFocus(),
+		);
+		await userEvent.keyboard("eyes");
+		await chooseSearched(picker, "Eyes", userEvent);
+
+		const mine = await within(asked).findByRole("button", {
+			name: "👀 1: You reacted with 👀",
+		});
+		await expect(mine).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(mine);
+		await waitFor(() =>
+			expect(within(asked).queryByRole("list", { name: "Reactions" })).toBeNull(),
+		);
+	},
+});
+
+/**
+ * The chat's handlers, with reactions kept on its messages as the API keeps
+ * them, so a reload still has them. A reaction added is answered after
+ * `addedAfterMs`.
+ */
+function reactionHandlers(chat: Message[], { addedAfterMs = 0 } = {}) {
+	const you = { id: storyUser.id, name: storyUser.name, at: "2026-09-18T06:09:00.000Z" };
+	const change = (messageId: string, emoji: string, reacting: boolean) => {
+		const index = chat.findIndex(({ id }) => id === messageId);
+		const message = chat[index];
+		if (!message) return HttpResponse.json([]);
+		const others = (message.reactions ?? []).map((reaction) =>
+			reaction.emoji === emoji
+				? { ...reaction, people: reaction.people.filter(({ id }) => id !== you.id) }
+				: reaction,
+		);
+		const reactions = reacting
+			? others.some((reaction) => reaction.emoji === emoji)
+				? others.map((reaction) =>
+						reaction.emoji === emoji
+							? { ...reaction, people: [...reaction.people, you] }
+							: reaction,
+					)
+				: [...others, { emoji, people: [you] }]
+			: others.filter((reaction) => reaction.people.length > 0);
+		chat[index] = { ...message, reactions: reactions.length > 0 ? reactions : undefined };
+		return HttpResponse.json(reactions);
+	};
+	return [
+		...appHandlers({ messages: { [growthDesk.id]: chat } }),
+		http.put(`${API}/messages/:messageId/reactions/:emoji`, async ({ params }) => {
+			await delay(addedAfterMs);
+			return change(String(params.messageId), String(params.emoji), true);
+		}),
+		http.delete(`${API}/messages/:messageId/reactions/:emoji`, ({ params }) =>
+			change(String(params.messageId), String(params.emoji), false),
+		),
+	];
+}
+
+/**
+ * Reactions are sent in the order they were made, so clicking one on and
+ * straight off again leaves it off, however slowly the API answers the first.
+ */
+export const ChangeYourMindQuickly = meta.story({
+	beforeEach({ msw }) {
+		const jay = {
+			id: "0199a3a0-0000-7000-8000-0000000005f1",
+			name: "Jay Park",
+			at: "2026-09-18T06:08:00.000Z",
+		};
+		const chat = conversation.map((message) =>
+			/Want me to draft replies/.test(message.content)
+				? { ...message, reactions: [{ emoji: "👍", people: [jay] }] }
+				: { ...message },
+		);
+		msw.use(...reactionHandlers(chat, { addedAfterMs: 300 }));
+	},
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const asked = (await within(log).findByText(/Want me to draft replies/)).closest("article");
+		if (!asked) throw new Error("The bot's question is not a message row");
+		const thumbs = within(asked).getByRole("button", { name: /^👍/ });
+		await userEvent.click(thumbs);
+		await expect(thumbs).toHaveAccessibleName("👍 2: Jay Park and You reacted with 👍");
+		await userEvent.click(thumbs);
+		await expect(thumbs).toHaveAccessibleName("👍 1: Jay Park reacted with 👍");
+		// Past the slow answer to the first click, and the second's after it.
+		await new Promise((resolve) => setTimeout(resolve, 600));
+		await expect(thumbs).toHaveAccessibleName("👍 1: Jay Park reacted with 👍");
+		await expect(thumbs).toHaveAttribute("aria-pressed", "false");
 	},
 });
 
@@ -553,3 +659,28 @@ export const ArtifactOnAPhone = meta.story({
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
 	},
 });
+
+/**
+ * Chooses the emoji the picker's search has narrowed to, once it has settled.
+ * The picker applies a search when the page is idle and may lay its rows out
+ * again after the first results show, so the emoji is hovered until the
+ * picker marks it as the one under the pointer, and only then clicked.
+ */
+async function chooseSearched(
+	picker: HTMLElement,
+	name: string,
+	user: { hover: (element: Element) => Promise<void>; click: (element: Element) => Promise<void> },
+): Promise<void> {
+	const cell = () => {
+		expect(within(picker).queryByRole("gridcell", { name: "Grinning face" })).toBeNull();
+		return within(picker).getByRole("gridcell", { name });
+	};
+	await waitFor(
+		async () => {
+			await user.hover(cell());
+			expect(cell()).toHaveAttribute("aria-selected", "true");
+		},
+		{ timeout: 5_000 },
+	);
+	await user.click(cell());
+}

@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { refreshArtifactsAfter } from "@/lib/artifacts.ts";
 import { refreshAfterThreadChange } from "@/lib/chats.ts";
+import { changeReactions } from "@/lib/reactions.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 export function useThreadEvents(threadId: string | undefined): void {
@@ -224,6 +225,10 @@ async function applyThreadEvent(
 				typing?.filter((entry) => entry.person.id !== author.id),
 			);
 		}
+	}
+	if (update.type === "message.reactions_changed") {
+		changeReactions(queries, { id: update.messageId, threadId }, update.reactions);
+		return;
 	}
 	await queries.cancelQueries({ queryKey: ["thread", threadId] });
 	if (!queries.getQueryData(["thread", threadId])) {

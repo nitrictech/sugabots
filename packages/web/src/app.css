@@ -96,6 +96,9 @@
 	/* The count of what is unread or waiting, on a rail tile, a list row or a tab, and the hand when a chat waits for your approval. */
 	--rail-count: oklch(0.56 0.17 268);
 	--approval-marker: oklch(0.56 0.17 268);
+	/* A reaction you are among, under a message: an accent wash edged in the accent. Others' are a card on a chip's edge. */
+	--reaction-mine: light-dark(oklch(0.95 0.035 268), oklch(0.27 0.07 268));
+	--reaction-mine-foreground: light-dark(oklch(0.42 0.17 268), #dfe4ff);
 
 	/* Red is only for errors and delete. */
 	--destructive: #ef4444;
@@ -174,6 +177,8 @@
 	--color-meter: var(--meter);
 	--color-rail-count: var(--rail-count);
 	--color-approval-marker: var(--approval-marker);
+	--color-reaction-mine: var(--reaction-mine);
+	--color-reaction-mine-foreground: var(--reaction-mine-foreground);
 	--color-warning: var(--warning);
 	--color-success-text: var(--success-text);
 	--color-success: var(--success);

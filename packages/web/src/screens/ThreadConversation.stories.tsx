@@ -1,8 +1,14 @@
-import type { Message, MessagePart, ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
+import type {
+	Message,
+	MessagePart,
+	MessageReaction,
+	ThreadParticipant,
+	ToolCallPart,
+} from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
-import { expect, fn, screen, waitFor } from "storybook/test";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -775,6 +781,154 @@ export const ReplyFromToolbar = meta.story({
 	},
 });
 
+function reacted(emoji: string, ...people: { id: string; name: string }[]): MessageReaction {
+	return {
+		emoji,
+		people: people.map(({ id, name }) => ({ id, name, at: "2026-09-22T04:31:00.000Z" })),
+	};
+}
+
+const reactedTo: Message = {
+	...releaseNotes,
+	reactions: [reacted("👍", person, jay), reacted("🎉", jay), reacted("👀", jay)],
+};
+
+/** Sam Rivera reading, reacting to messages. */
+const samReacting = { userId: person.id, onToggle: fn(), onAdd: fn() };
+
+/**
+ * Reactions sit under a message's words, each emoji with how many reacted
+ * with it. Yours are in the accent. Hovering one names who reacted; clicking
+ * it adds yours or takes it back. The button after them adds another.
+ */
+export const Reactions = meta.story({
+	args: {
+		participants: [host, person, jay],
+		reacting: samReacting,
+		messages: [reactedTo],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		const thumbs = canvas.getByRole("button", { name: /^👍 2: You and Jay Park reacted with 👍$/ });
+		await expect(thumbs).toHaveAttribute("aria-pressed", "true");
+		const party = canvas.getByRole("button", { name: /^🎉 1: Jay Park reacted with 🎉$/ });
+		await expect(party).toHaveAttribute("aria-pressed", "false");
+		await userEvent.hover(party);
+		await expect(await screen.findByText("Jay Park reacted with 🎉")).toBeVisible();
+		await userEvent.click(party);
+		await expect(args.reacting?.onToggle).toHaveBeenCalledWith(reactedTo, "🎉");
+
+		const reactions = canvas.getByRole("list", { name: "Reactions" });
+		await userEvent.click(within(reactions).getByRole("button", { name: "Add reaction" }));
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
+		await waitFor(() => expect(search).toHaveFocus());
+		await userEvent.keyboard("rocket");
+		await chooseSearched(picker, "Rocket", userEvent);
+		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "🚀");
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
+	},
+});
+
+/** Where the person cannot react, as in a bots' collaboration, reactions are only shown. */
+export const ReactionsOnlyShown = meta.story({
+	args: { participants: [host, person, jay], messages: [reactedTo] },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("list", { name: "Reactions" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: /^👍/ })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Add reaction" })).toBeNull();
+	},
+});
+
+/**
+ * ReactFromToolbar is the hover toolbar's Add reaction, which opens an emoji
+ * picker. Searching narrows it, and choosing an emoji adds it, as a reaction
+ * writes it, and closes it.
+ */
+export const ReactFromToolbar = meta.story({
+	args: {
+		reacting: samReacting,
+		messages: [releaseNotes],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		canvas.getByRole("button", { name: "Add reaction" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
+		await waitFor(() => expect(search).toHaveFocus());
+		await userEvent.keyboard("thumbs up");
+		await chooseSearched(picker, "Thumbs up", userEvent);
+		// The picker's data writes 👍 with a variation selector after it, which a reaction leaves off.
+		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(releaseNotes, "\u{1F44D}");
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
+	},
+});
+
+/**
+ * A message still on its way to the API can be copied, but not replied or
+ * reacted to until the API has it.
+ */
+export const StillSending = meta.story({
+	args: {
+		onReply: fn(),
+		reacting: samReacting,
+		messages: [
+			releaseNotes,
+			message("0199a3a0-0000-7000-8000-000000000c21", person, "Ship it after lunch"),
+		],
+		sending: new Set(["0199a3a0-0000-7000-8000-000000000c21"]),
+	},
+	play: async ({ canvas }) => {
+		const [notes, sent] = canvas.getAllByRole("article");
+		if (!notes || !sent) throw new Error("Both messages should be rows");
+		await expect(within(notes).getByRole("button", { name: "Reply" })).toBeInTheDocument();
+		await expect(within(notes).getByRole("button", { name: "Add reaction" })).toBeInTheDocument();
+		await expect(within(sent).getByRole("button", { name: "Copy text" })).toBeInTheDocument();
+		await expect(within(sent).queryByRole("button", { name: "Reply" })).toBeNull();
+		await expect(within(sent).queryByRole("button", { name: "Add reaction" })).toBeNull();
+	},
+});
+
+const EVERY_SLOT = [
+	"😀",
+	"😂",
+	"😍",
+	"🤔",
+	"😢",
+	"😡",
+	"👍",
+	"👎",
+	"👏",
+	"🙏",
+	"🔥",
+	"💯",
+	"✅",
+	"❌",
+	"👀",
+	"🚀",
+	"💡",
+	"📌",
+	"🐛",
+	"☕",
+];
+
+/**
+ * A message with as many different emoji as it can take says so in the
+ * picker, opened here from the button after its reactions, and still takes
+ * one of those.
+ */
+export const ReactionsAtTheLimit = meta.story({
+	args: {
+		reacting: samReacting,
+		messages: [{ ...releaseNotes, reactions: EVERY_SLOT.map((emoji) => reacted(emoji, jay)) }],
+	},
+	play: async ({ canvas, userEvent }) => {
+		const reactions = canvas.getByRole("list", { name: "Reactions" });
+		await userEvent.click(within(reactions).getByRole("button", { name: "Add reaction" }));
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		await expect(within(picker).getByText(/This message has 20 different reactions/)).toBeVisible();
+	},
+});
+
 function asked(id: string, tool: string, approval: ToolCallPart["approval"]): Message {
 	return reply(id, [
 		{ type: "text", text: "I'll track the checkout timeouts in Linear." },
@@ -813,3 +967,28 @@ export const AnsweredApprovals = meta.story({
 		await expect(canvas.queryByRole("status")).toBeNull();
 	},
 });
+
+/**
+ * Chooses the emoji the picker's search has narrowed to, once it has settled.
+ * The picker applies a search when the page is idle and may lay its rows out
+ * again after the first results show, so the emoji is hovered until the
+ * picker marks it as the one under the pointer, and only then clicked.
+ */
+async function chooseSearched(
+	picker: HTMLElement,
+	name: string,
+	user: { hover: (element: Element) => Promise<void>; click: (element: Element) => Promise<void> },
+): Promise<void> {
+	const cell = () => {
+		expect(within(picker).queryByRole("gridcell", { name: "Grinning face" })).toBeNull();
+		return within(picker).getByRole("gridcell", { name });
+	};
+	await waitFor(
+		async () => {
+			await user.hover(cell());
+			expect(cell()).toHaveAttribute("aria-selected", "true");
+		},
+		{ timeout: 5_000 },
+	);
+	await user.click(cell());
+}
