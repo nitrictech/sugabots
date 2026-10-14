@@ -14,6 +14,7 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
+import { SandboxCredentials } from "../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
@@ -40,6 +41,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		[sandboxTools, podSandboxes] = await runOnPostgres(
 			Effect.all([SandboxTools.Service, PodSandboxes.Service]).pipe(
 				Effect.provide(Layer.merge(SandboxTools.layer, PodSandboxes.layer)),
+				Effect.provide(SandboxCredentials.none),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -342,7 +344,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 					.insert(sandboxAllowedHost)
 					.values({ workspaceId: thePod.workspaceId, host: "example.com" }),
 			);
-			await runOnPostgres(podSandboxes.applyAllowedHosts({ workspaceId: thePod.workspaceId }));
+			await runOnPostgres(podSandboxes.applyNetwork({ workspaceId: thePod.workspaceId }));
 
 			expect(await reaches("example.com")).toBe(true);
 		},
