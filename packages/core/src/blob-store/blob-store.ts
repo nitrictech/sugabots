@@ -66,7 +66,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/** Postgres's database is infrastructure the entry point provides. */
+/** The database and `Ids` are infrastructure the entry point provides. */
 export const layer = layerNoDeps.pipe(Layer.provide(NodeFileSystem.layer));
 
 /** A blob's path, made by `key`. */

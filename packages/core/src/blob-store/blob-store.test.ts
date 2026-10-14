@@ -12,6 +12,7 @@ import {
 	promising,
 	runOnPostgres,
 } from "../database/testing.ts";
+import { Ids } from "../ids/ids.ts";
 import { BlobStore } from "./blob-store.ts";
 
 interface Implementation {
@@ -37,7 +38,11 @@ const implementations: Implementation[] = [
 			const env = { BLOB_STORE_PROVIDER: "filesystem", BLOB_STORE_FILESYSTEM_ROOT: root };
 			const runtime = ManagedRuntime.make(
 				BlobStore.layer.pipe(
-					Layer.provide([noDatabase, ConfigProvider.layer(ConfigProvider.fromEnv({ env }))]),
+					Layer.provide([
+						noDatabase,
+						Ids.layer,
+						ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
+					]),
 				),
 			);
 			const run = effectRunner<BlobStore.Service>(runtime);

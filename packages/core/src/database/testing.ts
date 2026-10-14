@@ -33,13 +33,12 @@ import {
  */
 export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
-	Ids.layer,
 	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
 	Layer.succeed(
 		Installation.Service,
 		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 	),
-).pipe(Layer.provideMerge(layer));
+).pipe(Layer.provideMerge(Ids.layer), Layer.provideMerge(layer));
 
 export type TestInfrastructure = Layer.Success<typeof testInfrastructure>;
 
