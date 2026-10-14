@@ -8,6 +8,7 @@ import {
 } from "../../providers/search-providers/backends.ts";
 import { artifactTools } from "./artifacts/tool.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
+import { routineTools } from "./routines/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
 import { webSearchTool } from "./web-search/tool.ts";
 
@@ -136,8 +137,8 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		expect(await schema.validate?.({ query: "x", count: 0 })).toMatchObject({ success: false });
 	});
 
-	it.each(
-		Object.entries(
+	it.each([
+		...Object.entries(
 			artifactTools({
 				by: { workspaceId: "workspace", podId: "pod", agentId: "agent", threadId: "thread" },
 				turnId: "turn",
@@ -152,7 +153,19 @@ describe("native Effect tool schemas through the AI SDK", () => {
 				run: unexpectedExecution,
 			}),
 		),
-	)("gives %s an object input schema, as providers require", async (_name, artifactTool) => {
-		expect(await asSchema(artifactTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
+		...Object.entries(
+			routineTools({
+				bot: { agentId: "agent", askedBy: "user" },
+				timeZone: "UTC",
+				routines: {
+					list: unexpectedExecution,
+					create: unexpectedExecution,
+					update: unexpectedExecution,
+				},
+				run: unexpectedExecution,
+			}),
+		),
+	])("gives %s an object input schema, as providers require", async (_name, builtInTool) => {
+		expect(await asSchema(builtInTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
 	});
 });

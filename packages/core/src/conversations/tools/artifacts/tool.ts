@@ -11,6 +11,7 @@ import { Effect, Option, Schema } from "effect";
 import type { Artifacts } from "../../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import { isUuid } from "../../../ids/ids.ts";
+import { noInputSchema } from "../no-input.ts";
 
 export const ARTIFACT_LIST_TOOL = "artifact_list" satisfies BuiltInToolKey;
 export const ARTIFACT_READ_TOOL = "artifact_read" satisfies BuiltInToolKey;
@@ -122,12 +123,7 @@ export function artifactTools({
 	return {
 		[ARTIFACT_LIST_TOOL]: tool({
 			description: "List the documents and HTML pages kept in this pod, newest first.",
-			// An empty Struct converts to "anything but null", which providers refuse as a
-			// tool's input; a record of nothing converts to an empty object.
-			inputSchema: Schema.Record(Schema.String, Schema.Never).pipe(
-				Schema.toStandardSchemaV1,
-				Schema.toStandardJSONSchemaV1,
-			),
+			inputSchema: noInputSchema,
 			execute: async (): Promise<{ artifacts: ArtifactListing[] }> => ({
 				artifacts: (await run(authoring.list(by))).map(listing),
 			}),

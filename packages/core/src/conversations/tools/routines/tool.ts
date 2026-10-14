@@ -8,6 +8,7 @@ import { type Tool, tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { BotRoutines } from "../../routines/bot-routines.ts";
+import { noInputSchema } from "../no-input.ts";
 
 export const LIST_ROUTINES_TOOL = "list_routines";
 export const CREATE_ROUTINE_TOOL = "create_routine";
@@ -98,7 +99,7 @@ export function routineTools({
 		[LIST_ROUTINES_TOOL]: tool({
 			description:
 				"List your routines: the jobs you do on a schedule or when a webhook calls, with when each runs, whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
-			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			inputSchema: noInputSchema,
 			execute: () => answer(Effect.map(routines.list(bot), (listed) => ({ routines: listed }))),
 		}),
 		[CREATE_ROUTINE_TOOL]: tool({
