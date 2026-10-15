@@ -1,10 +1,24 @@
+import { createOpenAI } from "@ai-sdk/openai";
 import { Effect, Schema, SchemaGetter } from "effect";
+import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	dataListing,
 	discoveredModel,
 	type ProviderDialect,
 	type ProviderModelFields,
+	type RequestEndpoint,
 } from "./dialect.ts";
+
+/** The OpenAI SDK, set up for `endpoint` and sending through `fetch`. */
+export function openaiClient(endpoint: RequestEndpoint, fetch: EgressHttpClient) {
+	return createOpenAI({
+		// The SDK requires a key, even for servers that don't use one.
+		apiKey: endpoint.apiKey ?? "no-key",
+		baseURL: endpoint.baseUrl,
+		headers: endpoint.headers,
+		fetch,
+	});
+}
 
 /**
  * OpenAI and everything that speaks its API: Groq, vLLM, LM Studio, a gateway.
@@ -17,6 +31,7 @@ export const openaiCompatible: ProviderDialect = {
 	listingUrl: (root) => `${root}/models`,
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+	languageModel: (endpoint, modelId, fetch) => openaiClient(endpoint, fetch).chat(modelId),
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,

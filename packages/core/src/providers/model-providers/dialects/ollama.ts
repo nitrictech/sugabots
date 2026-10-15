@@ -33,10 +33,10 @@ const shown = Schema.Struct({
  * `/v1` to the root the two share and asks about each model in turn.
  */
 export const ollama: ProviderDialect = {
+	...openaiCompatible,
 	name: "Ollama",
 	discoveryRoot: (baseUrl) => baseUrl.replace(/\/v1$/, ""),
 	listingUrl: (root) => `${root}/api/tags`,
-	authorization: openaiCompatible.authorization,
 	listing: Schema.Struct({ models: Schema.mutable(Schema.Array(Schema.Unknown)) }).pipe(
 		Schema.decodeTo(Schema.mutable(Schema.Array(Schema.Unknown)), {
 			decode: SchemaGetter.transform((body) => body.models),
