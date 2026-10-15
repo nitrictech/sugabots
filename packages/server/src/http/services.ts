@@ -12,6 +12,7 @@ import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/v
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
+import type { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
 import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import type { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import type { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
@@ -48,6 +49,7 @@ export type HttpServices =
 	| DesktopViewer.Service
 	| PodSandboxSetup.Service
 	| GitHubApps.Service
+	| GitHubConnections.Service
 	| ConnectionSetup.Service
 	| Artifacts.Service
 	| ArtifactPages.Service

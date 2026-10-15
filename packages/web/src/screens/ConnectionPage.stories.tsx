@@ -164,6 +164,21 @@ const gitHubAppPending = connection(7, {
 	access: "ask",
 });
 
+const appRepositories = (account: string | null) =>
+	http.get(`${API}/pods/:podId/connections/:connectionId/repositories`, () =>
+		HttpResponse.json({
+			account,
+			repositories:
+				account === null
+					? []
+					: ["acme/web", "acme/infra"].map((repository) => ({
+							repository,
+							addedByName: "Ryan Eyes",
+							addedAt: "2026-10-05T09:30:00.000Z",
+						})),
+		}),
+	);
+
 const pagePath = (one: TestConnection) =>
 	`/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
 
@@ -282,19 +297,61 @@ export const NotSignedIn = meta.story({
 	},
 });
 
-/** The pod's GitHub App's connection, installed: its tools, and no install step. */
+/** The pod's GitHub App's connection: the repositories its bots work on, from the account the app is installed on. */
 export const GitHubApp = meta.story({
+	beforeEach({ msw }) {
+		msw.use(appRepositories("acme"));
+	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "GitHub" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		const repositories = await canvas.findByRole(
+			"region",
+			{ name: "Repositories" },
+			{ timeout: 10_000 },
+		);
+		await expect(within(repositories).getByText("acme/web")).toBeInTheDocument();
+		await expect(within(repositories).getByRole("link", { name: "the pod's app" })).toHaveAttribute(
+			"href",
+			"https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
+		);
 		await expect(canvas.queryByRole("button", { name: "Install on GitHub" })).toBeNull();
+	},
+});
+
+/** Add repository: what the app reaches that the connection doesn't have yet, listed as soon as it opens. */
+export const AddingARepository = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			appRepositories("acme"),
+			http.get(`${API}/pods/:podId/connections/:connectionId/github/reachable`, async () => {
+				await delay(300);
+				return HttpResponse.json(
+					["acme/web", "acme/infra", "acme/docs"].map((repository) => ({
+						repository,
+						private: repository !== "acme/docs",
+					})),
+				);
+			}),
+		);
+	},
+	render: () => <StoryApp path={pagePath(gitHubApp)} />,
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Add repository" }, { timeout: 10_000 }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: "Add from acme" });
+		await expect(
+			await within(dialog).findByRole("button", { name: /^acme\/docs/ }, { timeout: 5_000 }),
+		).toBeInTheDocument();
+		await expect(within(dialog).queryByRole("button", { name: /^acme\/web/ })).toBeNull();
 	},
 });
 
 /** Disconnecting GitHub says the app stays there, and links to its settings to delete it. */
 export const DisconnectingGitHub = meta.story({
+	beforeEach({ msw }) {
+		msw.use(appRepositories("acme"));
+	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
 	play: async ({ canvas }) => {
 		await userEvent.click(
@@ -308,14 +365,18 @@ export const DisconnectingGitHub = meta.story({
 	},
 });
 
-/** Made on GitHub but not installed yet: Install on GitHub, where an MCP server has Sign in. */
+/** Made on GitHub but not installed yet: Install on GitHub, and no repositories until it is. */
 export const GitHubAppNotInstalled = meta.story({
+	beforeEach({ msw }) {
+		msw.use(appRepositories(null));
+	},
 	render: () => <StoryApp path={pagePath(gitHubAppPending)} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("button", { name: "Install on GitHub" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Sign in" })).toBeNull();
+		await expect(canvas.queryByRole("region", { name: "Repositories" })).toBeNull();
 	},
 });
 
