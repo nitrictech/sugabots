@@ -1,3 +1,4 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	dataListing,
@@ -12,9 +13,19 @@ import {
  * registry supplies them. Its models cache only the prompt prefixes a
  * request marks.
  */
+/** Where Anthropic's API is, under a base URL given with or without its `/v1`. */
+const apiRoot = (baseUrl: string) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`);
+
 export const anthropic: ProviderDialect = {
 	name: "Anthropic",
-	discoveryRoot: (baseUrl) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`),
+	discoveryRoot: apiRoot,
+	languageModel: (endpoint, modelId, http) =>
+		createAnthropic({
+			apiKey: endpoint.apiKey ?? "",
+			baseURL: apiRoot(endpoint.baseUrl.replace(/\/$/, "")),
+			headers: endpoint.headers,
+			fetch: http(endpoint.baseUrl),
+		})(modelId),
 	listingUrl: (root) => `${root}/models?limit=1000`,
 	authorization: (apiKey) => ({ "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01" }),
 	cacheBreakpoint: () => ({ anthropic: { cacheControl: { type: "ephemeral" } } }),

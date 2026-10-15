@@ -1,10 +1,24 @@
+import { createOpenAI } from "@ai-sdk/openai";
 import { Effect, Schema, SchemaGetter } from "effect";
 import {
+	type BoundHttpClient,
 	dataListing,
 	discoveredModel,
 	type ProviderDialect,
 	type ProviderModelFields,
+	type RequestEndpoint,
 } from "./dialect.ts";
+
+/** OpenAI's SDK for `endpoint`, sending through a client bound to its address. */
+export function openaiClient(endpoint: RequestEndpoint, http: BoundHttpClient) {
+	return createOpenAI({
+		// A local server such as Ollama takes no key, but the SDK insists on one.
+		apiKey: endpoint.apiKey ?? "ollama",
+		baseURL: endpoint.baseUrl,
+		headers: endpoint.headers,
+		fetch: http(endpoint.baseUrl),
+	});
+}
 
 /**
  * OpenAI and everything that speaks its API: Groq, vLLM, LM Studio, a gateway.
@@ -17,6 +31,7 @@ export const openaiCompatible: ProviderDialect = {
 	listingUrl: (root) => `${root}/models`,
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+	languageModel: (endpoint, modelId, http) => openaiClient(endpoint, http).chat(modelId),
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,

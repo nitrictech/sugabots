@@ -37,6 +37,7 @@ export const ollama: ProviderDialect = {
 	discoveryRoot: (baseUrl) => baseUrl.replace(/\/v1$/, ""),
 	listingUrl: (root) => `${root}/api/tags`,
 	authorization: openaiCompatible.authorization,
+	languageModel: openaiCompatible.languageModel,
 	listing: Schema.Struct({ models: Schema.mutable(Schema.Array(Schema.Unknown)) }).pipe(
 		Schema.decodeTo(Schema.mutable(Schema.Array(Schema.Unknown)), {
 			decode: SchemaGetter.transform((body) => body.models),

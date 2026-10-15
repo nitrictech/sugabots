@@ -5,7 +5,7 @@ import {
 	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
-import type { ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { Data, Effect, Schema, SchemaGetter } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -19,10 +19,10 @@ import type { EgressHttpClient } from "../../network/egress.ts";
  * per provider that has one, so a preset can name it and the code that talks
  * to a provider never asks which one it is.
  *
- * Discovery, how a provider lists its models and what it says about them, is
- * most of what a dialect covers; the rest is the options its requests take. A
- * header a provider wants on every request belongs here too as the need
- * arrives.
+ * A dialect covers discovery, how a provider lists its models and what it
+ * says about them, and requests: which SDK speaks the provider's API, and the
+ * options its requests take. A header a provider wants on every request
+ * belongs here too as the need arrives.
  */
 
 export interface DiscoveredModel {
@@ -45,6 +45,20 @@ export interface ProviderIdentity {
 
 /** Options for one provider's SDK, keyed by the provider they are for. */
 export type ProviderOptions = NonNullable<ModelMessage["providerOptions"]>;
+
+/** Where a provider's requests go, and the credentials and headers they carry. */
+export interface RequestEndpoint {
+	baseUrl: string;
+	apiKey?: string;
+	headers: Record<string, string>;
+}
+
+/**
+ * Hands out a client bound to `baseUrl` under the network policy. An SDK
+ * sends every request through one, so it can reach nothing outside that
+ * address.
+ */
+export type BoundHttpClient = (baseUrl: string) => EgressHttpClient;
 
 export interface ProviderDialect {
 	/** Named in tests and in what a person is told. */
@@ -81,6 +95,16 @@ export interface ProviderDialect {
 	 * not at all.
 	 */
 	cacheBreakpoint?(modelId: string): ProviderOptions | undefined;
+	/**
+	 * The model requests go to, built with the SDK that speaks this
+	 * provider's API, sending through clients `http` binds.
+	 */
+	languageModel(endpoint: RequestEndpoint, modelId: string, http: BoundHttpClient): LanguageModel;
+	/**
+	 * The system text as request options, for a provider that won't take it
+	 * as a message. Absent, it is sent as the system message.
+	 */
+	systemOptions?(system: string): ProviderOptions;
 }
 
 export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
