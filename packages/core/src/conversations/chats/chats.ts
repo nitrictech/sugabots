@@ -12,7 +12,7 @@ import { query, serviceOperations, transaction } from "../../database/database.t
 import { agent, pod } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
-import { crewOf, personAuthor, personColumns, toMessage } from "../threads/participants.ts";
+import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { toChat } from "./chat.ts";
 
@@ -42,9 +42,14 @@ export interface Interface {
 		content: string;
 		/** Written for the other people, so no bot replies. Off unless set. */
 		peopleOnly?: boolean;
+		/** The id of the message in the chat's main thread that this one quotes and answers. */
+		replyTo?: string;
 	}) => Effect.Effect<
 		Message,
-		ResourceHidden | ThreadRepository.MessageIdConflict | ChatAgentHasNoModel,
+		| ResourceHidden
+		| ThreadRepository.MessageIdConflict
+		| ThreadRepository.ReplyTargetNotFound
+		| ChatAgentHasNoModel,
 		CurrentActor.Service
 	>;
 	/** Records that the actor has read the chat's main conversation up to its newest finished message. */
@@ -87,14 +92,14 @@ export const make = Effect.gen(function* () {
 						const peopleOnly = input.peopleOnly ?? false;
 						const visible = yield* visibility.chat(input.chatId);
 						const sender = yield* senderOf(yield* CurrentActor.Service);
-						const author = personAuthor(sender);
 						const posted = yield* threads.post({
 							id: input.messageId,
 							threadId: visible.mainThreadId,
 							author: sender,
 							content: input.content,
+							replyTo: input.replyTo,
 						});
-						if (posted._tag === "AlreadyPosted") return toMessage(posted.message, author);
+						if (posted._tag === "AlreadyPosted") return posted.message;
 						// Checked once the message is known to be new, so sending it again
 						// still returns it; refusing here rolls the post back.
 						if ((yield* hostModelOf(visible.hostAgentId)) === null) {
@@ -106,7 +111,7 @@ export const make = Effect.gen(function* () {
 							content: posted.message.content,
 							author: { kind: "person", peopleOnly },
 						});
-						return toMessage(posted.message, author);
+						return posted.message;
 					}),
 				),
 			),

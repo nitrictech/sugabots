@@ -95,6 +95,11 @@ export const messageAuthorSchema = Schema.Union([
 
 export type MessageAuthor = typeof messageAuthorSchema.Type;
 
+/** Who wrote a message, by name: a routine's trigger goes by the routine's. */
+export function messageAuthorName(author: MessageAuthor): string {
+	return author.kind === "routine_trigger" ? author.routineName : author.name;
+}
+
 export const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
 
 /**
@@ -291,6 +296,14 @@ export function messagePreview(content: string): string {
 	return `${(atWord > 0 ? cut.slice(0, atWord) : cut).trimEnd()}…`;
 }
 
+/** A message as a reply quotes it: its spoken text, without narration, by `messagePreview`. */
+export function quotedPreview(message: {
+	parts: readonly { type: string; text?: string }[];
+	content: string;
+}): string {
+	return messagePreview(textWithoutNarration(message.parts) || message.content);
+}
+
 /** The text `markdown` reads as once rendered, without its syntax. */
 function markdownText(markdown: string): string {
 	return mdastToString(fromMarkdown(markdown));
@@ -348,6 +361,16 @@ export const messageStatusSchema = Schema.Literals([
 
 export type MessageStatus = typeof messageStatusSchema.Type;
 
+/** The message a reply quotes, as the reply shows it. */
+export const messageReplyToSchema = Schema.Struct({
+	id: uuidSchema,
+	author: messageAuthorSchema,
+	/** The quoted message shortened to one line, by `quotedPreview`. */
+	preview: Schema.String,
+});
+
+export type MessageReplyTo = typeof messageReplyToSchema.Type;
+
 export const messageSchema = Schema.Struct({
 	id: uuidSchema,
 	threadId: uuidSchema,
@@ -360,6 +383,8 @@ export const messageSchema = Schema.Struct({
 	error: Schema.optional(Schema.String),
 	/** Set on a routine run's result, posted in the agent's chat when the run completed. */
 	routineResultOf: Schema.optional(routineResultOfSchema),
+	/** The message this one quotes and answers, in the same thread. */
+	replyTo: Schema.optional(messageReplyToSchema),
 	createdAt: isoTimestampSchema,
 }).check(
 	Schema.makeFilter(({ content, parts }) =>
@@ -464,6 +489,8 @@ export const newMessageSchema = Schema.Struct({
 	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
 	/** For the people in the thread only: the bots read it, but none replies. */
 	peopleOnly: Schema.optional(Schema.Boolean),
+	/** The id of the message in the same thread that this one quotes and answers. */
+	replyTo: Schema.optional(uuidSchema),
 });
 
 export type NewMessage = typeof newMessageSchema.Type;

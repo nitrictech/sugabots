@@ -14,7 +14,7 @@ import {
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Conflict, refused } from "../errors.ts";
+import { BadRequest, Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
@@ -67,7 +67,7 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			params: { chatId: Schema.String },
 			payload: newMessageSchema,
 			success: messageSchema.pipe(HttpApiSchema.status(201)),
-			error: [Conflict, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 	)
 	.middleware(Session) {}

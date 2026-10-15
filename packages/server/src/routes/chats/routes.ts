@@ -47,6 +47,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						messageId: payload.id,
 						content: payload.message,
 						peopleOnly: payload.peopleOnly,
+						replyTo: payload.replyTo,
 					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			);
@@ -57,6 +58,7 @@ const chatErrors = {
 	...refusals,
 	ChatPlacementRejected: BadRequest,
 	MessageIdConflict: Conflict,
+	ReplyTargetNotFound: BadRequest,
 	ChatAgentHasNoModel: Conflict,
 	InvalidChatCursor: BadRequest,
 };

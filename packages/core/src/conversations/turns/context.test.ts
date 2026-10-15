@@ -285,6 +285,28 @@ describe("modelPrompt", () => {
 		expect(history).toContain(`kept as file ${fileId}, which read_thread_file reads`);
 	});
 
+	it("tells the agent which message a person's reply quotes", () => {
+		const input = context();
+		const [question, , finding] = input.messages;
+		if (!question || !finding) throw new Error("Context fixture has no messages to reply with");
+		input.messages.push({
+			...question,
+			id: "0199a3a0-0000-7000-8000-000000000020",
+			parts: [{ type: "text", text: "Which migration?" }],
+			content: "Which migration?",
+			replyTo: { id: finding.id, author: finding.author, preview: "Migration is present." },
+			createdAt: "2026-09-10T04:03:00.000Z",
+		});
+
+		const prompt = modelPrompt(input, environment());
+
+		expect(prompt.messages).toContainEqual(
+			expect.objectContaining({
+				content: 'Sam (@sam): [Replying to Reviewer: "Migration is present."]\nWhich migration?',
+			}),
+		);
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];

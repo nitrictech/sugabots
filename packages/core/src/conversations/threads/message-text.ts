@@ -1,4 +1,10 @@
-import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
+import {
+	type CollaborationPart,
+	type Message,
+	type MessageReplyTo,
+	messageAuthorName,
+	type ToolCallPart,
+} from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
@@ -21,7 +27,7 @@ const DESCRIBED_HISTORY_SEARCH_CHARACTERS = 4_000;
  * happened so the agent's own history says what it asked and what it was told.
  */
 export function messageTextWithPlacedParts(message: Message): string {
-	return message.parts
+	const text = message.parts
 		.map((part) => {
 			if (part.type === "text") return part.text;
 			if (part.type === "collaboration") return describeCollaboration(part);
@@ -29,6 +35,12 @@ export function messageTextWithPlacedParts(message: Message): string {
 		})
 		.join("\n\n")
 		.trim();
+	return text && message.replyTo ? `${describeReplyTo(message.replyTo)}\n${text}` : text;
+}
+
+/** The line a reply starts with, naming the message it quotes. */
+export function describeReplyTo(replyTo: MessageReplyTo): string {
+	return `[Replying to ${messageAuthorName(replyTo.author)}: "${replyTo.preview}"]`;
 }
 
 /**
