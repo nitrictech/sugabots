@@ -95,6 +95,51 @@ describe("models", () => {
 		},
 	);
 
+	const prompt = {
+		workspaceId: "workspace-id",
+		activity: { purpose: "provider-check" },
+		system: "",
+		messages: [],
+		maxSteps: 1,
+	} as const;
+
+	it.each([
+		["openai", "https://models.example/v1/", "https://models.example/v1", sdk.createOpenAI],
+		["anthropic", "https://models.example", "https://models.example/v1", sdk.createAnthropic],
+		["anthropic", "https://models.example/v1/", "https://models.example/v1", sdk.createAnthropic],
+	] as const)(
+		"binds the %s SDK's client to where its requests go, from %s",
+		async (apiFormat, baseUrl, requestRoot, createProvider) => {
+			const boundTo = vi.fn((_endpoint: { baseUrl: string }) => vi.fn<typeof fetch>());
+			const model = Models.make({
+				modelProviders: {
+					renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+					resolve: () =>
+						Effect.succeed(
+							resolvedModel({
+								providerId: "provider-id",
+								preset: null,
+								baseUrl,
+								apiFormat,
+								headers: {},
+								configurationUpdatedAt: new Date(),
+							}),
+						),
+				},
+				httpClients: { for: boundTo },
+				requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
+				registry: emptyRegistry,
+			});
+
+			await run(Effect.scoped(model.stream({ ...prompt, model: "model-id" })));
+
+			expect(boundTo).toHaveBeenCalledExactlyOnceWith({ baseUrl: requestRoot });
+			expect(createProvider).toHaveBeenCalledWith(
+				expect.objectContaining({ baseURL: requestRoot }),
+			);
+		},
+	);
+
 	const endpoint = {
 		providerId: "provider-id",
 		preset: null,

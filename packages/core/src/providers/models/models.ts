@@ -7,9 +7,6 @@
  */
 export * as Models from "./models.ts";
 
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { DisplayName, type DomainError, userText } from "@sugabots/errors";
 import {
 	APICallError,
@@ -265,7 +262,6 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				input.workspaceId,
 				resolved.endpoint,
 			).pipe(Effect.mapError((cause) => new ProviderOAuthRefreshFailed({ ...context, cause })));
-			const fetch = httpClients.for(connection);
 			const ledger = yield* streamLedger({
 				requests,
 				registry,
@@ -274,10 +270,13 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				model: input.model,
 				connection,
 			});
-			const codex = connection.preset === "chatgpt";
+			const dialect = dialectFor(connection);
+			const baseUrl = connection.baseUrl.replace(/\/$/, "");
+			const requestRoot = dialect.requestRoot?.(baseUrl) ?? baseUrl;
+			const systemOptions = dialect.systemOptions?.(input.system);
 			// Anthropic allows a request four marks. This spends three: the system
 			// text, the history's end and each step's newest message.
-			const breakpoint = dialectFor(connection).cacheBreakpoint?.(input.model);
+			const breakpoint = dialect.cacheBreakpoint?.(input.model);
 			const markNewest = breakpoint ? newestMessageBreakpoint(breakpoint) : undefined;
 			// The SDK does not throw a provider's error into the text stream: it
 			// reports it here and ends the stream, and whatever is asked of the
@@ -290,19 +289,13 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			const runLog = Effect.runForkWith(yield* Effect.context<never>());
 			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 			const result = streamText({
-				model: languageModel(connection, input.model, fetch),
-				// The Codex backend takes the system prompt only as `instructions`,
-				// and keeps nothing between requests, so reasoning has to travel with them.
-				...(codex
-					? {
-							providerOptions: {
-								openai: {
-									instructions: input.system,
-									store: false,
-									include: ["reasoning.encrypted_content"],
-								},
-							},
-						}
+				model: dialect.languageModel(
+					{ ...connection, baseUrl: requestRoot },
+					input.model,
+					httpClients.for({ baseUrl: requestRoot }),
+				),
+				...(systemOptions
+					? { providerOptions: systemOptions }
 					: {
 							system: breakpoint
 								? withBreakpoint({ role: "system", content: input.system }, breakpoint)
@@ -502,42 +495,6 @@ function withBreakpoint<Marked extends ModelMessage | ToolResultPart>(
 		providerOptions[provider] = { ...providerOptions[provider], ...options };
 	}
 	return { ...marked, providerOptions };
-}
-
-function languageModel(
-	connection: ModelProviderRepository.ProviderEndpoint,
-	modelId: string,
-	fetch: typeof globalThis.fetch,
-) {
-	if (connection.apiFormat === "anthropic") {
-		return createAnthropic({
-			apiKey: connection.apiKey ?? "",
-			baseURL: connection.baseUrl.endsWith("/v1")
-				? connection.baseUrl
-				: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
-			headers: connection.headers,
-			fetch,
-		})(modelId);
-	}
-	if (connection.preset === "openrouter") {
-		return createOpenRouter({
-			apiKey: connection.apiKey ?? "",
-			baseURL: connection.baseUrl,
-			headers: connection.headers,
-			fetch,
-			// Asks for usage at the end of each stream, which costs are recorded from.
-			compatibility: "strict",
-		})(modelId);
-	}
-	const openai = createOpenAI({
-		// A local server such as Ollama takes no key, but the SDK insists on one.
-		apiKey: connection.apiKey ?? "ollama",
-		baseURL: connection.baseUrl,
-		headers: connection.headers,
-		fetch,
-	});
-	// The Codex backend speaks only the Responses API.
-	return connection.preset === "chatgpt" ? openai.responses(modelId) : openai.chat(modelId);
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Models") {}

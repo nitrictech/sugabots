@@ -1,3 +1,4 @@
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { ProviderModelCapability } from "@sugabots/contracts";
 import { Effect, Schema, SchemaGetter } from "effect";
 import {
@@ -27,6 +28,15 @@ export const openrouter: ProviderDialect = {
 	// The public /models endpoint accepts invalid keys; /models/user requires authentication.
 	listingUrl: (root) => `${root}/models/user`,
 	authorization: openaiCompatible.authorization,
+	languageModel: (endpoint, modelId, fetch) =>
+		createOpenRouter({
+			apiKey: endpoint.apiKey ?? "",
+			baseURL: endpoint.baseUrl,
+			headers: endpoint.headers,
+			fetch,
+			// Include usage at the end of each stream; costs are recorded from it.
+			compatibility: "strict",
+		})(modelId),
 	cacheBreakpoint: (modelId) =>
 		modelId.startsWith(ANTHROPIC_MODELS)
 			? { openrouter: { cacheControl: { type: "ephemeral" } } }

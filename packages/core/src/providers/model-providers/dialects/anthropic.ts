@@ -1,3 +1,4 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	dataListing,
@@ -5,6 +6,9 @@ import {
 	type ProviderDialect,
 	type ProviderModelFields,
 } from "./dialect.ts";
+
+/** Anthropic's API is under `/v1`. Accepts a base URL with or without it. */
+const apiRoot = (baseUrl: string) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`);
 
 /**
  * Anthropic keys with a header of its own and pages its listing, twenty models
@@ -14,7 +18,15 @@ import {
  */
 export const anthropic: ProviderDialect = {
 	name: "Anthropic",
-	discoveryRoot: (baseUrl) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`),
+	discoveryRoot: apiRoot,
+	requestRoot: apiRoot,
+	languageModel: (endpoint, modelId, fetch) =>
+		createAnthropic({
+			apiKey: endpoint.apiKey ?? "",
+			baseURL: endpoint.baseUrl,
+			headers: endpoint.headers,
+			fetch,
+		})(modelId),
 	listingUrl: (root) => `${root}/models?limit=1000`,
 	authorization: (apiKey) => ({ "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01" }),
 	cacheBreakpoint: () => ({ anthropic: { cacheControl: { type: "ephemeral" } } }),
