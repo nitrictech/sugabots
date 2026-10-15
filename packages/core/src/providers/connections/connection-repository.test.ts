@@ -12,6 +12,7 @@ import {
 } from "../../database/testing.ts";
 import { connectionIn, connectionsIn } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
+import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () => {
 	let connections: Promised<ConnectionRepository.Interface>;
@@ -212,6 +213,25 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			destructive: null,
 			access: "allow",
 		});
+	});
+
+	it("gives a GitHub connection this version's tools, whenever it was made", async () => {
+		const made = await connections.createGitHub(workspaceId, podId, userId, {
+			id: crypto.randomUUID(),
+			app: { appId: 42, slug: "acme-sugabots", owner: { login: "acme", type: "Organization" } },
+			appCredentialEncrypted: "sealed",
+		});
+
+		await connections.update(workspaceId, podId, made.id, {
+			toolAccess: { list_issues: "off" },
+		});
+
+		const tools = (await shown(made.id))?.tools ?? [];
+		expect(tools.map((tool) => tool.name)).toEqual(
+			GITHUB_CONNECTION_TOOLS.map((tool) => tool.name),
+		);
+		expect(tools).toContainEqual(expect.objectContaining({ name: "list_issues", access: "off" }));
+		expect(tools).toContainEqual(expect.objectContaining({ name: "push_branch", access: "ask" }));
 	});
 
 	it("does not expose a connection through another pod", async () => {

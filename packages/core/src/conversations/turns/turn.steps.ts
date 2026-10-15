@@ -438,6 +438,8 @@ const streamReply = (
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
+					turnId: prepared.turnId,
+					workspace: sandbox.usable ? sandbox.workspace : undefined,
 					sandboxSignsIn: sandbox.signsIn,
 				}),
 				(opened) => Effect.promise(() => opened.close()),

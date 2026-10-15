@@ -6,4 +6,41 @@ import type { ConnectionTool } from "@sugabots/contracts";
  * each, and new ones reach connections made before them. Those that change
  * something wait for a person until someone chooses otherwise.
  */
-export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [];
+export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [
+	{
+		name: "push_branch",
+		description: "Push a commit from a checkout in the sandbox to a branch under sugabots/.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
+		name: "list_issues",
+		description: "List a repository's issues.",
+		readOnly: true,
+		destructive: false,
+	},
+	{
+		name: "get_issue",
+		description: "Read an issue and its comments.",
+		readOnly: true,
+		destructive: false,
+	},
+	{
+		name: "list_pull_requests",
+		description: "List a repository's pull requests.",
+		readOnly: true,
+		destructive: false,
+	},
+	{
+		name: "get_pull_request",
+		description: "Read a pull request with its reviews and comments.",
+		readOnly: true,
+		destructive: false,
+	},
+	{
+		name: "list_check_runs",
+		description: "List the checks run on a branch or commit, with what each concluded.",
+		readOnly: true,
+		destructive: false,
+	},
+];

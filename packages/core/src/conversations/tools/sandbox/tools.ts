@@ -74,7 +74,7 @@ interface Failed {
 }
 
 /** Runs `work` in the pod's sandbox, turning a refusal it can act on into a result. */
-async function inSandbox<A>(
+export async function inSandbox<A>(
 	openSandbox: OpenSandbox,
 	work: (
 		sandbox: Sandboxes.Sandbox,
