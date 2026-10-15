@@ -1,5 +1,5 @@
-import type { ThreadDetails } from "@sugabots/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { threadQuery } from "./threads.ts";
 import { BROWSER_TOOL_PREFIX } from "./tool-names.ts";
 
 /**
@@ -9,7 +9,7 @@ import { BROWSER_TOOL_PREFIX } from "./tool-names.ts";
  * nothing of its own.
  */
 export function useDesktopInUse(threadId: string | undefined, agentId: string): boolean {
-	const { data } = useQuery<ThreadDetails>({ queryKey: ["thread", threadId], enabled: false });
+	const { data } = useQuery({ ...threadQuery(threadId), enabled: false });
 	const reply = data?.messages.findLast(
 		(message) => message.author.kind === "agent" && message.author.id === agentId,
 	);
