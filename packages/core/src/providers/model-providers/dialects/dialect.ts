@@ -7,6 +7,7 @@ import {
 } from "@sugabots/contracts";
 import type { LanguageModel, ModelMessage } from "ai";
 import { Data, Effect, Schema, SchemaGetter } from "effect";
+import type { RecognizeFailure } from "../../models/request-failures.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
 /**
@@ -105,6 +106,11 @@ export interface ProviderDialect {
 	 * message.
 	 */
 	systemOptions?(system: string): ProviderOptions;
+	/**
+	 * Maps the provider's error to a shared failure when the status code alone
+	 * isn't enough. Return undefined to classify by status.
+	 */
+	recognizeFailure?: RecognizeFailure;
 }
 
 export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{

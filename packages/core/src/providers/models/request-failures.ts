@@ -9,6 +9,27 @@ export interface RequestContext {
 	readonly model: DisplayName;
 }
 
+/** The parts of a provider's error that a dialect uses to classify it. */
+export interface FailureReport {
+	/** HTTP status, if there was one. */
+	status: number | undefined;
+	/** The error's `code`, or its `type` if it has no code. */
+	code: string | undefined;
+	/** The provider's error message. */
+	message: string | undefined;
+}
+
+/** Failures a dialect can identify from an error when the status code isn't enough. */
+export type RecognizedFailure = "quota-exhausted" | "context-too-long";
+
+/** Maps a provider's error to a shared failure, or undefined to fall back to the status. */
+export type RecognizeFailure = (report: FailureReport) => RecognizedFailure | undefined;
+
+/** Provider and model names for the failure message, and the dialect's error mapping. */
+export interface FailedRequest extends RequestContext {
+	readonly recognize?: RecognizeFailure;
+}
+
 const requestFields = { provider: DisplayName.schema, model: DisplayName.schema };
 const requestFieldsWithCause = { ...requestFields, cause: Schema.Defect() };
 
@@ -320,11 +341,20 @@ const CONNECTION_DROPPED = new Set([
 	"UND_ERR_HEADERS_TIMEOUT",
 ]);
 
-/** The failure a request to `context.provider` ended with, from what the SDK or the network threw. */
-export function classifyRequestFailure(cause: unknown, context: RequestContext): RequestFailure {
+/**
+ * Classifies an error from a model request. `recognize` handles
+ * provider-specific errors; the HTTP status and network errors cover the rest.
+ */
+export function classifyRequestFailure(cause: unknown, request: FailedRequest): RequestFailure {
+	const { recognize, ...context } = request;
 	const fields = { ...context, cause };
 	if (APICallError.isInstance(cause) && cause.statusCode !== undefined) {
-		return classifyStatus(cause.statusCode, cause, fields);
+		const recognized = recognize?.({
+			status: cause.statusCode,
+			code: errorCode(cause.responseBody),
+			message: providerSaid(cause.responseBody),
+		});
+		return classifyStatus(cause.statusCode, recognized, fields, cause);
 	}
 	const refused = findInChain(cause, (link) => link instanceof EgressRefused);
 	if (refused) {
@@ -340,19 +370,13 @@ export function classifyRequestFailure(cause: unknown, context: RequestContext):
 
 function classifyStatus(
 	status: number,
-	cause: APICallError,
+	recognized: RecognizedFailure | undefined,
 	fields: RequestContext & { cause: unknown },
+	cause: APICallError,
 ): RequestFailure {
-	const code = errorCode(cause.responseBody);
 	if (status === 401) return new ProviderCredentialsRejected(fields);
 	if (status === 403) return new ProviderAccessDenied(fields);
-	// OpenAI, and the servers that copy its errors, report an exhausted quota as a
-	// 429; Anthropic reports one as a 400.
-	if (
-		status === 402 ||
-		(status === 429 && code === "insufficient_quota") ||
-		(status === 400 && providerSays(cause, /credit balance is too low/i))
-	) {
+	if (status === 402 || recognized === "quota-exhausted") {
 		return new ProviderQuotaExhausted(fields);
 	}
 	if (status === 429) {
@@ -362,20 +386,11 @@ function classifyStatus(
 		});
 	}
 	if (status === 404) return new ProviderModelNotFound(fields);
-	if (
-		status === 413 ||
-		code === "context_length_exceeded" ||
-		providerSays(cause, /prompt is too long|maximum context length/i)
-	) {
+	if (status === 413 || recognized === "context-too-long") {
 		return new ProviderContextLengthExceeded(fields);
 	}
 	if (status === 408 || status >= 500) return new ProviderServerError(fields);
 	return new ProviderRejectedRequest(fields);
-}
-
-/** Whether the provider's own sentence about the failure matches `pattern`. */
-function providerSays(cause: APICallError, pattern: RegExp): boolean {
-	return pattern.test(providerSaid(cause.responseBody) ?? "");
 }
 
 /** How long a 429 asks to be left: `retry-after-ms`, which OpenAI sends, or `retry-after` in seconds. */

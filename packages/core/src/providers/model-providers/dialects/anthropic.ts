@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { Effect, Schema, SchemaGetter } from "effect";
+import type { RecognizeFailure } from "../../models/request-failures.ts";
 import {
 	dataListing,
 	discoveredModel,
@@ -11,6 +12,17 @@ import {
 const apiRoot = (baseUrl: string) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`);
 
 /**
+ * Maps Anthropic errors to shared failures:
+ * - 400 "credit balance is too low": quota exhausted
+ * - "prompt is too long": context too long
+ */
+export const recognizeAnthropicFailure: RecognizeFailure = ({ status, message }) => {
+	if (status === 400 && /credit balance is too low/i.test(message ?? "")) return "quota-exhausted";
+	if (/prompt is too long/i.test(message ?? "")) return "context-too-long";
+	return undefined;
+};
+
+/**
  * Anthropic keys with a header of its own and pages its listing, twenty models
  * at a time unless asked for more. The listing has no capabilities, so the
  * registry supplies them. Its models cache only the prompt prefixes a
@@ -20,6 +32,7 @@ export const anthropic: ProviderDialect = {
 	name: "Anthropic",
 	discoveryRoot: apiRoot,
 	requestRoot: apiRoot,
+	recognizeFailure: recognizeAnthropicFailure,
 	languageModel: (endpoint, modelId, fetch) =>
 		createAnthropic({
 			apiKey: endpoint.apiKey ?? "",

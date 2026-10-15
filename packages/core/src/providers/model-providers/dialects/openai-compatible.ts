@@ -1,5 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { Effect, Schema, SchemaGetter } from "effect";
+import type { RecognizeFailure } from "../../models/request-failures.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	dataListing,
@@ -8,6 +9,20 @@ import {
 	type ProviderModelFields,
 	type RequestEndpoint,
 } from "./dialect.ts";
+
+/**
+ * Maps OpenAI errors to shared failures. Most OpenAI-compatible servers use
+ * the same codes and wording.
+ * - 429 `insufficient_quota`: quota exhausted
+ * - `context_length_exceeded`, or "maximum context length": context too long
+ */
+export const recognizeOpenAIFailure: RecognizeFailure = ({ status, code, message }) => {
+	if (status === 429 && code === "insufficient_quota") return "quota-exhausted";
+	if (code === "context_length_exceeded" || /maximum context length/i.test(message ?? "")) {
+		return "context-too-long";
+	}
+	return undefined;
+};
 
 /** The OpenAI SDK, set up for `endpoint` and sending through `fetch`. */
 export function openaiClient(endpoint: RequestEndpoint, fetch: EgressHttpClient) {
@@ -32,6 +47,7 @@ export const openaiCompatible: ProviderDialect = {
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
 	languageModel: (endpoint, modelId, fetch) => openaiClient(endpoint, fetch).chat(modelId),
+	recognizeFailure: recognizeOpenAIFailure,
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,

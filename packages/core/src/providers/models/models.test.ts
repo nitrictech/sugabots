@@ -3,7 +3,16 @@ import { Duration, Effect, ManagedRuntime } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { emptyRegistry } from "../../providers/model-providers/dialects/index.ts";
+import {
+	anthropic,
+	chatgpt,
+	emptyRegistry,
+	gemini,
+	ollama,
+	openaiCompatible,
+	openrouter,
+	type ProviderDialect,
+} from "../../providers/model-providers/dialects/index.ts";
 import { EgressRefused } from "../network/egress.ts";
 
 const sdk = vi.hoisted(() => ({
@@ -279,16 +288,17 @@ describe("a failed model request", () => {
 			responseHeaders,
 		});
 	const unsent = (code: string) => new TypeError("fetch failed", { cause: { code } });
+	const classify = (cause: unknown, dialect: ProviderDialect = openaiCompatible) =>
+		Models.classifyRequestFailure(cause, { ...context, recognize: dialect.recognizeFailure });
 
 	it("logs what the provider said, and tells people what it means in the names they know", () => {
-		const failure = Models.classifyRequestFailure(
+		const failure = classify(
 			answered(403, {
 				error: {
 					message:
 						"This model requires you to complete the following before use: 18+ age confirmation.",
 				},
 			}),
-			context,
 		);
 
 		expect(failure).toMatchObject({
@@ -302,14 +312,19 @@ describe("a failed model request", () => {
 	});
 
 	it.each([
-		["a 402", answered(402, { error: { message: "Insufficient balance" } })],
-		["an exhausted quota", answered(429, { error: { code: "insufficient_quota" } })],
+		["a 402", answered(402, { error: { message: "Insufficient balance" } }), openaiCompatible],
+		[
+			"an exhausted quota",
+			answered(429, { error: { code: "insufficient_quota" } }),
+			openaiCompatible,
+		],
 		[
 			"Anthropic's low credit",
 			answered(400, { error: { message: "Your credit balance is too low to access the API." } }),
+			anthropic,
 		],
-	])("says plainly when a provider wants payment, for %s", (_, refused) => {
-		expect(Models.classifyRequestFailure(refused, context)).toMatchObject({
+	])("says plainly when a provider wants payment, for %s", (_, refused, dialect) => {
+		expect(classify(refused, dialect)).toMatchObject({
 			_tag: "ProviderQuotaExhausted",
 			isRetryable: false,
 		});
@@ -325,28 +340,66 @@ describe("a failed model request", () => {
 		[429, "ProviderRateLimited", true],
 		[503, "ProviderServerError", true],
 	])("names a %i as %s, which may be tried again: %s", (statusCode, tag, isRetryable) => {
-		expect(Models.classifyRequestFailure(answered(statusCode), context)).toMatchObject({
+		expect(classify(answered(statusCode))).toMatchObject({
 			_tag: tag,
 			isRetryable,
 		});
 	});
 
 	it.each([
-		"prompt is too long: 210000 tokens",
-		"This endpoint's maximum context length is 131072 tokens.",
-	])("knows a prompt over the model's window from the provider's words: %s", (said) => {
+		["prompt is too long: 210000 tokens", anthropic],
+		["This endpoint's maximum context length is 131072 tokens.", openaiCompatible],
+	])("knows a prompt over the model's window from the provider's words: %s", (said, dialect) => {
 		const tooLong = answered(400, { error: { message: said } });
 
-		expect(Models.classifyRequestFailure(tooLong, context)._tag).toBe(
-			"ProviderContextLengthExceeded",
+		expect(classify(tooLong, dialect)._tag).toBe("ProviderContextLengthExceeded");
+	});
+
+	it.each([
+		["OpenAI-compatible", openaiCompatible],
+		["Ollama", ollama],
+		["ChatGPT", chatgpt],
+		["OpenRouter", openrouter],
+	])("reads OpenAI's words for a failure from %s", (_, dialect) => {
+		expect(classify(answered(429, { error: { code: "insufficient_quota" } }), dialect)._tag).toBe(
+			"ProviderQuotaExhausted",
 		);
+		expect(
+			classify(answered(400, { error: { code: "context_length_exceeded" } }), dialect)._tag,
+		).toBe("ProviderContextLengthExceeded");
+	});
+
+	it("reads Anthropic's words from OpenRouter too, which fronts its models", () => {
+		const anthropicWords = answered(400, {
+			error: { message: "Your credit balance is too low to access the API." },
+		});
+
+		expect(classify(anthropicWords, openrouter)._tag).toBe("ProviderQuotaExhausted");
+	});
+
+	it("knows a prompt over a Gemini model's window from Google's words", () => {
+		const tooLong = answered(400, {
+			error: {
+				code: 400,
+				message:
+					"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).",
+				status: "INVALID_ARGUMENT",
+			},
+		});
+
+		expect(classify(tooLong, gemini)._tag).toBe("ProviderContextLengthExceeded");
+	});
+
+	it("leaves another provider's words to the status", () => {
+		const anthropicWords = answered(400, {
+			error: { message: "Your credit balance is too low to access the API." },
+		});
+
+		expect(classify(anthropicWords, openaiCompatible)._tag).toBe("ProviderRejectedRequest");
 	});
 
 	it("reads how long a rate-limited provider asks to be left, and says so", () => {
-		const failure = Models.classifyRequestFailure(
-			answered(429, {}, { "retry-after": "90" }),
-			context,
-		);
+		const failure = classify(answered(429, {}, { "retry-after": "90" }));
 
 		expect(failure).toMatchObject({
 			_tag: "ProviderRateLimited",
@@ -364,7 +417,7 @@ describe("a failed model request", () => {
 		["ECONNRESET", "ProviderConnectionLost"],
 		["UND_ERR_SOCKET", "ProviderConnectionLost"],
 	])("tells a connection never made from one that dropped: %s", (code, tag) => {
-		expect(Models.classifyRequestFailure(unsent(code), context)).toMatchObject({
+		expect(classify(unsent(code))).toMatchObject({
 			_tag: tag,
 			isRetryable: true,
 		});
@@ -378,7 +431,7 @@ describe("a failed model request", () => {
 			cause: new EgressRefused({ reason: "privateNetwork" }),
 		});
 
-		const failure = Models.classifyRequestFailure(refused, context);
+		const failure = classify(refused);
 
 		expect(failure).toMatchObject({ _tag: "ProviderAddressRefused", isRetryable: false });
 		expect(failure.userMessage).toContain("local or private network");
@@ -387,12 +440,12 @@ describe("a failed model request", () => {
 	it("keeps an unreadable response for the logs and tells people only that it failed", () => {
 		const opaque = answered(502, "<html>upstream timed out</html>");
 
-		expect(Models.classifyRequestFailure(opaque, context)).toMatchObject({
+		expect(classify(opaque)).toMatchObject({
 			message: "Provider returned 502: <html>upstream timed out</html>",
 			userMessage:
 				"We're having trouble getting an answer from OpenRouter. Try again in a few minutes. If it keeps happening, choose another model.",
 		});
-		expect(Models.classifyRequestFailure(new Error("socket hang up"), context)).toMatchObject({
+		expect(classify(new Error("socket hang up"))).toMatchObject({
 			_tag: "ProviderRequestFailed",
 			message: "socket hang up",
 		});
