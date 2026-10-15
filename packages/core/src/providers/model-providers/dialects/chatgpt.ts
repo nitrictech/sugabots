@@ -1,6 +1,6 @@
 import { Effect, Schema, SchemaGetter } from "effect";
 import { discoveredModel, type ProviderDialect, type ProviderModelFields } from "./dialect.ts";
-import { openaiClient } from "./openai-compatible.ts";
+import { openaiClient, recognizeOpenAIFailure } from "./openai-compatible.ts";
 
 /**
  * The Codex backend lists the models a ChatGPT plan may use under `models`,
@@ -16,6 +16,7 @@ export const chatgpt: ProviderDialect = {
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
 	// The Codex backend only supports the Responses API.
 	languageModel: (endpoint, modelId, fetch) => openaiClient(endpoint, fetch).responses(modelId),
+	recognizeFailure: recognizeOpenAIFailure,
 	// Codex reads the system prompt from `instructions`. With `store: false` the
 	// server keeps no state, so we ask for encrypted reasoning to send back.
 	systemOptions: (system) => ({

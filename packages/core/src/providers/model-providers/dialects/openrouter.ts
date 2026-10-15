@@ -1,13 +1,14 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { ProviderModelCapability } from "@sugabots/contracts";
 import { Effect, Schema, SchemaGetter } from "effect";
+import { recognizeAnthropicFailure } from "./anthropic.ts";
 import {
 	dataListing,
 	discoveredModel,
 	type ProviderDialect,
 	type ProviderModelFields,
 } from "./dialect.ts";
-import { openaiCompatible } from "./openai-compatible.ts";
+import { openaiCompatible, recognizeOpenAIFailure } from "./openai-compatible.ts";
 
 const names = Schema.Array(Schema.String).pipe(
 	Schema.withDecodingDefault(Effect.succeed([])),
@@ -28,6 +29,8 @@ export const openrouter: ProviderDialect = {
 	// The public /models endpoint accepts invalid keys; /models/user requires authentication.
 	listingUrl: (root) => `${root}/models/user`,
 	authorization: openaiCompatible.authorization,
+	// OpenRouter serves both OpenAI-style and Anthropic models, so check for either's errors.
+	recognizeFailure: (report) => recognizeOpenAIFailure(report) ?? recognizeAnthropicFailure(report),
 	languageModel: (endpoint, modelId, fetch) =>
 		createOpenRouter({
 			apiKey: endpoint.apiKey ?? "",

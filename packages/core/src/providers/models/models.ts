@@ -348,7 +348,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			const classified = (cause: unknown) => {
 				const failure = providerFailure ?? cause;
 				runLog(logModelFailure(failure, streamErrors, signal));
-				return classifyRequestFailure(failure, context);
+				return classifyRequestFailure(failure, {
+					...context,
+					recognize: dialect.recognizeFailure,
+				});
 			};
 			return {
 				text: failingWith(result.textStream, classified),

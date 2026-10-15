@@ -13,6 +13,11 @@ export const gemini: ProviderDialect = {
 	...openaiCompatible,
 	name: "Gemini",
 	requestRoot: (baseUrl) => baseUrl.replace(/\/openai$/, ""),
+	// The native API reports context overflow in its own words.
+	recognizeFailure: ({ message }) =>
+		/input token count .* exceeds the maximum/i.test(message ?? "")
+			? "context-too-long"
+			: undefined,
 	// Listed ids look like `models/gemma-3-27b-it`. The SDK only recognises
 	// Gemma (which doesn't support system instructions) from the bare id.
 	languageModel: (endpoint, modelId, fetch) =>
