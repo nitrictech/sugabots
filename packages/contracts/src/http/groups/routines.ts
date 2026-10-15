@@ -13,6 +13,7 @@ import {
 	routineSchema,
 	routineSecretReplacementSchema,
 	routineSecretSchema,
+	routineTriggerInputSchema,
 	routineUpdateSchema,
 	routineWebhookChallengeSchema,
 	routineWriteResultSchema,
@@ -25,6 +26,7 @@ import { Session } from "../middleware.ts";
 
 const agent = { agentId: uuidSchema };
 const routine = { agentId: uuidSchema, routineId: Schema.String };
+const trigger = { ...routine, triggerId: uuidSchema };
 
 /**
  * The webhook is the one endpoint here without a session: it is called by
@@ -75,29 +77,61 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		success: acceptedRoutineExecutionSchema.pipe(HttpApiSchema.status(202)),
 		error: [Conflict, ...refused],
 	}).middleware(Session),
-	HttpApiEndpoint.get("getSecret", "/agents/:agentId/routines/:routineId/secret", {
+	HttpApiEndpoint.post("addTrigger", "/agents/:agentId/routines/:routineId/triggers", {
 		params: routine,
-		success: routineCurrentSecretSchema,
-		error: refused,
+		payload: routineTriggerInputSchema,
+		success: routineWriteResultSchema.pipe(HttpApiSchema.status(201)),
+		error: [BadRequest, Conflict, ...refused],
 	}).middleware(Session),
-	HttpApiEndpoint.post("rotateSecret", "/agents/:agentId/routines/:routineId/secret", {
-		params: routine,
-		payload: routineSecretReplacementSchema,
-		success: routineSecretSchema,
-		error: refused,
+	HttpApiEndpoint.put("updateTrigger", "/agents/:agentId/routines/:routineId/triggers/:triggerId", {
+		params: trigger,
+		payload: routineTriggerInputSchema,
+		success: routineWriteResultSchema,
+		error: [BadRequest, Conflict, ...refused],
 	}).middleware(Session),
+	HttpApiEndpoint.delete(
+		"removeTrigger",
+		"/agents/:agentId/routines/:routineId/triggers/:triggerId",
+		{ params: trigger, success: routineSchema, error: [Conflict, ...refused] },
+	).middleware(Session),
+	HttpApiEndpoint.get(
+		"getSecret",
+		"/agents/:agentId/routines/:routineId/triggers/:triggerId/secret",
+		{ params: trigger, success: routineCurrentSecretSchema, error: refused },
+	).middleware(Session),
+	HttpApiEndpoint.post(
+		"rotateSecret",
+		"/agents/:agentId/routines/:routineId/triggers/:triggerId/secret",
+		{
+			params: trigger,
+			payload: routineSecretReplacementSchema,
+			success: routineSecretSchema,
+			error: refused,
+		},
+	).middleware(Session),
 	HttpApiEndpoint.get("executions", "/agents/:agentId/routines/:routineId/executions", {
 		params: routine,
 		query: routineExecutionPageQuerySchema,
 		success: routineExecutionPageSchema,
 		error: refused,
 	}).middleware(Session),
-	// Any JSON body, carried to the Routine as its trigger's payload. The
-	// caller proves it holds the Routine's secret the way the Routine's auth
+	// Any JSON body, carried to the routine as its trigger's payload. The
+	// caller proves it holds the trigger's secret the way the trigger's auth
 	// says. A delivery id, such as `Idempotency-Key`, makes a retry land on
 	// the execution the first delivery started. Slack's URL check is answered
 	// with its challenge, and starts nothing.
-	HttpApiEndpoint.post("webhook", "/hooks/routines/:routineId", {
+	HttpApiEndpoint.post("webhook", "/hooks/triggers/:triggerId", {
+		params: { triggerId: Schema.String },
+		payload: Schema.Json,
+		success: [
+			acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
+			routineWebhookChallengeSchema,
+		],
+		error: [BadRequest, Unauthorized, Conflict],
+	}),
+	// The address a webhook had when a routine had only one trigger: a
+	// trigger moved from then has its routine's id, so it is still reached here.
+	HttpApiEndpoint.post("routineWebhook", "/hooks/routines/:routineId", {
 		params: { routineId: Schema.String },
 		payload: Schema.Json,
 		success: [

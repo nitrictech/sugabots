@@ -98,7 +98,7 @@ export function routineTools({
 	return {
 		[LIST_ROUTINES_TOOL]: tool({
 			description:
-				"List your routines: the jobs you do on a schedule or when a webhook calls, with when each runs, whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
+				"List your routines: the jobs you do without being asked, with what starts each (its schedules or webhooks), whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
 			inputSchema: noInputSchema,
 			execute: () => answer(Effect.map(routines.list(bot), (listed) => ({ routines: listed }))),
 		}),
@@ -112,7 +112,7 @@ export function routineTools({
 				answer(Effect.map(routines.create(bot, input), (routine) => ({ routine }))),
 		}),
 		[UPDATE_ROUTINE_TOOL]: tool({
-			description: `Change one of your routines, by the id list_routines gives: its name, instructions, schedule, where its result goes, or whether it is paused. Give only what changes. Schedules run in ${zone}. A webhook routine's trigger can only be changed in its settings.`,
+			description: `Change one of your routines, by the id list_routines gives: its name, instructions, schedule, where its result goes, or whether it is paused. Give only what changes. Schedules run in ${zone}. Its schedule can be changed here only while that schedule is all that starts it; other triggers are changed in its settings.`,
 			inputSchema: Schema.Struct({
 				routineId: Schema.String.check(Schema.isUUID()).annotate({
 					description: "The routine's id, from list_routines.",

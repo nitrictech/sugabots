@@ -68,12 +68,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 
 		expect(made).toMatchObject({
 			name: "Morning standup",
-			when: {
-				kind: "schedule",
-				schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
-				timezone: "Australia/Sydney",
-				nextRunAt: expect.any(String),
-			},
+			when: [
+				{
+					kind: "schedule",
+					schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
+					timezone: "Australia/Sydney",
+					nextRunAt: expect.any(String),
+				},
+			],
 			paused: false,
 			results: "post_to_chat",
 			settingsUrl: expect.stringMatching(
@@ -95,11 +97,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 		});
 
 		expect(changed).toMatchObject({
-			when: {
-				kind: "schedule",
-				schedule: { repeat: "cron", expression: "0 10 * * 1-5" },
-				timezone: "Australia/Sydney",
-			},
+			when: [
+				{
+					kind: "schedule",
+					schedule: { repeat: "cron", expression: "0 10 * * 1-5" },
+					timezone: "Australia/Sydney",
+				},
+			],
 			paused: true,
 			results: "post_to_chat",
 		});
@@ -110,17 +114,35 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 		const routines = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 		const hook = await routines.create(
 			{ agentId },
-			{ name: "Sentry issues", instructions: "Look into it.", trigger: { kind: "webhook" } },
+			{ name: "Sentry issues", instructions: "Look into it.", triggers: [{ kind: "webhook" }] },
 		);
 		const bot = { agentId, askedBy: userId };
 
 		await expect(bots.update(bot, hook.routine.id, { schedule: "0 9 * * *" })).rejects.toThrow(
-			BotRoutines.WebhookKeepsItsTrigger,
+			BotRoutines.TriggerSetInSettings,
 		);
 		expect(await bots.update(bot, hook.routine.id, { results: "post_to_chat" })).toMatchObject({
-			when: { kind: "webhook" },
+			when: [{ kind: "webhook" }],
 			results: "post_to_chat",
 		});
+	});
+
+	it("leaves a schedule to settings once the routine has another trigger", async () => {
+		const made = await bots.create({ agentId, askedBy: userId }, standup);
+		const routines = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
+		await routines.addTrigger({ agentId, routineId: made.id }, { kind: "webhook" });
+
+		await expect(
+			bots.update({ agentId, askedBy: userId }, made.id, { schedule: "0 10 * * 1-5" }),
+		).rejects.toThrow(BotRoutines.TriggerSetInSettings);
+		expect(await bots.list({ agentId, askedBy: userId })).toEqual([
+			expect.objectContaining({
+				when: [
+					expect.objectContaining({ schedule: { repeat: "cron", expression: "0 9 * * 1-5" } }),
+					{ kind: "webhook" },
+				],
+			}),
+		]);
 	});
 
 	it("refuses when no person asked, as in a routine's run", async () => {
