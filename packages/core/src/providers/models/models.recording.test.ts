@@ -72,6 +72,8 @@ function modelAnswering(
 	const recorded: Recorded[] = [];
 	/** Each request's body, as the provider was sent it. */
 	const sent: Array<Record<string, unknown>> = [];
+	/** Each request's URL, and the base URL its client was bound to. */
+	const addressed: Array<{ url: string; boundTo: string }> = [];
 	const answers = [...responses];
 	const model = Models.make({
 		modelProviders: {
@@ -88,7 +90,8 @@ function modelAnswering(
 				),
 		},
 		httpClients: {
-			for: () => async (_url, init) => {
+			for: (endpoint) => async (url, init) => {
+				addressed.push({ url: String(url), boundTo: endpoint.baseUrl });
 				sent.push(JSON.parse(String(init?.body)));
 				return answers.shift()?.(recorded) ?? new Response("No more answers", { status: 500 });
 			},
@@ -103,7 +106,7 @@ function modelAnswering(
 		},
 		registry: { version: "models.dev@test", cost: () => ({ input: 3, output: 15 }) },
 	});
-	return { model, recorded, sent };
+	return { model, recorded, sent, addressed };
 }
 
 const input: Models.StreamRequest = {
@@ -317,4 +320,70 @@ describe("prompt caching", () => {
 			expect(JSON.stringify(sent)).not.toContain("cache_control");
 		},
 	);
+});
+
+describe("Gemini", () => {
+	const GEMINI = {
+		preset: "gemini",
+		baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+		apiFormat: "openai",
+	} satisfies ProviderIdentity;
+
+	/** A response in the native Gemini API's stream format. */
+	const geminiStreamed = (parts: unknown[]) =>
+		new Response(
+			`data: ${JSON.stringify({
+				candidates: [{ content: { role: "model", parts }, finishReason: "STOP" }],
+				usageMetadata: {
+					promptTokenCount: 1_000,
+					candidatesTokenCount: 20,
+					totalTokenCount: 1_020,
+				},
+			})}\n\n`,
+			{ headers: { "content-type": "text/event-stream" } },
+		);
+
+	it("hands a tool call's thought signature back, as Gemini requires", async () => {
+		const { model, sent, addressed } = modelAnswering(
+			[
+				() =>
+					geminiStreamed([
+						{ functionCall: { name: "lookup", args: {} }, thoughtSignature: "signature-1" },
+					]),
+				() => geminiStreamed([{ text: "Found it." }]),
+			],
+			GEMINI,
+		);
+
+		const { text, finished } = await answer(model, { ...input, model: "gemini-test" });
+
+		expect(finished._tag).toBe("Success");
+		expect(text).toBe("Found it.");
+		expect(addressed).toEqual([
+			{
+				url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse",
+				boundTo: "https://generativelanguage.googleapis.com/v1beta",
+			},
+			expect.objectContaining({ boundTo: "https://generativelanguage.googleapis.com/v1beta" }),
+		]);
+		expect(sent[1]?.contents).toContainEqual({
+			role: "model",
+			parts: [expect.objectContaining({ thoughtSignature: "signature-1" })],
+		});
+	});
+
+	it("asks a Gemma model, listed under models/, with its system text in the prompt", async () => {
+		const { model, sent, addressed } = modelAnswering(
+			[() => geminiStreamed([{ text: "Hello." }])],
+			GEMINI,
+		);
+
+		await answer(model, { ...input, model: "models/gemma-test", tools: {} });
+
+		expect(addressed[0]?.url).toBe(
+			"https://generativelanguage.googleapis.com/v1beta/models/gemma-test:streamGenerateContent?alt=sse",
+		);
+		expect(sent[0]).not.toHaveProperty("systemInstruction");
+		expect(JSON.stringify(sent[0]?.contents)).toContain("You are a test.");
+	});
 });
