@@ -67,6 +67,11 @@ configs:
       host = "0.0.0.0"
       port = 8090
       api_key = "${OPENSANDBOX_API_KEY:-development-opensandbox-key}"
+      # The host in the sandbox addresses this server returns, which the API
+      # on this machine connects to. Docker publishes sandboxes' ports on every
+      # interface, loopback included, and Docker Desktop forwards them to this
+      # machine's loopback.
+      eip = "127.0.0.1"
 
       [runtime]
       type = "docker"
@@ -78,11 +83,10 @@ configs:
 
       [docker]
       network_mode = "bridge"
-      # Sandboxes' ports are published on Docker's bridge address, which this
-      # container can reach and nothing outside the machine can. 172.17.0.1 is
-      # Docker's default on Linux.
-      host_ip = "${OPENSANDBOX_HOST_IP:-172.17.0.1}"
-      publish_host = "${OPENSANDBOX_HOST_IP:-172.17.0.1}"
+      # How this container reaches sandboxes' published ports, to proxy to them
+      # and check they are up. The opensandbox service's extra_hosts entry
+      # resolves this name on Docker Engine and Docker Desktop alike.
+      host_ip = "host.docker.internal"
       # Below Linux's ephemeral ports (32768 and up), which outgoing
       # connections take, so a sandbox's port is never already in use.
       port_range_min = 20000
