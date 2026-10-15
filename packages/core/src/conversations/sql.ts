@@ -404,6 +404,10 @@ export const message = pgTable(
 		routineExecutionId: uuid("routine_execution_id").references(() => routineExecution.id, {
 			onDelete: "set null",
 		}),
+		/** The message this one quotes and answers, always in the same thread. */
+		replyToMessageId: uuid("reply_to_message_id").references((): AnyPgColumn => message.id, {
+			onDelete: "set null",
+		}),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -431,6 +435,29 @@ export const message = pgTable(
 		index("message_content_trigram_idx")
 			.using("gin", table.content.op("gin_trgm_ops"))
 			.where(sql`${table.status} = 'complete'`),
+	],
+);
+
+/** One person's emoji reaction to a message. A person adds each emoji at most once. */
+export const messageReaction = pgTable(
+	"message_reaction",
+	{
+		id: primaryKey(),
+		messageId: uuid("message_id")
+			.notNull()
+			.references(() => message.id, { onDelete: "cascade" }),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		emoji: text("emoji").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		uniqueIndex("message_reaction_message_user_emoji_idx").on(
+			table.messageId,
+			table.userId,
+			table.emoji,
+		),
 	],
 );
 
