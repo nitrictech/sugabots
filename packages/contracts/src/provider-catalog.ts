@@ -37,6 +37,7 @@ export const providerDialectIdSchema = Schema.Literals([
 	"openrouter",
 	"ollama",
 	"chatgpt",
+	"gemini",
 ]);
 export type ProviderDialectId = typeof providerDialectIdSchema.Type;
 
@@ -142,10 +143,10 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		name: "Google Gemini",
 		baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
 		apiFormat: "openai",
-		dialect: "openai-compatible",
+		dialect: "gemini",
 		hosting: "remote",
 		credential: "api-key",
-		hint: "Gemini models over Google's OpenAI-compatible endpoint. Keys from AI Studio.",
+		hint: "Google's Gemini models. Keys are issued at aistudio.google.com.",
 		models: [],
 	},
 	{
