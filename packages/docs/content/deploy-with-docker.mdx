@@ -70,6 +70,9 @@ both the web app and the API. It stores everything in PostgreSQL 18.
    emails and sign-in redirects are built from it. Every other setting is in the
    [configuration reference](/docs/configuration).
 
+   To keep files on a volume rather than in the database, add
+   [those settings](#files-on-a-volume) now, before anyone uses Sugabots.
+
 2. Create `.env`
 
    In the same folder, generate the database password and the two secret keys:
@@ -189,6 +192,61 @@ Either way, the service needs these settings:
 
 See the [configuration reference](/docs/configuration) for what each does.
 
+## Files on a volume
+
+Sugabots keeps files, such as attachments and large tool results, in the
+database unless told otherwise. There, every file adds to the database and its
+backups, and each one is held in memory while it's saved. To keep them on a
+volume instead, add these settings and a `files` volume to `compose.yml`,
+keeping what's already there:
+
+```yaml title="compose.yml"
+services:
+  sugabots:
+    environment:
+      BLOB_STORE_PROVIDER: filesystem
+      BLOB_STORE_FILESYSTEM_ROOT: /data/files
+    volumes:
+      - files:/data/files
+
+volumes:
+  postgres_data:
+  files:
+```
+
+Add both: without the volume, files are lost when the container is replaced,
+such as when you update. Then run `docker compose up -d`. The `compose.yml`
+the [Quickstart](/docs/quickstart) downloads has these lines, commented out.
+
+Choose before you start using Sugabots. Files already kept stay in the
+database, and Sugabots can't open them unless you switch back.
+
+To keep files in a folder on the server rather than a Docker volume, make the
+folder and give it to the user Sugabots runs as:
+
+```sh
+sudo mkdir -p /srv/sugabots/files
+sudo chown 1000:1000 /srv/sugabots/files
+```
+
+Keep the two settings, but mount the folder in place of `files:/data/files`,
+and leave out `files:` at the end:
+
+```yaml title="compose.yml"
+services:
+  sugabots:
+    volumes:
+      - /srv/sugabots/files:/data/files
+```
+
+If Sugabots can't write to the folder, it stops, and
+`docker compose logs sugabots` says why.
+
+On a hosting platform, attach a persistent disk at `/data/files`, set the same
+two settings, and run one copy of the service: the disk belongs to one server.
+Without a disk, keep the default: files kept in the container are lost when
+it's replaced.
+
 ## Email
 
 Sugabots sends email for invites and address verification. Without a provider,
@@ -299,8 +357,26 @@ This deletes whatever is in the database before loading the backup. If the
 backup is from an older version, Sugabots applies the newer migrations when it
 starts.
 
-On a hosting platform, use the platform's database backups, and keep a copy of
-the two keys.
+If you keep [files on a volume](#files-on-a-volume), back it up after the
+database, and restore it from the same backup: the database lists the files,
+and the volume holds them. In the same folder, write the volume to a file:
+
+```sh
+docker run --rm -v sugabots_files:/data/files -v "$PWD":/backup alpine \
+  tar czf /backup/sugabots-files.tar.gz -C /data/files .
+```
+
+To restore it, run this before `docker compose start sugabots` above:
+
+```sh
+docker run --rm -v sugabots_files:/data/files -v "$PWD":/backup alpine \
+  tar xzf /backup/sugabots-files.tar.gz -C /data/files
+```
+
+For a folder on the server, archive the folder itself instead.
+
+On a hosting platform, use the platform's database backups, and its disk
+backups if you keep files on a disk. Keep a copy of the two keys too.
 
 ## Building the image yourself
 
