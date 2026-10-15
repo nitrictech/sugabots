@@ -1,3 +1,4 @@
+import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { botColors } from "@sugabots/avatars";
 import {
 	type AgentColor,
@@ -6,9 +7,8 @@ import {
 	type UsageMonth,
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
-import { cn } from "cn";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	dateIn,
@@ -100,12 +100,8 @@ function MonthStepper({
 	);
 }
 
-/** The month's total, and a bar for each of its days. Days still to come are an empty mark. */
+/** The month's total, and a bar for each of its days. */
 function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }) {
-	const busiest = usage.days.reduce(
-		(most, day) => (day.usd > most.usd ? day : most),
-		usage.days[0] ?? { date: "", usd: 0 },
-	);
 	const first = usage.days[0];
 	const last = usage.days.at(-1);
 	return (
@@ -116,30 +112,7 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 			<p className="m-0 font-bold text-[30px] text-foreground tabular-nums tracking-[-0.01em]">
 				{formatUsd(usage.usd)}
 			</p>
-			<div
-				role="img"
-				aria-label={
-					busiest.usd > 0
-						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
-						: "Spend each day. Nothing was spent."
-				}
-				className="flex h-[78px] items-end gap-[3px]"
-			>
-				{usage.days.map((day) => (
-					<span
-						key={day.date}
-						className={cn(
-							"min-w-0 flex-1 rounded-[3px]",
-							day.date > today ? "h-0.5 bg-chip" : "min-h-0.5 bg-primary",
-						)}
-						style={
-							day.date > today || busiest.usd === 0
-								? undefined
-								: { height: `${(day.usd / busiest.usd) * 100}%` }
-						}
-					/>
-				))}
-			</div>
+			<DailySpend days={usage.days} today={today} />
 			{first && last && (
 				<div aria-hidden className="flex justify-between text-subtle-foreground text-xs">
 					<span>{dayLabel(first.date)}</span>
@@ -147,6 +120,104 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 				</div>
 			)}
 		</section>
+	);
+}
+
+type UsageDay = WorkspaceUsage["days"][number];
+
+/** The keys that move between the days, to the index of the day each one moves to. */
+const dayKeys: Record<string, (index: number, count: number) => number> = {
+	ArrowLeft: (index) => Math.max(index - 1, 0),
+	ArrowRight: (index, count) => Math.min(index + 1, count - 1),
+	Home: () => 0,
+	End: (_, count) => count - 1,
+};
+
+/**
+ * A bar for each day. Hovering, focusing or tapping a day so far shows what it
+ * cost; days still to come are an empty mark. The days are one tab stop, and
+ * the arrow keys move between them.
+ */
+function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string }) {
+	const [tooltip] = useState(() => TooltipPrimitive.createHandle<UsageDay>());
+	const idPrefix = useId();
+	const triggerId = (day: UsageDay) => `${idPrefix}${day.date}`;
+	const spentDays = days.filter((day) => day.date <= today);
+	const [focused, setFocused] = useState<string>();
+	const tabStop = spentDays.find((day) => day.date === focused) ?? spentDays.at(-1);
+	const busiest = days.reduce(
+		(most, day) => (day.usd > most.usd ? day : most),
+		days[0] ?? { date: "", usd: 0 },
+	);
+
+	function moveBetweenDays(event: KeyboardEvent) {
+		const move = dayKeys[event.key];
+		if (!move || !tabStop) return;
+		event.preventDefault();
+		const day = spentDays[move(spentDays.indexOf(tabStop), spentDays.length)];
+		if (day) document.getElementById(triggerId(day))?.focus();
+	}
+
+	return (
+		<>
+			{/* biome-ignore lint/a11y/useSemanticElements: this group labels a chart of buttons, not form controls, so a fieldset is inappropriate. */}
+			<div
+				role="group"
+				aria-label={
+					busiest.usd > 0
+						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
+						: "Spend each day. Nothing was spent."
+				}
+				className="flex h-[78px] items-end"
+				onKeyDown={moveBetweenDays}
+			>
+				{days.map((day) =>
+					day.date > today ? (
+						<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-[1.5px]">
+							<span className="h-0.5 w-full rounded-[3px] bg-chip" />
+						</span>
+					) : (
+						<TooltipPrimitive.Trigger
+							key={day.date}
+							id={triggerId(day)}
+							handle={tooltip}
+							payload={day}
+							delay={0}
+							closeOnClick={false}
+							// Touch never hovers, so a tap opens the tooltip instead.
+							onClick={() => tooltip.open(triggerId(day))}
+							onFocus={() => setFocused(day.date)}
+							tabIndex={day === tabStop ? 0 : -1}
+							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
+							className="focus-ring flex h-full min-w-0 flex-1 cursor-default items-end rounded-[4px] px-[1.5px] data-popup-open:bg-chip"
+						>
+							<span
+								className="min-h-0.5 w-full rounded-[3px] bg-primary"
+								style={
+									busiest.usd === 0 ? undefined : { height: `${(day.usd / busiest.usd) * 100}%` }
+								}
+							/>
+						</TooltipPrimitive.Trigger>
+					),
+				)}
+			</div>
+			<TooltipPrimitive.Root handle={tooltip}>
+				{({ payload: day }) => (
+					<TooltipPrimitive.Portal>
+						<TooltipPrimitive.Positioner side="top" sideOffset={6} className="isolate z-50">
+							<TooltipPrimitive.Popup className="flex flex-col items-center rounded-md bg-foreground px-2 py-1 font-sans text-background text-xs shadow-sm">
+								{day && (
+									<>
+										<span className="font-semibold tabular-nums">{formatUsd(day.usd)}</span>
+										<span className="text-background/70">{dayLabel(day.date)}</span>
+									</>
+								)}
+							</TooltipPrimitive.Popup>
+						</TooltipPrimitive.Positioner>
+					</TooltipPrimitive.Portal>
+				)}
+			</TooltipPrimitive.Root>
+		</>
 	);
 }
 
