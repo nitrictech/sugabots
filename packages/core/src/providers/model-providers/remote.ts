@@ -1,6 +1,5 @@
-import { type UserText, userText } from "@sugabots/errors";
-import { Clock, Data, Effect, Schema } from "effect";
-import type { UserFacing } from "../../user-message.ts";
+import { type DomainError, type UserText, userText } from "@sugabots/errors";
+import { Clock, Effect, ErrorReporter, Schema } from "effect";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import {
 	type DiscoveredModel,
@@ -9,7 +8,7 @@ import {
 	modelsDev,
 } from "./dialects/index.ts";
 import type { ModelProviderRepository } from "./model-provider-repository.ts";
-import { type ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
+import { ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
 
 /**
  * Asking a provider which models it offers and what they can do.
@@ -25,83 +24,167 @@ const MAX_MODELS = 2_000;
 /** How many models are asked about at once when a listing needs following up. */
 const INSPECT_CONCURRENCY = 4;
 
-/** No credential, so there is nothing to try. */
-class ConnectionMissing extends Data.TaggedError("ConnectionMissing")<Record<string, never>> {}
-/** We reached the provider and it said no. */
-class ProviderRejected extends Data.TaggedError("ProviderRejected")<{
-	readonly status: number;
-	readonly statusText: string;
-}> {}
-/** We never got an answer. */
-class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{
-	readonly cause: unknown;
-}> {}
-/** The subscription sign-in could not give a live token. */
-class SignInLapsed extends Data.TaggedError("SignInLapsed")<{
-	readonly failure: ProviderSignInFailed;
-}> {}
-/** It answered with something that is not a model list. */
-class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
-	readonly reason: UserText;
-}> {}
+/** The provider has no API key or sign-in yet. */
+export class DiscoveryCredentialsMissing
+	extends Schema.TaggedError<DiscoveryCredentialsMissing>()("DiscoveryCredentialsMissing", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The provider has no API key or sign-in";
+	}
+	get userMessage() {
+		return userText`This provider has no API key or sign-in yet. Add one, then try again.`;
+	}
+}
 
-/** Asking the provider which models it offers failed; `message` is what went wrong, for the logs. */
-export class ModelDiscoveryFailed
-	extends Data.TaggedError("ModelDiscoveryFailed")<{
-		readonly message: string;
-		readonly userMessage: UserText;
-	}>
-	implements UserFacing {}
+/** The provider answered 401 or 403: it doesn't accept the key or sign-in. */
+export class DiscoveryCredentialsRejected
+	extends Schema.TaggedError<DiscoveryCredentialsRejected>()("DiscoveryCredentialsRejected", {
+		status: Schema.Finite,
+		statusText: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The provider answered ${this.status} ${this.statusText}`;
+	}
+	get userMessage() {
+		return userText`The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.`;
+	}
+}
 
-type ProviderFailure =
-	| ConnectionMissing
-	| ProviderRejected
-	| ProviderUnreachable
-	| SignInLapsed
-	| InvalidModelList;
+/** The subscription sign-in couldn't give a live token. */
+export class DiscoverySignInLapsed
+	extends Schema.TaggedError<DiscoverySignInLapsed>()("DiscoverySignInLapsed", {
+		cause: Schema.instanceOf(ProviderSignInFailed),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The subscription sign-in gave no live token: ${this.cause.message}`;
+	}
+	get userMessage() {
+		return this.cause.userMessage;
+	}
+}
+
+/** The provider failed or was busy: a 408, 429 or 5xx. Asking again later may work. */
+export class DiscoveryUnavailable
+	extends Schema.TaggedError<DiscoveryUnavailable>()("DiscoveryUnavailable", {
+		status: Schema.Finite,
+		statusText: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The provider answered ${this.status} ${this.statusText}`;
+	}
+	get userMessage() {
+		return userText`The provider couldn't list its models just now. Try again in a few minutes.`;
+	}
+}
+
+/** No connection to the provider: refused, no such host, or no answer in time. */
+export class DiscoveryUnreachable
+	extends Schema.TaggedError<DiscoveryUnreachable>()("DiscoveryUnreachable", {
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The provider could not be reached: ${String(this.cause)}`;
+	}
+	get userMessage() {
+		return userText`We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.`;
+	}
+}
+
+/** The network policy refused the provider's address before anything was sent. */
+export class DiscoveryAddressRefused
+	extends Schema.TaggedError<DiscoveryAddressRefused>()("DiscoveryAddressRefused", {
+		cause: Schema.instanceOf(EgressRefused),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The network policy refused the provider's address: ${this.cause.reason}`;
+	}
+	get userMessage() {
+		return userText`We can't send requests to the provider's address. ${this.cause.userMessage}`;
+	}
+}
 
 /**
- * What a person should be told. Each failure gets its own sentence, in our
- * words: the provider's status text and the network's errors go unquoted.
+ * The provider's answer isn't a model list we can read: a 4xx other than 401
+ * or 403 (usually a wrong address), or a body that isn't a model list.
  */
-function describe(failure: ProviderFailure): UserText {
-	switch (failure._tag) {
-		case "ConnectionMissing":
-			return userText`Add an API key before connecting`;
-		case "ProviderRejected":
-			if (failure.status === 401) {
-				return userText`The provider rejected the API key. Replace it with a valid key and try again.`;
-			}
-			return userText`Provider returned ${failure.status}`;
-		case "InvalidModelList":
-			return failure.reason;
-		case "SignInLapsed":
-			return failure.failure.userMessage;
-		case "ProviderUnreachable":
-			return failure.cause instanceof EgressRefused
-				? failure.cause.userMessage
-				: userText`Connection failed`;
+export class ModelListUnreadable
+	extends Schema.TaggedError<ModelListUnreadable>()("ModelListUnreadable", {
+		/** What was wrong with the answer, for the logs. */
+		problem: Schema.String,
+		/** The HTTP status, when the provider answered with an error. */
+		status: Schema.optional(Schema.Finite),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return this.problem;
+	}
+	get userMessage() {
+		return userText`The provider didn't send a model list we can read. Check the address is for the provider's API, then try again.`;
 	}
 }
 
-/** What went wrong, for the logs, with whatever the provider or the network said. */
-function detail(failure: ProviderFailure): string {
-	switch (failure._tag) {
-		case "ConnectionMissing":
-			return "The provider needs a key it does not have";
-		case "ProviderRejected":
-			return `The provider answered ${failure.status} ${failure.statusText}`;
-		case "InvalidModelList":
-			return failure.reason;
-		case "SignInLapsed":
-			return `The subscription sign-in gave no live token: ${failure.failure.message}`;
-		case "ProviderUnreachable":
-			return `The provider could not be reached: ${String(failure.cause)}`;
+/** The provider's model list is bigger than we accept: too many bytes or too many models. */
+export class ModelListTooLarge
+	extends Schema.TaggedError<ModelListTooLarge>()("ModelListTooLarge", {
+		/** Which limit it went over, for the logs. */
+		problem: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return this.problem;
+	}
+	get userMessage() {
+		return userText`The provider lists more models than we can take. Add the models you want by hand instead.`;
 	}
 }
 
-const logFailure = (failure: ProviderFailure) =>
-	Effect.logWarning("Asking a model provider for its models failed", detail(failure));
+/** Why asking a provider for its models failed. */
+export const DiscoveryFailure = Schema.Union([
+	DiscoveryCredentialsMissing,
+	DiscoveryCredentialsRejected,
+	DiscoverySignInLapsed,
+	DiscoveryUnavailable,
+	DiscoveryUnreachable,
+	DiscoveryAddressRefused,
+	ModelListUnreadable,
+	ModelListTooLarge,
+]);
+export type DiscoveryFailure = typeof DiscoveryFailure.Type;
+
+/** Whether `failure` is a model discovery failure. */
+export const isDiscoveryFailure = Schema.is(DiscoveryFailure);
+
+const logFailure = (failure: DiscoveryFailure) =>
+	Effect.logWarning("Asking a model provider for its models failed", failure.message);
 
 export function testProvider(
 	providers: Pick<
@@ -120,7 +203,7 @@ export function testProvider(
 			Effect.tapError(logFailure),
 			Effect.result,
 		);
-		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
+		const error = outcome._tag === "Failure" ? outcome.failure.userMessage : undefined;
 
 		// A test is recorded either way, and only recorded: switching the provider
 		// on or off is the person's to do.
@@ -136,8 +219,8 @@ export function testProvider(
 
 	// A missing connection is the one failure with nothing to record against.
 	return attempt.pipe(
-		Effect.catchTag("ConnectionMissing", (failure) =>
-			Effect.succeed({ reachable: false, latencyMs: 0, error: describe(failure) }),
+		Effect.catchTag("DiscoveryCredentialsMissing", (failure) =>
+			Effect.succeed({ reachable: false, latencyMs: 0, error: failure.userMessage }),
 		),
 	);
 }
@@ -154,8 +237,8 @@ export function fetchProviderModels(
 		registry = modelsDev,
 		activateOnSuccess = false,
 	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
-): Effect.Effect<{ added: number; updated: number; unchanged: number }, ModelDiscoveryFailed> {
-	const discover = Effect.gen(function* () {
+): Effect.Effect<{ added: number; updated: number; unchanged: number }, DiscoveryFailure> {
+	return Effect.gen(function* () {
 		const connection = yield* requireConnection(providers, workspaceId, providerId);
 		const outcome = yield* requestModels(providers, workspaceId, connection, httpClients).pipe(
 			Effect.tapError(logFailure),
@@ -165,7 +248,7 @@ export function fetchProviderModels(
 
 		if (outcome._tag === "Failure") {
 			yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
-				error: describe(outcome.failure),
+				error: outcome.failure.userMessage,
 			});
 			return yield* outcome.failure;
 		}
@@ -180,25 +263,17 @@ export function fetchProviderModels(
 		});
 		return { added, updated, unchanged: outcome.success.length - added - updated };
 	});
-
-	// The tags are this module's business. A caller only needs the sentence.
-	return discover.pipe(
-		Effect.mapError(
-			(failure) =>
-				new ModelDiscoveryFailed({ message: detail(failure), userMessage: describe(failure) }),
-		),
-	);
 }
 
 function requireConnection(
 	providers: Pick<ModelProviderRepository.Interface, "endpoint">,
 	workspaceId: string,
 	providerId: string,
-): Effect.Effect<ModelProviderRepository.ProviderEndpoint, ConnectionMissing> {
+): Effect.Effect<ModelProviderRepository.ProviderEndpoint, DiscoveryCredentialsMissing> {
 	return Effect.filterOrFail(
 		providers.endpoint(workspaceId, providerId),
 		(connection) => connection != null,
-		() => new ConnectionMissing({}),
+		() => new DiscoveryCredentialsMissing(),
 	);
 }
 
@@ -207,14 +282,14 @@ function requestModels(
 	workspaceId: string,
 	stored: ModelProviderRepository.ProviderEndpoint,
 	httpClients: EgressHttpClients,
-): Effect.Effect<DiscoveredModel[], ProviderFailure> {
+): Effect.Effect<DiscoveredModel[], DiscoveryFailure> {
 	const dialect = dialectFor(stored);
 	const baseUrl = stored.baseUrl.replace(/\/$/, "");
 	const root = dialect.discoveryRoot?.(baseUrl) ?? baseUrl;
 	const http = httpClients.for({ baseUrl: root });
 	return Effect.gen(function* () {
 		const connection = yield* withSignInAccess(providers, httpClients, workspaceId, stored).pipe(
-			Effect.mapError((failure) => new SignInLapsed({ failure })),
+			Effect.mapError((cause) => new DiscoverySignInLapsed({ cause })),
 		);
 		const response = yield* Effect.tryPromise({
 			try: () =>
@@ -222,25 +297,20 @@ function requestModels(
 					headers: { ...connection.headers, ...dialect.authorization(connection.apiKey) },
 					signal: AbortSignal.timeout(15_000),
 				}),
-			catch: (cause) => new ProviderUnreachable({ cause }),
+			catch: unreachable,
 		});
 
-		if (!response.ok) {
-			return yield* new ProviderRejected({
-				status: response.status,
-				statusText: response.statusText,
-			});
-		}
+		if (!response.ok) return yield* refusal(response);
 
 		const listing = Schema.decodeUnknownResult(dialect.listing)(yield* readJson(response));
 		if (listing._tag === "Failure") {
-			return yield* new InvalidModelList({
-				reason: userText`Provider returned an invalid model list`,
+			return yield* new ModelListUnreadable({
+				problem: "The provider's model list didn't match its dialect",
 			});
 		}
 		if (listing.success.length > MAX_MODELS) {
-			return yield* new InvalidModelList({
-				reason: userText`Provider returned more than ${MAX_MODELS} models`,
+			return yield* new ModelListTooLarge({
+				problem: `The provider listed more than ${MAX_MODELS} models`,
 			});
 		}
 		const listed = distinctById(
@@ -265,12 +335,39 @@ function distinctById(models: DiscoveredModel[]): DiscoveredModel[] {
 	return models.filter(({ modelId }) => !seen.has(modelId) && seen.add(modelId));
 }
 
-function readJson(response: Response): Effect.Effect<unknown, ProviderFailure> {
+/** The failure for a provider that answered with an error status. */
+function refusal(response: Response): DiscoveryFailure {
+	const { status, statusText } = response;
+	if (status === 401 || status === 403) {
+		return new DiscoveryCredentialsRejected({ status, statusText });
+	}
+	if (status === 408 || status === 429 || status >= 500) {
+		return new DiscoveryUnavailable({ status, statusText });
+	}
+	return new ModelListUnreadable({
+		problem: `The provider answered ${status} ${statusText}`,
+		status,
+	});
+}
+
+/** The failure for a request, or a read of its answer, that failed before the whole answer arrived. */
+function unreachable(cause: unknown): DiscoveryUnreachable | DiscoveryAddressRefused {
+	return cause instanceof EgressRefused && cause.reason !== "unresolved"
+		? new DiscoveryAddressRefused({ cause })
+		: new DiscoveryUnreachable({ cause });
+}
+
+function readJson(
+	response: Response,
+): Effect.Effect<
+	unknown,
+	DiscoveryUnreachable | DiscoveryAddressRefused | ModelListUnreadable | ModelListTooLarge
+> {
 	return Effect.gen(function* () {
 		if (!response.body) {
 			return yield* Effect.tryPromise({
 				try: () => response.json(),
-				catch: (cause) => new ProviderUnreachable({ cause }),
+				catch: (cause) => (cause instanceof SyntaxError ? notJson() : unreachable(cause)),
 			});
 		}
 		const reader = response.body.getReader();
@@ -280,14 +377,14 @@ function readJson(response: Response): Effect.Effect<unknown, ProviderFailure> {
 		while (true) {
 			const chunk = yield* Effect.tryPromise({
 				try: () => reader.read(),
-				catch: (cause) => new ProviderUnreachable({ cause }),
+				catch: unreachable,
 			});
 			if (chunk.done) break;
 			bytes += chunk.value.byteLength;
 			if (bytes > MAX_MODEL_RESPONSE_BYTES) {
-				yield* Effect.promise(() => reader.cancel());
-				return yield* new InvalidModelList({
-					reason: userText`Provider model response is too large`,
+				yield* Effect.tryPromise(() => reader.cancel()).pipe(Effect.ignore);
+				return yield* new ModelListTooLarge({
+					problem: `The provider's model list is over ${MAX_MODEL_RESPONSE_BYTES} bytes`,
 				});
 			}
 			text += decoder.decode(chunk.value, { stream: true });
@@ -295,8 +392,9 @@ function readJson(response: Response): Effect.Effect<unknown, ProviderFailure> {
 		text += decoder.decode();
 		return yield* Effect.try({
 			try: () => JSON.parse(text) as unknown,
-			catch: () =>
-				new InvalidModelList({ reason: userText`Provider returned an invalid model list` }),
+			catch: notJson,
 		});
 	});
 }
+
+const notJson = () => new ModelListUnreadable({ problem: "The provider's model list isn't JSON" });

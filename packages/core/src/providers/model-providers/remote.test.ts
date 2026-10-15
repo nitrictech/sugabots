@@ -2,7 +2,7 @@ import { Effect, ManagedRuntime } from "effect";
 import { expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import type { EgressHttpClients } from "../network/egress.ts";
+import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import { type DiscoveredModel, emptyRegistry, type ModelRegistry } from "./dialects/index.ts";
 import { registryFrom } from "./dialects/registry.ts";
 import type { ModelProviderRepository } from "./model-provider-repository.ts";
@@ -277,11 +277,13 @@ it("rejects invalid OpenRouter keys even when the public model list is accessibl
 	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
 	expect(result).toMatchObject({
 		reachable: false,
-		error: "The provider rejected the API key. Replace it with a valid key and try again.",
+		error:
+			"The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.",
 	});
 	await expect(discover(models, found, httpClient).result).rejects.toMatchObject({
-		_tag: "ModelDiscoveryFailed",
-		userMessage: "The provider rejected the API key. Replace it with a valid key and try again.",
+		_tag: "DiscoveryCredentialsRejected",
+		userMessage:
+			"The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.",
 	});
 	expect(models.synced).toEqual([]);
 });
@@ -336,6 +338,54 @@ it("reads OpenRouter's own account of what a model can do", async () => {
 	]);
 });
 
+it.each([
+	[401, "DiscoveryCredentialsRejected", false],
+	[403, "DiscoveryCredentialsRejected", false],
+	[404, "ModelListUnreadable", false],
+	[408, "DiscoveryUnavailable", true],
+	[429, "DiscoveryUnavailable", true],
+	[503, "DiscoveryUnavailable", true],
+])(
+	"names a %i from the listing as %s, which may be tried again: %s",
+	async (status, tag, isRetryable) => {
+		const found = connection({});
+		const models = repository(found);
+
+		await expect(
+			discover(models, found, async () => new Response(null, { status })).result,
+		).rejects.toMatchObject({ _tag: tag, isRetryable });
+	},
+);
+
+it.each([
+	["a blocked address", "privateNetwork", "DiscoveryAddressRefused", false],
+	["a name that doesn't resolve", "unresolved", "DiscoveryUnreachable", true],
+] as const)("tells %s from the network policy apart", async (_, reason, tag, isRetryable) => {
+	const found = connection({});
+	const models = repository(found);
+	const refused = async (): Promise<Response> => {
+		throw new EgressRefused({ reason });
+	};
+
+	await expect(discover(models, found, refused).result).rejects.toMatchObject({
+		_tag: tag,
+		isRetryable,
+	});
+});
+
+it("says a provider listing more models than we take has too many, not a wrong address", async () => {
+	const found = connection({});
+	const models = repository(found);
+	const tooMany = Array.from({ length: 2_001 }, (_, index) => ({ id: `model-${index}` }));
+
+	await expect(
+		discover(models, found, async () => Response.json({ data: tooMany })).result,
+	).rejects.toMatchObject({ _tag: "ModelListTooLarge" });
+});
+
+const UNREACHABLE =
+	"We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.";
+
 it("records a fixed sentence for an unreachable provider, and keeps the network's words out of it", async () => {
 	const found = connection({});
 	const models = repository(found);
@@ -346,14 +396,12 @@ it("records a fixed sentence for an unreachable provider, and keeps the network'
 
 	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
 
-	expect(result).toMatchObject({ reachable: false, error: "Connection failed" });
+	expect(result).toMatchObject({ reachable: false, error: UNREACHABLE });
 	expect(models.recordTest).toHaveBeenCalledWith(
 		"workspace-id",
 		found.providerId,
 		expect.any(Date),
-		{
-			error: "Connection failed",
-		},
+		{ error: UNREACHABLE },
 	);
 });
 

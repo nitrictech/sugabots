@@ -3,11 +3,10 @@ import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { ModelDiscoveryFailed } from "@sugabots/core/providers/model-providers/remote";
+import { DiscoveryUnreachable } from "@sugabots/core/providers/model-providers/remote";
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
-import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -147,14 +146,18 @@ describe("model provider routes", () => {
 		const response = await app({
 			fetchModels: () =>
 				Effect.fail(
-					new ModelDiscoveryFailed({
-						message: "The provider could not be reached: getaddrinfo ENOTFOUND 10.0.0.7",
-						userMessage: userText`Connection failed`,
-					}),
+					new DiscoveryUnreachable({ cause: new Error("getaddrinfo ENOTFOUND 10.0.0.7") }),
 				),
 		}).request(`${root}/${PROVIDER_ID}/fetch-models`, { method: "POST", headers });
 
 		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ _tag: "BadRequest", message: "Connection failed" });
+		const body = await response.json();
+		expect(body).toMatchObject({
+			_tag: "BadRequest",
+			message:
+				"We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.",
+			error: { _tag: "DiscoveryUnreachable", isRetryable: true },
+		});
+		expect(JSON.stringify(body)).not.toContain("ENOTFOUND");
 	});
 });

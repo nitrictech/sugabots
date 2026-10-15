@@ -37,7 +37,12 @@ import {
 } from "./held-models.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
-import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./remote.ts";
+import {
+	type DiscoveryFailure,
+	fetchProviderModels,
+	isDiscoveryFailure,
+	testProvider,
+} from "./remote.ts";
 import {
 	type OAuthTokens,
 	type ProviderSignInFailed,
@@ -148,7 +153,7 @@ export interface Interface {
 		input: InProvider,
 	) => Effect.Effect<
 		{ added: number; updated: number; unchanged: number },
-		AuthorizationDenied | ModelDiscoveryFailed,
+		AuthorizationDenied | DiscoveryFailure,
 		CurrentActor.Service
 	>;
 	readonly addModel: (
@@ -302,7 +307,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		fetchProviderModels(providers, workspaceId, providerId, egress.providers, {
 			activateOnSuccess,
-		}).pipe(Effect.catchTag("ModelDiscoveryFailed", () => Effect.void));
+		}).pipe(Effect.catchIf(isDiscoveryFailure, () => Effect.void));
 
 	const saveSignIn = (workspaceId: string, providerId: string, tokens: OAuthTokens) =>
 		Effect.gen(function* () {
