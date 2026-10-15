@@ -27,6 +27,7 @@ import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
+import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Models } from "@sugabots/core/providers/models/models";
@@ -98,6 +99,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SandboxNetwork.layer,
 	PodSandboxSetup.layer,
 	GitHubApps.layer,
+	GitHubConnections.layer,
 	ConnectionSetup.layer,
 	Artifacts.layer,
 	ArtifactPages.layer,

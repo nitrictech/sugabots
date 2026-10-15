@@ -11,6 +11,7 @@ import { isUniqueViolation } from "../../database/errors.ts";
 import {
 	type ConnectionRow,
 	connection,
+	type GitHubConnectionRepository,
 	type GitHubConnectionSettings,
 	type ToolAccess,
 } from "../../database/schema.ts";
@@ -64,6 +65,20 @@ export interface Interface {
 		connectionId: string,
 		installation: { installationId: number; account: string },
 	) => Effect.Effect<boolean>;
+	/**
+	 * Changes a GitHub connection's repositories to what `change` makes of
+	 * them, with the connection locked meanwhile, so two changes made at once
+	 * both land. A change to which repositories it has, not only to how they
+	 * are written, is a change of configuration. Answers the repositories as
+	 * they now are, or undefined for no such GitHub connection.
+	 */
+	readonly changeGitHubRepositories: (
+		workspaceId: string,
+		connectionId: string,
+		change: (
+			repositories: readonly GitHubConnectionRepository[],
+		) => readonly GitHubConnectionRepository[],
+	) => Effect.Effect<readonly GitHubConnectionRepository[] | undefined>;
 	/** Counts a change to what a connection's tools work on as a change of configuration. */
 	readonly reconfigured: (workspaceId: string, connectionId: string) => Effect.Effect<void>;
 	readonly update: (
@@ -245,6 +260,49 @@ export const make = Effect.gen(function* () {
 							.returning({ id: connection.id }),
 					),
 					(rows) => rows.length > 0,
+				),
+			),
+
+		changeGitHubRepositories: (workspaceId, connectionId, change) =>
+			operation(
+				"changeGitHubRepositories",
+				transaction(
+					Effect.gen(function* () {
+						const where = and(
+							eq(connection.id, connectionId),
+							eq(connection.workspaceId, workspaceId),
+							eq(connection.kind, "github"),
+						);
+						const [row] = yield* query((db) =>
+							db
+								.select({ settings: connection.settings })
+								.from(connection)
+								.where(where)
+								.limit(1)
+								.for("update"),
+						);
+						const settings = row?.settings;
+						if (!settings) return undefined;
+						const before = settings.repositories;
+						const after = change(before);
+						const ids = (repositories: readonly GitHubConnectionRepository[]) =>
+							repositories
+								.map((one) => one.id)
+								.sort((a, b) => a - b)
+								.join();
+						yield* query((db) =>
+							db
+								.update(connection)
+								.set({
+									settings: { ...settings, repositories: after },
+									...(ids(before) === ids(after)
+										? {}
+										: { configurationRevision: sql`${connection.configurationRevision} + 1` }),
+								})
+								.where(where),
+						);
+						return after;
+					}),
 				),
 			),
 

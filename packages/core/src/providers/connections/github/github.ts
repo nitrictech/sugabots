@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 import { type DomainError, userText } from "@sugabots/errors";
-import { Clock, Effect, ErrorReporter, Schema } from "effect";
+import { Clock, DateTime, Effect, ErrorReporter, Schema } from "effect";
 import type { GitHubAppOwner } from "../../../database/schema.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -23,6 +23,11 @@ export interface Installation {
 	readonly id: number;
 	/** The login of the organization or user whose repositories it reaches. */
 	readonly account: string;
+}
+
+/** A GitHub App at one of its installations. */
+export interface InstalledApp extends AppIdentity {
+	readonly installation: Installation;
 }
 
 export const API_URL = "https://api.github.com";
@@ -152,6 +157,86 @@ export const installation = (http: EgressHttpClient, app: AppIdentity, installat
 		Effect.flatMap(decoded(FoundInstallation)),
 		Effect.map((found): Installation => ({ id: found.id, account: found.account.login })),
 	);
+
+const AccessToken = Schema.Struct({ token: Schema.String, expires_at: Schema.String });
+
+export interface AccessToken {
+	readonly token: string;
+	readonly expiresAt: DateTime.Utc;
+}
+
+/**
+ * A token for the installation's repositories `repositoryIds`, or every one
+ * it reaches when they're left out, with `permissions`, lasting an hour.
+ * GitHub refuses one for a repository the installation doesn't reach.
+ */
+export const accessToken = (
+	http: EgressHttpClient,
+	app: InstalledApp,
+	request: { repositoryIds?: readonly number[]; permissions: Permissions },
+) =>
+	appJwt(app).pipe(
+		Effect.flatMap((bearer) =>
+			call(http, "POST", `/app/installations/${app.installation.id}/access_tokens`, {
+				bearer,
+				body: { repository_ids: request.repositoryIds, permissions: request.permissions },
+			}),
+		),
+		Effect.flatMap(decoded(AccessToken)),
+		Effect.map(
+			(made): AccessToken => ({
+				token: made.token,
+				expiresAt: DateTime.makeUnsafe(made.expires_at),
+			}),
+		),
+	);
+
+const Repositories = Schema.Struct({
+	total_count: Schema.Int,
+	repositories: Schema.Array(
+		Schema.Struct({ id: Schema.Int, full_name: Schema.String, private: Schema.Boolean }),
+	),
+});
+
+/** At most this many of an installation's repositories are listed, to pick from. */
+const MAX_LISTED_REPOSITORIES = 1_000;
+const PAGE_SIZE = 100;
+
+export interface Repository {
+	readonly id: number;
+	/** `owner/name`, as GitHub writes it. */
+	readonly fullName: string;
+	readonly private: boolean;
+}
+
+/** The repositories the installation reaches. */
+export const repositories = (http: EgressHttpClient, app: InstalledApp) =>
+	Effect.gen(function* () {
+		const { token } = yield* accessToken(http, app, { permissions: { metadata: "read" } });
+		const listed: Repository[] = [];
+		for (let page = 1; listed.length < MAX_LISTED_REPOSITORIES; page++) {
+			const { repositories, total_count } = yield* call(
+				http,
+				"GET",
+				`/installation/repositories?per_page=${PAGE_SIZE}&page=${page}`,
+				{ bearer: token },
+			).pipe(Effect.flatMap(decoded(Repositories)));
+			listed.push(
+				...repositories.map((repository) => ({
+					id: repository.id,
+					fullName: repository.full_name,
+					private: repository.private,
+				})),
+			);
+			if (repositories.length < PAGE_SIZE || listed.length >= total_count) break;
+		}
+		return listed;
+	});
+
+/** `owner/name`'s name: what an installation token is asked for by. */
+export function nameOf(repository: string) {
+	return repository.slice(repository.indexOf("/") + 1);
+}
 
 /** How long an app's own token lasts; GitHub takes at most ten minutes. */
 const APP_JWT_SECONDS = 9 * 60;
