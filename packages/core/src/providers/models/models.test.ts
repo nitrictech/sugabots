@@ -210,7 +210,7 @@ describe("models", () => {
 
 		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
 
-		expect(failure).toMatchObject({ _tag: "ProviderServerError", isRetryable: true });
+		expect(failure).toMatchObject({ _tag: "ProviderOverloaded", isRetryable: true });
 	});
 
 	it("asks the Codex backend the way Codex does for a ChatGPT subscription", async () => {
@@ -338,7 +338,8 @@ describe("a failed model request", () => {
 		[408, "ProviderServerError", true],
 		[413, "ProviderContextLengthExceeded", false],
 		[429, "ProviderRateLimited", true],
-		[503, "ProviderServerError", true],
+		[500, "ProviderServerError", true],
+		[503, "ProviderOverloaded", true],
 	])("names a %i as %s, which may be tried again: %s", (statusCode, tag, isRetryable) => {
 		expect(classify(answered(statusCode))).toMatchObject({
 			_tag: tag,
@@ -388,6 +389,82 @@ describe("a failed model request", () => {
 		});
 
 		expect(classify(tooLong, gemini)._tag).toBe("ProviderContextLengthExceeded");
+	});
+
+	it("says a busy provider is busy, and logs what it said", () => {
+		const busy = answered(503, [
+			{
+				error: {
+					code: 503,
+					message:
+						"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+					status: "UNAVAILABLE",
+				},
+			},
+		]);
+
+		expect(classify(busy)).toMatchObject({
+			_tag: "ProviderOverloaded",
+			message:
+				"Provider returned 503: This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+			userMessage:
+				"OpenRouter is too busy to answer right now. Try again in a few minutes, or choose another model.",
+			isRetryable: true,
+		});
+	});
+
+	it.each([
+		["a 529", answered(529)],
+		[
+			"an overloaded_error partway through a stream",
+			{ type: "overloaded_error", message: "Overloaded" },
+		],
+	])("knows Anthropic is busy from %s", (_, busy) => {
+		expect(classify(busy, anthropic)._tag).toBe("ProviderOverloaded");
+		expect(classify(busy, openaiCompatible)._tag).not.toBe("ProviderOverloaded");
+	});
+
+	it("takes a provider's own words only from what it sent, not from an error we threw", () => {
+		const ours = new Error("Couldn't parse the chunk: prompt is too long");
+
+		expect(classify(ours, anthropic)._tag).toBe("ProviderRequestFailed");
+	});
+
+	it("keeps a rate limit a rate limit, whatever its words", () => {
+		const limited = answered(429, {
+			error: { message: "This model's maximum context length is 8192 tokens" },
+		});
+
+		expect(classify(limited)._tag).toBe("ProviderRateLimited");
+	});
+
+	it.each([
+		[
+			"the sentence a provider gives as its error",
+			{ code: "invalid-argument", error: "list_routines: tool parameter root must be an object" },
+			"Provider returned 400: list_routines: tool parameter root must be an object",
+		],
+		[
+			"the provider's message over the status words beside it",
+			{
+				statusCode: 400,
+				error: "Bad Request",
+				message: "This model's maximum context length is 8192 tokens",
+			},
+			"Provider returned 400: This model's maximum context length is 8192 tokens",
+		],
+	])("logs %s", (_, body, logged) => {
+		expect(classify(answered(400, body)).message).toBe(logged);
+	});
+
+	it("reads a context limit from a message beside the status words", () => {
+		const tooLong = answered(400, {
+			statusCode: 400,
+			error: "Bad Request",
+			message: "This model's maximum context length is 8192 tokens",
+		});
+
+		expect(classify(tooLong)._tag).toBe("ProviderContextLengthExceeded");
 	});
 
 	it("leaves another provider's words to the status", () => {
