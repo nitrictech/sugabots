@@ -1,8 +1,10 @@
 import { connectionToolKey } from "@sugabots/contracts";
 import { asSchema, type Tool, tool } from "ai";
+import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import type { Database, RunEffect } from "../../../database/database.ts";
-import type { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
+import { type Database, query, type RunEffect } from "../../../database/database.ts";
+import { agent, toolCall, user } from "../../../database/schema.ts";
+import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
 import * as GitHubReads from "../../../providers/connections/github/github-reads.ts";
 import { GITHUB_CONNECTION_TOOLS } from "../../../providers/connections/github/github-tools.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connections/github/push.ts";
@@ -10,9 +12,6 @@ import { toolAccessOf } from "../../../providers/connections/tool-access.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { OfferedTool } from "../connections.ts";
 import { inSandbox, type OpenSandbox, type Place } from "../sandbox/tools.ts";
-
-/** Bots push only to branches under this, so they can't move anyone else's. */
-export const BOT_BRANCH_PREFIX = "sugabots/";
 
 /** The largest bundle a push carries: a whole branch's history, read into the API's memory. */
 const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
@@ -32,11 +31,13 @@ export interface Workspace {
 export function gitHubTools({
 	connected,
 	turnId,
+	agentId,
 	workspace,
 	run,
 }: {
 	connected: GitHubConnections.Connected;
 	turnId: string;
+	agentId: string;
 	/** Undefined when the turn has no sandbox, so pushes are refused. */
 	workspace: Workspace | undefined;
 	run: RunEffect<Database>;
@@ -63,7 +64,7 @@ export function gitHubTools({
 
 	const tools: Record<string, Tool> = {
 		push_branch: tool({
-			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. `,
+			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${GitHubConnections.BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				branch: botBranchSchema,
@@ -107,6 +108,120 @@ export function gitHubTools({
 					}),
 				);
 			},
+		}),
+		open_pull_request: tool({
+			description:
+				"Open a pull request for a branch you pushed with push_branch. Write the title and description for the repository's reviewers: what changed and why, and how you checked it.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				branch: botBranchSchema,
+				base: Schema.optional(
+					Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+				).annotate({
+					description: "The branch to merge into; the repository's default if left out",
+				}),
+				title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+				body: Schema.String.check(Schema.isMaxLength(60_000)).annotate({
+					description: "The pull request's description, in Markdown",
+				}),
+				draft: Schema.optional(Schema.Boolean).annotate({
+					description: "Open it as a draft, for work that isn't ready for review",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, branch, base, title, body, draft = false }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"opened this pull request",
+						);
+						const opened = yield* connected.openPullRequest({
+							repository: path,
+							head: branch,
+							base,
+							title,
+							body: `${body}\n\n---\n${signature}`,
+							draft,
+						});
+						return { status: "opened", ...opened };
+					}),
+				),
+		}),
+		update_pull_request: tool({
+			description: `Change a pull request a bot opened, from a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}: its title, description, base branch, whether it's a draft, or whether it's open. Leave out what stays the same. To change its code, push to its branch with push_branch.`,
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: pullRequestNumberSchema,
+				title: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
+				body: Schema.optional(Schema.String.check(Schema.isMaxLength(60_000))).annotate({
+					description: "The whole new description, in Markdown, replacing the old one",
+				}),
+				base: Schema.optional(
+					Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+				).annotate({ description: "The branch to merge into" }),
+				draft: Schema.optional(Schema.Boolean).annotate({
+					description: "false marks a draft ready for review; true makes it a draft again",
+				}),
+				state: Schema.optional(Schema.Literals(["open", "closed"])).annotate({
+					description: "closed closes it without merging; open reopens it",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, number, title, body, base, draft, state }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signed =
+							body === undefined
+								? undefined
+								: `${body}\n\n---\n${yield* attribution(
+										{ agentId, turnId, sdkToolCallId: toolCallId },
+										"wrote this description",
+									)}`;
+						const updated = yield* connected.updatePullRequest({
+							repository: path,
+							number,
+							title,
+							body: signed,
+							base,
+							state,
+							draft,
+						});
+						return { status: "updated", ...updated };
+					}).pipe(
+						Effect.catchTag("NotBotPullRequest", (refused) =>
+							Effect.succeed(
+								failed(
+									`#${number} is from ${refused.branch}, not a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, so bots can't change it. Comment on it with comment_on_pull_request instead.`,
+								),
+							),
+						),
+					),
+				),
+		}),
+		comment_on_pull_request: tool({
+			description:
+				"Comment on a pull request, such as to answer its reviewers or say what you changed. For a comment on a line of its code, quote the file and line.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: pullRequestNumberSchema,
+				body: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60_000)).annotate({
+					description: "The comment, in Markdown",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, number, body }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this comment",
+						);
+						const commented = yield* connected.commentOnPullRequest({
+							repository: path,
+							number,
+							body: `${body}\n\n---\n${signature}`,
+						});
+						return { status: "commented", ...commented };
+					}),
+				),
 		}),
 		list_issues: tool({
 			description: "List a repository's issues, newest first, without their comments.",
@@ -196,7 +311,7 @@ export function gitHubNote(connected: GitHubConnections.Connected, signedIn: boo
 	const reading = signedIn
 		? "In the sandbox, git clone and fetch of them are signed in to read, outside the sandbox, without a token. There is no gh; read issues, pull requests and checks with the connection's tools."
 		: "The sandbox's provider can't sign its requests in, so only public ones can be cloned.";
-	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${BOT_BRANCH_PREFIX}.`;
+	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request.`;
 }
 
 interface Failed {
@@ -232,10 +347,14 @@ const commitSchema = Schema.String.check(
 const botBranchSchema = Schema.String.check(
 	Schema.isMaxLength(200),
 	Schema.isPattern(/^sugabots\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/, {
-		message: `Name a branch under ${BOT_BRANCH_PREFIX}, such as ${BOT_BRANCH_PREFIX}fix-login`,
+		message: `Name a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
 	}),
 ).annotate({
-	description: `The branch, which must start with ${BOT_BRANCH_PREFIX}, such as ${BOT_BRANCH_PREFIX}fix-login`,
+	description: `The branch, which must start with ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
+});
+
+const pullRequestNumberSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+	description: "The pull request's number",
 });
 
 const listSchema = (repository: Schema.Codec<string>) =>
@@ -251,6 +370,32 @@ const numberedSchema = (repository: Schema.Codec<string>, description: string) =
 		repository,
 		number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({ description }),
 	}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1);
+
+/**
+ * The line under what a bot wrote on GitHub, such as a pull request's
+ * description: which bot `did` it, and who allowed it.
+ */
+const attribution = (
+	call: { agentId: string; turnId: string; sdkToolCallId: string },
+	did: string,
+) =>
+	Effect.gen(function* () {
+		const [opener] = yield* query((db) =>
+			db.select({ name: agent.name }).from(agent).where(eq(agent.id, call.agentId)),
+		);
+		const [decider] = yield* query((db) =>
+			db
+				.select({ name: user.name })
+				.from(toolCall)
+				.innerJoin(user, eq(user.id, toolCall.decidedById))
+				.where(
+					and(eq(toolCall.turnId, call.turnId), eq(toolCall.sdkToolCallId, call.sdkToolCallId)),
+				)
+				.limit(1),
+		);
+		const bot = opener ? `**${opener.name}**, a bot in Sugabots,` : "A bot in Sugabots";
+		return decider ? `${bot} ${did}, which ${decider.name} allowed.` : `${bot} ${did}.`;
+	});
 
 /** What the bundling script exits with when the checkout is shallow, so the bundle would lack history. */
 const SHALLOW_EXIT_CODE = 3;

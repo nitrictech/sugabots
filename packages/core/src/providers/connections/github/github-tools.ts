@@ -14,6 +14,25 @@ export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [
 		destructive: false,
 	},
 	{
+		name: "open_pull_request",
+		description: "Open a pull request for a branch pushed with push_branch.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
+		name: "update_pull_request",
+		description:
+			"Change a bot's pull request: its title, description, base, draft, or whether it's open.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
+		name: "comment_on_pull_request",
+		description: "Comment on a pull request.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
 		name: "list_issues",
 		description: "List a repository's issues.",
 		readOnly: true,

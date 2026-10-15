@@ -439,6 +439,7 @@ const streamReply = (
 			const connections = yield* Effect.acquireRelease(
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
 					turnId: prepared.turnId,
+					agentId: prepared.context.agent.id,
 					workspace: sandbox.usable ? sandbox.workspace : undefined,
 					sandboxSignsIn: sandbox.signsIn,
 				}),
