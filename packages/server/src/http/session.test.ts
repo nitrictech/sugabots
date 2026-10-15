@@ -13,7 +13,11 @@ import { createTestApp, identifiedBy } from "./app.test-support.ts";
  */
 
 /** Public by intent. Anything else reaching here without credentials is a bug. */
-const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
+const OPEN_ENDPOINTS = new Set([
+	"GET /health",
+	"POST /hooks/routines/:routineId",
+	"POST /hooks/triggers/:triggerId",
+]);
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspace: "0199a3a0-0000-7000-8000-000000000001",
@@ -40,6 +44,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	messageId: "0199a3a0-0000-7000-8000-00000000000f",
 	// 👍, as a client puts it in the address.
 	emoji: "%F0%9F%91%8D",
+	triggerId: "0199a3a0-0000-7000-8000-000000000011",
 };
 
 function fill(pattern: string): string {

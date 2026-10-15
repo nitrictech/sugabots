@@ -446,7 +446,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			// A routine run elsewhere, so an approval outside any run must not be taken for one.
 			const elsewhere = await routines.create(
 				{ agentId: recipientAgentId },
-				{ name: "Elsewhere", instructions: "Run somewhere else.", trigger: { kind: "webhook" } },
+				{ name: "Elsewhere", instructions: "Run somewhere else.", triggers: [{ kind: "webhook" }] },
 			);
 			await routines.run({
 				agentId: recipientAgentId,
@@ -851,7 +851,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -875,7 +875,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -1036,7 +1036,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -1288,7 +1288,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			const created = await routines.create(
 				{ agentId },
-				{ name: "Overnight filing", instructions: "File it.", trigger: { kind: "webhook" } },
+				{ name: "Overnight filing", instructions: "File it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await routines.run({
 				agentId,
@@ -1383,7 +1383,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			const created = await routines.create(
 				{ agentId },
-				{ name: "Overnight review", instructions: "Review it.", trigger: { kind: "webhook" } },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const accepted = await routines.run({
 				agentId,
@@ -1428,7 +1428,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			const created = await routines.create(
 				{ agentId },
-				{ name: "Overnight review", instructions: "Review it.", trigger: { kind: "webhook" } },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await routines.run({
 				agentId,

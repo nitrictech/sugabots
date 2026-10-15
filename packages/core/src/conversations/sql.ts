@@ -1,5 +1,4 @@
 import type {
-	CalendarSchedule,
 	CollaborationStatus,
 	JsonValue,
 	MessageStatus,
@@ -8,13 +7,13 @@ import type {
 	RoutineExecutionTriggerKind,
 	RoutineResults,
 	RoutineState,
+	RoutineTrigger,
 	RoutineTriggerAuthor,
 	RoutineTriggerKind,
 	SystemAgentKey,
 	ThreadType,
 	ToolApprovalStatus,
 	ToolCallStatus,
-	WebhookAuth,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
@@ -45,20 +44,6 @@ export const routine = pgTable(
 		agentId: uuid("agent_id").notNull(),
 		name: text("name").notNull(),
 		instructions: text("instructions").notNull(),
-		triggerKind: text("trigger_kind").$type<RoutineTriggerKind>().notNull(),
-		/** A schedule written as cron, kept as it was; a picked one is `schedule` instead. */
-		cronExpression: text("cron_expression"),
-		schedule: jsonb("schedule").$type<CalendarSchedule>(),
-		cronTimezone: text("cron_timezone"),
-		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
-		webhookAuth: jsonb("webhook_auth").$type<WebhookAuth>(),
-		/** The webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
-		webhookSecret: text("webhook_secret"),
-		/**
-		 * The scrypt hash of a bearer secret made before secrets were kept
-		 * sealed instead. It still admits callers until the secret is replaced.
-		 */
-		webhookSecretDigest: text("webhook_secret_digest"),
 		state: text("state").$type<RoutineState>().notNull().default("enabled"),
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
@@ -80,41 +65,66 @@ export const routine = pgTable(
 			"routine_created_by_agent_valid",
 			sql`${table.createdByAgentId} is null or ${table.createdByAgentId} = ${table.agentId}`,
 		),
-		check(
-			"routine_trigger_valid",
-			sql`(
-				${table.triggerKind} = 'cron'
-				and (${table.cronExpression} is null) <> (${table.schedule} is null)
-				and ${table.cronTimezone} is not null
-				and ${table.webhookAuth} is null
-				and ${table.webhookSecret} is null
-				and ${table.webhookSecretDigest} is null
-			) or (
-				${table.triggerKind} = 'webhook'
-				and ${table.cronExpression} is null
-				and ${table.schedule} is null
-				and ${table.cronTimezone} is null
-				and ${table.nextScheduledAt} is null
-				and ${table.webhookAuth} is not null
-				and (${table.webhookSecret} is null or ${table.webhookSecretDigest} is null)
-				and (${table.webhookSecretDigest} is null or ${table.webhookAuth}->>'kind' = 'bearer')
-			)`,
-		),
-		check(
-			"routine_schedule_state_valid",
-			sql`${table.triggerKind} <> 'cron'
-				or (${table.state} = 'enabled' and ${table.nextScheduledAt} is not null)
-				or (${table.state} = 'paused' and ${table.nextScheduledAt} is null)`,
-		),
 		uniqueIndex("routine_agent_name_idx")
 			.on(table.agentId, table.name)
 			.where(sql`${table.deletedAt} is null`),
 		uniqueIndex("routine_id_workspace_id_idx").on(table.id, table.workspaceId),
-		index("routine_due_idx")
+	],
+);
+
+/**
+ * One of the things that start a routine; a routine may have several, of any
+ * kinds, or none and run only when someone runs it. `settings` holds what
+ * each kind is, with the kind; a webhook keeps its secret in its own column,
+ * and a schedule its next time, while its routine is enabled.
+ */
+export const routineTrigger = pgTable(
+	"routine_trigger",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id").notNull(),
+		routineId: uuid("routine_id").notNull(),
+		/** Follows `settings`, so the kind and its settings can't disagree. */
+		kind: text("kind")
+			.$type<RoutineTriggerKind>()
+			.generatedAlwaysAs(sql`settings->>'kind'`)
+			.notNull(),
+		settings: jsonb("settings").$type<RoutineTriggerSettings>().notNull(),
+		/** A webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
+		secretEncrypted: text("secret_encrypted"),
+		/**
+		 * The scrypt hash of a webhook's bearer secret made before secrets were
+		 * kept sealed. It still admits callers until the secret is replaced.
+		 */
+		secretDigest: text("secret_digest"),
+		/** When a schedule next runs its routine; null while the routine is paused. */
+		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.routineId, table.workspaceId],
+			foreignColumns: [routine.id, routine.workspaceId],
+			name: "routine_trigger_routine_workspace_fkey",
+		}).onDelete("cascade"),
+		check(
+			"routine_trigger_secret_valid",
+			sql`(${table.secretEncrypted} is null and ${table.secretDigest} is null)
+				or (${table.kind} = 'webhook' and (${table.secretEncrypted} is null or ${table.secretDigest} is null))`,
+		),
+		check(
+			"routine_trigger_digest_valid",
+			sql`${table.secretDigest} is null or ${table.settings}->'auth'->>'kind' = 'bearer'`,
+		),
+		check(
+			"routine_trigger_schedule_valid",
+			sql`${table.kind} = 'cron' or ${table.nextScheduledAt} is null`,
+		),
+		index("routine_trigger_routine_idx").on(table.routineId, table.createdAt),
+		index("routine_trigger_due_idx")
 			.on(table.nextScheduledAt, table.id)
-			.where(
-				sql`${table.deletedAt} is null and ${table.state} = 'enabled' and ${table.triggerKind} = 'cron'`,
-			),
+			.where(sql`${table.nextScheduledAt} is not null`),
 	],
 );
 
@@ -220,6 +230,8 @@ export const routineExecution = pgTable(
 		threadId: uuid("thread_id")
 			.notNull()
 			.references(() => thread.id, { onDelete: "cascade" }),
+		/** The trigger that started it; null for a run someone started, or once the trigger is removed. */
+		triggerId: uuid("trigger_id").references(() => routineTrigger.id, { onDelete: "set null" }),
 		triggerKind: text("trigger_kind").$type<RoutineExecutionTriggerKind>().notNull(),
 		triggerIdentity: text("trigger_identity"),
 		trigger: jsonb("trigger").$type<RoutineExecutionTrigger>().notNull(),
@@ -250,9 +262,9 @@ export const routineExecution = pgTable(
 		}).onDelete("restrict"),
 		check(
 			"routine_execution_trigger_valid",
-			sql`${table.triggerKind} in ('cron', 'webhook', 'manual')
-				and ${table.trigger}->>'kind' = ${table.triggerKind}
-				and (${table.triggerKind} = 'webhook' or ${table.triggerIdentity} is not null)`,
+			sql`${table.trigger}->>'kind' = ${table.triggerKind}
+				and (${table.triggerKind} = 'webhook' or ${table.triggerIdentity} is not null)
+				and (${table.triggerKind} <> 'manual' or ${table.triggerId} is null)`,
 		),
 		check(
 			"routine_execution_state_valid",
@@ -281,9 +293,13 @@ export const routineExecution = pgTable(
 			sql`${table.results} in ('keep_in_run', 'post_to_chat')`,
 		),
 		uniqueIndex("routine_execution_thread_idx").on(table.threadId),
+		// A trigger's retry of a delivery or an occurrence lands on the run it started.
 		uniqueIndex("routine_execution_trigger_identity_idx")
-			.on(table.routineId, table.triggerKind, table.triggerIdentity)
-			.where(sql`${table.triggerIdentity} is not null`),
+			.on(table.triggerId, table.triggerIdentity)
+			.where(sql`${table.triggerId} is not null and ${table.triggerIdentity} is not null`),
+		uniqueIndex("routine_execution_manual_identity_idx")
+			.on(table.routineId, table.triggerIdentity)
+			.where(sql`${table.triggerKind} = 'manual'`),
 		uniqueIndex("routine_execution_running_idx")
 			.on(table.routineId)
 			.where(sql`${table.state} = 'running'`),
@@ -655,6 +671,13 @@ export const threadRead = pgTable(
 export type ThreadRow = typeof thread.$inferSelect;
 export type ChatRow = typeof chat.$inferSelect;
 export type RoutineRow = typeof routine.$inferSelect;
+export type RoutineTriggerRow = typeof routineTrigger.$inferSelect;
+/** What a trigger is, by kind: a trigger as the API shows it, without what the row keeps apart. */
+export type RoutineTriggerSettings = RoutineTrigger extends infer T
+	? T extends RoutineTrigger
+		? Omit<T, "id" | "nextScheduledAt">
+		: never
+	: never;
 export type RoutineExecutionRow = typeof routineExecution.$inferSelect;
 export type MessageRow = typeof message.$inferSelect;
 export type TurnRow = typeof turn.$inferSelect;

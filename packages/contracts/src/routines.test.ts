@@ -21,7 +21,7 @@ describe("Routine contracts", () => {
 			Schema.decodeUnknownResult(newRoutineSchema)({
 				name: "Morning review",
 				instructions: "Review the overnight changes.",
-				trigger,
+				triggers: [trigger],
 			})._tag,
 		).toBe("Success");
 	});
@@ -34,7 +34,7 @@ describe("Routine contracts", () => {
 			Schema.decodeUnknownResult(newRoutineSchema)({
 				name: "Morning review",
 				instructions: "Review the overnight changes.",
-				trigger,
+				triggers: [trigger],
 			})._tag,
 		).toBe("Failure");
 	});
@@ -50,7 +50,7 @@ describe("Routine contracts", () => {
 			Schema.decodeUnknownResult(newRoutineSchema)({
 				name: "Incoming",
 				instructions: "Handle it.",
-				trigger: { kind: "webhook", auth, secret: "lin_wh_0123456789abcdef" },
+				triggers: [{ kind: "webhook", auth, secret: "lin_wh_0123456789abcdef" }],
 			})._tag,
 		).toBe("Success");
 	});
@@ -69,7 +69,7 @@ describe("Routine contracts", () => {
 			Schema.decodeUnknownResult(newRoutineSchema)({
 				name: "Incoming",
 				instructions: "Handle it.",
-				trigger: { kind: "webhook", ...webhook },
+				triggers: [{ kind: "webhook", ...webhook }],
 			})._tag,
 		).toBe("Failure");
 	});

@@ -1,6 +1,7 @@
 import type {
 	ConnectionAccess,
 	ConnectionAuth,
+	ConnectionKind,
 	ConnectionTool,
 	ProviderApiFormat,
 	ProviderModel,
@@ -8,8 +9,10 @@ import type {
 	ProviderPresetId,
 	SearchProviderPresetId,
 } from "@sugabots/contracts";
+import { sql } from "drizzle-orm";
 import {
 	boolean,
+	check,
 	foreignKey,
 	integer,
 	jsonb,
@@ -138,10 +141,14 @@ export const searchProvider = pgTable(
 export type SearchProviderRow = typeof searchProvider.$inferSelect;
 
 /**
- * An MCP server a pod owner has configured for every agent in that pod.
+ * A service a pod owner has connected every agent in that pod to, by `kind`:
+ * an MCP server at `url`, or the pod's own GitHub App, whose tools are
+ * Sugabots' own, on the repositories in its `settings`.
+ * A pod has at most one GitHub connection, since its sandbox can be signed in
+ * to only one account there.
  *
- * `handle` prefixes the server's tool names for the model, so two servers
- * with a `search` tool do not collide; unique per workspace like an agent's.
+ * `handle` prefixes the tool names for the model, so two connections with a
+ * `search` tool do not collide; unique per workspace like an agent's.
  */
 export const connection = pgTable(
 	"connection",
@@ -153,7 +160,16 @@ export const connection = pgTable(
 		podId: uuid("pod_id").notNull(),
 		name: text("name").notNull(),
 		handle: text("handle").notNull(),
+		kind: text("kind").$type<ConnectionKind>().notNull().default("mcp"),
+		/**
+		 * The MCP server's address; for GitHub, the page of the account its app
+		 * is installed on, or of the app itself until it is.
+		 */
 		url: text("url").notNull(),
+		/** What a connection of a kind other than MCP is, which may be shown; its shape follows `kind`. */
+		settings: jsonb("settings").$type<ConnectionSettings>(),
+		/** For GitHub, the connection's own app's private key and webhook secret, sealed as one document. */
+		appCredentialEncrypted: text("app_credential_encrypted"),
 		/** `header`: a pasted secret in `secret_encrypted`; `oauth`: tokens in `oauth_encrypted`. */
 		authKind: text("auth_kind").$type<ConnectionAuth>().notNull().default("header"),
 		secretHeader: text("secret_header"),
@@ -164,7 +180,7 @@ export const connection = pgTable(
 		oauthState: text("oauth_state"),
 		/** Incremented whenever the configured target or availability changes. */
 		configurationRevision: integer("configuration_revision").notNull().default(1),
-		/** The tools the server listed when last asked, as it described them. */
+		/** The tools the server listed when last asked, as it described them; for GitHub, Sugabots' own. */
 		tools: jsonb("tools").$type<ConnectionTool[]>().notNull().default([]),
 		/**
 		 * What somebody chose for the pod's bots to do with each tool, by the
@@ -191,8 +207,62 @@ export const connection = pgTable(
 		uniqueIndex("connection_id_workspace_id_idx").on(table.id, table.workspaceId),
 		uniqueIndex("connection_id_pod_id_idx").on(table.id, table.podId),
 		uniqueIndex("connection_oauth_state_idx").on(table.oauthState),
+		uniqueIndex("connection_github_pod_idx").on(table.podId).where(sql`${table.kind} = 'github'`),
+		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github')`),
+		check(
+			"connection_settings_kind_check",
+			sql`(${table.kind} = 'github') = (${table.settings} is not null)
+				and (${table.settings} is null or ${table.settings}->>'kind' = ${table.kind})`,
+		),
+		check(
+			"connection_app_credential_kind_check",
+			sql`(${table.kind} = 'github') = (${table.appCredentialEncrypted} is not null)`,
+		),
 	],
 );
+
+export type ConnectionSettings = GitHubConnectionSettings;
+
+/** A GitHub App's owner: an organization, or a person's own account. */
+export interface GitHubAppOwner {
+	readonly login: string;
+	readonly type: "Organization" | "User";
+}
+
+/**
+ * A GitHub connection's own GitHub App, which a person made from Sugabots'
+ * manifest under the account its pod works on, and the app's installation
+ * there: both null until the app is installed.
+ */
+export interface GitHubConnectionSettings {
+	readonly kind: "github";
+	readonly appId: number;
+	/** The app's name in its github.com/apps/ address. */
+	readonly slug: string;
+	/** Who owns the app on GitHub, whose settings change or delete it. */
+	readonly owner: GitHubAppOwner;
+	readonly installationId: number | null;
+	/** The login of the organization or user it is installed on. */
+	readonly account: string | null;
+	/**
+	 * The repositories its tools work on: they read them in the pod's
+	 * sandbox, push branches to them and open pull requests on them, and their
+	 * events may start the pod's routines.
+	 */
+	readonly repositories: readonly GitHubConnectionRepository[];
+}
+
+/** One of a GitHub connection's repositories. */
+export interface GitHubConnectionRepository {
+	/** GitHub's id for it, which stays the same when it is renamed or moved. */
+	readonly id: number;
+	/** `owner/name`, as GitHub last wrote it. */
+	readonly path: string;
+	/** Who added it; null once they have left. */
+	readonly addedById: string | null;
+	/** When it was added, as an ISO timestamp. */
+	readonly addedAt: string;
+}
 
 export type ConnectionRow = typeof connection.$inferSelect;
 
