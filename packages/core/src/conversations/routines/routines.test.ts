@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
-import { handleFromName } from "@sugabots/contracts";
+import { handleFromName, MAX_ROUTINE_TRIGGERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { TestClock } from "effect/testing";
@@ -16,8 +16,8 @@ import {
 	message,
 	pod,
 	podMember,
-	routine,
 	routineExecution,
+	routineTrigger,
 	thread,
 	toolCall,
 	turn,
@@ -44,7 +44,13 @@ import {
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { lockTriggers } from "./acceptance.ts";
-import { RoutineTriggerConflict, WebhookSecretTooShort } from "./routine.ts";
+import {
+	RoutineTriggerConflict,
+	RoutineTriggerKindChanged,
+	RoutineTriggerNotFound,
+	TooManyRoutineTriggers,
+	WebhookSecretTooShort,
+} from "./routine.ts";
 import { RoutineRunner } from "./routine-runner.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
@@ -83,6 +89,41 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 	let podId: string;
 	let agentId: string;
 	let userId: string;
+	/** The routine's first trigger, addressed, and the secret this write made for it, if any. */
+	const firstTriggerOf = (defined: Routines.Defined) => {
+		const [trigger] = defined.routine.triggers;
+		if (!trigger) throw new Error("The routine has no trigger");
+		const made = defined.secrets.find((secret) => secret.triggerId === trigger.id);
+		return {
+			addressed: { agentId, routineId: defined.routine.id, triggerId: trigger.id },
+			secret: made?.secret ?? null,
+		};
+	};
+	/** Runs the scheduler once, as if it were `now`. */
+	const processDueAt = (now: Date) =>
+		runOnPostgres(
+			TestClock.setTime(now.getTime()).pipe(
+				Effect.andThen(Context.get(conversations, RoutineRunner.Service).processNextDue()),
+				Effect.provide(TestClock.layer()),
+			),
+		);
+	/** Makes each of the routine's schedules due at `at`. */
+	const makeDue = (routineId: string, at: Date) =>
+		onDatabase((db) =>
+			db
+				.update(routineTrigger)
+				.set({ nextScheduledAt: at })
+				.where(eq(routineTrigger.routineId, routineId)),
+		);
+	const nextTimesOf = async (routineId: string) =>
+		(
+			await onDatabase((db) =>
+				db
+					.select({ id: routineTrigger.id, nextScheduledAt: routineTrigger.nextScheduledAt })
+					.from(routineTrigger)
+					.where(eq(routineTrigger.routineId, routineId)),
+			)
+		).map(({ id, nextScheduledAt }) => ({ id, at: nextScheduledAt?.toISOString() ?? null }));
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -102,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: `Doomed ${crypto.randomUUID()}`,
 				instructions: "Report.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		await routines.run({ agentId, routineId: created.routine.id, requestId: crypto.randomUUID() });
@@ -167,7 +208,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Unreached",
 				instructions: "In a pod this member is not in.",
-				trigger: webhook,
+				triggers: [webhook],
 			},
 		);
 		const later = await routines.create(
@@ -175,7 +216,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Weekly report",
 				instructions: "Summarise the week.",
-				trigger: webhook,
+				triggers: [webhook],
 			},
 		);
 		const sooner = await routines.create(
@@ -183,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Morning brief",
 				instructions: "Plan the day.",
-				trigger: webhook,
+				triggers: [webhook],
 			},
 		);
 		const removed = await routines.create(
@@ -191,7 +232,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Removed",
 				instructions: "Gone.",
-				trigger: webhook,
+				triggers: [webhook],
 			},
 		);
 		await routines.remove({ agentId: helper.id, routineId: removed.routine.id });
@@ -211,35 +252,39 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Weekday briefing",
 				instructions: "Summarise the overnight changes.",
-				trigger: {
-					kind: "cron",
-					schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
-					timezone: "Australia/Sydney",
-				},
+				triggers: [
+					{
+						kind: "cron",
+						schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
+						timezone: "Australia/Sydney",
+					},
+				],
 			},
 		);
-		expect(cron.secret).toBeNull();
-		expect(cron.routine.trigger).toMatchObject({
-			kind: "cron",
-			nextScheduledAt: expect.any(String),
-		});
+		expect(cron.secrets).toEqual([]);
+		expect(cron.routine.triggers).toMatchObject([
+			{ kind: "cron", nextScheduledAt: expect.any(String) },
+		]);
 
 		const webhook = await routines.create(
 			{ agentId },
 			{
 				name: "Incoming alert",
 				instructions: "Investigate the alert.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
-		expect(webhook.routine.trigger).toEqual({ kind: "webhook", auth: { kind: "bearer" } });
-		const secret = webhook.secret ?? "";
+		expect(webhook.routine.triggers).toEqual([
+			{ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } },
+		]);
+		const { addressed, secret } = firstTriggerOf(webhook);
+		if (secret === null) throw new Error("A new webhook gets a secret");
 		expect(secret).toMatch(/^rtb_/);
-		const routineId = webhook.routine.id;
+		const { triggerId } = addressed;
 		const payload = { event: "created" };
 		expect(
 			await webhooks.accept({
-				routineId,
+				triggerId,
 				delivery: bearerDelivery(secret, payload, { "idempotency-key": "definition-test" }),
 			}),
 		).toEqual({
@@ -251,21 +296,21 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		});
 		expect(
-			await webhooks.accept({ routineId, delivery: bearerDelivery("incorrect", payload) }),
+			await webhooks.accept({ triggerId, delivery: bearerDelivery("incorrect", payload) }),
 		).toBeUndefined();
-		const rotatedSecret = await routines.rotateSecret({ agentId, routineId });
+		const rotatedSecret = await routines.rotateSecret(addressed);
 		if (rotatedSecret === null) throw new Error("A rotation without a secret makes one");
 		expect(
-			await webhooks.accept({ routineId, delivery: bearerDelivery(secret, payload) }),
+			await webhooks.accept({ triggerId, delivery: bearerDelivery(secret, payload) }),
 		).toBeUndefined();
 		expect(
 			await webhooks.accept({
-				routineId,
+				triggerId,
 				delivery: bearerDelivery(rotatedSecret, payload, { "idempotency-key": "after-rotation" }),
 			}),
 		).toMatchObject({ kind: "run", execution: { duplicate: false } });
 		expect(
-			await webhooks.accept({ routineId: "not-a-uuid", delivery: bearerDelivery(rotatedSecret) }),
+			await webhooks.accept({ triggerId: "not-a-uuid", delivery: bearerDelivery(rotatedSecret) }),
 		).toBeUndefined();
 		expect(await view.list({ agentId })).toHaveLength(2);
 	});
@@ -277,14 +322,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Linear issues",
 				instructions: "Triage the issue.",
-				trigger: {
-					kind: "webhook",
-					auth: { kind: "linear" },
-					secret: linearSecret,
-				},
+				triggers: [{ kind: "webhook", auth: { kind: "linear" }, secret: linearSecret }],
 			},
 		);
-		const routineId = created.routine.id;
+		const { triggerId } = firstTriggerOf(created).addressed;
 		const body = '{"action":"create","data":{"id":"ISS-1"}}';
 		const signed: Delivery = {
 			headers: {
@@ -295,17 +336,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			payload: JSON.parse(body),
 		};
 
-		expect(await webhooks.accept({ routineId, delivery: signed })).toMatchObject({
+		expect(await webhooks.accept({ triggerId, delivery: signed })).toMatchObject({
 			kind: "run",
 			execution: { duplicate: false },
 		});
 		// Linear's retry of the same delivery lands on the first run.
-		expect(await webhooks.accept({ routineId, delivery: signed })).toMatchObject({
+		expect(await webhooks.accept({ triggerId, delivery: signed })).toMatchObject({
 			kind: "run",
 			execution: { duplicate: true },
 		});
 		expect(
-			await webhooks.accept({ routineId, delivery: bearerDelivery(linearSecret) }),
+			await webhooks.accept({ triggerId, delivery: bearerDelivery(linearSecret) }),
 		).toBeUndefined();
 	});
 
@@ -315,33 +356,35 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Signups",
 				instructions: "Look up the account.",
-				trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } },
+				triggers: [{ kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } }],
 			},
 		);
-		const addressed = { agentId, routineId: created.routine.id };
-		expect(created.secret).toMatch(/^sk_rt_/);
-		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: created.secret });
+		const { addressed, secret } = firstTriggerOf(created);
+		expect(secret).toMatch(/^sk_rt_/);
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
 
-		const renamedHeader = await routines.update(addressed, {
-			trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
+		const renamedHeader = await routines.updateTrigger(addressed, {
+			kind: "webhook",
+			auth: { kind: "api_key", header: "X-Signup-Key" },
 		});
-		expect(renamedHeader.secret).toBeNull();
+		expect(renamedHeader.secrets).toEqual([]);
 		expect(
 			await webhooks.accept({
-				routineId: addressed.routineId,
-				delivery: { ...bearerDelivery(""), headers: { "x-signup-key": created.secret ?? "" } },
+				triggerId: addressed.triggerId,
+				delivery: { ...bearerDelivery(""), headers: { "x-signup-key": secret ?? "" } },
 			}),
 		).toMatchObject({ kind: "run" });
 
-		const basic = await routines.update(addressed, {
-			trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
+		const basic = await routines.updateTrigger(addressed, {
+			kind: "webhook",
+			auth: { kind: "basic", username: "sugabots" },
 		});
-		expect(basic.secret).toBeNull();
-		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: created.secret });
-		const basicAuthorization = `Basic ${Buffer.from(`sugabots:${created.secret}`).toString("base64")}`;
+		expect(basic.secrets).toEqual([]);
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
+		const basicAuthorization = `Basic ${Buffer.from(`sugabots:${secret}`).toString("base64")}`;
 		expect(
 			await webhooks.accept({
-				routineId: addressed.routineId,
+				triggerId: addressed.triggerId,
 				delivery: { ...bearerDelivery(""), headers: { authorization: basicAuthorization } },
 			}),
 		).toMatchObject({ kind: "run" });
@@ -360,53 +403,68 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Fortnightly",
 				instructions: "Review the fortnight.",
-				trigger: { kind: "cron", schedule, timezone: "Australia/Sydney" },
+				triggers: [{ kind: "cron", schedule, timezone: "Australia/Sydney" }],
 			},
 		);
 
-		expect(created.routine.trigger).toEqual({
-			kind: "cron",
-			schedule,
-			timezone: "Australia/Sydney",
-			nextScheduledAt: expect.any(String),
-		});
+		expect(created.routine.triggers).toEqual([
+			{
+				id: expect.any(String),
+				kind: "cron",
+				schedule,
+				timezone: "Australia/Sydney",
+				nextScheduledAt: expect.any(String),
+			},
+		]);
 		const [stored] = await onDatabase((db) =>
-			db.select().from(routine).where(eq(routine.id, created.routine.id)),
+			db.select().from(routineTrigger).where(eq(routineTrigger.routineId, created.routine.id)),
 		);
-		expect(stored?.cronExpression).toBeNull();
+		expect(stored?.settings).toEqual({ kind: "cron", schedule, timezone: "Australia/Sydney" });
 		expect(stored?.nextScheduledAt?.getTime()).toBeGreaterThan(Date.now());
 	});
 
-	it("turns a scheduled routine into a webhook, and back", async () => {
+	it("swaps a routine's schedule for a webhook, and back", async () => {
 		const created = await routines.create(
 			{ agentId },
 			{
 				name: "Switching",
 				instructions: "Handle it.",
-				trigger: {
-					kind: "cron",
-					schedule: { repeat: "cron", expression: "0 9 * * *" },
-					timezone: "UTC",
-				},
+				triggers: [
+					{
+						kind: "cron",
+						schedule: { repeat: "cron", expression: "0 9 * * *" },
+						timezone: "UTC",
+					},
+				],
 			},
 		);
+		const schedule = firstTriggerOf(created).addressed;
 		const addressed = { agentId, routineId: created.routine.id };
 
-		const webhook = await routines.update(addressed, { trigger: { kind: "webhook" } });
-		expect(webhook.routine.trigger).toEqual({ kind: "webhook", auth: { kind: "bearer" } });
-		expect(webhook.secret).toMatch(/^rtb_/);
+		const withWebhook = await routines.addTrigger(addressed, { kind: "webhook" });
+		const webhook = withWebhook.routine.triggers.find((trigger) => trigger.kind === "webhook");
+		expect(webhook).toEqual({ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } });
+		expect(withWebhook.secrets).toEqual([
+			{ triggerId: webhook?.id, secret: expect.stringMatching(/^rtb_/) },
+		]);
+		expect(
+			(await routines.removeTrigger(schedule)).triggers.map((trigger) => trigger.kind),
+		).toEqual(["webhook"]);
 
-		const scheduled = await routines.update(addressed, {
-			trigger: {
-				kind: "cron",
-				schedule: { repeat: "cron", expression: "0 10 * * *" },
-				timezone: "UTC",
-			},
-		});
-		expect(scheduled.routine.trigger).toMatchObject({
+		const scheduled = await routines.addTrigger(addressed, {
 			kind: "cron",
 			schedule: { repeat: "cron", expression: "0 10 * * *" },
+			timezone: "UTC",
 		});
+		await routines.removeTrigger({ ...addressed, triggerId: webhook?.id ?? "" });
+		expect((await routines.get(addressed)).triggers).toEqual([
+			expect.objectContaining({
+				kind: "cron",
+				schedule: { repeat: "cron", expression: "0 10 * * *" },
+				nextScheduledAt: expect.any(String),
+			}),
+		]);
+		expect(scheduled.secrets).toEqual([]);
 	});
 
 	it("runs a webhook left without a secret for whoever calls its address, until one is set", async () => {
@@ -415,33 +473,36 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Open intake",
 				instructions: "Handle it.",
-				trigger: {
-					kind: "webhook",
-					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-					secret: null,
-				},
+				triggers: [
+					{
+						kind: "webhook",
+						auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+						secret: null,
+					},
+				],
 			},
 		);
-		const addressed = { agentId, routineId: created.routine.id };
-		expect(created.secret).toBeNull();
+		const { addressed, secret: made } = firstTriggerOf(created);
+		expect(made).toBeNull();
 		expect(await routines.getSecret(addressed)).toEqual({ kind: "none" });
 		const unsigned = { ...bearerDelivery(""), headers: {} };
 		expect(
-			await webhooks.accept({ routineId: addressed.routineId, delivery: unsigned }),
+			await webhooks.accept({ triggerId: addressed.triggerId, delivery: unsigned }),
 		).toMatchObject({ kind: "run" });
 
-		// Another auth kind doesn't make a secret for a routine left without one.
-		const asBearer = await routines.update(addressed, {
-			trigger: { kind: "webhook", auth: { kind: "bearer" } },
+		// Another auth kind doesn't make a secret for a webhook left without one.
+		const asBearer = await routines.updateTrigger(addressed, {
+			kind: "webhook",
+			auth: { kind: "bearer" },
 		});
-		expect(asBearer.secret).toBeNull();
+		expect(asBearer.secrets).toEqual([]);
 		expect(await routines.getSecret(addressed)).toEqual({ kind: "none" });
 
 		const secret = "a-token-chosen-for-this-routine";
 		expect(await routines.rotateSecret(addressed, secret)).toBe(secret);
 		expect(
 			await webhooks.accept({
-				routineId: addressed.routineId,
+				triggerId: addressed.triggerId,
 				delivery: { ...unsigned, headers: { "idempotency-key": "unsigned-again" } },
 			}),
 		).toBeUndefined();
@@ -456,10 +517,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Linear issues",
 				instructions: "Triage it.",
-				trigger: { kind: "webhook", auth: { kind: "linear" }, secret: "lin_wh_short" },
+				triggers: [{ kind: "webhook", auth: { kind: "linear" }, secret: "lin_wh_short" }],
 			},
 		);
-		expect(linear.secret).toBe("lin_wh_short");
+		expect(firstTriggerOf(linear).secret).toBe("lin_wh_short");
 
 		await expect(
 			routines.create(
@@ -467,11 +528,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				{
 					name: "Signed alerts",
 					instructions: "Handle input.",
-					trigger: {
-						kind: "webhook",
-						auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-						secret: "too-short",
-					},
+					triggers: [
+						{
+							kind: "webhook",
+							auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+							secret: "too-short",
+						},
+					],
 				},
 			),
 		).rejects.toThrow(WebhookSecretTooShort);
@@ -481,47 +544,47 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Alerts",
 				instructions: "Handle input.",
-				trigger: { kind: "webhook", auth: { kind: "bearer" } },
+				triggers: [{ kind: "webhook", auth: { kind: "bearer" } }],
 			},
 		);
-		const addressed = { agentId, routineId: bearer.routine.id };
+		const { addressed, secret } = firstTriggerOf(bearer);
 		await expect(routines.rotateSecret(addressed, "too-short")).rejects.toThrow(
 			WebhookSecretTooShort,
 		);
-		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: bearer.secret });
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
 	});
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {
 		const created = await routines.create(
 			{ agentId },
-			{ name: "Old alerts", instructions: "Handle input.", trigger: { kind: "webhook" } },
+			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
-		const routineId = created.routine.id;
+		const { triggerId } = firstTriggerOf(created).addressed;
 		const legacySecret = randomBytes(32).toString("base64url");
 		const salt = randomBytes(16);
 		const digest = scryptSync(legacySecret, salt, 32);
 		await onDatabase((db) =>
 			db
-				.update(routine)
+				.update(routineTrigger)
 				.set({
-					webhookSecret: null,
-					webhookSecretDigest: `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`,
+					secretEncrypted: null,
+					secretDigest: `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`,
 				})
-				.where(eq(routine.id, routineId)),
+				.where(eq(routineTrigger.id, triggerId)),
 		);
 
 		expect(
-			await webhooks.accept({ routineId, delivery: bearerDelivery(legacySecret) }),
+			await webhooks.accept({ triggerId, delivery: bearerDelivery(legacySecret) }),
 		).toMatchObject({ kind: "run" });
 		expect(
-			await webhooks.accept({ routineId, delivery: bearerDelivery("incorrect") }),
+			await webhooks.accept({ triggerId, delivery: bearerDelivery("incorrect") }),
 		).toBeUndefined();
 	});
 
 	it("refuses a wrong webhook secret without waiting on the routine's other triggers", async () => {
 		const created = await routines.create(
 			{ agentId },
-			{ name: "Busy", instructions: "Handle input.", trigger: { kind: "webhook" } },
+			{ name: "Busy", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		let release = () => {};
 		const released = new Promise<void>((resolve) => {
@@ -542,7 +605,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await lockHeld;
 
 		const refused = await Promise.race([
-			webhooks.accept({ routineId: created.routine.id, delivery: bearerDelivery("incorrect") }),
+			webhooks.accept({
+				triggerId: firstTriggerOf(created).addressed.triggerId,
+				delivery: bearerDelivery("incorrect"),
+			}),
 			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
 		]);
 		release();
@@ -551,12 +617,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(refused).toBeUndefined();
 	});
 
-	it("keeps a secret replaced while the routine is being edited", async () => {
+	it("keeps a secret replaced while its webhook is being edited", async () => {
 		const created = await routines.create(
 			{ agentId },
-			{ name: "Alerts", instructions: "Handle input.", trigger: { kind: "webhook" } },
+			{ name: "Alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
-		const addressed = { agentId, routineId: created.routine.id };
+		const { addressed } = firstTriggerOf(created);
 		let releaseRotation = () => {};
 		const rotationHeld = new Promise<void>((resolve) => {
 			releaseRotation = resolve;
@@ -578,15 +644,21 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		);
 		const secret = await rotatedSecret;
 
-		const edit = routines.update(addressed, { name: "Renamed alerts" });
+		const edit = routines.updateTrigger(addressed, {
+			kind: "webhook",
+			auth: { kind: "api_key", header: "X-Alert-Key" },
+		});
 		await waitUntilBlocked();
 		releaseRotation();
 		await Promise.all([rotation, edit]);
 
 		expect(
-			await webhooks.accept({ routineId: created.routine.id, delivery: bearerDelivery(secret) }),
+			await webhooks.accept({
+				triggerId: addressed.triggerId,
+				delivery: { ...bearerDelivery(""), headers: { "x-alert-key": secret } },
+			}),
 		).toMatchObject({ kind: "run", execution: { duplicate: false } });
-		expect(await view.get(addressed)).toMatchObject({ name: "Renamed alerts" });
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
 	});
 
 	it("refuses a member who may not manage routines a run, a removal or the secret, whoever asks", async () => {
@@ -594,7 +666,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		// forgot to check would reach.
 		const created = await routines.create(
 			{ agentId },
-			{ name: "Nightly", instructions: "Run nightly.", trigger: { kind: "webhook" } },
+			{ name: "Nightly", instructions: "Run nightly.", triggers: [{ kind: "webhook" }] },
 		);
 		const [member] = await onDatabase((db) =>
 			db
@@ -615,7 +687,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			routinesAs(member.id).run({ ...routine, requestId: crypto.randomUUID() }),
 		).rejects.toThrow(ActionForbidden);
 		await expect(routinesAs(member.id).remove(routine)).rejects.toThrow(ActionForbidden);
-		await expect(routinesAs(member.id).getSecret(routine)).rejects.toThrow(ActionForbidden);
+		await expect(
+			routinesAs(member.id).getSecret(firstTriggerOf(created).addressed),
+		).rejects.toThrow(ActionForbidden);
 		expect((await view.listExecutions(routine))?.items).toEqual([]);
 	});
 
@@ -646,7 +720,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				{
 					name: "Forbidden",
 					instructions: "Should not run.",
-					trigger: { kind: "webhook" },
+					triggers: [{ kind: "webhook" }],
 				},
 			),
 		).rejects.toThrow(ResourceHidden);
@@ -658,7 +732,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Check reports",
 				instructions: "Use the original instructions.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const input = { agentId, routineId: created.routine.id, requestId: crypto.randomUUID() };
@@ -692,7 +766,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Morning standup",
 				instructions: "Ask the team what they are working on.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		expect(created.routine.results).toBe("keep_in_run");
@@ -720,7 +794,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "R".repeat(80),
 				instructions: "Keep the title valid.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -737,14 +811,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Webhook",
 				instructions: "Handle input.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
+		const { addressed, secret } = firstTriggerOf(created);
 		const delivery = (amount: number) =>
-			bearerDelivery(created.secret ?? "", { amount }, { "idempotency-key": "delivery-1" });
-		await webhooks.accept({ routineId: created.routine.id, delivery: delivery(1) });
+			bearerDelivery(secret ?? "", { amount }, { "idempotency-key": "delivery-1" });
+		await webhooks.accept({ triggerId: addressed.triggerId, delivery: delivery(1) });
 		await expect(
-			webhooks.accept({ routineId: created.routine.id, delivery: delivery(2) }),
+			webhooks.accept({ triggerId: addressed.triggerId, delivery: delivery(2) }),
 		).rejects.toThrow(RoutineTriggerConflict);
 	});
 
@@ -754,7 +829,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "First queue",
 				instructions: "Run in order.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const secondRoutine = await routines.create(
@@ -762,7 +837,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Second queue",
 				instructions: "Run independently.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const accepted: AcceptedRoutineExecution[] = [];
@@ -810,26 +885,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Quarter hourly",
 				instructions: "Check recent activity.",
-				trigger: {
-					kind: "cron",
-					schedule: { repeat: "cron", expression: "*/15 * * * *" },
-					timezone: "UTC",
-				},
+				triggers: [
+					{
+						kind: "cron",
+						schedule: { repeat: "cron", expression: "*/15 * * * *" },
+						timezone: "UTC",
+					},
+				],
 			},
 		);
-		await onDatabase((db) =>
-			db
-				.update(routine)
-				.set({ nextScheduledAt: new Date("2026-09-18T10:00:00Z") })
-				.where(eq(routine.id, created.routine.id)),
-		);
-		const processDueAt = (now: Date) =>
-			runOnPostgres(
-				TestClock.setTime(now.getTime()).pipe(
-					Effect.andThen(Context.get(conversations, RoutineRunner.Service).processNextDue()),
-					Effect.provide(TestClock.layer()),
-				),
-			);
+		await makeDue(created.routine.id, new Date("2026-09-18T10:00:00Z"));
 		const now = new Date("2026-09-18T12:37:40Z");
 		const accepted = await processDueAt(now);
 		expect(accepted?.duplicate).toBe(false);
@@ -839,11 +904,212 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			kind: "cron",
 			scheduledAt: "2026-09-18T12:30:00.000Z",
 		});
-		const [updated] = await onDatabase((db) =>
-			db.select().from(routine).where(eq(routine.id, created.routine.id)),
-		);
-		expect(updated?.nextScheduledAt?.toISOString()).toBe("2026-09-18T12:45:00.000Z");
+		expect(await nextTimesOf(created.routine.id)).toEqual([
+			{ id: expect.any(String), at: "2026-09-18T12:45:00.000Z" },
+		]);
 		expect(await processDueAt(now)).toBeUndefined();
+	});
+
+	it("runs each of a routine's schedules as it falls due", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "On the hour and half past",
+				instructions: "Check recent activity.",
+				triggers: [
+					{ kind: "cron", schedule: { repeat: "cron", expression: "0 * * * *" }, timezone: "UTC" },
+					{ kind: "cron", schedule: { repeat: "cron", expression: "30 * * * *" }, timezone: "UTC" },
+				],
+			},
+		);
+		const [onTheHour, halfPast] = created.routine.triggers;
+		await makeDue(created.routine.id, new Date("2026-09-18T10:00:00Z"));
+		const now = new Date("2026-09-18T12:40:00Z");
+
+		const first = await processDueAt(now);
+		const second = await processDueAt(now);
+
+		expect(first?.duplicate).toBe(false);
+		expect(second?.duplicate).toBe(false);
+		expect(second?.executionId).not.toBe(first?.executionId);
+		const runs = (await view.listExecutions({ agentId, routineId: created.routine.id })).items;
+		const scheduledTimes = runs.map((run) =>
+			run.trigger.kind === "cron" ? run.trigger.scheduledAt : run.trigger.kind,
+		);
+		expect(scheduledTimes.sort()).toEqual(["2026-09-18T12:00:00.000Z", "2026-09-18T12:30:00.000Z"]);
+		expect(await nextTimesOf(created.routine.id)).toEqual(
+			expect.arrayContaining([
+				{ id: onTheHour?.id, at: "2026-09-18T13:00:00.000Z" },
+				{ id: halfPast?.id, at: "2026-09-18T13:30:00.000Z" },
+			]),
+		);
+		expect(await processDueAt(now)).toBeUndefined();
+	});
+
+	it("starts a run for each schedule due at the same time, not one for both", async () => {
+		const quarterHourly = {
+			kind: "cron" as const,
+			schedule: { repeat: "cron" as const, expression: "*/15 * * * *" },
+			timezone: "UTC",
+		};
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Twice over",
+				instructions: "Check recent activity.",
+				triggers: [quarterHourly, quarterHourly],
+			},
+		);
+		await makeDue(created.routine.id, new Date("2026-09-18T10:00:00Z"));
+		const now = new Date("2026-09-18T12:37:40Z");
+
+		const first = await processDueAt(now);
+		const second = await processDueAt(now);
+
+		expect([first?.duplicate, second?.duplicate]).toEqual([false, false]);
+		expect(second?.executionId).not.toBe(first?.executionId);
+		const runs = (await view.listExecutions({ agentId, routineId: created.routine.id })).items;
+		expect(runs.map((run) => run.trigger)).toMatchObject([
+			{ kind: "cron", scheduledAt: "2026-09-18T12:30:00.000Z" },
+			{ kind: "cron", scheduledAt: "2026-09-18T12:30:00.000Z" },
+		]);
+	});
+
+	it("pauses every schedule of a paused routine, and schedules each again once it is enabled", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Morning and evening",
+				instructions: "Check recent activity.",
+				triggers: [
+					{ kind: "cron", schedule: { repeat: "cron", expression: "0 9 * * *" }, timezone: "UTC" },
+					{ kind: "cron", schedule: { repeat: "cron", expression: "0 17 * * *" }, timezone: "UTC" },
+					{ kind: "webhook" },
+				],
+			},
+		);
+		const addressed = { agentId, routineId: created.routine.id };
+		const nextTimes = (defined: Routines.Defined) =>
+			defined.routine.triggers.flatMap((trigger) =>
+				trigger.kind === "cron" ? [trigger.nextScheduledAt] : [],
+			);
+
+		const paused = await routines.update(addressed, { state: "paused" });
+		expect(nextTimes(paused)).toEqual([null, null]);
+		expect((await nextTimesOf(created.routine.id)).map(({ at }) => at)).toEqual([null, null, null]);
+
+		const enabled = await routines.update(addressed, { state: "enabled" });
+		expect(nextTimes(enabled)).toEqual([expect.any(String), expect.any(String)]);
+		expect(nextTimes(enabled)[0]).not.toBe(nextTimes(enabled)[1]);
+	});
+
+	it("keeps each webhook of a routine to its own secret, and its own deliveries", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Two senders",
+				instructions: "Handle input.",
+				triggers: [{ kind: "webhook" }, { kind: "webhook" }],
+			},
+		);
+		const [first, second] = created.routine.triggers;
+		const secretOf = (triggerId: string | undefined) =>
+			created.secrets.find((made) => made.triggerId === triggerId)?.secret ?? "";
+		expect(created.secrets).toHaveLength(2);
+		expect(secretOf(first?.id)).not.toBe(secretOf(second?.id));
+		const delivered = (triggerId: string | undefined, secret: string) =>
+			webhooks.accept({
+				triggerId: triggerId ?? "",
+				delivery: bearerDelivery(secret, { event: "created" }, { "idempotency-key": "shared-key" }),
+			});
+
+		expect(await delivered(first?.id, secretOf(second?.id))).toBeUndefined();
+		const toFirst = await delivered(first?.id, secretOf(first?.id));
+		const toSecond = await delivered(second?.id, secretOf(second?.id));
+
+		expect(toFirst).toMatchObject({ kind: "run", execution: { duplicate: false } });
+		expect(toSecond).toMatchObject({ kind: "run", execution: { duplicate: false } });
+		expect(toSecond?.kind === "run" && toSecond.execution.executionId).not.toBe(
+			toFirst?.kind === "run" && toFirst.execution.executionId,
+		);
+	});
+
+	it("keeps a trigger to its kind", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Scheduled",
+				instructions: "Handle it.",
+				triggers: [
+					{ kind: "cron", schedule: { repeat: "cron", expression: "0 9 * * *" }, timezone: "UTC" },
+				],
+			},
+		);
+		const { addressed } = firstTriggerOf(created);
+
+		await expect(routines.updateTrigger(addressed, { kind: "webhook" })).rejects.toThrow(
+			RoutineTriggerKindChanged,
+		);
+		expect((await routines.get(addressed)).triggers).toEqual(created.routine.triggers);
+	});
+
+	it("refuses a delivery to a webhook once it is removed from its routine", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Short-lived", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
+		);
+		const { addressed, secret } = firstTriggerOf(created);
+
+		expect((await routines.removeTrigger(addressed)).triggers).toEqual([]);
+
+		expect(
+			await webhooks.accept({
+				triggerId: addressed.triggerId,
+				delivery: bearerDelivery(secret ?? ""),
+			}),
+		).toBeUndefined();
+		await expect(routines.removeTrigger(addressed)).rejects.toThrow(RoutineTriggerNotFound);
+	});
+
+	it("runs a routine without triggers only when someone runs it", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "On request", instructions: "Handle it.", triggers: [] },
+		);
+		expect(created).toEqual({
+			routine: expect.objectContaining({ triggers: [] }),
+			secrets: [],
+		});
+
+		const accepted = await routines.run({
+			agentId,
+			routineId: created.routine.id,
+			requestId: crypto.randomUUID(),
+		});
+
+		expect(accepted.duplicate).toBe(false);
+		const [execution] = await onDatabase((db) =>
+			db.select().from(routineExecution).where(eq(routineExecution.id, accepted.executionId)),
+		);
+		expect(execution).toMatchObject({ triggerKind: "manual", triggerId: null });
+	});
+
+	it("takes no more triggers than a routine may have", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Crowded",
+				instructions: "Handle it.",
+				triggers: Array.from({ length: MAX_ROUTINE_TRIGGERS }, () => ({
+					kind: "webhook" as const,
+					secret: null,
+				})),
+			},
+		);
+
+		await expect(
+			routines.addTrigger({ agentId, routineId: created.routine.id }, { kind: "webhook" }),
+		).rejects.toThrow(TooManyRoutineTriggers);
 	});
 
 	it("pages execution history with opaque cursors", async () => {
@@ -852,7 +1118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Paged runs",
 				instructions: "Run repeatedly.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		for (let index = 0; index < 3; index += 1) {
@@ -913,7 +1179,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		const aRoutineWithARun = async () => {
 			const created = await routines.create(
 				{ agentId },
-				{ name: "Reached", instructions: "Run.", trigger: { kind: "webhook" } },
+				{ name: "Reached", instructions: "Run.", triggers: [{ kind: "webhook" }] },
 			);
 			const routine = { agentId, routineId: created.routine.id };
 			await routines.run({ ...routine, requestId: crypto.randomUUID() });

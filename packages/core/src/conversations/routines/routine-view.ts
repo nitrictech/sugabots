@@ -12,7 +12,14 @@ import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { crewOf } from "../threads/participants.ts";
 import { toRoutineExecution } from "./execution.ts";
-import { inScope, RoutineNotFound, scopeOf, toRoutine } from "./routine.ts";
+import {
+	inScope,
+	RoutineNotFound,
+	routineWithTriggers,
+	scopeOf,
+	toRoutine,
+	triggersOf,
+} from "./routine.ts";
 import type { Routines } from "./routines.ts";
 
 /** What the routine screens show: the view half of `Routines.Service`. */
@@ -43,10 +50,18 @@ export const makeView = Effect.gen(function* () {
 							)
 							.orderBy(asc(routine.name), asc(routine.id)),
 					);
+					const triggers = yield* triggersOf(rows.map((row) => row.routine.id));
 					return rows.flatMap((row): WorkspaceRoutine[] => {
 						const crew = crewAgentRow(row.agent);
+						const routineTriggers = triggers.get(row.routine.id) ?? [];
 						return crew
-							? [{ routine: toRoutine(row.routine), agent: toAgent(crew), pod: row.pod }]
+							? [
+									{
+										routine: toRoutine(row.routine, routineTriggers),
+										agent: toAgent(crew),
+										pod: row.pod,
+									},
+								]
 							: [];
 					});
 				}),
@@ -70,7 +85,8 @@ export const makeView = Effect.gen(function* () {
 							)
 							.orderBy(asc(routine.name)),
 					);
-					return rows.map(toRoutine);
+					const triggers = yield* triggersOf(rows.map((row) => row.id));
+					return rows.map((row) => toRoutine(row, triggers.get(row.id) ?? []));
 				}),
 			),
 
@@ -83,7 +99,7 @@ export const makeView = Effect.gen(function* () {
 						db.select().from(routine).where(inScope(scope)).limit(1),
 					);
 					if (!row) return yield* new RoutineNotFound();
-					return toRoutine(row);
+					return yield* routineWithTriggers(row);
 				}),
 			),
 

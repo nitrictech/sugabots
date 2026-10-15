@@ -205,14 +205,17 @@ export type RoutineSchedule = typeof routineScheduleSchema.Type;
 /** A schedule picked by its parts rather than written as cron. */
 export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
 
+/** One of the things that start a routine; a routine may have several, of any kinds. */
 export const routineTriggerSchema = Schema.Union([
 	Schema.Struct({
+		id: uuidSchema,
 		kind: Schema.Literal("cron"),
 		schedule: routineScheduleSchema,
 		timezone: timezoneSchema,
+		/** Null while the routine is paused. */
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
-	Schema.Struct({ kind: Schema.Literal("webhook"), auth: webhookAuthSchema }),
+	Schema.Struct({ id: uuidSchema, kind: Schema.Literal("webhook"), auth: webhookAuthSchema }),
 ]);
 
 export type RoutineTrigger = typeof routineTriggerSchema.Type;
@@ -223,7 +226,8 @@ export const routineSchema = Schema.Struct({
 	agentId: uuidSchema,
 	name: routineNameSchema,
 	instructions: routineInstructionsSchema,
-	trigger: routineTriggerSchema,
+	/** What starts it, in the order they were added; with none, it runs only when someone runs it. */
+	triggers: Schema.Array(routineTriggerSchema),
 	state: routineStateSchema,
 	results: routineResultsSchema,
 	createdById: Schema.NullOr(uuidSchema),
@@ -252,11 +256,11 @@ export const workspaceRoutineListSchema = Schema.Struct({
 export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
 
 /**
- * A webhook trigger as written. Without `auth`, a new routine takes a bearer
+ * A webhook trigger as written. Without `auth`, a new one takes a bearer
  * token and a changed one keeps how it checks callers. A null `secret` leaves
- * the routine without one, so its address alone runs it. Without `secret`,
- * one is made when the routine first needs one or its auth kind changes, and
- * is returned then.
+ * it without one, so its address alone runs the routine. Without `secret`,
+ * one is made when it first needs one or its auth kind changes, and is
+ * returned then.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
@@ -272,26 +276,33 @@ const scheduledTriggerInputSchema = Schema.Struct({
 	timezone: timezoneSchema,
 });
 
-const newRoutineBaseSchema = {
+/** A trigger as written, to add to a routine or to replace one of its own of the same kind. */
+export const routineTriggerInputSchema = Schema.Union([
+	scheduledTriggerInputSchema,
+	webhookTriggerInputSchema,
+]);
+
+export type RoutineTriggerInput = typeof routineTriggerInputSchema.Type;
+
+/** At most this many triggers start one routine. */
+export const MAX_ROUTINE_TRIGGERS = 20;
+
+export const newRoutineSchema = Schema.Struct({
 	name: routineNameSchema,
 	instructions: routineInstructionsSchema,
 	state: Schema.optional(routineStateSchema),
 	results: Schema.optional(routineResultsSchema),
-};
-
-export const newRoutineSchema = Schema.Union([
-	Schema.Struct({ ...newRoutineBaseSchema, trigger: scheduledTriggerInputSchema }),
-	Schema.Struct({ ...newRoutineBaseSchema, trigger: webhookTriggerInputSchema }),
-]);
+	triggers: Schema.Array(routineTriggerInputSchema).check(Schema.isMaxLength(MAX_ROUTINE_TRIGGERS)),
+});
 
 export type NewRoutine = typeof newRoutineSchema.Type;
 
+/** A routine's own settings; its triggers change one by one, through their own endpoints. */
 export const routineUpdateSchema = Schema.Struct({
 	name: Schema.optional(routineNameSchema),
 	instructions: Schema.optional(routineInstructionsSchema),
 	state: Schema.optional(routineStateSchema),
 	results: Schema.optional(routineResultsSchema),
-	trigger: Schema.optional(Schema.Union([scheduledTriggerInputSchema, webhookTriggerInputSchema])),
 });
 
 export type RoutineUpdate = typeof routineUpdateSchema.Type;
@@ -415,14 +426,14 @@ export const acceptedRoutineExecutionSchema = Schema.Struct({
 
 export type AcceptedRoutineExecution = typeof acceptedRoutineExecutionSchema.Type;
 
-/** A webhook routine's new secret, or null when it was left without one. */
+/** A webhook trigger's new secret, or null when it was left without one. */
 export const routineSecretSchema = Schema.Struct({ secret: Schema.NullOr(Schema.String) });
 export type RoutineSecret = typeof routineSecretSchema.Type;
 
 /**
- * A webhook routine's current secret, for somebody who manages it. A routine
- * with `none` runs for anybody who has its address; a `hashed` one has a
- * bearer token made before secrets were kept, which only its hash checks.
+ * A webhook trigger's current secret, for somebody who manages it. One with
+ * `none` runs the routine for anybody who has its address; a `hashed` one has
+ * a bearer token made before secrets were kept, which only its hash checks.
  */
 export const routineCurrentSecretSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("set"), secret: Schema.String }),
@@ -432,7 +443,7 @@ export const routineCurrentSecretSchema = Schema.Union([
 export type RoutineCurrentSecret = typeof routineCurrentSecretSchema.Type;
 
 /**
- * Replaces a webhook routine's secret with `secret`, with a new one when it
+ * Replaces a webhook trigger's secret with `secret`, with a new one when it
  * is absent, or with none when it is null, so the address alone runs it.
  */
 export const routineSecretReplacementSchema = Schema.Struct({
@@ -450,9 +461,10 @@ export type AcceptedRoutineWebhook = typeof acceptedRoutineWebhookSchema.Type;
 export const routineWebhookChallengeSchema = Schema.Struct({ challenge: Schema.String });
 export type RoutineWebhookChallenge = typeof routineWebhookChallengeSchema.Type;
 
+/** A routine as written, and the secrets of any webhook triggers the write made one for, shown once. */
 export const routineWriteResultSchema = Schema.Struct({
 	routine: routineSchema,
-	secret: Schema.NullOr(Schema.String),
+	secrets: Schema.Array(Schema.Struct({ triggerId: uuidSchema, secret: Schema.String })),
 });
 export type RoutineWriteResult = typeof routineWriteResultSchema.Type;
 

@@ -1,7 +1,8 @@
 import type { Agent, Pod, Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
+import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
-import { expect, screen, waitFor, within } from "storybook/test";
+import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -29,17 +30,18 @@ function placed(
 	name: string,
 	agent: Agent,
 	pod: Pod,
-	trigger: Routine["trigger"],
+	trigger: TestRoutineTrigger | readonly TestRoutineTrigger[],
 	fields: Partial<Pick<Routine, "state" | "results">> = {},
 ): WorkspaceRoutine {
+	const id = `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`;
 	return {
 		routine: {
-			id: `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`,
+			id,
 			workspaceId: storyWorkspace.id,
 			agentId: agent.id,
 			name,
 			instructions: `${name}: look over what changed and post a short summary.`,
-			trigger,
+			triggers: routineTriggers(id, ...[trigger].flat()),
 			state: "enabled",
 			results: "post_to_chat",
 			createdById: null,
@@ -53,7 +55,7 @@ function placed(
 	};
 }
 
-const cron = (expression: string): Routine["trigger"] => ({
+const cron = (expression: string): TestRoutineTrigger => ({
 	kind: "cron",
 	schedule: { repeat: "cron", expression },
 	timezone: "UTC",
@@ -126,6 +128,15 @@ const quarterClose = placed(9, "Quarter close", accountManager, revenue, {
 	timezone: "UTC",
 	nextScheduledAt: null,
 });
+const releaseWatch = placed(
+	11,
+	"Release watch",
+	oncall,
+	engineering,
+	[cron("0 9 * * 1-5"), cron("0 17 * * 5"), { kind: "webhook", auth: { kind: "bearer" } }],
+	{ results: "keep_in_run" },
+);
+
 const everyRoutine = [
 	overnight,
 	morningBrief,
@@ -141,6 +152,30 @@ const routinesAnswer = (items: WorkspaceRoutine[]) =>
 	http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items }));
 
 const pageOf = (one: WorkspaceRoutine) => `${routines}/${one.routine.id}`;
+
+type Canvas = ReturnType<typeof within>;
+
+/** The rows of the Triggers group, once the routine's page has loaded. */
+async function triggerRows(canvas: Canvas) {
+	const group = await canvas.findByRole("region", { name: "Triggers" }, { timeout: 10_000 });
+	return within(group).getAllByRole("button");
+}
+
+/** Opens the dialog of the routine's first trigger. */
+async function openFirstTrigger(canvas: Canvas) {
+	const [first] = await triggerRows(canvas);
+	if (!first) throw new Error("No trigger to open");
+	await userEvent.click(first);
+	return screen.findByRole("dialog");
+}
+
+/** Opens Add trigger's first step, the kinds of trigger. */
+async function openAddTrigger(canvas: Canvas) {
+	await userEvent.click(
+		await canvas.findByRole("button", { name: "Add trigger" }, { timeout: 10_000 }),
+	);
+	return screen.findByRole("dialog", { name: "Add a trigger" });
+}
 
 const meta = preview.meta({
 	title: "Views/Routines",
@@ -181,9 +216,8 @@ export const Scheduled = meta.story({
 			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "On" })).toBeChecked();
-		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
-			"Daily at 6:00",
-		);
+		await expect(await triggerRows(canvas)).toHaveLength(2);
+		await expect(canvas.getByRole("button", { name: /^Daily at 6:00/ })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "More" })).toBeInTheDocument();
 	},
@@ -283,33 +317,59 @@ export const RecentRuns = meta.story({
 	},
 });
 
-/** The trigger opens on a page of its own: its type, the schedule's groups, and when it runs, in which time zone. */
+/** A trigger opens in a dialog: the schedule's groups, when it runs, in which time zone, Save and Remove. */
 export const Trigger = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByRole("heading", { name: "Trigger" })).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
-		await expect(canvas.getByText(/^Runs every day at 6:00, .*UTC.*\.$/)).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Overnight outbound" })).toBeInTheDocument();
+	play: async ({ canvas }) => {
+		const dialog = await openFirstTrigger(canvas);
+		await expect(within(dialog).getByRole("heading", { name: "Schedule" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("radio", { name: "Daily" })).toBeChecked();
+		await expect(
+			within(dialog).getByText(/^Runs every day at 6:00, .*UTC.*\.$/),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Remove" })).toBeInTheDocument();
+	},
+});
+
+/** Several triggers: two schedules and a webhook, each a row, then Add trigger. */
+export const SeveralTriggers = meta.story({
+	beforeEach({ msw }) {
+		msw.use(routinesAnswer([...everyRoutine, releaseWatch]));
+	},
+	render: () => <StoryApp path={pageOf(releaseWatch)} />,
+	play: async ({ canvas }) => {
+		const rows = await triggerRows(canvas);
+		await expect(rows.map((row) => row.textContent)).toEqual([
+			"Weekdays at 9:00Schedule",
+			"Fri at 17:00Schedule",
+			"WebhookWebhook",
+			"Add trigger",
+		]);
+	},
+});
+
+/** Add trigger's first step: the kinds of trigger. */
+export const AddTrigger = meta.story({
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas }) => {
+		const step = await openAddTrigger(canvas);
+		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
+		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 	},
 });
 
 /** Several times on some days of the week: a row per time, each with a way to remove it, and room for more. */
 export const SeveralTimes = meta.story({
 	render: () => <StoryApp path={pageOf(standups)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByRole("radio", { name: "Weekly" })).toBeChecked();
-		await expect(canvas.getAllByRole("combobox", { name: /^Time / })).toHaveLength(3);
-		await expect(canvas.getAllByRole("button", { name: /^Remove / })).toHaveLength(3);
-		await expect(canvas.getByRole("button", { name: "Add a time" })).toBeInTheDocument();
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(await dialog.findByRole("radio", { name: "Weekly" })).toBeChecked();
+		await expect(dialog.getAllByRole("combobox", { name: /^Time / })).toHaveLength(3);
+		await expect(dialog.getAllByRole("button", { name: /^Remove / })).toHaveLength(3);
+		await expect(dialog.getByRole("button", { name: "Add a time" })).toBeInTheDocument();
 		await expect(
-			canvas.getByText(/^Runs every week on Mon, Wed and Fri at 9:00, 13:00 and 17:00, .*UTC.*\.$/),
+			dialog.getByText(/^Runs every week on Mon, Wed and Fri at 9:00, 13:00 and 17:00, .*UTC.*\.$/),
 		).toBeInTheDocument();
 	},
 });
@@ -317,16 +377,14 @@ export const SeveralTimes = meta.story({
 /** Every third month on its last day: Every and On the step through their values. */
 export const Monthly = meta.story({
 	render: () => <StoryApp path={pageOf(quarterClose)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByRole("status", { name: "Every" })).toHaveTextContent(
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(await dialog.findByRole("status", { name: "Every" })).toHaveTextContent(
 			"3 months",
 		);
-		await expect(canvas.getByRole("status", { name: "On the" })).toHaveTextContent("last day");
+		await expect(dialog.getByRole("status", { name: "On the" })).toHaveTextContent("last day");
 		await expect(
-			canvas.getByText(/Runs every 3 months on the last day at 10:00/),
+			dialog.getByText(/Runs every 3 months on the last day at 10:00/),
 		).toBeInTheDocument();
 	},
 });
@@ -358,19 +416,17 @@ export const Paused = meta.story({
 /** A webhook: its address, its auth, and its saved secret, hidden until Show, edited in place. */
 export const Webhook = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
 		await expect(
-			await canvas.findByText(new RegExp(`/hooks/routines/${incidentIntake.routine.id}$`)),
+			await dialog.findByText(new RegExp(`/hooks/triggers/${incidentIntake.routine.id}$`)),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
-		await expect(canvas.getByLabelText("Header")).toHaveValue("X-Signature");
-		const secret = await canvas.findByLabelText("Signing secret");
+		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await expect(dialog.getByLabelText("Header")).toHaveValue("X-Signature");
+		const secret = await dialog.findByLabelText("Signing secret");
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
 		await expect(secret).toHaveAttribute("type", "password");
-		await expect(canvas.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
+		await expect(dialog.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
 	},
 });
 
@@ -378,12 +434,10 @@ export const Webhook = meta.story({
 export const SlackWebhook = meta.story({
 	render: () => <StoryApp path={pageOf(slackMentions)} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByRole("button", { name: "Source: Slack" })).toBeInTheDocument();
-		await expect(canvas.queryByLabelText("Header")).toBeNull();
-		const secret = await canvas.findByLabelText("Signing secret");
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(await dialog.findByRole("button", { name: "Source: Slack" })).toBeInTheDocument();
+		await expect(dialog.queryByLabelText("Header")).toBeNull();
+		const secret = await dialog.findByLabelText("Signing secret");
 		await userEvent.clear(secret);
 		await userEvent.type(secret, "8f742231b10e8888abcd99yyyzzz85a5{Escape}");
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
@@ -394,10 +448,8 @@ export const SlackWebhook = meta.story({
 export const SourceMenu = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await userEvent.click(await canvas.findByRole("button", { name: "Source: Generic" }));
+		const dialog = within(await openFirstTrigger(canvas));
+		await userEvent.click(await dialog.findByRole("button", { name: "Source: Generic" }));
 		const menu = await screen.findByRole("menu");
 		for (const source of ["Generic", "GitHub", "Stripe", "Slack", "Linear"]) {
 			await expect(within(menu).getByRole("menuitem", { name: source })).toBeInTheDocument();
@@ -410,12 +462,10 @@ export const SourceMenu = meta.story({
 /** Basic auth: a username to set, and a password. */
 export const BasicWebhook = meta.story({
 	render: () => <StoryApp path={pageOf(signups)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByLabelText("Username")).toHaveValue("sugabots");
-		await expect(canvas.getByText("Password")).toBeInTheDocument();
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(await dialog.findByLabelText("Username")).toHaveValue("sugabots");
+		await expect(dialog.getByText("Password")).toBeInTheDocument();
 	},
 });
 
@@ -423,21 +473,21 @@ export const BasicWebhook = meta.story({
 export const NewWebhook = meta.story({
 	render: () => <StoryApp path={`${routines}/new`} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await userEvent.click(await canvas.findByRole("radio", { name: "Webhook" }));
-		await expect(canvas.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
-		await expect(canvas.getByLabelText("Signing secret")).toHaveValue("");
+		const step = await openAddTrigger(canvas);
+		await userEvent.click(within(step).getByRole("button", { name: /^Webhook/ }));
+		const dialog = within(await screen.findByRole("dialog", { name: "Webhook" }));
+		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await expect(dialog.getByLabelText("Signing secret")).toHaveValue("");
 		await expect(
-			canvas.getByText(/^With no secret, anyone who has the address can run it\./),
+			dialog.getByText(/^With no secret, anyone who has the address can run it\./),
 		).toBeInTheDocument();
+		await expect(dialog.getByRole("button", { name: "Add trigger" })).toBeEnabled();
 	},
 });
 
 /**
- * A new routine starts on a daily schedule at 9:00 on the first bot, posting
- * its result to the chat, and waits for a name and instructions.
+ * A new routine starts with no triggers on the first bot, posting its result
+ * to the chat, and waits for a name and instructions.
  */
 export const NewRoutine = meta.story({
 	render: () => <StoryApp path={`${routines}/new`} />,
@@ -446,28 +496,26 @@ export const NewRoutine = meta.story({
 			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Not created yet")).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
-			"Daily at 9:00",
-		);
+		await expect(canvas.getByText("No triggers")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
 		await expect(canvas.queryByRole("switch", { name: "On" })).toBeNull();
 	},
 });
 
-/** Weekly adds a row of days, Done goes back, and the bot list opens in place under its pods. */
+/** A schedule added: Weekly adds a row of days, and the bot list opens in place under its pods. */
 export const ChoosingDaysAndABot = meta.story({
 	render: () => <StoryApp path={`${routines}/new`} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
-		);
-		await userEvent.click(await canvas.findByRole("radio", { name: "Weekly" }));
-		await userEvent.click(canvas.getByRole("checkbox", { name: "Friday" }));
-		await expect(canvas.getByText(/Runs every week on Mon and Fri at 9:00/)).toBeInTheDocument();
-		await userEvent.click(canvas.getByRole("button", { name: "Done" }));
-		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
-			"Mon Fri at 9:00",
-		);
+		const step = await openAddTrigger(canvas);
+		await userEvent.click(within(step).getByRole("button", { name: /^Schedule/ }));
+		const dialog = within(await screen.findByRole("dialog", { name: "Schedule" }));
+		await userEvent.click(dialog.getByRole("radio", { name: "Weekly" }));
+		await userEvent.click(dialog.getByRole("checkbox", { name: "Friday" }));
+		await expect(dialog.getByText(/Runs every week on Mon and Fri at 9:00/)).toBeInTheDocument();
+		await userEvent.click(dialog.getByRole("button", { name: "Add trigger" }));
+		await expect(
+			await canvas.findByRole("button", { name: /^Mon Fri at 9:00/ }),
+		).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: /^Bot/ }));
 		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
 	},
@@ -491,6 +539,9 @@ export const AsAMember = meta.story({
 		await expect(canvas.queryByRole("button", { name: "Run now" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "More" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New routine" })).toBeNull();
+		await expect(canvas.getByText("Daily at 6:00")).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: /^Daily at 6:00/ })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Add trigger" })).toBeNull();
 	},
 });
 

@@ -1,6 +1,5 @@
-import type { Agent, Pod, Routine } from "@sugabots/contracts";
+import type { Agent, Pod, Routine, RoutineExecutionTriggerKind } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Clock, Webhook } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -22,6 +21,7 @@ import {
 	SettingsRowIcon,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { RoutineTriggerIcon } from "./ChatActivityRow.tsx";
 import {
 	type BotChoice,
 	NewRoutinePage,
@@ -93,7 +93,7 @@ export function WorkspaceRoutinesSettings({
 				>
 					{newRoutine && (
 						<SettingsListRow
-							picture={<RoutineIcon trigger="cron" paused={false} />}
+							picture={<RoutineIcon kind="cron" paused={false} />}
 							label="New routine"
 							sub="Not created yet"
 							selected
@@ -105,7 +105,7 @@ export function WorkspaceRoutinesSettings({
 							key={one.routine.id}
 							picture={
 								<RoutineIcon
-									trigger={one.routine.trigger.kind}
+									kind={firstKind(one.routine)}
 									paused={one.routine.state === "paused"}
 								/>
 							}
@@ -176,7 +176,7 @@ export function AgentRoutines({ agent, pod }: { agent: Agent; pod: Pod }) {
 			{list.map((routine) => (
 				<SettingsRow
 					key={routine.id}
-					icon={<RoutineIcon trigger={routine.trigger.kind} paused={routine.state === "paused"} />}
+					icon={<RoutineIcon kind={firstKind(routine)} paused={routine.state === "paused"} />}
 					label={routine.name}
 					sub={scheduleLabel(routine)}
 					trailing={routine.state === "paused" && <SettingsValue>Paused</SettingsValue>}
@@ -191,20 +191,18 @@ export function AgentRoutines({ agent, pod }: { agent: Agent; pod: Pod }) {
 	);
 }
 
-/** A clock for a schedule and a hook for a webhook, faded while the routine is paused. */
-function RoutineIcon({
-	trigger,
-	paused,
-}: {
-	trigger: Routine["trigger"]["kind"];
-	paused: boolean;
-}) {
-	const Icon = trigger === "cron" ? Clock : Webhook;
+/** The mark of what first starts a routine, faded while it is paused. */
+function RoutineIcon({ kind, paused }: { kind: RoutineExecutionTriggerKind; paused: boolean }) {
 	return (
 		<SettingsRowIcon className={paused ? "opacity-55" : undefined}>
-			<Icon size={15} strokeWidth={2.2} />
+			<RoutineTriggerIcon kind={kind} size={15} strokeWidth={2.2} />
 		</SettingsRowIcon>
 	);
+}
+
+/** What first starts `routine`, or nothing but someone running it. */
+function firstKind(routine: Routine): RoutineExecutionTriggerKind {
+	return routine.triggers[0]?.kind ?? "manual";
 }
 
 /** The crew bots a person may add a routine to, grouped by pod as the pods are listed. */

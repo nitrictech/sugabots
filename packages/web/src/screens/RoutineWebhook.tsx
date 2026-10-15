@@ -13,7 +13,7 @@ import { ChevronDown, Eye, EyeOff, Webhook } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useRoutineActions, useRoutineSecret } from "@/lib/routines.ts";
+import { type TriggerAddress, useRoutineActions, useRoutineSecret } from "@/lib/routines.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import {
@@ -197,32 +197,35 @@ export function NewWebhookGroups({
 }
 
 /**
- * An existing webhook routine's groups: its address and where it comes from,
+ * An existing webhook trigger's groups: its address and where it comes from,
  * then its auth, which saves as it changes, and its secret, under a note of
  * what a caller must send, or, while it has no secret, that nothing is asked
  * of them.
  */
 export function WebhookGroups({
 	placed,
+	triggerId,
 	auth,
 	onChangeAuth,
 }: {
 	placed: PlacedRoutine;
+	triggerId: string;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
 }) {
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;
-	const saved = useRoutineSecret({ agentId: agent.id, routineId: routine.id, canManage }).data;
-	const address = webhookAddress(placed.routine.id);
+	const address = { agentId: agent.id, routineId: routine.id, triggerId };
+	const saved = useRoutineSecret({ ...address, canManage }).data;
+	const url = webhookAddress(triggerId);
 	return (
 		<>
 			<SettingsGroup>
 				<SettingsControlRow label="Address">
 					<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-						{address}
+						{url}
 					</code>
-					<CopyIconButton label="Copy address" text={address} size="lg" />
+					<CopyIconButton label="Copy address" text={url} size="lg" />
 				</SettingsControlRow>
 				<SourceRow auth={auth} onChange={onChangeAuth} />
 			</SettingsGroup>
@@ -230,7 +233,7 @@ export function WebhookGroups({
 				// Keyed by the saved secret, so the field starts again from a newly saved one.
 				<SecretGroup
 					key={saved.kind === "set" ? saved.secret : saved.kind}
-					placed={placed}
+					address={address}
 					auth={auth}
 					onChangeAuth={onChangeAuth}
 					hasSecret={saved.kind !== "none"}
@@ -252,8 +255,8 @@ export function WebhookGroups({
 	);
 }
 
-function webhookAddress(routineId: string): string {
-	return `${apiBaseUrl}/hooks/routines/${routineId}`;
+function webhookAddress(triggerId: string): string {
+	return `${apiBaseUrl}/hooks/triggers/${triggerId}`;
 }
 
 /** For a generic webhook, the auth to ask callers for and what it needs. */
@@ -447,7 +450,11 @@ function CommittedFieldRow({
 				onBlur={commit}
 				onKeyDown={(event) => {
 					if (event.key === "Enter") event.currentTarget.blur();
-					if (event.key === "Escape") setDraft(value);
+					if (event.key === "Escape" && draft !== value) {
+						// Undoing the edit takes this Escape, so the dialog around it stays open.
+						event.stopPropagation();
+						setDraft(value);
+					}
 				}}
 				autoComplete="off"
 				spellCheck={false}
@@ -467,13 +474,13 @@ function CommittedFieldRow({
  * the address alone runs the routine.
  */
 function SecretGroup({
-	placed,
+	address,
 	auth,
 	onChangeAuth,
 	hasSecret,
 	savedSecret,
 }: {
-	placed: PlacedRoutine;
+	address: TriggerAddress;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
 	hasSecret: boolean;
@@ -486,11 +493,7 @@ function SecretGroup({
 
 	function commit() {
 		if (next === savedSecret || !secretReady(auth, next)) return;
-		actions.rotateSecret.mutate({
-			agentId: placed.agent.id,
-			routineId: placed.routine.id,
-			secret: next === "" ? null : next,
-		});
+		actions.rotateSecret.mutate({ ...address, secret: next === "" ? null : next });
 	}
 
 	return (
@@ -501,7 +504,7 @@ function SecretGroup({
 				value={draft}
 				onChange={setDraft}
 				onCommit={commit}
-				onRevert={() => setDraft(savedSecret)}
+				onRevert={draft === savedSecret ? undefined : () => setDraft(savedSecret)}
 				error={
 					actions.rotateSecret.error
 						? failureMessage(actions.rotateSecret.error)
@@ -517,7 +520,8 @@ function SecretGroup({
 /**
  * A secret as a field, typed or pasted in, such as the signing secret a
  * sender made. It shows hidden until Show, and can be copied. `onCommit`
- * runs when it is left or Enter is pressed, and `onRevert` on Escape.
+ * runs when it is left or Enter is pressed, and `onRevert`, given while there
+ * is an edit to undo, on Escape.
  */
 function SecretField({
 	auth,
@@ -549,7 +553,11 @@ function SecretField({
 					onBlur={onCommit}
 					onKeyDown={(event) => {
 						if (event.key === "Enter") event.currentTarget.blur();
-						if (event.key === "Escape") onRevert?.();
+						if (event.key === "Escape" && onRevert) {
+							// Undoing the edit takes this Escape, so the dialog around it stays open.
+							event.stopPropagation();
+							onRevert();
+						}
 					}}
 					autoComplete="off"
 					spellCheck={false}
