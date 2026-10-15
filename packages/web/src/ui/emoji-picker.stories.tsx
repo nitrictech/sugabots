@@ -41,12 +41,22 @@ const meta = preview.meta({
 
 /** Every emoji by category. Typing narrows them, and choosing one gives it. */
 export const Default = meta.story({
-	play: async ({ args, canvas, canvasElement, userEvent }) => {
+	play: async ({ args, canvas, userEvent }) => {
 		await canvas.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
 		await userEvent.click(canvas.getByRole("searchbox", { name: "Search emoji" }));
-		await userEvent.keyboard("rocket");
-		await chooseSearched(canvasElement, "Rocket", userEvent);
-		await expect(args.onSelect).toHaveBeenCalledWith("🚀");
+		await userEvent.keyboard("hundred points");
+		// The search's only result is active once it applies, and Enter chooses it. A
+		// click could miss, as the picker lays its rows out again while results arrive.
+		await waitFor(
+			() =>
+				expect(canvas.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+					"aria-selected",
+					"true",
+				),
+			{ timeout: 5_000 },
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onSelect).toHaveBeenCalledWith("💯");
 	},
 });
 
@@ -98,28 +108,3 @@ export const NoneRecent = meta.story({
 		await expect(canvas.queryByRole("region", { name: "Recent" })).toBeNull();
 	},
 });
-
-/**
- * Chooses the emoji the picker's search has narrowed to, once it has settled.
- * The picker applies a search when the page is idle and may lay its rows out
- * again after the first results show, so the emoji is hovered until the
- * picker marks it as the one under the pointer, and only then clicked.
- */
-async function chooseSearched(
-	picker: HTMLElement,
-	name: string,
-	user: { hover: (element: Element) => Promise<void>; click: (element: Element) => Promise<void> },
-): Promise<void> {
-	const cell = () => {
-		expect(within(picker).queryByRole("gridcell", { name: "Grinning face" })).toBeNull();
-		return within(picker).getByRole("gridcell", { name });
-	};
-	await waitFor(
-		async () => {
-			await user.hover(cell());
-			expect(cell()).toHaveAttribute("aria-selected", "true");
-		},
-		{ timeout: 5_000 },
-	);
-	await user.click(cell());
-}

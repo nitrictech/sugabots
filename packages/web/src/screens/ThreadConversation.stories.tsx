@@ -822,9 +822,19 @@ export const Reactions = meta.story({
 		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
 		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
 		await waitFor(() => expect(search).toHaveFocus());
-		await userEvent.keyboard("rocket");
-		await chooseSearched(picker, "Rocket", userEvent);
-		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "🚀");
+		await userEvent.keyboard("hundred points");
+		// The search's only result is active once it applies, and Enter chooses it. A
+		// click could miss, as the picker lays its rows out again while results arrive.
+		await waitFor(
+			() =>
+				expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+					"aria-selected",
+					"true",
+				),
+			{ timeout: 5_000 },
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "💯");
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
 	},
 });
@@ -856,7 +866,17 @@ export const ReactFromToolbar = meta.story({
 		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
 		await waitFor(() => expect(search).toHaveFocus());
 		await userEvent.keyboard("thumbs up");
-		await chooseSearched(picker, "Thumbs up", userEvent);
+		// The search's only result is active once it applies, and Enter chooses it. A
+		// click could miss, as the picker lays its rows out again while results arrive.
+		await waitFor(
+			() =>
+				expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
+					"aria-selected",
+					"true",
+				),
+			{ timeout: 5_000 },
+		);
+		await userEvent.keyboard("{Enter}");
 		// The picker's data writes 👍 with a variation selector after it, which a reaction leaves off.
 		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(releaseNotes, "\u{1F44D}");
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
@@ -967,28 +987,3 @@ export const AnsweredApprovals = meta.story({
 		await expect(canvas.queryByRole("status")).toBeNull();
 	},
 });
-
-/**
- * Chooses the emoji the picker's search has narrowed to, once it has settled.
- * The picker applies a search when the page is idle and may lay its rows out
- * again after the first results show, so the emoji is hovered until the
- * picker marks it as the one under the pointer, and only then clicked.
- */
-async function chooseSearched(
-	picker: HTMLElement,
-	name: string,
-	user: { hover: (element: Element) => Promise<void>; click: (element: Element) => Promise<void> },
-): Promise<void> {
-	const cell = () => {
-		expect(within(picker).queryByRole("gridcell", { name: "Grinning face" })).toBeNull();
-		return within(picker).getByRole("gridcell", { name });
-	};
-	await waitFor(
-		async () => {
-			await user.hover(cell());
-			expect(cell()).toHaveAttribute("aria-selected", "true");
-		},
-		{ timeout: 5_000 },
-	);
-	await user.click(cell());
-}
