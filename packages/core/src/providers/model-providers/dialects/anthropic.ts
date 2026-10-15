@@ -15,10 +15,12 @@ const apiRoot = (baseUrl: string) => (baseUrl.endsWith("/v1") ? baseUrl : `${bas
  * Maps Anthropic errors to shared failures:
  * - 400 "credit balance is too low": quota exhausted
  * - "prompt is too long": context too long
+ * - 529, or `overloaded_error` sent mid-stream: overloaded
  */
-export const recognizeAnthropicFailure: RecognizeFailure = ({ status, message }) => {
+export const recognizeAnthropicFailure: RecognizeFailure = ({ status, code, message }) => {
 	if (status === 400 && /credit balance is too low/i.test(message ?? "")) return "quota-exhausted";
 	if (/prompt is too long/i.test(message ?? "")) return "context-too-long";
+	if (status === 529 || code === "overloaded_error") return "overloaded";
 	return undefined;
 };
 

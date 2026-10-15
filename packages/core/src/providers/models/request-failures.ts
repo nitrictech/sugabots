@@ -11,7 +11,7 @@ export interface RequestContext {
 
 /** The parts of a provider's error that a dialect uses to classify it. */
 export interface FailureReport {
-	/** HTTP status, if there was one. */
+	/** HTTP status. Undefined for an error sent mid-stream. */
 	status: number | undefined;
 	/** The error's `code`, or its `type` if it has no code. */
 	code: string | undefined;
@@ -20,7 +20,7 @@ export interface FailureReport {
 }
 
 /** Failures a dialect can identify from an error when the status code isn't enough. */
-export type RecognizedFailure = "quota-exhausted" | "context-too-long";
+export type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overloaded";
 
 /** Maps a provider's error to a shared failure, or undefined to fall back to the status. */
 export type RecognizeFailure = (report: FailureReport) => RecognizedFailure | undefined;
@@ -265,7 +265,22 @@ export class ProviderRejectedRequest
 	}
 }
 
-/** The provider failed or timed out on its side: a 5xx or a 408. */
+/** The provider is overloaded: a 503, or what its dialect recognises as overloaded (e.g. a 529). */
+export class ProviderOverloaded
+	extends Schema.TaggedError<ProviderOverloaded>()("ProviderOverloaded", requestFieldsWithCause)
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return describe(this.cause);
+	}
+	get userMessage() {
+		return userText`${this.provider} is too busy to answer right now. Try again in a few minutes, or choose another model.`;
+	}
+}
+
+/** The provider failed or timed out on its side: any other 5xx, or a 408. */
 export class ProviderServerError
 	extends Schema.TaggedError<ProviderServerError>()("ProviderServerError", requestFieldsWithCause)
 	implements DomainError
@@ -313,6 +328,7 @@ export const RequestFailure = Schema.Union([
 	ProviderModelNotFound,
 	ProviderContextLengthExceeded,
 	ProviderRejectedRequest,
+	ProviderOverloaded,
 	ProviderServerError,
 	ProviderRequestFailed,
 ]);
@@ -349,12 +365,23 @@ export function classifyRequestFailure(cause: unknown, request: FailedRequest): 
 	const { recognize, ...context } = request;
 	const fields = { ...context, cause };
 	if (APICallError.isInstance(cause) && cause.statusCode !== undefined) {
+		const body = parsedBody(cause.responseBody);
 		const recognized = recognize?.({
 			status: cause.statusCode,
-			code: errorCode(cause.responseBody),
-			message: providerSaid(cause.responseBody),
+			code: errorCode(body),
+			message: providerSaid(body) ?? shortText(cause.responseBody),
 		});
 		return classifyStatus(cause.statusCode, recognized, fields, cause);
+	}
+	// Providers send mid-stream errors as plain objects. An `Error` comes from our
+	// code or the SDK, so the dialect doesn't see it.
+	if (!(cause instanceof Error)) {
+		const recognized = recognize?.({
+			status: undefined,
+			code: errorCode(cause),
+			message: providerSaid(cause),
+		});
+		if (recognized) return recognizedFailure(recognized, fields);
 	}
 	const refused = findInChain(cause, (link) => link instanceof EgressRefused);
 	if (refused) {
@@ -389,6 +416,7 @@ function classifyStatus(
 	if (status === 413 || recognized === "context-too-long") {
 		return new ProviderContextLengthExceeded(fields);
 	}
+	if (status === 503 || recognized === "overloaded") return new ProviderOverloaded(fields);
 	if (status === 408 || status >= 500) return new ProviderServerError(fields);
 	return new ProviderRejectedRequest(fields);
 }
@@ -424,10 +452,28 @@ function hasErrorCode(link: unknown): link is { code: string } {
 	);
 }
 
+/** The failure for a mid-stream error the dialect recognised. */
+function recognizedFailure(
+	recognized: RecognizedFailure,
+	fields: RequestContext & { cause: unknown },
+): RequestFailure {
+	switch (recognized) {
+		case "quota-exhausted":
+			return new ProviderQuotaExhausted(fields);
+		case "context-too-long":
+			return new ProviderContextLengthExceeded(fields);
+		case "overloaded":
+			return new ProviderOverloaded(fields);
+	}
+}
+
 /** What the provider said about a failed request, for the logs: its own sentence when it gave one. */
 function describe(cause: unknown): string {
 	if (APICallError.isInstance(cause)) {
-		const said = providerSaid(cause.responseBody) ?? cause.message;
+		const said =
+			providerSaid(parsedBody(cause.responseBody)) ??
+			shortText(cause.responseBody) ??
+			cause.message;
 		return cause.statusCode ? `Provider returned ${cause.statusCode}: ${said}` : said;
 	}
 	if (cause instanceof Error) return cause.message;
@@ -439,30 +485,45 @@ function describe(cause: unknown): string {
 	}
 }
 
-/** errorCode returns the `code`, else the `type`, of the error in an OpenAI-style error `body`. */
-function errorCode(body: string | undefined): string | undefined {
+/** Parses a JSON error body. Google wraps its error in a one-element array, so unwrap it. */
+function parsedBody(body: string | undefined): unknown {
 	if (!body) return undefined;
 	try {
-		const { error } = JSON.parse(body) as { error?: { code?: unknown; type?: unknown } };
-		const code = error?.code ?? error?.type;
-		return typeof code === "string" ? code : undefined;
+		const parsed: unknown = JSON.parse(body);
+		return Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : parsed;
 	} catch {
 		return undefined;
 	}
 }
 
-function providerSaid(body: string | undefined): string | undefined {
-	if (!body) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(body);
-		if (typeof parsed !== "object" || parsed === null) return undefined;
-		const error = (parsed as { error?: unknown }).error;
-		const message =
-			typeof error === "object" && error !== null
-				? (error as { message?: unknown }).message
-				: (parsed as { message?: unknown }).message;
-		return typeof message === "string" && message ? message : undefined;
-	} catch {
-		return body.length <= 300 ? body : undefined;
-	}
+/** The error object: `error` if that's an object, otherwise the body itself. */
+function errorIn(reported: unknown): Record<string, unknown> | undefined {
+	if (typeof reported !== "object" || reported === null) return undefined;
+	const nested = (reported as { error?: unknown }).error;
+	return typeof nested === "object" && nested !== null
+		? (nested as Record<string, unknown>)
+		: (reported as Record<string, unknown>);
+}
+
+/** The error's `code`, or its `type` if it has no code. */
+function errorCode(reported: unknown): string | undefined {
+	const error = errorIn(reported);
+	const code = error?.code ?? error?.type;
+	return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * The provider's error message: `message`, or `error` when that's a string
+ * (xAI sends its message there).
+ */
+function providerSaid(reported: unknown): string | undefined {
+	const message = errorIn(reported)?.message;
+	if (typeof message === "string" && message) return message;
+	const nested = (reported as { error?: unknown } | null | undefined)?.error;
+	return typeof nested === "string" && nested ? nested : undefined;
+}
+
+/** A non-JSON body, if it's short enough to be an error message rather than an HTML page. */
+function shortText(body: string | undefined): string | undefined {
+	return body && body.length <= 300 && parsedBody(body) === undefined ? body : undefined;
 }
