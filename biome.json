@@ -47,6 +47,7 @@
 	"overrides": [
 		{
 			"includes": [
+				"packages/core/src/providers/connections/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",
 				"packages/core/src/providers/model-providers/remote.ts",
 				"packages/server/src/http/errors.ts"

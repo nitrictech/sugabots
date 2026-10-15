@@ -1,0 +1,265 @@
+import { createSign } from "node:crypto";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Clock, Effect, ErrorReporter, Schema } from "effect";
+import type { GitHubAppOwner } from "../../../database/schema.ts";
+import type { EgressHttpClient } from "../../network/egress.ts";
+
+/**
+ * GitHub's REST API, as a workspace's own GitHub App calls it: made from a
+ * manifest, signing requests about itself with its private key, and working
+ * on each account it is installed on through that installation's tokens,
+ * which last an hour and carry only the repositories and permissions each
+ * was asked for.
+ */
+
+/** What a GitHub App signs requests about itself with. */
+export interface AppIdentity {
+	readonly appId: number;
+	readonly privateKey: string;
+}
+
+/** One of a GitHub App's installations: an account it reaches. */
+export interface Installation {
+	readonly id: number;
+	/** The login of the organization or user whose repositories it reaches. */
+	readonly account: string;
+}
+
+export const API_URL = "https://api.github.com";
+export const WEB_URL = "https://github.com";
+
+/**
+ * What a workspace's app may be given at install; an app's permissions can
+ * later be changed only by its owner, on GitHub. Each token asks for less.
+ * Without `workflows`, GitHub refuses a push that changes
+ * `.github/workflows`, so a bot can't write CI that runs with the
+ * repository's secrets.
+ */
+const APP_PERMISSIONS = {
+	contents: "write",
+	pull_requests: "write",
+	issues: "read",
+	checks: "read",
+	actions: "read",
+	metadata: "read",
+} as const;
+
+export type Permissions = { readonly [K in keyof typeof APP_PERMISSIONS]?: "read" | "write" };
+
+/**
+ * The events a workspace's app is sent, chosen when it is made because an
+ * app's events can later be changed only by its owner, on GitHub. Each is
+ * covered by a read side of {@link APP_PERMISSIONS}.
+ */
+const WEBHOOK_EVENTS = [
+	"pull_request",
+	"pull_request_review",
+	"pull_request_review_comment",
+	"issue_comment",
+	"issues",
+	"check_suite",
+	"push",
+] as const;
+
+/** GitHub's longest app name. */
+export const MAX_APP_NAME_LENGTH = 34;
+
+/**
+ * A GitHub App's manifest, as GitHub's new-app page takes it. Without a
+ * `webhookUrl` the app has no webhook and is sent no events: GitHub refuses a
+ * webhook URL it can't reach, even an inactive one.
+ */
+export function appManifest(input: {
+	name: string;
+	homepageUrl: string;
+	redirectUrl: string;
+	setupUrl: string;
+	webhookUrl: string | undefined;
+}) {
+	const webhook = input.webhookUrl
+		? { hook_attributes: { url: input.webhookUrl, active: true }, default_events: WEBHOOK_EVENTS }
+		: { default_events: [] };
+	return {
+		name: input.name,
+		url: input.homepageUrl,
+		redirect_url: input.redirectUrl,
+		setup_url: input.setupUrl,
+		setup_on_update: true,
+		// Private: only the account that owns it can find or install it, so a
+		// stranger can't learn the installation's address from it or send it events.
+		public: false,
+		default_permissions: APP_PERMISSIONS,
+		...webhook,
+	};
+}
+
+/** Where the browser posts a manifest: the person's own account, or an organization they own. */
+export function newAppUrl(organization: string | undefined, state: string) {
+	const url = new URL(
+		organization
+			? `${WEB_URL}/organizations/${encodeURIComponent(organization)}/settings/apps/new`
+			: `${WEB_URL}/settings/apps/new`,
+	);
+	url.searchParams.set("state", state);
+	return url.toString();
+}
+
+/** Where a person installs the app; GitHub then sends them to its setup URL with `state`. */
+export function installAppUrl(slug: string, state: string) {
+	const url = new URL(`${WEB_URL}/apps/${encodeURIComponent(slug)}/installations/new`);
+	url.searchParams.set("state", state);
+	return url.toString();
+}
+
+/** Where the app's owner changes or deletes it on GitHub. */
+export function appSettingsUrl(app: { slug: string; owner: GitHubAppOwner }) {
+	const slug = encodeURIComponent(app.slug);
+	return app.owner.type === "Organization"
+		? `${WEB_URL}/organizations/${encodeURIComponent(app.owner.login)}/settings/apps/${slug}`
+		: `${WEB_URL}/settings/apps/${slug}`;
+}
+
+const MadeApp = Schema.Struct({
+	id: Schema.Int,
+	slug: Schema.String,
+	name: Schema.String,
+	owner: Schema.Struct({
+		login: Schema.String,
+		type: Schema.Literals(["Organization", "User"]),
+	}),
+	pem: Schema.String,
+	/** Null for an app made without a webhook. */
+	webhook_secret: Schema.NullOr(Schema.String),
+});
+
+/** Turns the code GitHub gave for an app made from a manifest into the app, its private key and its webhook's secret. */
+export const madeApp = (http: EgressHttpClient, code: string) =>
+	call(http, "POST", `/app-manifests/${encodeURIComponent(code)}/conversions`, {}).pipe(
+		Effect.flatMap(decoded(MadeApp)),
+	);
+
+const FoundInstallation = Schema.Struct({
+	id: Schema.Int,
+	account: Schema.Struct({ login: Schema.String }),
+});
+
+/** The app's installation `installationId`; a failure when it is another app's. */
+export const installation = (http: EgressHttpClient, app: AppIdentity, installationId: number) =>
+	appJwt(app).pipe(
+		Effect.flatMap((bearer) =>
+			call(http, "GET", `/app/installations/${installationId}`, { bearer }),
+		),
+		Effect.flatMap(decoded(FoundInstallation)),
+		Effect.map((found): Installation => ({ id: found.id, account: found.account.login })),
+	);
+
+/** How long an app's own token lasts; GitHub takes at most ten minutes. */
+const APP_JWT_SECONDS = 9 * 60;
+/** Back-dated, as GitHub suggests, so a clock a little ahead of GitHub's isn't refused. */
+const CLOCK_ALLOWANCE_SECONDS = 60;
+
+/** The app's own token, signed with its private key, for requests about the app and its installations. */
+export const appJwt = (app: AppIdentity) =>
+	Effect.map(Clock.currentTimeMillis, (nowMilliseconds) => {
+		const now = Math.floor(nowMilliseconds / 1000);
+		const encode = (part: object) => Buffer.from(JSON.stringify(part)).toString("base64url");
+		const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({
+			iat: now - CLOCK_ALLOWANCE_SECONDS,
+			exp: now + APP_JWT_SECONDS,
+			iss: String(app.appId),
+		})}`;
+		const signature = createSign("RSA-SHA256").update(unsigned).sign(app.privateKey, "base64url");
+		return `${unsigned}.${signature}`;
+	});
+
+const ErrorBody = Schema.Struct({
+	message: Schema.String,
+	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.optional(Schema.String) }))),
+});
+
+/** A request to GitHub's API, signed in with `bearer`, answering with the decoded JSON body. */
+export function call(
+	http: EgressHttpClient,
+	method: "GET" | "POST" | "DELETE",
+	path: string,
+	options: { bearer?: string; body?: unknown },
+) {
+	return Effect.gen(function* () {
+		const response = yield* Effect.tryPromise({
+			try: (signal) =>
+				http(`${API_URL}${path}`, {
+					method,
+					signal,
+					headers: {
+						accept: "application/vnd.github+json",
+						"x-github-api-version": "2022-11-28",
+						...(options.bearer ? { authorization: `Bearer ${options.bearer}` } : {}),
+						...(options.body === undefined ? {} : { "content-type": "application/json" }),
+					},
+					body: options.body === undefined ? undefined : JSON.stringify(options.body),
+				}),
+			catch: (cause) => requestFailed({ status: undefined, reason: String(cause) }),
+		});
+		const text = yield* Effect.tryPromise({
+			try: () => response.text(),
+			catch: (cause) => requestFailed({ status: response.status, reason: String(cause) }),
+		});
+		const body = parsedJson(text);
+		if (response.ok) return body;
+		const failure = Schema.decodeUnknownOption(ErrorBody)(body);
+		const reason =
+			failure._tag === "Some"
+				? [failure.value.message, ...(failure.value.errors ?? []).flatMap((e) => e.message ?? [])]
+						.filter(Boolean)
+						.join(": ")
+				: response.statusText;
+		return yield* requestFailed({ status: response.status, reason });
+	});
+}
+
+export function parsedJson(text: string): unknown {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+export const decoded =
+	<S extends Schema.Decoder<unknown>>(schema: S) =>
+	(body: unknown) =>
+		Schema.decodeUnknownEffect(schema)(body).pipe(
+			Effect.mapError((cause) =>
+				requestFailed({ status: undefined, reason: `Unexpected reply: ${cause}` }),
+			),
+		);
+
+function requestFailed(failure: { status: number | undefined; reason: string }) {
+	return new GitHubRequestFailed(failure);
+}
+
+/**
+ * GitHub refused a request or couldn't be reached. `reason` is GitHub's own
+ * words, for the logs and for the bot whose call it was; people are told
+ * only that GitHub refused.
+ */
+export class GitHubRequestFailed
+	extends Schema.TaggedError<GitHubRequestFailed>()("GitHubRequestFailed", {
+		status: Schema.UndefinedOr(Schema.Int),
+		reason: Schema.String,
+	})
+	implements DomainError
+{
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get isRetryable() {
+		return this.status === undefined || this.status >= 500;
+	}
+	override get message() {
+		return `GitHub ${this.status ?? "unreachable"}: ${this.reason}`;
+	}
+	get userMessage() {
+		return this.isRetryable
+			? userText`We couldn't reach GitHub. Try again in a few minutes.`
+			: userText`GitHub refused the workspace's sign-in. A workspace admin can check it in the workspace's Git settings.`;
+	}
+}

@@ -2,7 +2,7 @@ import {
 	type Agent,
 	type AgentUpdate,
 	builtInToolCatalog,
-	connectionPresetFor,
+	connectionMarkFor,
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
@@ -412,7 +412,7 @@ function Tools({
 						key={connection.id}
 						icon={
 							<ConnectionMark
-								presetId={connectionPresetFor(connection.url)?.id}
+								presetId={connectionMarkFor(connection)}
 								name={connection.name}
 								size="sm"
 							/>

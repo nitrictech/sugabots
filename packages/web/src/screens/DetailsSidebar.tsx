@@ -6,7 +6,7 @@ import type {
 	ThreadParticipant,
 	ThreadSummary,
 } from "@sugabots/contracts";
-import { connectionPresetFor } from "@sugabots/contracts";
+import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
@@ -228,7 +228,7 @@ function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 					className="focus-ring flex h-[30px] min-w-0 items-center gap-[7px] rounded-[8px] border border-border-strong pr-2.5 pl-1 font-medium text-[13px] text-soft-foreground transition-colors hover:bg-panel"
 				>
 					<ConnectionMark
-						presetId={connectionPresetFor(connection.url)?.id}
+						presetId={connectionMarkFor(connection)}
 						name={connection.name}
 						size="md"
 					/>

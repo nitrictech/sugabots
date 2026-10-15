@@ -82,10 +82,12 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
+		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
+		appSettingsUrl: null,
 		status: "connected",
 		tools: [
 			{
