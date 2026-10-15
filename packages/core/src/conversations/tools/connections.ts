@@ -8,9 +8,13 @@ import {
 import type { JSONSchema7, Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
-import { ConnectionRepository } from "../../providers/connections/connection-repository.ts";
+import {
+	ConnectionRepository,
+	everyToolOff,
+} from "../../providers/connections/connection-repository.ts";
 import { ConnectionSignIn } from "../../providers/connections/connection-sign-in.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
+import { GitHubConnections } from "../../providers/connections/github/github-connections.ts";
 import {
 	connectServer,
 	type ServerListing,
@@ -23,6 +27,7 @@ import {
 	type EgressHttpClient,
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
+import { gitHubNote } from "./github/tools.ts";
 
 /**
  * The tools an agent inherits from its pod for one turn.
@@ -39,6 +44,9 @@ import {
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
  * has, and the connection's own test is where the owner learns why.
+ *
+ * A GitHub connection has no server to reach; what the model is told of it
+ * comes with the connections' instructions (see `github/tools.ts`).
  */
 
 export interface OfferedTool {
@@ -67,7 +75,17 @@ export interface ConnectionToolSet {
 }
 
 export interface Interface {
-	forPod(workspaceId: string, podId: string): Effect.Effect<ConnectionToolSet, never, Database>;
+	forPod(
+		workspaceId: string,
+		podId: string,
+		turn: TurnSide,
+	): Effect.Effect<ConnectionToolSet, never, Database>;
+}
+
+/** What a turn's connections work for, for the kinds that aren't MCP servers. */
+export interface TurnSide {
+	/** Whether the sandbox's provider signs its requests in, outside it. */
+	readonly sandboxSignsIn: boolean;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -86,13 +104,14 @@ export const make = Effect.gen(function* () {
 		connections: yield* ConnectionRepository.Service,
 		httpClients: egress.providers,
 		oauth: { clients: signIn.clients, fetch: egress.oauth },
+		github: yield* GitHubConnections.Service,
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([ConnectionRepository.layer, ConnectionSignIn.layer]),
+	Layer.provide([ConnectionRepository.layer, ConnectionSignIn.layer, GitHubConnections.layer]),
 );
 
 /** Lets a server's changed tools reach turns without the connection being edited. */
@@ -118,6 +137,8 @@ export interface Parts {
 	 * read once per turn, and the client their calls go through.
 	 */
 	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
+	/** The pod's GitHub connection; a case without one says nothing of GitHub. */
+	github?: Pick<GitHubConnections.Interface, "forPod">;
 }
 
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
@@ -126,15 +147,32 @@ export function from({
 	httpClients,
 	connect = connectServer,
 	oauth,
+	github,
 }: Parts): Interface {
 	const kept = new Map<string, KeptListing>();
 	const failedAt = new Map<string, number>();
 
+	/** What the model is told of the pod's GitHub connection. */
+	const gitHubOffered = (workspaceId: string, podId: string, turn: TurnSide) =>
+		Effect.gen(function* () {
+			const connected = github ? yield* github.forPod({ workspaceId, podId }) : undefined;
+			if (!connected || everyToolOff(connected.connection)) {
+				return { tools: {}, instructions: {} };
+			}
+			return {
+				tools: {},
+				instructions: {
+					[connected.connection.handle]: gitHubNote(connected, turn.sandboxSignsIn),
+				},
+			};
+		});
+
 	return {
-		forPod: (workspaceId, podId) =>
+		forPod: (workspaceId, podId, turn) =>
 			Effect.gen(function* () {
 				const targets = yield* connections.targetsForPod(workspaceId, podId);
-				if (targets.length === 0) return nothingOffered;
+				const ownTools = yield* gitHubOffered(workspaceId, podId, turn);
+				if (targets.length === 0) return { ...nothingOffered, ...ownTools };
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const now = yield* Clock.currentTimeMillis;
 				const sessions = new Map<string, Promise<ServerSession>>();
@@ -212,15 +250,19 @@ export function from({
 					tools: Object.assign(
 						{},
 						...listed.map(({ target, listing }) => buildOfferedTools(target, listing, openSession)),
+						ownTools.tools,
 					),
 					unavailable: targets
 						.filter((_, index) => listings[index] === undefined)
 						.map((target) => target.handle),
-					instructions: Object.fromEntries(
-						listed.flatMap(({ target, listing }) =>
-							listing.instructions ? [[target.handle, listing.instructions]] : [],
+					instructions: {
+						...Object.fromEntries(
+							listed.flatMap(({ target, listing }) =>
+								listing.instructions ? [[target.handle, listing.instructions]] : [],
+							),
 						),
-					),
+						...ownTools.instructions,
+					},
 					close: async () => {
 						await Promise.allSettled(
 							[...sessions.values()].map((session) => session.then((open) => open.close())),

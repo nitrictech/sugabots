@@ -100,7 +100,7 @@ describe("a turn's connection tools", () => {
 	it("runs a tool set to allow straight away, a change included", async () => {
 		const offered = toolsFor(target());
 
-		const set = await run(offered.forPod("w", "p"));
+		const set = await run(offered.forPod("w", "p", NO_TURN));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "allow" });
@@ -118,7 +118,7 @@ describe("a turn's connection tools", () => {
 	it("asks before each call to a tool set to ask, a read included", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "ask", wipe: "ask" } }));
 
-		const set = await run(offered.forPod("w", "p"));
+		const set = await run(offered.forPod("w", "p", NO_TURN));
 		try {
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "ask" });
 			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, access: "ask" });
@@ -130,7 +130,7 @@ describe("a turn's connection tools", () => {
 	it("still offers a tool set to off, so the tools sent to the model stay the same", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "allow", wipe: "off" } }));
 
-		const set = await run(offered.forPod("w", "p"));
+		const set = await run(offered.forPod("w", "p", NO_TURN));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(set.tools.wiki__wipe).toMatchObject({ access: "off" });
@@ -142,7 +142,7 @@ describe("a turn's connection tools", () => {
 	it("treats a tool the server did not list when last asked as its default says", async () => {
 		const offered = toolsFor(target({ toolAccess: {} }));
 
-		const set = await run(offered.forPod("w", "p"));
+		const set = await run(offered.forPod("w", "p", NO_TURN));
 		try {
 			// `lookup` says it only reads; `wipe` says nothing, so it may change things.
 			expect(set.tools.wiki__lookup).toMatchObject({ access: "allow" });
@@ -165,7 +165,7 @@ describe("a turn's connection tools", () => {
 
 		const set = await run(
 			offered
-				.forPod("w", "p")
+				.forPod("w", "p", NO_TURN)
 				.pipe(Effect.provide(Logger.layer([Logger.make(({ message }) => logged.push(message))]))),
 		);
 		try {
@@ -190,7 +190,7 @@ describe("a turn's connection tools", () => {
 			use: (set: ConnectionTools.ConnectionToolSet) => Promise<unknown> = async () => undefined,
 		) =>
 			Effect.gen(function* () {
-				const set = yield* offered.forPod("w", "p");
+				const set = yield* offered.forPod("w", "p", NO_TURN);
 				try {
 					return yield* Effect.promise(() => use(set));
 				} finally {
@@ -277,3 +277,6 @@ describe("a turn's connection tools", () => {
 		});
 	});
 });
+
+/** A turn with no sandbox, for cases that only look at MCP servers' tools. */
+const NO_TURN = { sandboxSignsIn: false };

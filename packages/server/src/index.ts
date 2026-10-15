@@ -27,6 +27,7 @@ import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
+import { GitHubSignIn } from "@sugabots/core/providers/connections/github/github-sign-in";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Models } from "@sugabots/core/providers/models/models";
@@ -34,7 +35,6 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
-import { SandboxCredentials } from "@sugabots/core/sandboxes/sandbox-credentials";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
@@ -148,7 +148,7 @@ const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
 	// What pods' sandboxes are signed in to, which sandboxes leave to the edge.
-	Layer.provide(SandboxCredentials.none),
+	Layer.provide(GitHubSignIn.layer),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),
 );
