@@ -179,11 +179,15 @@ export const ReplyToAMessage = meta.story({
 		await expect(canvas.getByRole("button", { name: "Cancel reply" })).toBeVisible();
 
 		await userEvent.keyboard("Only the Northwind one{Enter}");
-		const quote = await within(log).findByRole("button", {
-			name: /^Replying to Growth Desk: The two Northwind accounts/,
-		});
-		// A message the chat reloads with rises into place.
-		await waitFor(() => expect(quote).toBeVisible());
+		// Look the quote up each time: the row shown while the message sends is
+		// replaced when the chat reloads, and the new one rises into place.
+		await waitFor(() =>
+			expect(
+				within(log).getByRole("button", {
+					name: /^Replying to Growth Desk: The two Northwind accounts/,
+				}),
+			).toBeVisible(),
+		);
 		await expect(canvas.queryByRole("button", { name: "Cancel reply" })).toBeNull();
 	},
 });
