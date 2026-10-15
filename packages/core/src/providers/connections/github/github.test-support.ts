@@ -29,7 +29,7 @@ export interface Asked {
 	readonly body: unknown;
 }
 
-type Route = (asked: Asked) => Response | undefined;
+export type Route = (asked: Asked) => Response | undefined;
 
 /**
  * GitHub as a pod's app sees it: it makes the app from a manifest, and

@@ -61,6 +61,8 @@ export interface Offered {
 	readonly usable: boolean;
 	/** What the model is told of the sandbox with the turn, as it may change between turns. */
 	readonly note: string | undefined;
+	/** The sandbox and the agent's place in it, while the tools are usable, for other tools that work there. */
+	readonly workspace: { readonly open: OpenSandbox; readonly place: Place } | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */
 	readonly signsIn: boolean;
 }
@@ -134,6 +136,7 @@ export const make = Effect.gen(function* () {
 						}),
 						usable: false,
 						note: NO_SANDBOX_NOTE,
+						workspace: undefined,
 						signsIn: false,
 					};
 				}
@@ -184,6 +187,7 @@ export const make = Effect.gen(function* () {
 					}),
 					usable: true,
 					note: allowedHostsNote(allowedHosts),
+					workspace: { open: openSandbox, place },
 					signsIn: sandboxes.forConnection(provider.connection).capabilities.credentials !== "none",
 				};
 			}),
@@ -252,6 +256,7 @@ export const none: Interface = {
 			requests: {},
 			usable: false,
 			note: undefined,
+			workspace: undefined,
 			signsIn: false,
 		}),
 };
