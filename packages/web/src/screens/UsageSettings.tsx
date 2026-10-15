@@ -148,7 +148,7 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
 						: "Spend each day. Nothing was spent."
 				}
-				className="flex h-[78px] items-end"
+				className="-mx-[1.5px] flex h-[78px] items-end"
 			>
 				{days.map((day) =>
 					day.date > today ? (
@@ -167,14 +167,16 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 							onClick={() => tooltip.open(triggerId(day))}
 							tabIndex={-1}
 							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
-							className="flex h-full min-w-0 flex-1 cursor-default items-end rounded-[4px] px-[1.5px] data-popup-open:bg-chip"
+							className="group flex h-full min-w-0 flex-1 cursor-default px-[1.5px]"
 						>
-							<span
-								className="min-h-0.5 w-full rounded-[3px] bg-primary"
-								style={
-									busiest.usd === 0 ? undefined : { height: `${(day.usd / busiest.usd) * 100}%` }
-								}
-							/>
+							<span className="flex w-full items-end rounded-[3px] group-data-popup-open:bg-chip">
+								<span
+									className="min-h-0.5 w-full rounded-[3px] bg-primary"
+									style={
+										busiest.usd === 0 ? undefined : { height: `${(day.usd / busiest.usd) * 100}%` }
+									}
+								/>
+							</span>
 						</TooltipPrimitive.Trigger>
 					),
 				)}
