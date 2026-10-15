@@ -21,15 +21,16 @@ import { Egress, type EgressHttpClient } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
 import { openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
+import { activityOf, type RepositoryActivity } from "./github-events.ts";
 
 /**
  * A pod's GitHub connection, to the pod's own GitHub App (see
  * `github-app.ts`), installed on the account the pod works on: the
  * repositories its bots work on there, read in the pod's sandbox and changed
- * through the connection's tools, which are Sugabots' own. A pod has at most
- * one, since its sandbox can be signed in to only one account at GitHub.
- * Seeing a connection's repositories takes `pod.read`; choosing them takes
- * `connection.manage`.
+ * through the connection's tools, which are Sugabots' own, and what happens
+ * there, which its app delivers. A pod has at most one, since its sandbox
+ * can be signed in to only one account at GitHub. Seeing a connection's
+ * repositories takes `pod.read`; choosing them takes `connection.manage`.
  */
 export interface Interface {
 	/** What the connection's app reaches, for the pod to choose from. */
@@ -75,6 +76,14 @@ export interface Interface {
 	>;
 	/** The pod's GitHub connection, for its turns and sandbox; undefined until its app is installed. */
 	readonly forPod: (pod: Pod) => Effect.Effect<Connected | undefined>;
+	/**
+	 * What a delivery to the connection's webhook says happened at one of its
+	 * account's repositories, once its app proves it sent it; `activity` is
+	 * `undefined` for an event no routine is run by.
+	 */
+	readonly receiveDelivery: (
+		delivery: Delivery & { connectionId: string },
+	) => Effect.Effect<Delivered, DeliveryRefused>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -246,6 +255,40 @@ export const make = Effect.gen(function* () {
 					const app = row && installedApp(credentials, row);
 					if (!row?.settings || !app) return undefined;
 					return new Connected(row, app, row.settings.repositories, http);
+				}),
+			),
+
+		receiveDelivery: ({ connectionId, headers, body }) =>
+			operation(
+				"receiveDelivery",
+				Effect.gen(function* () {
+					const [row] = yield* query((db) =>
+						db
+							.select()
+							.from(connection)
+							.where(and(eq(connection.id, connectionId), eq(connection.kind, "github")))
+							.limit(1),
+					);
+					const secret =
+						row?.appCredentialEncrypted &&
+						openAppCredential(credentials, row.appCredentialEncrypted).webhookSecret;
+					if (
+						!row?.settings ||
+						!secret ||
+						!GitHub.signedDelivery(secret, body, headers["x-hub-signature-256"])
+					) {
+						return yield* new DeliveryRefused({ connectionId });
+					}
+					return {
+						workspaceId: row.workspaceId,
+						connectionId,
+						deliveryId: headers["x-github-delivery"],
+						activity: activityOf(
+							headers["x-github-event"],
+							GitHub.parsedJson(body),
+							row.settings.slug,
+						),
+					};
 				}),
 			),
 	});
@@ -551,5 +594,37 @@ export class RepositoryUnreachable
 	}
 	get userMessage() {
 		return userText`The connection's GitHub App can't reach that repository. Give it access on GitHub first.`;
+	}
+}
+
+/** A request GitHub sent the connection's webhook, as it arrived. */
+export interface Delivery {
+	/** Its headers, by lowercase name. */
+	readonly headers: Readonly<Record<string, string | undefined>>;
+	readonly body: string;
+}
+
+/** A delivery the connection's app signed, the id GitHub gave it, and what it says happened. */
+export interface Delivered {
+	readonly workspaceId: string;
+	readonly connectionId: string;
+	readonly deliveryId: string | undefined;
+	readonly activity: RepositoryActivity | undefined;
+}
+
+/** A delivery for no GitHub connection, or one its app didn't send. */
+export class DeliveryRefused
+	extends Schema.TaggedError<DeliveryRefused>()("DeliveryRefused", {
+		connectionId: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `A delivery for connection ${this.connectionId} wasn't signed by its app`;
+	}
+	get userMessage() {
+		return userText`That delivery isn't signed by the app it's addressed to.`;
 	}
 }

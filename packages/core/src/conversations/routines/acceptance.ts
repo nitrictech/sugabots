@@ -193,6 +193,9 @@ function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigg
 	if (left.kind === "manual" && right.kind === "manual") {
 		return left.requestId === right.requestId && left.requestedByUserId === right.requestedByUserId;
 	}
+	if (left.kind === "github" && right.kind === "github") {
+		return left.deliveryId === right.deliveryId && left.event === right.event;
+	}
 	return (
 		left.kind === "webhook" &&
 		right.kind === "webhook" &&

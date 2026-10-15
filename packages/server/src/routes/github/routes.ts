@@ -1,8 +1,10 @@
-import { GITHUB_SETUP_RETURN_PATH } from "@sugabots/contracts";
-import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
+import { GITHUB_SETUP_RETURN_PATH, MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
+import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
+import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { Installation } from "@sugabots/core/installation/installation";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
+import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -94,4 +96,35 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 								.pipe(Effect.map(redirect), asSessionUser),
 				);
 		}),
+);
+
+export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhooks", (handlers) =>
+	Effect.gen(function* () {
+		const connections = yield* GitHubConnections.Service;
+		const connectionEvents = yield* Routines.ConnectionEvents;
+		// Raw, since the signature is over the body exactly as sent.
+		return handlers.handleRaw("delivery", ({ params, request }) =>
+			Effect.gen(function* () {
+				const refused = () =>
+					new Unauthorized({ message: userText`That delivery isn't signed by its app` });
+				const body = yield* Effect.mapError(request.text, refused);
+				// Deliberately without a session: the signature is what admits it.
+				const delivered = yield* connections
+					.receiveDelivery({ connectionId: params.connectionId, headers: request.headers, body })
+					.pipe(Effect.mapError(refused));
+				if (!delivered.activity) return HttpServerResponse.empty({ status: 204 });
+				const { deliveryId } = delivered;
+				if (!deliveryId || deliveryId.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
+					return yield* new BadRequest({ message: userText`The delivery has no usable id` });
+				}
+				yield* connectionEvents.accept({
+					workspaceId: delivered.workspaceId,
+					connectionId: delivered.connectionId,
+					deliveryId,
+					activity: delivered.activity,
+				});
+				return HttpServerResponse.empty({ status: 204 });
+			}),
+		);
+	}),
 );

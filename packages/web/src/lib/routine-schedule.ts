@@ -175,12 +175,14 @@ export function scheduleLabel(routine: Routine): string {
 
 /**
  * One trigger, short enough for a row: "Daily at 22:00", "Mon Wed Fri, 3
- * times", "Every 3 months at 10:00", "Webhook".
+ * times", "Every 3 months at 10:00", "Webhook", "On acme/web".
  */
 export function triggerLabel(trigger: RoutineTriggerInput): string {
 	switch (trigger.kind) {
 		case "webhook":
 			return "Webhook";
+		case "github":
+			return `On ${trigger.repository}`;
 		case "cron":
 			return readingLabel(readSchedule(trigger.schedule));
 	}

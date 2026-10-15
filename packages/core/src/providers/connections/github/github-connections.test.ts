@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
@@ -12,6 +13,7 @@ import {
 	type Route,
 	reachingGitHub,
 	standInGitHub,
+	WEBHOOK_SECRET,
 	workspaceWithPod,
 } from "./github.test-support.ts";
 import { GitHubApps } from "./github-app.ts";
@@ -239,5 +241,54 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 		await expect(
 			as(other.adminId).repositories({ podId: other.podId, connectionId }),
 		).rejects.toMatchObject({ _tag: "NotGitHubConnection" });
+	});
+
+	describe("deliveries to the connection's webhook", () => {
+		const body = JSON.stringify({
+			action: "opened",
+			repository: { full_name: "acme/web" },
+			sender: { login: "octocat" },
+			pull_request: {
+				number: 3,
+				title: "Fix the login",
+				html_url: "https://github.com/acme/web/pull/3",
+				body: null,
+				head: { ref: "fix-login" },
+			},
+		});
+		const signed = (secret: string) =>
+			`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+		const deliver = (to: string, signature: string) =>
+			runOnPostgres(
+				connections.receiveDelivery({
+					connectionId: to,
+					headers: {
+						"x-github-event": "pull_request",
+						"x-github-delivery": "delivery-1",
+						"x-hub-signature-256": signature,
+					},
+					body,
+				}),
+			);
+
+		it("takes one its app signed, for the connection's workspace", async () => {
+			const delivered = await deliver(connectionId, signed(WEBHOOK_SECRET));
+
+			expect(delivered).toMatchObject({
+				workspaceId: fixture.workspaceId,
+				connectionId,
+				deliveryId: "delivery-1",
+				activity: { event: "pull_request_opened", repository: "acme/web", number: 3 },
+			});
+		});
+
+		it("refuses one signed with another secret, or for no connection", async () => {
+			await expect(deliver(connectionId, signed("not-the-secret"))).rejects.toMatchObject({
+				_tag: "DeliveryRefused",
+			});
+			await expect(deliver(crypto.randomUUID(), signed(WEBHOOK_SECRET))).rejects.toMatchObject({
+				_tag: "DeliveryRefused",
+			});
+		});
 	});
 });

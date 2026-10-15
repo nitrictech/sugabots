@@ -119,6 +119,7 @@ const routineErrors = {
 	RoutineDeliveryIdTooLong: BadRequest,
 	RoutineNameTaken: Conflict,
 	RoutineNotFound: NotFound,
+	RoutineRepositoryNotInPod: BadRequest,
 	RoutineTriggerConflict: Conflict,
 	RoutineTriggerKindChanged: BadRequest,
 	RoutineTriggerNotFound: NotFound,

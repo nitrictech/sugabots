@@ -98,7 +98,7 @@ export function routineTools({
 	return {
 		[LIST_ROUTINES_TOOL]: tool({
 			description:
-				"List your routines: the jobs you do without being asked, with what starts each (its schedules or webhooks), whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
+				"List your routines: the jobs you do without being asked, with what starts each (its schedules, webhooks or repository events), whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
 			inputSchema: noInputSchema,
 			execute: () => answer(Effect.map(routines.list(bot), (listed) => ({ routines: listed }))),
 		}),
