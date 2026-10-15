@@ -1,4 +1,3 @@
-import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { botColors } from "@sugabots/avatars";
 import {
 	type AgentColor,
@@ -8,7 +7,7 @@ import {
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	dateIn,
@@ -28,6 +27,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * What the workspace's models cost, a month at a time: the total and each
@@ -130,41 +130,52 @@ type UsageDay = WorkspaceUsage["days"][number];
  * days still to come are an empty mark.
  */
 function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string }) {
-	const [tooltip] = useState(() => TooltipPrimitive.createHandle<UsageDay>());
-	const idPrefix = useId();
-	const triggerId = (day: UsageDay) => `${idPrefix}${day.date}`;
+	const [openDate, setOpenDate] = useState<string>();
 	const busiest = days.reduce(
 		(most, day) => (day.usd > most.usd ? day : most),
 		days[0] ?? { date: "", usd: 0 },
 	);
 
 	return (
-		<>
-			{/* biome-ignore lint/a11y/useSemanticElements: this group labels a chart of buttons, not form controls, so a fieldset is inappropriate. */}
-			<div
-				role="group"
-				aria-label={
-					busiest.usd > 0
-						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
-						: "Spend each day. Nothing was spent."
-				}
-				className="-mx-[1.5px] flex h-[78px] items-end"
-			>
-				{days.map((day) =>
-					day.date > today ? (
-						<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-[1.5px]">
-							<span className="h-0.5 w-full rounded-[3px] bg-chip" />
-						</span>
-					) : (
-						<TooltipPrimitive.Trigger
-							key={day.date}
-							id={triggerId(day)}
-							handle={tooltip}
-							payload={day}
-							delay={0}
-							closeOnClick={false}
+		// biome-ignore lint/a11y/useSemanticElements: this group labels a chart of buttons, not form controls, so a fieldset is inappropriate.
+		<div
+			role="group"
+			aria-label={
+				busiest.usd > 0
+					? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
+					: "Spend each day. Nothing was spent."
+			}
+			className="-mx-[1.5px] flex h-[78px] items-end"
+		>
+			{days.map((day) =>
+				day.date > today ? (
+					<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-[1.5px]">
+						<span className="h-0.5 w-full rounded-[3px] bg-chip" />
+					</span>
+				) : (
+					<Tooltip
+						key={day.date}
+						side="top"
+						delay={0}
+						closeOnClick={false}
+						open={openDate === day.date}
+						onOpenChange={(open) =>
+							// Moving between bars opens the next before closing the last, so only close this day's.
+							setOpenDate((current) =>
+								open ? day.date : current === day.date ? undefined : current,
+							)
+						}
+						label={
+							<span className="flex flex-col items-center">
+								<span className="font-semibold tabular-nums">{formatUsd(day.usd)}</span>
+								<span className="text-background/70">{dayLabel(day.date)}</span>
+							</span>
+						}
+					>
+						<button
+							type="button"
 							// Touch never hovers, so a tap opens the tooltip instead.
-							onClick={() => tooltip.open(triggerId(day))}
+							onClick={() => setOpenDate(day.date)}
 							tabIndex={-1}
 							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
 							className="group flex h-full min-w-0 flex-1 cursor-default px-[1.5px]"
@@ -177,27 +188,11 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 									}
 								/>
 							</span>
-						</TooltipPrimitive.Trigger>
-					),
-				)}
-			</div>
-			<TooltipPrimitive.Root handle={tooltip}>
-				{({ payload: day }) => (
-					<TooltipPrimitive.Portal>
-						<TooltipPrimitive.Positioner side="top" sideOffset={6} className="isolate z-50">
-							<TooltipPrimitive.Popup className="flex flex-col items-center rounded-md bg-foreground px-2 py-1 font-sans text-background text-xs shadow-sm">
-								{day && (
-									<>
-										<span className="font-semibold tabular-nums">{formatUsd(day.usd)}</span>
-										<span className="text-background/70">{dayLabel(day.date)}</span>
-									</>
-								)}
-							</TooltipPrimitive.Popup>
-						</TooltipPrimitive.Positioner>
-					</TooltipPrimitive.Portal>
-				)}
-			</TooltipPrimitive.Root>
-		</>
+						</button>
+					</Tooltip>
+				),
+			)}
+		</div>
 	);
 }
 

@@ -10,13 +10,14 @@ export function TooltipProvider({ delay = 400, ...props }: TooltipPrimitive.Prov
 	return <TooltipPrimitive.Provider delay={delay} {...props} />;
 }
 
-type TooltipProps = TooltipPrimitive.Root.Props & {
-	side?: "top" | "bottom" | "right";
-	/** Which edge of the trigger the tooltip lines up with, along `side`. */
-	align?: "start" | "center" | "end";
-	/** The control the tooltip describes. It is the trigger, so it must be one element. */
-	children: ReactElement;
-};
+type TooltipProps = TooltipPrimitive.Root.Props &
+	Pick<TooltipPrimitive.Trigger.Props, "delay" | "closeOnClick"> & {
+		side?: "top" | "bottom" | "right";
+		/** Which edge of the trigger the tooltip lines up with, along `side`. */
+		align?: "start" | "center" | "end";
+		/** The control the tooltip describes. It is the trigger, so it must be one element. */
+		children: ReactElement;
+	};
 
 export function Tooltip({ label, ...props }: TooltipProps & { label: ReactNode }) {
 	return (
@@ -57,11 +58,13 @@ function FloatingTooltip({
 	popupClassName,
 	side = "bottom",
 	align = "center",
+	delay,
+	closeOnClick,
 	...props
 }: TooltipProps & { content: ReactNode; popupClassName: string }) {
 	return (
 		<TooltipPrimitive.Root {...props}>
-			<TooltipPrimitive.Trigger render={children} />
+			<TooltipPrimitive.Trigger render={children} delay={delay} closeOnClick={closeOnClick} />
 			<TooltipPrimitive.Portal>
 				<TooltipPrimitive.Positioner
 					side={side}
