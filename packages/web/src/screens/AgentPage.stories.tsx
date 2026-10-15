@@ -210,11 +210,21 @@ export const ReactToAMessage = meta.story({
 		await waitFor(() =>
 			expect(within(picker).getByRole("searchbox", { name: "Search emoji" })).toHaveFocus(),
 		);
-		await userEvent.keyboard("eyes");
-		await chooseSearched(picker, "Eyes", userEvent);
+		await userEvent.keyboard("hundred points");
+		// The search's only result is active once it applies, and Enter chooses it. A
+		// click could miss, as the picker lays its rows out again while results arrive.
+		await waitFor(
+			() =>
+				expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+					"aria-selected",
+					"true",
+				),
+			{ timeout: 5_000 },
+		);
+		await userEvent.keyboard("{Enter}");
 
 		const mine = await within(asked).findByRole("button", {
-			name: "👀 1: You reacted with 👀",
+			name: "💯 1: You reacted with 💯",
 		});
 		await expect(mine).toHaveAttribute("aria-pressed", "true");
 		await userEvent.click(mine);
@@ -663,28 +673,3 @@ export const ArtifactOnAPhone = meta.story({
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
 	},
 });
-
-/**
- * Chooses the emoji the picker's search has narrowed to, once it has settled.
- * The picker applies a search when the page is idle and may lay its rows out
- * again after the first results show, so the emoji is hovered until the
- * picker marks it as the one under the pointer, and only then clicked.
- */
-async function chooseSearched(
-	picker: HTMLElement,
-	name: string,
-	user: { hover: (element: Element) => Promise<void>; click: (element: Element) => Promise<void> },
-): Promise<void> {
-	const cell = () => {
-		expect(within(picker).queryByRole("gridcell", { name: "Grinning face" })).toBeNull();
-		return within(picker).getByRole("gridcell", { name });
-	};
-	await waitFor(
-		async () => {
-			await user.hover(cell());
-			expect(cell()).toHaveAttribute("aria-selected", "true");
-		},
-		{ timeout: 5_000 },
-	);
-	await user.click(cell());
-}
