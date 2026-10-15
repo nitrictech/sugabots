@@ -8,7 +8,7 @@ import {
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	dateIn,
@@ -125,38 +125,18 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 
 type UsageDay = WorkspaceUsage["days"][number];
 
-/** The keys that move between the days, to the index of the day each one moves to. */
-const dayKeys: Record<string, (index: number, count: number) => number> = {
-	ArrowLeft: (index) => Math.max(index - 1, 0),
-	ArrowRight: (index, count) => Math.min(index + 1, count - 1),
-	Home: () => 0,
-	End: (_, count) => count - 1,
-};
-
 /**
- * A bar for each day. Hovering, focusing or tapping a day so far shows what it
- * cost; days still to come are an empty mark. The days are one tab stop, and
- * the arrow keys move between them.
+ * A bar for each day. Hovering or tapping a day so far shows what it cost;
+ * days still to come are an empty mark.
  */
 function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string }) {
 	const [tooltip] = useState(() => TooltipPrimitive.createHandle<UsageDay>());
 	const idPrefix = useId();
 	const triggerId = (day: UsageDay) => `${idPrefix}${day.date}`;
-	const spentDays = days.filter((day) => day.date <= today);
-	const [focused, setFocused] = useState<string>();
-	const tabStop = spentDays.find((day) => day.date === focused) ?? spentDays.at(-1);
 	const busiest = days.reduce(
 		(most, day) => (day.usd > most.usd ? day : most),
 		days[0] ?? { date: "", usd: 0 },
 	);
-
-	function moveBetweenDays(event: KeyboardEvent) {
-		const move = dayKeys[event.key];
-		if (!move || !tabStop) return;
-		event.preventDefault();
-		const day = spentDays[move(spentDays.indexOf(tabStop), spentDays.length)];
-		if (day) document.getElementById(triggerId(day))?.focus();
-	}
 
 	return (
 		<>
@@ -169,7 +149,6 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 						: "Spend each day. Nothing was spent."
 				}
 				className="flex h-[78px] items-end"
-				onKeyDown={moveBetweenDays}
 			>
 				{days.map((day) =>
 					day.date > today ? (
@@ -186,10 +165,9 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 							closeOnClick={false}
 							// Touch never hovers, so a tap opens the tooltip instead.
 							onClick={() => tooltip.open(triggerId(day))}
-							onFocus={() => setFocused(day.date)}
-							tabIndex={day === tabStop ? 0 : -1}
+							tabIndex={-1}
 							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
-							className="focus-ring flex h-full min-w-0 flex-1 cursor-default items-end rounded-[4px] px-[1.5px] data-popup-open:bg-chip"
+							className="flex h-full min-w-0 flex-1 cursor-default items-end rounded-[4px] px-[1.5px] data-popup-open:bg-chip"
 						>
 							<span
 								className="min-h-0.5 w-full rounded-[3px] bg-primary"

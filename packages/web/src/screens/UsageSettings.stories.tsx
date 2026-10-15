@@ -189,8 +189,8 @@ export const ByBot = meta.story({
 });
 
 /**
- * Each day so far shows what it cost: on hover, on focus, where the arrow keys
- * move between the days, and on a tap. Days still to come have nothing to show.
+ * Each day so far shows what it cost, on hover and on a tap. Days still to come
+ * have nothing to show.
  */
 export const DayCosts = meta.story({
 	play: async ({ canvas, userEvent }) => {
@@ -198,13 +198,6 @@ export const DayCosts = meta.story({
 		await waitFor(() => expect(dayTooltip("10 Sep")).toHaveTextContent("$4.70"));
 
 		await userEvent.unhover(canvas.getByRole("button", { name: "10 Sep: $4.70" }));
-		canvas.getByRole("button", { name: "25 Sep: $4.90" }).focus();
-		await userEvent.keyboard("{ArrowLeft}");
-		await expect(canvas.getByRole("button", { name: "24 Sep: $6.00" })).toHaveFocus();
-		await waitFor(() => expect(dayTooltip("24 Sep")).toHaveTextContent("$6.00"));
-		await userEvent.keyboard("{Home}");
-		await expect(canvas.getByRole("button", { name: "1 Sep: $1.90" })).toHaveFocus();
-
 		await userEvent.pointer({
 			keys: "[TouchA]",
 			target: canvas.getByRole("button", { name: "16 Sep: $5.10" }),
