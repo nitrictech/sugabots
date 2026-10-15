@@ -3,7 +3,7 @@ import type {
 	RoutineExecutionTriggerKind,
 	ThreadParticipant,
 } from "@sugabots/contracts";
-import { Clock, type LucideProps, RefreshCw, Webhook } from "lucide-react";
+import { Clock, GitBranch, type LucideProps, RefreshCw, Webhook } from "lucide-react";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 
@@ -103,13 +103,17 @@ export function ChatActivityRow(
 	);
 }
 
-/** What started a routine run, as a mark: a clock for its schedule, a hook for its webhook. */
+/**
+ * What started a routine run, as a mark: a clock for its schedule, a hook
+ * for its webhook, a branch for its repository.
+ */
 export function RoutineTriggerIcon({
 	kind,
 	...props
 }: { kind: RoutineExecutionTriggerKind } & LucideProps) {
 	if (kind === "cron") return <Clock {...props} />;
 	if (kind === "webhook") return <Webhook {...props} />;
+	if (kind === "github") return <GitBranch {...props} />;
 	return <RefreshCw {...props} />;
 }
 

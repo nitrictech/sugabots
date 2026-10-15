@@ -1,6 +1,12 @@
 export * as BotRoutines from "./bot-routines.ts";
 
-import type { Routine, RoutineResults, RoutineSchedule, RoutineTrigger } from "@sugabots/contracts";
+import type {
+	RepositoryEvent,
+	Routine,
+	RoutineResults,
+	RoutineSchedule,
+	RoutineTrigger,
+} from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -13,6 +19,7 @@ import type { UserFacing } from "../../user-message.ts";
 import type { RoutineRepository } from "./repository.ts";
 import type {
 	RoutineNotFound,
+	RoutineRepositoryNotInPod,
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
 	WebhookSecretTooShort,
@@ -189,13 +196,15 @@ export interface BotRoutine {
 	name: string;
 	instructions: string;
 	/**
-	 * What starts it: each schedule and the timezone it runs in, or a webhook.
-	 * A schedule the bot set is a cron expression; one picked in settings is by
-	 * its days and times. With none, it runs only when someone runs it.
+	 * What starts it: each schedule and the timezone it runs in, a webhook, or
+	 * a repository's events. A schedule the bot set is a cron expression; one
+	 * picked in settings is by its days and times. With none, it runs only when
+	 * someone runs it.
 	 */
 	when: Array<
 		| { kind: "schedule"; schedule: RoutineSchedule; timezone: string; nextRunAt: string | null }
 		| { kind: "webhook" }
+		| { kind: "github"; repository: string; events: readonly RepositoryEvent[] }
 	>;
 	paused: boolean;
 	results: RoutineResults;
@@ -230,6 +239,8 @@ function whenOf(trigger: RoutineTrigger): BotRoutine["when"][number] {
 			};
 		case "webhook":
 			return { kind: "webhook" };
+		case "github":
+			return { kind: "github", repository: trigger.repository, events: trigger.events };
 	}
 }
 
@@ -254,6 +265,7 @@ export type Refused =
 	| RoutineRepository.RoutineNameTaken
 	| InvalidRoutineSchedule
 	| WebhookSecretTooShort
+	| RoutineRepositoryNotInPod
 	| RoutineTriggerNotFound
 	| RoutineTriggerKindChanged;
 

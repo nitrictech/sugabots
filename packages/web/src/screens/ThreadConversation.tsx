@@ -847,7 +847,9 @@ function RoutineTriggerCard({ message }: { message: Message }) {
 			? "Scheduled trigger"
 			: message.author.triggerKind === "webhook"
 				? "Webhook trigger"
-				: "Manual run";
+				: message.author.triggerKind === "github"
+					? "Repository trigger"
+					: "Manual run";
 	return (
 		<article aria-label={`${source} for ${message.author.routineName}`} className="px-5 pt-3.5">
 			<div className="rounded-xl border border-border bg-list px-4 py-3">

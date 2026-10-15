@@ -139,6 +139,16 @@ export class RoutineDeliveryIdTooLong
 	}
 }
 
+/** A repository trigger for a repository the routine's agent's pod doesn't have. */
+export class RoutineRepositoryNotInPod
+	extends Data.TaggedError("RoutineRepositoryNotInPod")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`That repository isn't one of the bot's pod's. Add it in the pod's settings first.`;
+	}
+}
+
 export class RoutineTriggerNotFound
 	extends Data.TaggedError("RoutineTriggerNotFound")
 	implements UserFacing

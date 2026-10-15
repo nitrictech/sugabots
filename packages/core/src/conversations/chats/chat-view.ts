@@ -1157,9 +1157,9 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 							triggeredAt:
 								execution.trigger.kind === "cron"
 									? execution.trigger.scheduledAt
-									: execution.trigger.kind === "webhook"
-										? execution.trigger.receivedAt
-										: execution.trigger.requestedAt,
+									: execution.trigger.kind === "manual"
+										? execution.trigger.requestedAt
+										: execution.trigger.receivedAt,
 						}
 					: null,
 				latestActivityAt: side.updatedAt.toISOString(),

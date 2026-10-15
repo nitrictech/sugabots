@@ -37,6 +37,7 @@ const services = Layer.mergeAll(
 	Collaborations.layer,
 	Routines.layer,
 	Routines.webhooksLayer,
+	Routines.connectionEventsLayer,
 	// The turn's steps read it from here, for the routine tools.
 	BotRoutines.layer,
 	// The turn's steps read it from here, for save_instructions.

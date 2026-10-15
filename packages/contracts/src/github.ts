@@ -72,6 +72,26 @@ export const accountRepositorySchema = Schema.Struct({
 export type AccountRepository = typeof accountRepositorySchema.Type;
 
 /**
+ * What happens at a repository that can start a routine: a pull request
+ * opened (or reopened, or marked ready for review), a review of one, a
+ * comment on one or on its code, an issue opened, a comment on an issue, a
+ * run of checks that failed, and a push to a branch.
+ */
+export const REPOSITORY_EVENTS = [
+	"pull_request_opened",
+	"pull_request_review",
+	"pull_request_comment",
+	"issue_opened",
+	"issue_comment",
+	"checks_failed",
+	"push",
+] as const;
+
+export const repositoryEventSchema = Schema.Literals(REPOSITORY_EVENTS);
+
+export type RepositoryEvent = typeof repositoryEventSchema.Type;
+
+/**
  * The repositories a GitHub connection's tools work on, the account they
  * belong to, and where its app is changed or deleted on GitHub.
  */

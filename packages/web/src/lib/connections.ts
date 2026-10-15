@@ -12,7 +12,7 @@ import {
 	connectionSignInFailures,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo } from "react";
 import { client } from "@/api.ts";
@@ -23,11 +23,14 @@ export function usableToolCount(connection: Connection): number {
 }
 
 /** The pod's connections, each with how many tools are at each setting but not the tools. */
-export function useConnections(podId: string) {
+/** The pod's connections; nothing is asked while there is no pod, such as before a bot is chosen. */
+export function useConnections(podId: string | undefined) {
 	return useQuery({
 		queryKey: ["connections", podId],
-		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal }),
+		queryFn: podId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal })
+			: skipToken,
 	});
 }
 

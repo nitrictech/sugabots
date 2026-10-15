@@ -1,4 +1,4 @@
-import { createSign } from "node:crypto";
+import { createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { type DomainError, userText } from "@sugabots/errors";
 import { Clock, DateTime, Effect, ErrorReporter, Redacted, Schema } from "effect";
 import type { GitHubAppOwner } from "../../../database/schema.ts";
@@ -456,6 +456,17 @@ export const decoded =
 
 function requestFailed(failure: { status: number | undefined; reason: string }) {
 	return new GitHubRequestFailed(failure);
+}
+
+/**
+ * Whether `signature`, GitHub's `X-Hub-Signature-256` header, is the
+ * HMAC-SHA256 of `body` under the app's webhook secret.
+ */
+export function signedDelivery(secret: string, body: string, signature: string | undefined) {
+	if (!signature) return false;
+	const expected = Buffer.from(`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`);
+	const given = Buffer.from(signature);
+	return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 /** What git signs in with, as `username` and `token` over HTTP basic authentication. */
