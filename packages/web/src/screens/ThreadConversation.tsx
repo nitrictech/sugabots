@@ -3,6 +3,8 @@ import {
 	type CollaborationPart,
 	isNarration,
 	type Message,
+	type MessageReplyTo,
+	messageAuthorName,
 	type PersonParticipant,
 	type RoutineResultOf,
 	type ThreadParticipant,
@@ -10,7 +12,7 @@ import {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CornerUpLeft, Reply } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
@@ -20,6 +22,7 @@ import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
@@ -74,6 +77,8 @@ export function ThreadConversation({
 	highlightedMessageId,
 	threadActivityAt,
 	authorLinkOf,
+	onReply,
+	onJumpToMessage,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -129,6 +134,10 @@ export function ThreadConversation({
 	threadActivityAt?: ReadonlyMap<string, string>;
 	/** Where an author's name leads. Names are plain text without it. */
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
+	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
+	onReply?: (message: Message) => void;
+	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
+	onJumpToMessage?: (messageId: string) => void;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -170,6 +179,8 @@ export function ThreadConversation({
 								highlighted={message.id === highlightedMessageId}
 								threadActivityAt={threadActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
+								onReply={onReply}
+								onJumpToMessage={onJumpToMessage}
 								onOpenThread={onOpenThread}
 								onOpenArtifact={onOpenArtifact}
 								onOpenDesktop={onOpenDesktop}
@@ -213,11 +224,12 @@ export function typersAfter(
 
 /**
  * Whether `message` heads a group of its own, with its author's face and name:
- * a new author, an hour's quiet, or a message after one that opened a
- * collaboration, whose thread line ends that group.
+ * a new author, an hour's quiet, a reply, whose quote sits over its author's
+ * name, or a message after one that opened a collaboration, whose thread line
+ * ends that group.
  */
 function startsGroup(previous: Message | undefined, message: Message): boolean {
-	if (!previous || !sameAuthor(previous, message)) return true;
+	if (!previous || !sameAuthor(previous, message) || message.replyTo) return true;
 	if (previous.parts.some((part) => part.type === "collaboration")) return true;
 	return (
 		new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() >= LONG_QUIET_MS
@@ -332,8 +344,9 @@ const ROW = {
 /**
  * One message as a row: at the head of a group its author's face, name and
  * time, then its words, any collaboration it opened as a thread line, and any
- * call somebody was asked to approve as its card. Hovered, it lifts slightly,
- * shows its time beside a follow-up, and offers to copy its words.
+ * call somebody was asked to approve as its card. A reply has the message it
+ * quotes over its author's name. Hovered, it lifts slightly, shows its time
+ * beside a follow-up, and offers to reply to it and to copy its words.
  */
 function MessageRow({
 	message,
@@ -349,6 +362,8 @@ function MessageRow({
 	highlighted,
 	threadActivityAt,
 	authorLink,
+	onReply,
+	onJumpToMessage,
 	onOpenThread,
 	onOpenArtifact,
 	onOpenDesktop,
@@ -373,6 +388,8 @@ function MessageRow({
 	threadActivityAt?: ReadonlyMap<string, string>;
 	/** Where its author's name leads. */
 	authorLink?: AuthorLink;
+	onReply?: (message: Message) => void;
+	onJumpToMessage?: (messageId: string) => void;
 	onOpenThread: (threadId: string) => void;
 	onOpenArtifact?: (artifactId: string) => void;
 	onOpenDesktop?: () => void;
@@ -400,6 +417,7 @@ function MessageRow({
 		calls.length > 0 || segments.some((segment) => segment.type !== "text" || segment.text);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (message.status === "streaming" && !showsSomething) return null;
+	const replyable = onReply !== undefined && message.status === "complete";
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
 		<article
@@ -415,7 +433,11 @@ function MessageRow({
 			)}
 			style={agent ? botColorVariables(agent.color) : undefined}
 		>
-			<span className="flex shrink-0 justify-center" style={{ width: size.face }}>
+			{/* A reply's face lines up with its author's name, under the quote. */}
+			<span
+				className={cn("flex shrink-0 justify-center", message.replyTo && "pt-[21px]")}
+				style={{ width: size.face }}
+			>
 				{startsGroup ? (
 					<span aria-hidden className="mt-0.5 flex">
 						{author.kind === "agent" ? (
@@ -436,6 +458,7 @@ function MessageRow({
 				)}
 			</span>
 			<div className="flex min-w-0 flex-1 flex-col items-start">
+				{message.replyTo && <ReplyQuote replyTo={message.replyTo} onJump={onJumpToMessage} />}
 				{startsGroup && (
 					<div className="flex items-center gap-2 pb-px">
 						<AuthorName name={author.name} link={authorLink} />
@@ -548,17 +571,63 @@ function MessageRow({
 				)}
 				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
 			</div>
-			{words && (
+			{(words || replyable) && (
 				<div className="pointer-events-none absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 opacity-0 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only">
-					<CopyIconButton
-						label="Copy text"
-						text={words}
-						side="top"
-						className="h-7 w-[30px] rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-[15px]"
-					/>
+					{replyable && (
+						<IconButton
+							label="Reply"
+							side="top"
+							onClick={() => onReply(message)}
+							className={TOOLBAR_BUTTON}
+						>
+							<Reply aria-hidden />
+						</IconButton>
+					)}
+					{words && (
+						<CopyIconButton label="Copy text" text={words} side="top" className={TOOLBAR_BUTTON} />
+					)}
 				</div>
 			)}
 		</article>
+	);
+}
+
+const TOOLBAR_BUTTON =
+	"h-7 w-[30px] rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-[15px]";
+
+/**
+ * Over a reply, whose message it answers and that message's first line. With
+ * `onJump` it is a button going to that message.
+ */
+function ReplyQuote({
+	replyTo,
+	onJump,
+}: {
+	replyTo: MessageReplyTo;
+	onJump?: (messageId: string) => void;
+}) {
+	const name = messageAuthorName(replyTo.author);
+	const quote = (
+		<>
+			<CornerUpLeft aria-hidden size={13} strokeWidth={2.2} className="shrink-0" />
+			<span className="shrink-0">Replying to</span>
+			<span className="shrink-0 font-semibold text-soft-foreground">{name}</span>
+			<span className="ml-0.5 min-w-0 truncate">{replyTo.preview}</span>
+		</>
+	);
+	// 21px tall, which the reply's face is moved down by to line up with the name.
+	const className =
+		"-ml-1 flex h-[21px] max-w-full items-center gap-1 rounded-[6px] px-1 text-[13px] text-muted-foreground leading-[19px]";
+	if (!onJump) return <p className={cn("m-0", className)}>{quote}</p>;
+	return (
+		<button
+			type="button"
+			aria-label={`Replying to ${name}: ${replyTo.preview}`}
+			onClick={() => onJump(replyTo.id)}
+			className={cn("focus-ring transition-colors hover:text-foreground", className)}
+		>
+			{quote}
+		</button>
 	);
 }
 

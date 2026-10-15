@@ -714,6 +714,67 @@ export const JumpedTo = meta.story({
 	},
 });
 
+const releaseNotes = message(
+	"0199a3a0-0000-7000-8000-000000000c11",
+	host,
+	"The release notes are drafted. **Checkout** gets the retry fix, and search gets the new filters.",
+);
+
+/**
+ * Replies say whose message they answer, and its first line, over their
+ * author's name, and go to that message; a reply always starts a group of its
+ * own, even after the same author's last message.
+ */
+export const Replies = meta.story({
+	args: {
+		participants: [host, person, jay],
+		onJumpToMessage: fn(),
+		messages: [
+			releaseNotes,
+			{
+				...message("0199a3a0-0000-7000-8000-000000000c12", person, "Add the pricing page fix too"),
+				replyTo: {
+					id: releaseNotes.id,
+					author: host,
+					preview:
+						"The release notes are drafted. Checkout gets the retry fix, and search gets the new filters.",
+				},
+			},
+			{
+				...message("0199a3a0-0000-7000-8000-000000000c13", person, "And thank Jay for the filters"),
+				replyTo: {
+					id: "0199a3a0-0000-7000-8000-000000000c01",
+					author: jay,
+					preview: "Filters are merged, they're behind the search flag for now",
+				},
+			},
+		],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: /^Replying to Issue Triager: The release notes/ }),
+		);
+		await expect(args.onJumpToMessage).toHaveBeenCalledWith(releaseNotes.id);
+		await expect(canvas.getAllByRole("article", { name: /^Sam Rivera/ })).toHaveLength(2);
+	},
+});
+
+/**
+ * ReplyFromToolbar is the hover toolbar's Reply, which starts a reply quoting
+ * the message. The toolbar also opens for the keyboard, as focus reaches it.
+ */
+export const ReplyFromToolbar = meta.story({
+	args: {
+		onReply: fn(),
+		messages: [releaseNotes],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		canvas.getByRole("button", { name: "Reply" }).focus();
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onReply).toHaveBeenCalledWith(releaseNotes);
+	},
+});
+
 function asked(id: string, tool: string, approval: ToolCallPart["approval"]): Message {
 	return reply(id, [
 		{ type: "text", text: "I'll track the checkout timeouts in Linear." },

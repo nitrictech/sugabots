@@ -279,3 +279,31 @@ export const PeopleOnly = meta.story({
 		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
 	},
 });
+
+/**
+ * ReplyingTo is a draft answering a message: the strip over it names whom and
+ * what, and its × or Escape stops replying, leaving the draft as it is.
+ */
+export const ReplyingTo = meta.story({
+	args: {
+		value: "Add the pricing page fix too",
+		replyingTo: {
+			message: {
+				id: "0199a3a0-0000-7000-8000-000000000c11",
+				author: mentionable[0] as Extract<ThreadParticipant, { kind: "agent" }>,
+				preview:
+					"The release notes are drafted. Checkout gets the retry fix, and search gets the new filters.",
+			},
+			onCancel: fn(),
+		},
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByText("Issue Triager")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Cancel reply" }));
+		await expect(args.replyingTo?.onCancel).toHaveBeenCalledTimes(1);
+		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
+		await userEvent.keyboard("{Escape}");
+		await expect(args.replyingTo?.onCancel).toHaveBeenCalledTimes(2);
+		await expect(args.onValueChange).not.toHaveBeenCalled();
+	},
+});

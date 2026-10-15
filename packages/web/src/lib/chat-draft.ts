@@ -1,3 +1,5 @@
+import { type MessageReplyTo, messageReplyToSchema } from "@sugabots/contracts";
+import { Option, Schema } from "effect";
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 
 /**
@@ -19,6 +21,32 @@ export function useChatDraft(
 	}, [key, draft]);
 
 	return [draft, setDraft];
+}
+
+/**
+ * The message the unsent draft in the same chat answers, kept beside it as
+ * `useChatDraft` keeps the draft. A stored value that no longer reads as a
+ * quote is dropped.
+ */
+export function useChatReplyDraft(
+	userId: string,
+	podId: string,
+	agentId: string,
+): [MessageReplyTo | undefined, Dispatch<SetStateAction<MessageReplyTo | undefined>>] {
+	const key = `sugabots-draft-reply:${userId}:${podId}:${agentId}`;
+	const [replyTo, setReplyTo] = useState(() => decodeReplyTo(read(key)));
+
+	useEffect(() => {
+		write(key, replyTo ? JSON.stringify(replyTo) : "");
+	}, [key, replyTo]);
+
+	return [replyTo, setReplyTo];
+}
+
+const decodeStoredReplyTo = Schema.decodeUnknownOption(Schema.fromJsonString(messageReplyToSchema));
+
+function decodeReplyTo(stored: string): MessageReplyTo | undefined {
+	return stored ? Option.getOrUndefined(decodeStoredReplyTo(stored)) : undefined;
 }
 
 function read(key: string): string {

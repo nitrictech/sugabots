@@ -1,7 +1,7 @@
 import type { Message, ThreadDetails } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -140,6 +140,51 @@ export const Phone = meta.story({
 		await expect(
 			await canvas.findByRole("link", { name: "Back to Revenue" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+	},
+});
+
+/**
+ * Reply on a message's hover toolbar starts a reply: the composer names the
+ * message it answers, and the message is sent quoting it.
+ */
+export const ReplyToAMessage = meta.story({
+	beforeEach({ msw }) {
+		// What is sent stays in the chat, as the API keeps it, so it is there once the chat reloads.
+		const chat = [...conversation];
+		msw.use(
+			...appHandlers({ messages: { [growthDesk.id]: chat } }),
+			http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
+				const sent = (await request.json()) as { id: string; message: string; replyTo?: string };
+				const quoted = conversation.find((message) => message.id === sent.replyTo);
+				const reply: Message = {
+					...said("10", "you", sent.message, "2026-09-18T06:08:00.000Z"),
+					id: sent.id,
+					...(quoted && {
+						replyTo: { id: quoted.id, author: quoted.author, preview: quoted.content },
+					}),
+				};
+				chat.push(reply);
+				return HttpResponse.json(reply, { status: 201 });
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const asked = (await within(log).findByText(/Want me to draft replies/)).closest("article");
+		if (!asked) throw new Error("The bot's question is not a message row");
+		within(asked).getByRole("button", { name: "Reply" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const composer = canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` });
+		await expect(composer).toHaveFocus();
+		await expect(canvas.getByRole("button", { name: "Cancel reply" })).toBeVisible();
+
+		await userEvent.keyboard("Only the Northwind one{Enter}");
+		const quote = await within(log).findByRole("button", {
+			name: /^Replying to Growth Desk: The two Northwind accounts/,
+		});
+		// A message the chat reloads with rises into place.
+		await waitFor(() => expect(quote).toBeVisible());
+		await expect(canvas.queryByRole("button", { name: "Cancel reply" })).toBeNull();
 	},
 });
 

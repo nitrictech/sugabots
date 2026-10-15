@@ -1,13 +1,16 @@
 import {
 	type AgentParticipant,
 	canStartMention,
+	type MessageReplyTo,
+	messageAuthorName,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { AtSign, Send, UsersRound } from "lucide-react";
+import { AtSign, Send, UsersRound, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
@@ -17,7 +20,8 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  * `mentionable` whose name or handle matches what follows it; choosing one
  * writes their handle into the draft. With `peopleOnly`, a button beside the @
  * says whether the bot will answer, and it or Tab moves between writing to the bot,
- * the default, and writing to the other people only.
+ * the default, and writing to the other people only. With `replyingTo`, a strip
+ * over the draft names the message it answers; its × or Escape stops replying.
  */
 export function ChatComposer({
 	label,
@@ -30,6 +34,7 @@ export function ChatComposer({
 	className,
 	mentionable,
 	peopleOnly,
+	replyingTo,
 }: {
 	/** Names the box for assistive technology, and is its placeholder. */
 	label: string;
@@ -49,6 +54,8 @@ export function ChatComposer({
 		/** The bot that replies unless the message is for people only. */
 		agent: Pick<AgentParticipant, "name">;
 	};
+	/** The message the draft answers, quoted when it is sent. */
+	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -72,6 +79,12 @@ export function ChatComposer({
 		textarea.current?.setSelectionRange(end, end);
 	}, []);
 
+	// Choosing Reply on a message goes straight on to writing the reply.
+	const replyingToId = replyingTo?.message.id;
+	useEffect(() => {
+		if (replyingToId) textarea.current?.focus();
+	}, [replyingToId]);
+
 	function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
 		if (mentionMenuOpen && !event.nativeEvent.isComposing) {
 			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -92,6 +105,11 @@ export function ChatComposer({
 				insertMention(matches[selectedMention]);
 				return;
 			}
+		}
+		if (replyingTo && event.key === "Escape" && !event.nativeEvent.isComposing) {
+			event.preventDefault();
+			replyingTo.onCancel();
+			return;
 		}
 		// Shift+Tab still moves the focus back.
 		if (peopleOnly && event.key === "Tab" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -154,6 +172,9 @@ export function ChatComposer({
 					toPeople ? "border-people-only" : "border-border-strong",
 				)}
 			>
+				{replyingTo && (
+					<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
+				)}
 				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3">
 					<label htmlFor={id} className="sr-only">
 						{label}
@@ -239,6 +260,25 @@ export function ChatComposer({
 				{error}
 			</div>
 		</form>
+	);
+}
+
+/** Over the draft, the message it answers: its author and first line, and a × to stop replying. */
+function ReplyingToStrip({ message, onCancel }: { message: MessageReplyTo; onCancel: () => void }) {
+	const { author } = message;
+	const name = messageAuthorName(author);
+	return (
+		<div className="flex items-center gap-2 border-border border-b py-1.5 pr-1.5 pl-3 text-[13px]">
+			<p className="m-0 flex min-w-0 flex-1 items-center gap-1.5 text-muted-foreground">
+				<span className="shrink-0">
+					Replying to <span className="font-semibold text-soft-foreground">{name}</span>
+				</span>
+				<span className="min-w-0 truncate">{message.preview}</span>
+			</p>
+			<IconButton label="Cancel reply" side="top" onClick={onCancel}>
+				<X aria-hidden />
+			</IconButton>
+		</div>
 	);
 }
 

@@ -1,10 +1,12 @@
-import type {
-	Agent,
-	ChatHistoryEntry,
-	ChatMessageItem,
-	Pod,
-	SessionUser,
-	ThreadParticipant,
+import {
+	type Agent,
+	type ChatHistoryEntry,
+	type ChatMessageItem,
+	type Message,
+	type Pod,
+	quotedPreview,
+	type SessionUser,
+	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -20,7 +22,7 @@ import {
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { useChatDraft } from "@/lib/chat-draft.ts";
+import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
 	useChatHistory,
@@ -114,6 +116,7 @@ export function AgentChat({
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
+	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent.id);
 	const [peopleOnly, setPeopleOnly] = useState(false);
 	useTypingSignal(chat.data?.mainThreadId, draft);
 	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
@@ -163,9 +166,10 @@ export function AgentChat({
 		}
 	}, [latestItemRevision]);
 
+	const [jumpTarget, jumpTo] = useJumpTarget(focusMessageId);
 	const jump = useJumpToMessage({
-		messageId: focusMessageId,
-		shown: shownMessages.some((message) => message.id === focusMessageId),
+		target: jumpTarget,
+		shown: shownMessages.some((message) => message.id === jumpTarget?.messageId),
 		viewport,
 		older:
 			!messages.isSuccess || messages.isFetchingNextPage
@@ -197,20 +201,29 @@ export function AgentChat({
 		const message = draft.trim();
 		if (!message || send.isPending) return;
 		const submitted = draft;
+		const answering = replyingTo;
 		setDraft("");
+		setReplyingTo(undefined);
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
 				id: uuidv4(),
 				message,
 				peopleOnly: writingToPeople,
+				replyTo: answering,
 			});
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
 		} catch {
 			setDraft((current) => (current === "" ? submitted : current));
+			setReplyingTo((current) => current ?? answering);
 		}
+	}
+
+	function replyTo(message: Message) {
+		if (message.author.kind === "routine_trigger") return;
+		setReplyingTo({ id: message.id, author: message.author, preview: quotedPreview(message) });
 	}
 
 	function scrollToLatest() {
@@ -347,6 +360,8 @@ export function AgentChat({
 										highlightedMessageId={jump.pointedOut}
 										threadActivityAt={threadActivityAt}
 										authorLinkOf={authorLinkOf}
+										onReply={replyTo}
+										onJumpToMessage={jumpTo}
 									/>
 								) : (
 									<ActivityLine
@@ -384,6 +399,9 @@ export function AgentChat({
 								otherPeople.length > 0
 									? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
 									: undefined
+							}
+							replyingTo={
+								replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
 							}
 						/>
 					)}
@@ -546,14 +564,39 @@ const MAX_PAGES_TO_FIND = 10;
 /** How long a message jumped to stays pointed out. */
 const POINTED_OUT_MS = 2000;
 
+/** One request to go to a message. Asking again for the same message is a new request. */
+interface JumpTarget {
+	messageId: string;
+}
+
 /**
- * Jumps to `messageId` once it is shown, loading older pages until it is, up
- * to a limit, then centres it, moves the focus to it, and points it out for a
- * moment. Each message is jumped to once. Returns the message pointed out, if
- * any, and whether the search gave up without finding it.
+ * The message to go to: the one the chat was opened at, until a reply's quote
+ * asks for another, and again whenever the chat is opened at a new one.
+ */
+function useJumpTarget(
+	focusMessageId: string | undefined,
+): [JumpTarget | undefined, (messageId: string) => void] {
+	const [target, setTarget] = useState(() => jumpTargetOf(focusMessageId));
+	const [openedAt, setOpenedAt] = useState(focusMessageId);
+	if (focusMessageId !== openedAt) {
+		setOpenedAt(focusMessageId);
+		setTarget(jumpTargetOf(focusMessageId));
+	}
+	return [target, (messageId) => setTarget({ messageId })];
+}
+
+function jumpTargetOf(messageId: string | undefined): JumpTarget | undefined {
+	return messageId ? { messageId } : undefined;
+}
+
+/**
+ * Jumps to the target's message once it is shown, loading older pages until it
+ * is, up to a limit, then centres it, moves the focus to it, and points it out
+ * for a moment. Each target is jumped to once. Returns the message pointed out,
+ * if any, and whether the search gave up without finding it.
  */
 function useJumpToMessage({
-	messageId,
+	target,
 	shown,
 	viewport,
 	older,
@@ -561,7 +604,7 @@ function useJumpToMessage({
 	pagesLoaded,
 	onJumped,
 }: {
-	messageId: string | undefined;
+	target: JumpTarget | undefined;
 	/** Whether the message is among those loaded. */
 	shown: boolean;
 	viewport: RefObject<HTMLDivElement | null>;
@@ -571,22 +614,22 @@ function useJumpToMessage({
 	pagesLoaded: number;
 	onJumped: () => void;
 }): { pointedOut: string | undefined; notFound: boolean } {
-	const jumped = useRef<string>(undefined);
+	const jumped = useRef<JumpTarget>(undefined);
 	const [pointedOut, setPointedOut] = useState<string>();
 	const loadOlderPage = useEffectEvent(() => void loadOlder());
 	const jumpedTo = useEffectEvent(onJumped);
 	const searchedEnough = pagesLoaded >= MAX_PAGES_TO_FIND;
 	useEffect(() => {
-		if (!messageId || jumped.current === messageId) return;
+		if (!target || jumped.current === target) return;
 		if (!shown) {
 			if (older === "available" && !searchedEnough) loadOlderPage();
 			return;
 		}
 		const row = [
 			...(viewport.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []),
-		].find((candidate) => candidate.dataset.messageId === messageId);
+		].find((candidate) => candidate.dataset.messageId === target.messageId);
 		if (!row) return;
-		jumped.current = messageId;
+		jumped.current = target;
 		// In the next frame, after the scroll event from the chat's first move to its
 		// foot, which would otherwise say the chat is following its latest again.
 		requestAnimationFrame(() => {
@@ -595,18 +638,15 @@ function useJumpToMessage({
 			row.focus({ preventScroll: true });
 			jumpedTo();
 		});
-		setPointedOut(messageId);
-	}, [messageId, shown, viewport, older, searchedEnough]);
+		setPointedOut(target.messageId);
+	}, [target, shown, viewport, older, searchedEnough]);
 	useEffect(() => {
 		if (!pointedOut) return;
 		const fade = setTimeout(() => setPointedOut(undefined), POINTED_OUT_MS);
 		return () => clearTimeout(fade);
 	}, [pointedOut]);
 	const notFound =
-		messageId !== undefined &&
-		!shown &&
-		older !== "loading" &&
-		(older === "none" || searchedEnough);
+		target !== undefined && !shown && older !== "loading" && (older === "none" || searchedEnough);
 	return { pointedOut, notFound };
 }
 
