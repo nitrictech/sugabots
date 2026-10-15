@@ -2,7 +2,7 @@ import type { UsageMonth, WorkspaceUsage } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect } from "storybook/test";
+import { expect, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { UsageSettings } from "./UsageSettings.tsx";
 
@@ -187,6 +187,29 @@ export const ByBot = meta.story({
 		).toBeInTheDocument();
 	},
 });
+
+/**
+ * Each day so far shows what it cost, on hover and on a tap. Days still to come
+ * have nothing to show.
+ */
+export const DayCosts = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.hover(await canvas.findByRole("button", { name: "10 Sep: $4.70" }));
+		await waitFor(() => expect(dayTooltip("10 Sep")).toHaveTextContent("$4.70"));
+
+		await userEvent.unhover(canvas.getByRole("button", { name: "10 Sep: $4.70" }));
+		await userEvent.pointer({
+			keys: "[TouchA]",
+			target: canvas.getByRole("button", { name: "16 Sep: $5.10" }),
+		});
+		await waitFor(() => expect(dayTooltip("16 Sep")).toHaveTextContent("$5.10"));
+
+		await expect(canvas.queryByRole("button", { name: /^26 Sep/ })).not.toBeInTheDocument();
+	},
+});
+
+/** The tooltip for `day`, found by the date it shows beneath the amount. */
+const dayTooltip = (day: string) => screen.getByText(day, { selector: "span" }).parentElement;
 
 /**
  * By model, one line for each model through each provider, whoever asked it:

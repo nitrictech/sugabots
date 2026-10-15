@@ -6,7 +6,6 @@ import {
 	type UsageMonth,
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
-import { cn } from "cn";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
@@ -28,6 +27,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * What the workspace's models cost, a month at a time: the total and each
@@ -100,12 +100,8 @@ function MonthStepper({
 	);
 }
 
-/** The month's total, and a bar for each of its days. Days still to come are an empty mark. */
+/** The month's total, and a bar for each of its days. */
 function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }) {
-	const busiest = usage.days.reduce(
-		(most, day) => (day.usd > most.usd ? day : most),
-		usage.days[0] ?? { date: "", usd: 0 },
-	);
 	const first = usage.days[0];
 	const last = usage.days.at(-1);
 	return (
@@ -116,30 +112,7 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 			<p className="m-0 font-bold text-[30px] text-foreground tabular-nums tracking-[-0.01em]">
 				{formatUsd(usage.usd)}
 			</p>
-			<div
-				role="img"
-				aria-label={
-					busiest.usd > 0
-						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
-						: "Spend each day. Nothing was spent."
-				}
-				className="flex h-[78px] items-end gap-[3px]"
-			>
-				{usage.days.map((day) => (
-					<span
-						key={day.date}
-						className={cn(
-							"min-w-0 flex-1 rounded-[3px]",
-							day.date > today ? "h-0.5 bg-chip" : "min-h-0.5 bg-primary",
-						)}
-						style={
-							day.date > today || busiest.usd === 0
-								? undefined
-								: { height: `${(day.usd / busiest.usd) * 100}%` }
-						}
-					/>
-				))}
-			</div>
+			<DailySpend days={usage.days} today={today} />
 			{first && last && (
 				<div aria-hidden className="flex justify-between text-subtle-foreground text-xs">
 					<span>{dayLabel(first.date)}</span>
@@ -147,6 +120,79 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 				</div>
 			)}
 		</section>
+	);
+}
+
+type UsageDay = WorkspaceUsage["days"][number];
+
+/**
+ * A bar for each day. Hovering or tapping a day so far shows what it cost;
+ * days still to come are an empty mark.
+ */
+function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string }) {
+	const [openDate, setOpenDate] = useState<string>();
+	const busiest = days.reduce(
+		(most, day) => (day.usd > most.usd ? day : most),
+		days[0] ?? { date: "", usd: 0 },
+	);
+
+	return (
+		// biome-ignore lint/a11y/useSemanticElements: this group labels a chart of buttons, not form controls, so a fieldset is inappropriate.
+		<div
+			role="group"
+			aria-label={
+				busiest.usd > 0
+					? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
+					: "Spend each day. Nothing was spent."
+			}
+			className="-mx-[1.5px] flex h-[78px] items-end"
+		>
+			{days.map((day) =>
+				day.date > today ? (
+					<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-[1.5px]">
+						<span className="h-0.5 w-full rounded-[3px] bg-chip" />
+					</span>
+				) : (
+					<Tooltip
+						key={day.date}
+						side="top"
+						delay={0}
+						closeOnClick={false}
+						open={openDate === day.date}
+						onOpenChange={(open) =>
+							// Moving between bars opens the next before closing the last, so only close this day's.
+							setOpenDate((current) =>
+								open ? day.date : current === day.date ? undefined : current,
+							)
+						}
+						label={
+							<span className="flex flex-col items-center">
+								<span className="font-semibold tabular-nums">{formatUsd(day.usd)}</span>
+								<span className="text-background/70">{dayLabel(day.date)}</span>
+							</span>
+						}
+					>
+						<button
+							type="button"
+							// Touch never hovers, so a tap opens the tooltip instead.
+							onClick={() => setOpenDate(day.date)}
+							tabIndex={-1}
+							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
+							className="group flex h-full min-w-0 flex-1 cursor-default px-[1.5px]"
+						>
+							<span className="flex w-full items-end rounded-[3px] group-data-popup-open:bg-chip">
+								<span
+									className="min-h-0.5 w-full rounded-[3px] bg-primary"
+									style={
+										busiest.usd === 0 ? undefined : { height: `${(day.usd / busiest.usd) * 100}%` }
+									}
+								/>
+							</span>
+						</button>
+					</Tooltip>
+				),
+			)}
+		</div>
 	);
 }
 
