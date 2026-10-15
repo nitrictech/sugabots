@@ -34,6 +34,7 @@ import {
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
+import { useReactions } from "@/lib/reactions.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	usePeopleTyping,
@@ -115,6 +116,8 @@ export function AgentChat({
 	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
+	const reactions = useReactions(user);
+	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent.id);
 	const [peopleOnly, setPeopleOnly] = useState(false);
@@ -136,6 +139,7 @@ export function AgentChat({
 	const entries = history.entries;
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
+	const sending = sendingIds(optimistic, messages.items, details?.messages ?? []);
 	const groups = chatGroupsOf(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
@@ -356,12 +360,14 @@ export function AgentChat({
 										podId={pod.id}
 										approvalCapabilities={details.capabilities}
 										queued={queued}
+										sending={sending}
 										showsTyping={false}
 										highlightedMessageId={jump.pointedOut}
 										threadActivityAt={threadActivityAt}
 										authorLinkOf={authorLinkOf}
 										onReply={replyTo}
 										onJumpToMessage={jumpTo}
+										reacting={reacting}
 									/>
 								) : (
 									<ActivityLine
@@ -542,6 +548,23 @@ function mergeChatItems(
 		items.set(`message:${message.id}`, { kind: "message", message });
 	return [...items.values()].sort((left, right) =>
 		chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right)),
+	);
+}
+
+/** The messages shown as sent that the API has not yet been heard to have. */
+function sendingIds(
+	optimistic: ChatMessageItem[],
+	pageItems: ChatMessageItem[],
+	liveMessages: readonly Message[],
+): ReadonlySet<string> {
+	const saved = new Set([
+		...pageItems.flatMap((item) => (item.kind === "message" ? [item.message.id] : [])),
+		...liveMessages.map(({ id }) => id),
+	]);
+	return new Set(
+		optimistic.flatMap((item) =>
+			item.kind === "message" && !saved.has(item.message.id) ? [item.message.id] : [],
+		),
 	);
 }
 
