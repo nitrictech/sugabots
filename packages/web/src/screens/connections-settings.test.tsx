@@ -22,10 +22,12 @@ const wiki: TestConnection = {
 	name: "Wiki",
 	handle: "wiki",
 	url: "https://wiki.wikimple.com/mcp",
+	kind: "mcp",
 	auth: "header",
 	signedIn: true,
 	secretHeader: "authorization",
 	hasSecret: false,
+	appSettingsUrl: null,
 	status: "connected",
 	tools: [
 		{
@@ -410,6 +412,7 @@ describe("the Connections settings", () => {
 			lastTestError: "The server needs an access token or a sign-in (HTTP 401)",
 			secretHeader: null,
 			hasSecret: false,
+			appSettingsUrl: null,
 		};
 		serveConnections(failing);
 		route.update.mockReturnValue(Effect.succeed(listedConnection(failing)));

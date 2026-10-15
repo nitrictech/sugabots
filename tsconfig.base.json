@@ -32,6 +32,7 @@
 						// Code that uses DomainError: a caught error must become a typed class.
 						// Keep this list the same as the DomainError override in biome.json.
 						"include": [
+							"packages/core/src/integrations/**/*.ts",
 							"packages/core/src/providers/models/**/*.ts",
 							"packages/core/src/providers/model-providers/remote.ts",
 							"packages/server/src/http/errors.ts"

@@ -25,6 +25,7 @@ import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
+import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Models } from "@sugabots/core/providers/models/models";
@@ -75,7 +76,7 @@ const Infrastructure = Layer.mergeAll(
 );
 
 /** The outside systems: email, the workspaces' models, and the tools turns are offered. */
-const Integrations = Layer.mergeAll(
+const OutsideSystems = Layer.mergeAll(
 	Email.layer,
 	Models.layer,
 	BuiltInTools.layer,
@@ -95,6 +96,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SandboxProviderSetup.layer,
 	SandboxNetwork.layer,
 	PodSandboxSetup.layer,
+	GitHubApps.layer,
 	ConnectionSetup.layer,
 	Artifacts.layer,
 	ArtifactPages.layer,
@@ -141,7 +143,7 @@ const Http = listeningLayer.pipe(
 const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(ConversationServices),
 	Layer.provide(WorkspacesAndProviders),
-	Layer.provide(Integrations),
+	Layer.provide(OutsideSystems),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),
 );

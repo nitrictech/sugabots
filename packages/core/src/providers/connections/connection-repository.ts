@@ -8,16 +8,23 @@ import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { type ConnectionRow, connection, type ToolAccess } from "../../database/schema.ts";
+import {
+	type ConnectionRow,
+	connection,
+	type GitHubConnectionSettings,
+	type ToolAccess,
+} from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
+import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
 import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
 /**
- * The only writer of `connection`: the MCP servers a pod's agents may use, and
- * their sealed secrets and OAuth records.
+ * The only writer of `connection`: the MCP servers and GitHub apps a pod's
+ * agents may use, the MCP servers' sealed secrets and OAuth records, and the
+ * apps' sealed credentials.
  *
  * A name, and the handle made from it, is unique per pod. `target` does not
  * look at what the pod's bots may do with the tools: a connection whose tools
@@ -34,6 +41,31 @@ export interface Interface {
 		userId: string,
 		input: NewConnection,
 	) => Effect.Effect<ConnectionRow, ConnectionNameTaken>;
+	/**
+	 * Gives the pod a GitHub connection to the app made for it, `id`. It
+	 * waits on `installed` before it is signed in.
+	 */
+	readonly createGitHub: (
+		workspaceId: string,
+		podId: string,
+		userId: string,
+		input: {
+			id: string;
+			app: Pick<GitHubConnectionSettings, "appId" | "slug" | "owner">;
+			appCredentialEncrypted: string;
+		},
+	) => Effect.Effect<ConnectionRow, ConnectionNameTaken>;
+	/**
+	 * Records the account the connection's app was installed on, or installed
+	 * on again; answers whether the connection is still there.
+	 */
+	readonly installed: (
+		workspaceId: string,
+		connectionId: string,
+		installation: { installationId: number; account: string },
+	) => Effect.Effect<boolean>;
+	/** Counts a change to what a connection's tools work on as a change of configuration. */
+	readonly reconfigured: (workspaceId: string, connectionId: string) => Effect.Effect<void>;
 	readonly update: (
 		workspaceId: string,
 		podId: string,
@@ -61,9 +93,9 @@ export interface Interface {
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
 	/**
-	 * The ones a turn may use. A connection still waiting on its sign-in offers
-	 * nothing, and neither does one whose every listed tool is off, so a turn
-	 * does not reach its server at all.
+	 * The MCP servers a turn may use. A connection still waiting on its
+	 * sign-in offers nothing, and neither does one whose every listed tool is
+	 * off, so a turn does not reach its server at all.
 	 */
 	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<ConnectionTarget[]>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
@@ -151,6 +183,82 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		createGitHub: (workspaceId, podId, userId, input) =>
+			operation(
+				"createGitHub",
+				Effect.gen(function* () {
+					const name = "GitHub";
+					const testedAt = yield* DateTime.nowAsDate;
+					const [inserted] = yield* queryCatching(
+						(db) =>
+							db
+								.insert(connection)
+								.values({
+									workspaceId,
+									podId,
+									createdById: userId,
+									kind: "github",
+									name,
+									handle: handleFromName(name),
+									id: input.id,
+									url: `https://github.com/apps/${input.app.slug}`,
+									settings: {
+										kind: "github",
+										...input.app,
+										installationId: null,
+										account: null,
+										repositories: [],
+									},
+									appCredentialEncrypted: input.appCredentialEncrypted,
+									lastTestedAt: testedAt,
+								})
+								.returning(),
+						(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
+					);
+					if (!inserted) {
+						return yield* Effect.die(new Error("Connection insert returned no row"));
+					}
+					return inserted;
+				}),
+			),
+
+		installed: (workspaceId, connectionId, { installationId, account }) =>
+			operation(
+				"installed",
+				Effect.map(
+					query((db) =>
+						db
+							.update(connection)
+							.set({
+								url: `https://github.com/${account}`,
+								// Merged in SQL, so the app's own settings are kept as they are.
+								settings: sql`${connection.settings} || ${JSON.stringify({ installationId, account })}::jsonb`,
+								configurationRevision: sql`${connection.configurationRevision} + 1`,
+							})
+							.where(
+								and(
+									eq(connection.id, connectionId),
+									eq(connection.workspaceId, workspaceId),
+									eq(connection.kind, "github"),
+								),
+							)
+							.returning({ id: connection.id }),
+					),
+					(rows) => rows.length > 0,
+				),
+			),
+
+		reconfigured: (workspaceId, connectionId) =>
+			operation(
+				"reconfigured",
+				query((db) =>
+					db
+						.update(connection)
+						.set({ configurationRevision: sql`${connection.configurationRevision} + 1` })
+						.where(and(eq(connection.id, connectionId), eq(connection.workspaceId, workspaceId))),
+				),
+			),
+
 		update: (workspaceId, podId, connectionId, changes) =>
 			operation(
 				"update",
@@ -170,14 +278,18 @@ export const make = Effect.gen(function* () {
 						if (changes.access !== undefined || changes.toolAccess !== undefined) {
 							const [current] = yield* query((db) =>
 								db
-									.select({ names: listedToolNames })
+									.select({ kind: connection.kind, names: listedToolNames })
 									.from(connection)
 									.where(inPod)
 									.limit(1)
 									.for("update"),
 							);
 							if (!current) return undefined;
-							chosen = yield* choicesFor(current.names, changes);
+							const names =
+								current.kind === "github"
+									? GITHUB_CONNECTION_TOOLS.map((tool) => tool.name)
+									: current.names;
+							chosen = yield* choicesFor(names, changes);
 						}
 						const [row] = yield* queryCatching(
 							(db) =>
@@ -278,7 +390,14 @@ export const make = Effect.gen(function* () {
 					db
 						.select()
 						.from(connection)
-						.where(and(eq(connection.workspaceId, workspaceId), eq(connection.podId, podId)))
+						.where(
+							and(
+								eq(connection.workspaceId, workspaceId),
+								eq(connection.podId, podId),
+								// Other kinds' tools are Sugabots' own, with no server to reach.
+								eq(connection.kind, "mcp"),
+							),
+						)
 						.orderBy(asc(connection.createdAt)),
 				).pipe(
 					Effect.map((rows) =>
@@ -385,19 +504,38 @@ function choicesFor(
 		: Effect.succeed(toolAccess);
 }
 
-/** Whether the server listed tools when last asked and every one of them is off. */
-function everyToolOff(row: ConnectionRow): boolean {
-	return (
-		row.tools.length > 0 && row.tools.every((tool) => toolAccessOf(row.toolAccess, tool) === "off")
-	);
+/**
+ * A connection's tools: an MCP server's as it listed them when last asked,
+ * or GitHub's, which are Sugabots' own, as this version has them.
+ */
+export function toolsOf<Tool>(row: {
+	kind: ConnectionRow["kind"];
+	tools: readonly Tool[];
+}): readonly (Tool | ConnectionTool)[] {
+	return row.kind === "github" ? GITHUB_CONNECTION_TOOLS : row.tools;
 }
 
-/** Whether calls to the connection's server can be made: always for a secret, after its sign-in for OAuth. */
+/** Whether the connection has tools and every one of them is off. */
+function everyToolOff(row: ConnectionRow): boolean {
+	const tools = toolsOf(row);
+	return tools.length > 0 && tools.every((tool) => toolAccessOf(row.toolAccess, tool) === "off");
+}
+
+/**
+ * Whether calls through the connection can be made: always for a secret,
+ * after its sign-in for OAuth, and once its app is installed for GitHub.
+ */
 export function isSignedIn(
-	row: Pick<ConnectionRow, "authKind" | "oauthEncrypted">,
+	row: Pick<ConnectionRow, "authKind" | "oauthEncrypted" | "settings">,
 	cipher: Credentials.Interface,
 ): boolean {
+	if (row.settings?.kind === "github") return gitHubInstalled(row.settings);
 	return row.authKind === "header" || unsealOauthRecord(row, cipher)?.tokens !== undefined;
+}
+
+/** Whether a GitHub connection's app is installed on an account. */
+export function gitHubInstalled(settings: GitHubConnectionSettings): boolean {
+	return settings.installationId !== null;
 }
 
 /** What the OAuth client has learnt and been issued for the connection, unsealed. */

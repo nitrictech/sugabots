@@ -36,10 +36,12 @@ function connection(
 		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
 		podId: revenue.id,
+		kind: "mcp",
 		auth: "header",
 		signedIn: true,
 		secretHeader: "Authorization",
 		hasSecret: true,
+		appSettingsUrl: null,
 		status: "connected",
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
@@ -120,10 +122,12 @@ const connections: TestConnection[] = [
 		name: "Notion",
 		handle: "notion",
 		url: "https://mcp.notion.com/mcp",
+		kind: "mcp",
 		auth: "oauth",
 		signedIn: false,
 		secretHeader: null,
 		hasSecret: false,
+		appSettingsUrl: null,
 		status: "missing_key",
 		tools: [],
 		lastTestedAt: null,
@@ -217,6 +221,22 @@ export const AddingAnApp = meta.story({
 		await userEvent.click(within(list).getByRole("button", { name: /^Jira/ }));
 		const step = await screen.findByRole("dialog", { name: "Jira" });
 		await expect(within(step).getByRole("button", { name: /Connect Jira/ })).toBeInTheDocument();
+	},
+});
+
+/** GitHub chosen: the pod gets an app of its own, made on GitHub for the organization named or the person. */
+export const AddingGitHub = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
+		);
+		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
+		await expect(within(list).queryByText("Code")).toBeNull();
+		await userEvent.type(within(list).getByRole("searchbox", { name: "Search apps" }), "pull");
+		await userEvent.click(within(list).getByRole("button", { name: /^GitHub/ }));
+		const step = await screen.findByRole("dialog", { name: "GitHub" });
+		await expect(within(step).getByLabelText("Organization")).toHaveValue("");
+		await expect(within(step).getByRole("button", { name: "Make on GitHub" })).toBeEnabled();
 	},
 });
 

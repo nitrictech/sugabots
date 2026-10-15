@@ -8,7 +8,7 @@ import type {
 	UnsavedConnection,
 } from "@sugabots/contracts";
 import {
-	connectionPresetFor,
+	connectionMarkFor,
 	connectionSignInFailures,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
@@ -64,10 +64,9 @@ export function useConnectionLooks(podId: string): ReadonlyMap<string, Connectio
 	return useMemo(() => {
 		const looks = new Map<string, ConnectionLook>();
 		for (const connection of found ?? []) {
-			const preset = connectionPresetFor(connection.url);
 			looks.set(connection.handle, {
 				name: connection.name,
-				presetId: preset?.id,
+				presetId: connectionMarkFor(connection),
 			});
 		}
 		return looks;

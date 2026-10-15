@@ -11,7 +11,8 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
 import { type ConnectionRow, connection, user } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { isSignedIn } from "./connection-repository.ts";
+import { isSignedIn, toolsOf } from "./connection-repository.ts";
+import * as GitHub from "./github/github.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
 /** A tool as the server described it, less its description. */
@@ -79,7 +80,12 @@ function toConnection(
 	connectedBy: string | null,
 	cipher: Credentials.Interface,
 ): { connection: Connection; tools: ConnectionToolSetting[] } {
-	const tools = row.tools.map((tool) => ({ ...tool, access: toolAccessOf(row.toolAccess, tool) }));
+	const tools = toolsOf(row).map(({ name, readOnly, destructive }) => ({
+		name,
+		readOnly,
+		destructive,
+		access: toolAccessOf(row.toolAccess, { name, readOnly, destructive }),
+	}));
 	return {
 		tools,
 		connection: {
@@ -88,11 +94,13 @@ function toConnection(
 			podId: row.podId,
 			name: row.name,
 			handle: row.handle,
+			kind: row.kind,
 			url: row.url,
 			auth: row.authKind,
 			signedIn: isSignedIn(row, cipher),
 			secretHeader: row.secretHeader,
 			hasSecret: row.secretEncrypted !== null,
+			appSettingsUrl: row.settings ? GitHub.appSettingsUrl(row.settings) : null,
 			status: configurationStatus({
 				missingKey: false,
 				lastTestedAt: row.lastTestedAt,
