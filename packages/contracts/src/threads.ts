@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toString as mdastToString } from "mdast-util-to-string";
 import { agentColorSchema, agentFaceSchema } from "./agents.ts";
@@ -371,6 +371,68 @@ export const messageReplyToSchema = Schema.Struct({
 
 export type MessageReplyTo = typeof messageReplyToSchema.Type;
 
+/**
+ * Exactly one emoji, by the regex `v` flag's `\p{RGI_Emoji}`. Some browsers the
+ * web app runs in have no `v` flag (Safari before 17), and a literal using it
+ * fails as its module loads, so it is built on first use. Without it, any one
+ * character is taken: such a browser only reads emoji the API has already
+ * checked, or sends them to the API, which checks them.
+ */
+function isSingleEmoji(text: string): boolean {
+	if (rgiEmoji === undefined) {
+		try {
+			// biome-ignore lint/complexity/useRegexLiterals: a literal would fail where the flag is unknown, before this could catch it.
+			rgiEmoji = new RegExp("^\\p{RGI_Emoji}$", "v");
+		} catch {
+			rgiEmoji = null;
+		}
+	}
+	// A lone regional indicator, such as 🇦, is half a flag rather than an emoji of
+	// its own, but pickers offer the 26 of them, so they are taken too.
+	if (/^\p{Regional_Indicator}$/u.test(text)) return true;
+	if (rgiEmoji) return rgiEmoji.test(text);
+	return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].length === 1;
+}
+
+let rgiEmoji: RegExp | null | undefined;
+
+/** The most different emoji a message can have, so its reactions fit under it. */
+export const MAX_REACTION_EMOJI_PER_MESSAGE = 20;
+
+/**
+ * A variation selector (U+FE0F) after a character shown as an emoji anyway.
+ * Some emoji data writes one there, as Emojibase writes 👍, and with it the
+ * emoji is not one Unicode recommends. One a character needs, as in ❤️, is kept.
+ */
+const SPARE_VARIATION_SELECTOR = /(\p{Emoji_Presentation})\uFE0F/gu;
+
+/**
+ * Exactly one emoji, as a keyboard or picker gives it: skin tones, flags and
+ * families included. Decoding drops spare variation selectors, so the same
+ * emoji written two ways is one reaction.
+ */
+export const reactionEmojiSchema = Schema.String.pipe(
+	Schema.decodeTo(
+		Schema.String.check(Schema.makeFilter(isSingleEmoji, { message: "Must be a single emoji" })),
+		{
+			decode: SchemaGetter.transform((emoji) => emoji.replace(SPARE_VARIATION_SELECTOR, "$1")),
+			encode: SchemaGetter.passthrough(),
+		},
+	),
+);
+
+/** One emoji on a message, with the people who reacted with it, earliest first. */
+export const messageReactionSchema = Schema.Struct({
+	emoji: reactionEmojiSchema,
+	people: Schema.mutable(
+		Schema.Array(Schema.Struct({ id: uuidSchema, name: Schema.String, at: isoTimestampSchema })),
+	),
+});
+
+export type MessageReaction = typeof messageReactionSchema.Type;
+
+export const messageReactionsSchema = Schema.mutable(Schema.Array(messageReactionSchema));
+
 export const messageSchema = Schema.Struct({
 	id: uuidSchema,
 	threadId: uuidSchema,
@@ -385,6 +447,8 @@ export const messageSchema = Schema.Struct({
 	routineResultOf: Schema.optional(routineResultOfSchema),
 	/** The message this one quotes and answers, in the same thread. */
 	replyTo: Schema.optional(messageReplyToSchema),
+	/** People's reactions, in the order each emoji was first used. Absent when there are none. */
+	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
 }).check(
 	Schema.makeFilter(({ content, parts }) =>

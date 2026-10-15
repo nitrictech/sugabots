@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { customerThreadTypeSchema } from "./chats.ts";
 import {
 	collaborationPartSchema,
+	messageReactionsSchema,
 	messageSchema,
 	messageStatusSchema,
 	personParticipantSchema,
@@ -56,6 +57,12 @@ export const eventPayloadSchemas = {
 		turnId: uuidSchema,
 		willRetry: Schema.Boolean,
 		error: Schema.String,
+	}),
+	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */
+	"message.reactions_changed": Schema.Struct({
+		threadId,
+		messageId,
+		reactions: messageReactionsSchema,
 	}),
 	/** An agent's reply called a built-in tool; the part is `running`. */
 	"tool_call.started": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
@@ -132,6 +139,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"message.created",
 	"message.completed",
 	"message.failed",
+	"message.reactions_changed",
 	"tool_call.started",
 	"tool_call.completed",
 	"tool_call.updated",
@@ -250,6 +258,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("message.delta", P["message.delta"]),
 	withEnvelope("message.completed", P["message.completed"]),
 	withEnvelope("message.failed", P["message.failed"]),
+	withEnvelope("message.reactions_changed", P["message.reactions_changed"]),
 	withEnvelope("tool_call.started", P["tool_call.started"]),
 	withEnvelope("tool_call.completed", P["tool_call.completed"]),
 	withEnvelope("tool_call.updated", P["tool_call.updated"]),

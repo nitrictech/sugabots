@@ -1,6 +1,12 @@
 export * as ThreadRepository from "./repository.ts";
 
-import type { Message, RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
+import {
+	MAX_REACTION_EMOJI_PER_MESSAGE,
+	type Message,
+	type MessageReaction,
+	type RoutineTriggerAuthor,
+	type SystemAgentKey,
+} from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -11,6 +17,7 @@ import {
 	agent,
 	chat,
 	message,
+	messageReaction,
 	thread,
 	threadParticipant,
 	threadRead,
@@ -24,8 +31,10 @@ import {
 	personAuthor,
 	personColumns,
 	quotedMessageColumns,
+	reactionColumns,
 	toMessage,
 	toPerson,
+	toReactions,
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
@@ -128,6 +137,24 @@ export interface Interface {
 	 * Never moves anyone back.
 	 */
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
+	/**
+	 * Adds the person's reaction to a finished message, and announces what the
+	 * message has now. A reaction already there changes nothing and is not
+	 * announced. A new emoji past `MAX_REACTION_EMOJI_PER_MESSAGE` fails.
+	 */
+	readonly addReaction: (
+		reaction: Reaction,
+	) => Effect.Effect<MessageReaction[], MessageNotFinished | TooManyReactionEmoji>;
+	/** Takes the person's reaction back, announcing it as `addReaction` does, if it was there. */
+	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
+}
+
+/** One person's emoji on a message in a thread. */
+export interface Reaction {
+	readonly threadId: string;
+	readonly messageId: string;
+	readonly userId: string;
+	readonly emoji: string;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -137,6 +164,28 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ThreadRepository");
 	const { emit } = yield* ConversationEvents.Service;
+
+	/** What the message has now, announced when `changed`. */
+	const reactionsAfter = (reaction: Reaction, changed: boolean) =>
+		Effect.gen(function* () {
+			const rows = yield* query((db) =>
+				db.query.messageReaction.findMany({
+					where: { messageId: reaction.messageId },
+					...reactionColumns,
+				}),
+			);
+			const reactions = toReactions(rows);
+			if (changed) {
+				yield* emit([
+					ConversationEvent.ReactionsChanged({
+						threadId: reaction.threadId,
+						messageId: reaction.messageId,
+						reactions,
+					}),
+				]);
+			}
+			return reactions;
+		});
 
 	return Service.of({
 		openChat: (placement) =>
@@ -573,6 +622,70 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
+
+		addReaction: (reaction) =>
+			operation(
+				"addReaction",
+				transaction(
+					Effect.gen(function* () {
+						// Locked, so two people adding new emoji at once cannot both pass the limit.
+						const [target] = yield* query((db) =>
+							db
+								.select({ status: message.status })
+								.from(message)
+								.where(
+									and(eq(message.id, reaction.messageId), eq(message.threadId, reaction.threadId)),
+								)
+								.for("update"),
+						);
+						if (target?.status !== "complete") return yield* new MessageNotFinished();
+						const used = yield* query((db) =>
+							db
+								.selectDistinct({ emoji: messageReaction.emoji })
+								.from(messageReaction)
+								.where(eq(messageReaction.messageId, reaction.messageId)),
+						);
+						const isNewEmoji = !used.some((row) => row.emoji === reaction.emoji);
+						if (isNewEmoji && used.length >= MAX_REACTION_EMOJI_PER_MESSAGE) {
+							return yield* new TooManyReactionEmoji();
+						}
+						const added = yield* query((db) =>
+							db
+								.insert(messageReaction)
+								.values({
+									messageId: reaction.messageId,
+									userId: reaction.userId,
+									emoji: reaction.emoji,
+								})
+								.onConflictDoNothing()
+								.returning({ id: messageReaction.id }),
+						);
+						return yield* reactionsAfter(reaction, added.length > 0);
+					}),
+				),
+			),
+
+		removeReaction: (reaction) =>
+			operation(
+				"removeReaction",
+				transaction(
+					Effect.gen(function* () {
+						const removed = yield* query((db) =>
+							db
+								.delete(messageReaction)
+								.where(
+									and(
+										eq(messageReaction.messageId, reaction.messageId),
+										eq(messageReaction.userId, reaction.userId),
+										eq(messageReaction.emoji, reaction.emoji),
+									),
+								)
+								.returning({ id: messageReaction.id }),
+						);
+						return yield* reactionsAfter(reaction, removed.length > 0);
+					}),
+				),
+			),
 	});
 });
 
@@ -597,6 +710,30 @@ const quotedIn = (threadId: string, messageId: string | null | undefined) =>
 				db.query.message.findFirst({ where: { id: messageId, threadId }, ...quotedMessageColumns }),
 			).pipe(Effect.map((quoted) => (quoted ? toReplyTo(quoted) : undefined)))
 		: Effect.succeed(undefined);
+
+export class MessageNotFinished
+	extends Data.TaggedError("MessageNotFinished")
+	implements UserFacing
+{
+	override get message() {
+		return "A reaction was added to a message that is not finished";
+	}
+	get userMessage() {
+		return userText`You can react once the message is finished`;
+	}
+}
+
+export class TooManyReactionEmoji
+	extends Data.TaggedError("TooManyReactionEmoji")
+	implements UserFacing
+{
+	override get message() {
+		return "A message already has as many different reaction emoji as it can";
+	}
+	get userMessage() {
+		return userText`This message has as many different reactions as it can take. React with one already on it`;
+	}
+}
 
 export class ReplyTargetNotFound
 	extends Data.TaggedError("ReplyTargetNotFound")

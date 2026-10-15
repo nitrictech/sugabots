@@ -9,6 +9,7 @@ import { Compactions } from "./compaction/compactions.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
+import { Reactions } from "./reactions/reactions.ts";
 import { BotRoutines } from "./routines/bot-routines.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
 import { Routines } from "./routines/routines.ts";
@@ -29,6 +30,7 @@ import { Turns } from "./turns/turns.ts";
  */
 const services = Layer.mergeAll(
 	Chats.layer,
+	Reactions.layer,
 	Collaborations.layer,
 	Routines.layer,
 	Routines.webhooksLayer,

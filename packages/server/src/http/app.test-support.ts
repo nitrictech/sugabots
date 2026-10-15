@@ -7,6 +7,7 @@ import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
+import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
@@ -120,6 +121,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Usage.Service),
 	unimplemented(Chats.Service),
 	unimplemented(ChatView.Service),
+	unimplemented(Reactions.Service),
 	unimplemented(ThreadView.Service),
 	unimplemented(Turns.Controls),
 	unimplemented(Routines.Service),

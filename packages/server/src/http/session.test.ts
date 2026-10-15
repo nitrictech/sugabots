@@ -37,6 +37,9 @@ const PLACEHOLDERS: Record<string, string> = {
 	host: "api.example.com",
 	artifactId: "0199a3a0-0000-7000-8000-00000000000e",
 	version: "1",
+	messageId: "0199a3a0-0000-7000-8000-00000000000f",
+	// 👍, as a client puts it in the address.
+	emoji: "%F0%9F%91%8D",
 };
 
 function fill(pattern: string): string {
