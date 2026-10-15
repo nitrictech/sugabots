@@ -47,6 +47,7 @@ import {
 	ProviderOAuthRefreshFailed,
 	type RequestContext,
 	type RequestFailure,
+	type RequestStage,
 } from "./request-failures.ts";
 
 export * from "./request-failures.ts";
@@ -283,6 +284,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			// result afterwards fails with "No output generated". Keeping the
 			// first error is what lets the failure say why the provider refused.
 			let providerFailure: unknown;
+			// What the request was doing, so a failure can say. `failedAt` is the stage
+			// when the first error arrived: the stream can keep going after a bad chunk.
+			let stage: RequestStage = "asking";
+			let failedAt: RequestStage | undefined;
 			// Every error the stream reports, not just the first, so the log shows what led to the failure.
 			const streamErrors: unknown[] = [];
 			// The SDK's callbacks run outside Effect, so they log through this.
@@ -311,6 +316,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				toolApproval: input.toolApproval,
 				abortSignal: signal,
 				onChunk: ({ chunk }) => {
+					if (chunk.type === "text-delta") stage = "answering";
+					if (chunk.type === "tool-input-start" || chunk.type === "tool-call") {
+						stage = "calling-tool";
+					}
 					if (chunk.type === "tool-approval-request" && !chunk.isAutomatic) {
 						approvalRequests.push(chunk);
 					}
@@ -319,6 +328,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				onLanguageModelCallEnd: ({ usage }) => ledger.ended(usage),
 				onError: ({ error }) => {
 					providerFailure ??= error;
+					failedAt ??= stage;
 					streamErrors.push(error);
 					return ledger.failed();
 				},
@@ -338,6 +348,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				// for the next step to read up to from the cache; the last has no
 				// next step to read it.
 				prepareStep: ({ stepNumber, messages }) => {
+					// Every step after the first sends the previous step's tool results.
+					stage = stepNumber === 0 ? "asking" : "after-tools";
 					if (stepNumber === input.maxSteps - 1) return { messages: withLastStepNote(messages) };
 					return markNewest ? { messages: markNewest(messages) } : undefined;
 				},
@@ -350,6 +362,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				runLog(logModelFailure(failure, streamErrors, signal));
 				return classifyRequestFailure(failure, {
 					...context,
+					stage: failedAt ?? stage,
 					recognize: dialect.recognizeFailure,
 				});
 			};

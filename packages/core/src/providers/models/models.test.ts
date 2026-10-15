@@ -36,20 +36,30 @@ const sdk = vi.hoisted(() => ({
 
 vi.mock("@ai-sdk/anthropic", () => ({ createAnthropic: sdk.createAnthropic }));
 vi.mock("@ai-sdk/openai", () => ({ createOpenAI: sdk.createOpenAI }));
-vi.mock("ai", async (importOriginal) => ({
-	// The error class is real: describing a failure is about what it carries.
-	APICallError: (await importOriginal<typeof import("ai")>()).APICallError,
-	stepCountIs: vi.fn(),
-	streamText: sdk.streamText,
-}));
+vi.mock("ai", async (importOriginal) => {
+	const ai = await importOriginal<typeof import("ai")>();
+	return {
+		// Keep the real error classes: classification checks them.
+		APICallError: ai.APICallError,
+		InvalidResponseDataError: ai.InvalidResponseDataError,
+		JSONParseError: ai.JSONParseError,
+		TypeValidationError: ai.TypeValidationError,
+		stepCountIs: vi.fn(),
+		streamText: sdk.streamText,
+	};
+});
 
-import { APICallError } from "ai";
+import { APICallError, TypeValidationError } from "ai";
 import type { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { Models } from "./models.ts";
 import { resolvedModel } from "./testing.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
+
+/** The error the SDK raises for a response chunk it can't parse. */
+const unreadableChunk = () =>
+	new TypeValidationError({ value: {}, cause: new Error("expected number") });
 
 describe("models", () => {
 	beforeEach(() => {
@@ -213,6 +223,60 @@ describe("models", () => {
 		expect(failure).toMatchObject({ _tag: "ProviderOverloaded", isRetryable: true });
 	});
 
+	/** Fakes a stream by calling the SDK callbacks in `events`, in order. */
+	type StreamCallbacks = {
+		prepareStep: (step: { stepNumber: number; messages: unknown[] }) => unknown;
+		onChunk: (event: { chunk: { type: string } }) => void;
+		onError: (event: { error: unknown }) => void;
+	};
+	const streaming = (events: (callbacks: StreamCallbacks) => void) =>
+		sdk.streamText.mockImplementationOnce(((callbacks: StreamCallbacks) => {
+			events(callbacks);
+			return {
+				textStream: [],
+				steps: Promise.resolve([]),
+				responseMessages: Promise.resolve([]),
+			};
+		}) as never);
+
+	it.each([
+		[
+			"giving the model what its tools returned",
+			(stream: StreamCallbacks) => {
+				stream.prepareStep({ stepNumber: 0, messages: [] });
+				stream.prepareStep({ stepNumber: 1, messages: [] });
+				stream.onError({ error: new Error("socket hang up") });
+			},
+			"after-tools",
+		],
+		[
+			"the model's reply",
+			(stream: StreamCallbacks) => {
+				stream.prepareStep({ stepNumber: 0, messages: [] });
+				stream.onChunk({ chunk: { type: "text-delta" } });
+				stream.onError({ error: new Error("socket hang up") });
+			},
+			"answering",
+		],
+		[
+			"the model asking for a tool, though the stream carried on",
+			(stream: StreamCallbacks) => {
+				stream.prepareStep({ stepNumber: 0, messages: [] });
+				stream.onChunk({ chunk: { type: "tool-input-start" } });
+				stream.onError({ error: unreadableChunk() });
+				stream.prepareStep({ stepNumber: 1, messages: [] });
+				stream.onChunk({ chunk: { type: "text-delta" } });
+			},
+			"calling-tool",
+		],
+	])("says a request failed during %s", async (_, events, stage) => {
+		streaming(events);
+
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+
+		expect(failure).toMatchObject({ stage });
+	});
+
 	it("asks the Codex backend the way Codex does for a ChatGPT subscription", async () => {
 		const tokens = {
 			access: "access-token",
@@ -288,8 +352,16 @@ describe("a failed model request", () => {
 			responseHeaders,
 		});
 	const unsent = (code: string) => new TypeError("fetch failed", { cause: { code } });
-	const classify = (cause: unknown, dialect: ProviderDialect = openaiCompatible) =>
-		Models.classifyRequestFailure(cause, { ...context, recognize: dialect.recognizeFailure });
+	const classify = (
+		cause: unknown,
+		dialect: ProviderDialect = openaiCompatible,
+		stage: Models.RequestStage = "asking",
+	) =>
+		Models.classifyRequestFailure(cause, {
+			...context,
+			stage,
+			recognize: dialect.recognizeFailure,
+		});
 
 	it("logs what the provider said, and tells people what it means in the names they know", () => {
 		const failure = classify(
@@ -512,6 +584,21 @@ describe("a failed model request", () => {
 
 		expect(failure).toMatchObject({ _tag: "ProviderAddressRefused", isRetryable: false });
 		expect(failure.userMessage).toContain("local or private network");
+	});
+
+	it("says a provider refused what the tools returned, when that's what it refused", () => {
+		expect(classify(answered(400), openaiCompatible, "after-tools").userMessage).toBe(
+			"OpenRouter didn't accept the request when we gave Gemini 3.8 Flash what the tools returned. We've logged what it said. If it keeps happening, choose another model.",
+		);
+	});
+
+	it("says a reply came back in a form we couldn't read, and doesn't ask again", () => {
+		expect(classify(unreadableChunk(), openaiCompatible, "calling-tool")).toMatchObject({
+			_tag: "ProviderResponseUnreadable",
+			userMessage:
+				"OpenRouter sent something we couldn't read while Gemini 3.8 Flash was asking to use a tool. We've logged what it sent. If it keeps happening, choose another model.",
+			isRetryable: false,
+		});
 	});
 
 	it("keeps an unreadable response for the logs and tells people only that it failed", () => {

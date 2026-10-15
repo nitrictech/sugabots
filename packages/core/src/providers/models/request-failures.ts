@@ -1,5 +1,5 @@
-import { DisplayName, type DomainError, userText } from "@sugabots/errors";
-import { APICallError } from "ai";
+import { DisplayName, type DomainError, type UserText, userText } from "@sugabots/errors";
+import { APICallError, InvalidResponseDataError, JSONParseError, TypeValidationError } from "ai";
 import { Duration, ErrorReporter, Schema } from "effect";
 import { EgressRefused } from "../network/egress.ts";
 
@@ -25,13 +25,42 @@ export type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overlo
 /** Maps a provider's error to a shared failure, or undefined to fall back to the status. */
 export type RecognizeFailure = (report: FailureReport) => RecognizedFailure | undefined;
 
-/** Provider and model names for the failure message, and the dialect's error mapping. */
+/**
+ * What a request was doing when it failed: waiting for the first reply,
+ * streaming text, streaming a tool call, or waiting for the reply after
+ * sending tool results.
+ */
+export const RequestStage = Schema.Literals(["asking", "answering", "calling-tool", "after-tools"]);
+export type RequestStage = typeof RequestStage.Type;
+
+/** Provider and model names and the stage for the failure message, and the dialect's error mapping. */
 export interface FailedRequest extends RequestContext {
+	readonly stage: RequestStage;
 	readonly recognize?: RecognizeFailure;
 }
 
 const requestFields = { provider: DisplayName.schema, model: DisplayName.schema };
 const requestFieldsWithCause = { ...requestFields, cause: Schema.Defect() };
+
+/**
+ * Failures that don't otherwise explain what went wrong include the stage in
+ * their message.
+ */
+const stagedFields = { ...requestFieldsWithCause, stage: RequestStage };
+
+/** The stage as the end of a sentence, e.g. "when we asked Claude Fable 5.1 for a reply". */
+function during(stage: RequestStage, model: DisplayName): UserText {
+	switch (stage) {
+		case "asking":
+			return userText`when we asked ${model} for a reply`;
+		case "answering":
+			return userText`partway through ${model}'s reply`;
+		case "calling-tool":
+			return userText`while ${model} was asking to use a tool`;
+		case "after-tools":
+			return userText`when we gave ${model} what the tools returned`;
+	}
+}
 
 /** No provider in the workspace offers the model, or the one that does is switched off. */
 export class ModelNotOffered
@@ -249,10 +278,7 @@ export class ProviderContextLengthExceeded
 
 /** The provider refused the request itself: any other 4xx. */
 export class ProviderRejectedRequest
-	extends Schema.TaggedError<ProviderRejectedRequest>()(
-		"ProviderRejectedRequest",
-		requestFieldsWithCause,
-	)
+	extends Schema.TaggedError<ProviderRejectedRequest>()("ProviderRejectedRequest", stagedFields)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -261,7 +287,7 @@ export class ProviderRejectedRequest
 		return describe(this.cause);
 	}
 	get userMessage() {
-		return userText`${this.provider} didn't accept the request for ${this.model}. We've logged what it said. If it keeps happening, choose another model.`;
+		return userText`${this.provider} didn't accept the request ${during(this.stage, this.model)}. We've logged what it said. If it keeps happening, choose another model.`;
 	}
 }
 
@@ -295,12 +321,30 @@ export class ProviderServerError
 	}
 }
 
-/** A failure none of the others describe, such as a response the SDK couldn't read. */
-export class ProviderRequestFailed
-	extends Schema.TaggedError<ProviderRequestFailed>()(
-		"ProviderRequestFailed",
-		requestFieldsWithCause,
+/**
+ * The SDK couldn't parse the provider's response. Not retried: a retry would
+ * most likely get the same response.
+ */
+export class ProviderResponseUnreadable
+	extends Schema.TaggedError<ProviderResponseUnreadable>()(
+		"ProviderResponseUnreadable",
+		stagedFields,
 	)
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return describe(this.cause);
+	}
+	get userMessage() {
+		return userText`${this.provider} sent something we couldn't read ${during(this.stage, this.model)}. We've logged what it sent. If it keeps happening, choose another model.`;
+	}
+}
+
+/** A failure none of the others describe. */
+export class ProviderRequestFailed
+	extends Schema.TaggedError<ProviderRequestFailed>()("ProviderRequestFailed", stagedFields)
 	implements DomainError
 {
 	readonly isRetryable = true;
@@ -309,7 +353,7 @@ export class ProviderRequestFailed
 		return describe(this.cause);
 	}
 	get userMessage() {
-		return userText`We couldn't get an answer from ${this.provider}. Try again, and if it keeps happening, choose another model.`;
+		return userText`We couldn't get an answer from ${this.provider}: something went wrong ${during(this.stage, this.model)}. Try again, and if it keeps happening, choose another model.`;
 	}
 }
 
@@ -330,6 +374,7 @@ export const RequestFailure = Schema.Union([
 	ProviderRejectedRequest,
 	ProviderOverloaded,
 	ProviderServerError,
+	ProviderResponseUnreadable,
 	ProviderRequestFailed,
 ]);
 export type RequestFailure = typeof RequestFailure.Type;
@@ -362,7 +407,7 @@ const CONNECTION_DROPPED = new Set([
  * provider-specific errors; the HTTP status and network errors cover the rest.
  */
 export function classifyRequestFailure(cause: unknown, request: FailedRequest): RequestFailure {
-	const { recognize, ...context } = request;
+	const { recognize, stage, ...context } = request;
 	const fields = { ...context, cause };
 	if (APICallError.isInstance(cause) && cause.statusCode !== undefined) {
 		const body = parsedBody(cause.responseBody);
@@ -371,7 +416,7 @@ export function classifyRequestFailure(cause: unknown, request: FailedRequest): 
 			code: errorCode(body),
 			message: providerSaid(body) ?? shortText(cause.responseBody),
 		});
-		return classifyStatus(cause.statusCode, recognized, fields, cause);
+		return classifyStatus(cause.statusCode, recognized, { ...fields, stage }, cause);
 	}
 	// Providers send mid-stream errors as plain objects. An `Error` comes from our
 	// code or the SDK, so the dialect doesn't see it.
@@ -392,13 +437,16 @@ export function classifyRequestFailure(cause: unknown, request: FailedRequest): 
 	const code = findInChain(cause, hasErrorCode)?.code;
 	if (code && NOT_CONNECTED.has(code)) return new ProviderUnreachable(fields);
 	if (code && CONNECTION_DROPPED.has(code)) return new ProviderConnectionLost(fields);
-	return new ProviderRequestFailed(fields);
+	if (findInChain(cause, isUnreadableResponse)) {
+		return new ProviderResponseUnreadable({ ...fields, stage });
+	}
+	return new ProviderRequestFailed({ ...fields, stage });
 }
 
 function classifyStatus(
 	status: number,
 	recognized: RecognizedFailure | undefined,
-	fields: RequestContext & { cause: unknown },
+	fields: RequestContext & { cause: unknown; stage: RequestStage },
 	cause: APICallError,
 ): RequestFailure {
 	if (status === 401) return new ProviderCredentialsRejected(fields);
@@ -449,6 +497,17 @@ function hasErrorCode(link: unknown): link is { code: string } {
 		typeof link === "object" &&
 		link !== null &&
 		typeof (link as { code?: unknown }).code === "string"
+	);
+}
+
+/** Whether `link` is the SDK's error for a response it couldn't parse. */
+function isUnreadableResponse(
+	link: unknown,
+): link is TypeValidationError | JSONParseError | InvalidResponseDataError {
+	return (
+		TypeValidationError.isInstance(link) ||
+		JSONParseError.isInstance(link) ||
+		InvalidResponseDataError.isInstance(link)
 	);
 }
 
