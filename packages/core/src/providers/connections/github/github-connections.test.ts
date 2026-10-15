@@ -34,7 +34,27 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 					],
 				})
 			: undefined;
-	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories);
+	// #5 is from a bot's branch, #6 from someone's, and #7 from a bot-like branch of a fork.
+	const pullRequests: Route = ({ method, path }) => {
+		const pull = /^\/repos\/acme\/web\/pulls\/(\d+)$/.exec(path);
+		const head = {
+			5: ["sugabots/fix-login", "acme/web"],
+			6: ["fix-login", "acme/web"],
+			7: ["sugabots/fix-login", "mallory/web"],
+		}[Number(pull?.[1])];
+		if (path === "/graphql") return json({ data: {} });
+		if (!pull || !head) return undefined;
+		const [ref, fullName] = head;
+		const url = `https://github.com/acme/web/pull/${pull[1]}`;
+		return method === "PATCH"
+			? json({ number: Number(pull[1]), html_url: url })
+			: json({
+					node_id: `PR_${pull[1]}`,
+					draft: true,
+					head: { ref, repo: { full_name: fullName } },
+				});
+	};
+	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories, pullRequests);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
 	let fixture: Awaited<ReturnType<typeof workspaceWithPod>>;
@@ -106,6 +126,41 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 			repository_ids: [101],
 			permissions: { contents: "read", metadata: "read" },
 		});
+	});
+
+	it("changes a pull request from a bot's own branch, and no one else's", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const change = {
+			repository: "acme/web",
+			title: "Fix the login",
+			body: undefined,
+			base: undefined,
+			state: undefined,
+			draft: false,
+		};
+
+		const updated = await runOnPostgres(connected.updatePullRequest({ ...change, number: 5 }));
+		for (const number of [6, 7]) {
+			await expect(
+				runOnPostgres(connected.updatePullRequest({ ...change, number })),
+			).rejects.toMatchObject({ _tag: "NotBotPullRequest" });
+		}
+
+		expect(updated).toEqual({ number: 5, url: "https://github.com/acme/web/pull/5" });
+		const changed = github.asked.filter((request) => request.method !== "GET");
+		expect(changed.filter((request) => !request.path.endsWith("/access_tokens"))).toEqual([
+			expect.objectContaining({
+				path: "/graphql",
+				body: expect.objectContaining({ variables: { id: "PR_5" } }),
+			}),
+			expect.objectContaining({
+				method: "PATCH",
+				path: "/repos/acme/web/pulls/5",
+				body: { title: "Fix the login" },
+			}),
+		]);
 	});
 
 	it("adds a repository and removes one, each a change of the connection's configuration", async () => {
