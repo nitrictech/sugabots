@@ -15,6 +15,13 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set it in .env}
       CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?Set it in .env}
       EMAIL_TRANSACTIONAL_FROM: Sugabots <sugabots@localhost>
+      # Files are kept in the database. To keep them on a volume instead,
+      # uncomment these lines and the two below before any are kept:
+      # https://sugabots.ai/docs/deploy-with-docker#files-on-a-volume
+      # BLOB_STORE_PROVIDER: filesystem
+      # BLOB_STORE_FILESYSTEM_ROOT: /data/files
+    # volumes:
+    #   - files:/data/files
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,3 +43,4 @@ services:
 
 volumes:
   postgres_data:
+  # files:
