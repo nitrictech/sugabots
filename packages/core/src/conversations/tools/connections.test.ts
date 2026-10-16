@@ -279,4 +279,4 @@ describe("a turn's connection tools", () => {
 });
 
 /** A turn with no sandbox, for cases that only look at MCP servers' tools. */
-const NO_TURN = { turnId: "t", workspace: undefined, sandboxSignsIn: false };
+const NO_TURN = { turnId: "t", agentId: "a", workspace: undefined, sandboxSignsIn: false };

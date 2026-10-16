@@ -283,6 +283,9 @@ function installedApp(
 	};
 }
 
+/** Bots push only to branches under this, so they can't move anyone else's. */
+export const BOT_BRANCH_PREFIX = "sugabots/";
+
 /** The username git sends an installation token with. */
 const TOKEN_USERNAME = "x-access-token";
 
@@ -385,6 +388,80 @@ export class Connected {
 		);
 	}
 
+	/** Opens a pull request from `head`, into `base` or the repository's default branch. */
+	openPullRequest(request: {
+		repository: string;
+		head: string;
+		base: string | undefined;
+		title: string;
+		body: string;
+		draft: boolean;
+	}) {
+		const { http, app } = this;
+		const idOf = (repository: string) => this.idOf(repository);
+		return Effect.gen(function* () {
+			const { token } = yield* GitHub.accessToken(http, app, {
+				repositoryIds: [idOf(request.repository)],
+				permissions: { pull_requests: "write", contents: "read" },
+			});
+			return yield* GitHub.openPullRequest(http, token, {
+				...request,
+				base: request.base ?? (yield* GitHub.defaultBranch(http, token, request.repository)),
+			});
+		});
+	}
+
+	/**
+	 * Changes a pull request bots opened, from a branch under
+	 * {@link BOT_BRANCH_PREFIX} in `repository` itself, so bots can't rewrite
+	 * or close anyone else's. What isn't given stays as it is.
+	 */
+	updatePullRequest(request: {
+		repository: string;
+		number: number;
+		title: string | undefined;
+		body: string | undefined;
+		base: string | undefined;
+		state: "open" | "closed" | undefined;
+		draft: boolean | undefined;
+	}) {
+		const { http, app } = this;
+		const idOf = (repository: string) => this.idOf(repository);
+		return Effect.gen(function* () {
+			const { token } = yield* GitHub.accessToken(http, app, {
+				repositoryIds: [idOf(request.repository)],
+				permissions: { pull_requests: "write", contents: "read" },
+			});
+			const head = yield* GitHub.pullRequestHead(http, token, request);
+			const fromBotBranch =
+				head.branch.startsWith(BOT_BRANCH_PREFIX) &&
+				head.branchRepository?.toLowerCase() === request.repository.toLowerCase();
+			if (!fromBotBranch) {
+				return yield* new NotBotPullRequest({ number: request.number, branch: head.branch });
+			}
+			if (request.draft !== undefined && request.draft !== head.draft) {
+				yield* GitHub.setPullRequestDraft(http, token, {
+					nodeId: head.nodeId,
+					draft: request.draft,
+				});
+			}
+			return yield* GitHub.updatePullRequest(http, token, request);
+		});
+	}
+
+	/** Comments on pull request `number`, anyone's. */
+	commentOnPullRequest(request: { repository: string; number: number; body: string }) {
+		return Effect.flatMap(
+			Effect.suspend(() =>
+				GitHub.accessToken(this.http, this.app, {
+					repositoryIds: [this.idOf(request.repository)],
+					permissions: { pull_requests: "write" },
+				}),
+			),
+			({ token }) => GitHub.comment(this.http, token, request),
+		);
+	}
+
 	/** Runs `read` with a read-only token for the connection's repositories. */
 	read<A>(
 		read: (http: EgressHttpClient, token: string) => Effect.Effect<A, GitHub.GitHubRequestFailed>,
@@ -397,6 +474,24 @@ export class Connected {
 export interface SandboxSignIn {
 	readonly credentials: readonly Sandboxes.Credential[];
 	readonly expiresAt: GitHub.AccessToken["expiresAt"];
+}
+
+/** A pull request that isn't from a bot's branch, which bots may comment on but not change. */
+export class NotBotPullRequest
+	extends Schema.TaggedError<NotBotPullRequest>()("NotBotPullRequest", {
+		number: Schema.Int,
+		branch: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `Pull request #${this.number} is from ${this.branch}, not a branch under ${BOT_BRANCH_PREFIX}`;
+	}
+	get userMessage() {
+		return userText`Bots can only change pull requests from their own branches.`;
+	}
 }
 
 /** A GitHub connection whose app isn't installed on an account yet. */
