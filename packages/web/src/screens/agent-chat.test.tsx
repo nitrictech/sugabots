@@ -651,6 +651,63 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
 	});
 
+	it("shows a file the agent attaches while it still answers, and keeps it as the answer goes on", async () => {
+		const updates = controlledEventStream();
+		client.events.thread.mockReturnValue(updates.stream);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		const streaming = {
+			...agentMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fc",
+			status: "streaming" as const,
+			content: "Here it is",
+			parts: [{ type: "text" as const, text: "Here it is" }],
+			createdAt: "2026-09-18T09:20:00.000Z",
+		};
+		updates.emit(
+			streamEvent("message.created", { threadId: chat.mainThreadId, message: streaming }),
+		);
+		await screen.findByRole("status", { name: `${linear.name} is typing` });
+
+		// Before the reply's words are settled enough to show, its file already is.
+		updates.emit(
+			streamEvent("message.files_changed", {
+				threadId: chat.mainThreadId,
+				messageId: streaming.id,
+				files: [
+					{
+						type: "file",
+						id: "0199a3a0-0000-7000-8000-0000000000fd",
+						name: "q3-report.csv",
+						contentType: "text/csv",
+						size: 2_048,
+					},
+				],
+			}),
+		);
+		expect(await screen.findByRole("link", { name: "Download q3-report.csv" })).toBeDefined();
+
+		updates.emit(
+			streamEvent("message.delta", {
+				threadId: chat.mainThreadId,
+				messageId: streaming.id,
+				offset: streaming.content.length,
+				text: ", with the totals.",
+			}),
+		);
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: chat.mainThreadId,
+				messageId: streaming.id,
+				content: "Here it is, with the totals.",
+				status: "complete",
+			}),
+		);
+		await screen.findByText("Here it is, with the totals.");
+		expect(screen.getByRole("link", { name: "Download q3-report.csv" })).toBeDefined();
+	});
+
 	it("shows the reply that finished while you were elsewhere", async () => {
 		const writing: Message = {
 			...agentMessage,

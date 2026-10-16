@@ -41,6 +41,12 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 		],
+		MessageFilesChanged: ({ threadId, messageId, files }) => [
+			onThread(
+				threadId,
+				streamEvent("message.files_changed", { threadId, messageId, files: [...files] }),
+			),
+		],
 		AgentsJoined: ({ threadId }) => [
 			onThread(threadId, streamEvent("thread.changed", { threadId })),
 		],

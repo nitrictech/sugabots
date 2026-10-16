@@ -1,5 +1,6 @@
 export * as ThreadFiles from "./thread-files.ts";
 
+import { type FilePart, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import { and, count, eq, inArray, isNotNull, lt, not, sql } from "drizzle-orm";
 import {
@@ -15,11 +16,11 @@ import {
 	Stream,
 } from "effect";
 import { BlobStore } from "../../blob-store/blob-store.ts";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { threadFile } from "../../database/schema.ts";
+import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
+import { message, threadFile } from "../../database/schema.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import type { AttachedFileRow } from "../threads/file-parts.ts";
+import { type AttachedFileRow, loadFileParts } from "../threads/file-parts.ts";
 
 /**
  * The only writer of `thread_file`, and its reader but for the files messages
@@ -84,6 +85,28 @@ export interface Interface {
 	/** The files in the thread kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (threadId: string) => Effect.Effect<ReadonlyMap<string, string>>;
 	/**
+	 * Keeps `content` as a file an agent attached to its reply `messageId`,
+	 * after the reply's other files. Fails with `TooManyReplyFiles` once the
+	 * reply carries as many as a message can.
+	 */
+	readonly attachToReply: (file: {
+		threadId: string;
+		messageId: string;
+		name: string;
+		contentType: string;
+		content: Uint8Array;
+	}) => Effect.Effect<FilePart, TooManyReplyFiles | FileTooLarge | BlobStore.Failure>;
+	/** The files an agent attached to its reply `messageId`, in the order attached. */
+	readonly replyAttachments: (messageId: string) => Effect.Effect<readonly FilePart[]>;
+	/**
+	 * Removes the files an agent attached to its reply `messageId`, as when the
+	 * reply starts again. Their blobs go once the enclosing transaction commits.
+	 */
+	readonly removeReplyAttachments: (reply: {
+		threadId: string;
+		messageId: string;
+	}) => Effect.Effect<void>;
+	/**
 	 * Removes `fileId` when it is one of `uploaderId`'s unsent uploads in the
 	 * thread, such as one taken off a message before it was sent. Anything
 	 * else, a file already gone included, is left as it is.
@@ -145,13 +168,13 @@ export const make = Effect.gen(function* () {
 			return { id, contentType, size };
 		});
 
-	/** Removes an unsent upload's blob, once its row is gone; one that cannot be removed goes with the thread's folder. */
-	const removeUploadBlob = (threadId: string, fileId: string) =>
+	/** Removes a file's blob, once its row is gone; one that cannot be removed goes with the thread's folder. */
+	const removeBlob = (threadId: string, fileId: string) =>
 		blobs
 			.delete(fileKey(threadId, fileId))
 			.pipe(
 				Effect.catchCause((cause) =>
-					Effect.logWarning("Removing an unsent upload's blob failed", cause),
+					Effect.logWarning("Removing a thread file's blob failed", cause),
 				),
 			);
 
@@ -268,6 +291,62 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
+		attachToReply: ({ threadId, messageId, name, contentType, content }) =>
+			operation(
+				"attachToReply",
+				transaction(
+					Effect.gen(function* () {
+						// Locked, so files attached at once each take the next place, and the count holds.
+						yield* query((db) =>
+							db
+								.select({ id: message.id })
+								.from(message)
+								.where(eq(message.id, messageId))
+								.for("update"),
+						);
+						const [attached] = yield* query((db) =>
+							db
+								.select({ files: count() })
+								.from(threadFile)
+								.where(
+									and(eq(threadFile.messageId, messageId), eq(threadFile.kind, "agent_attachment")),
+								),
+						);
+						const position = attached?.files ?? 0;
+						if (position >= MAX_ATTACHMENTS_PER_MESSAGE) return yield* new TooManyReplyFiles();
+						const kept = yield* keep(
+							threadId,
+							{ stream: Stream.succeed(content), contentType },
+							{ kind: "agent_attachment", name, messageId, position },
+						);
+						return { type: "file", name, ...kept } as const;
+					}),
+				),
+			),
+		replyAttachments: (messageId) =>
+			operation(
+				"replyAttachments",
+				query((db) => loadFileParts(db, [messageId])).pipe(
+					Effect.map((byMessage) => byMessage.get(messageId) ?? []),
+				),
+			),
+		removeReplyAttachments: ({ threadId, messageId }) =>
+			operation(
+				"removeReplyAttachments",
+				Effect.gen(function* () {
+					const removed = yield* query((db) =>
+						db
+							.delete(threadFile)
+							.where(
+								and(eq(threadFile.messageId, messageId), eq(threadFile.kind, "agent_attachment")),
+							)
+							.returning({ id: threadFile.id }),
+					);
+					yield* afterCommit(
+						Effect.forEach(removed, ({ id }) => removeBlob(threadId, id), { discard: true }),
+					);
+				}),
+			),
 		removeUnsentUpload: ({ threadId, uploaderId, fileId }) =>
 			operation(
 				"removeUnsentUpload",
@@ -288,7 +367,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ id: threadFile.id }),
 					);
-					if (removed.length > 0) yield* removeUploadBlob(threadId, fileId);
+					if (removed.length > 0) yield* removeBlob(threadId, fileId);
 				}),
 			),
 		removeUnsentUploads: (unsentFor) =>
@@ -310,7 +389,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ id: threadFile.id, threadId: threadFile.threadId }),
 					);
-					yield* Effect.forEach(removed, ({ id, threadId }) => removeUploadBlob(threadId, id), {
+					yield* Effect.forEach(removed, ({ id, threadId }) => removeBlob(threadId, id), {
 						discard: true,
 					});
 					return removed.length;
@@ -355,7 +434,8 @@ const unsentUpload = sql`(${threadFile.kind} = 'upload' and ${threadFile.message
 /** Which kind of file a row is, with the columns that kind sets. */
 type FileSource =
 	| { kind: "tool_result"; toolCallId: string | undefined }
-	| { kind: "upload"; uploaderId: string; name: string };
+	| { kind: "upload"; uploaderId: string; name: string }
+	| { kind: "agent_attachment"; name: string; messageId: string; position: number };
 
 export class FileNotFound
 	extends Data.TaggedError("ThreadFileNotFound")<{
@@ -409,6 +489,12 @@ export class FileTooLarge
 	get userMessage() {
 		const { amount, unit } = sizeForPeople(this.maxSize);
 		return userText`The file is larger than ${amount} ${unit}, the most that can be kept`;
+	}
+}
+
+export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") implements UserFacing {
+	get userMessage() {
+		return userText`A reply can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
 }
 

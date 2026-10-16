@@ -1,5 +1,6 @@
 import type {
 	CollaborationPart,
+	FilePart,
 	Message,
 	MessageReaction,
 	PersonParticipant,
@@ -34,6 +35,15 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly threadId: string;
 		readonly messageId: string;
 		readonly reactions: readonly MessageReaction[];
+	};
+	/**
+	 * An agent attached a file to its reply. `files` is all the reply carries
+	 * now; a reply that starts again starts without them, as its `TurnStarted` says.
+	 */
+	MessageFilesChanged: {
+		readonly threadId: string;
+		readonly messageId: string;
+		readonly files: readonly FilePart[];
 	};
 	/** Agents were brought into the thread to answer in it. */
 	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };

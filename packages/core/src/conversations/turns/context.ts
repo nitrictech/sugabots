@@ -165,9 +165,13 @@ interface Reader {
 	usesSandbox: boolean;
 }
 
+/** Whether the agent `agentId` wrote `message`. */
+function isOwnMessage(message: Message, agentId: string): boolean {
+	return message.author.kind === "agent" && message.author.id === agentId;
+}
+
 function whose(message: Message, currentAgentId: string): string {
-	const ownMessage = message.author.kind === "agent" && message.author.id === currentAgentId;
-	return ownMessage ? "your" : `${messageAuthorName(message.author)}'s`;
+	return isOwnMessage(message, currentAgentId) ? "your" : `${messageAuthorName(message.author)}'s`;
 }
 
 function promptMessagesFor(
@@ -175,9 +179,13 @@ function promptMessagesFor(
 	reader: Reader,
 	resultFiles: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
-	const attachments = message.parts.flatMap((part) =>
-		part.type === "file" ? [describeAttachment(part, reader)] : [],
-	);
+	// An agent's own files are in its share_file calls: listed again in its
+	// own words, they would teach it to write such lines instead.
+	const attachments = isOwnMessage(message, reader.agentId)
+		? []
+		: message.parts.flatMap((part) =>
+				part.type === "file" ? [describeAttachment(part, reader)] : [],
+			);
 	const authored = authoredMessage(message, reader.agentId, attachments);
 	const records = message.parts.flatMap((part): string[] => {
 		if (part.type === "text" || part.type === "file") return [];
@@ -207,7 +215,7 @@ function authoredMessage(
 ): Models.PromptMessage | undefined {
 	const said = [message.content, ...attachments].filter((line) => line !== "").join("\n");
 	if (!said) return undefined;
-	if (message.author.kind === "agent" && message.author.id === currentAgentId) {
+	if (isOwnMessage(message, currentAgentId)) {
 		return { role: "assistant", content: said };
 	}
 	if (message.author.kind === "routine_trigger") {

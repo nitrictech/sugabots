@@ -456,7 +456,9 @@ function MessageRow({
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
 	const showsSomething =
-		calls.length > 0 || segments.some((segment) => segment.type !== "text" || segment.text);
+		calls.length > 0 ||
+		files.length > 0 ||
+		segments.some((segment) => segment.type !== "text" || segment.text);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (message.status === "streaming" && !showsSomething) return null;
 	const finished = message.status === "complete" && !sending;

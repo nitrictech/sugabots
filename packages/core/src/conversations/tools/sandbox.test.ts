@@ -105,7 +105,12 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		await closeDatabase();
 	}, SLOW);
 
-	const toolsFor = (turnId: string, threadId: string, agentId: string) =>
+	const toolsFor = (
+		turnId: string,
+		threadId: string,
+		agentId: string,
+		attach?: SandboxTools.Turn["attach"],
+	) =>
 		runOnPostgres(
 			Scope.provide(scope)(
 				sandboxTools.forTurn({
@@ -115,6 +120,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 					threadId,
 					agentId,
 					acceptsImages: false,
+					...(attach && { attach }),
 				}),
 			),
 		).then((offered) => offered.tools);
@@ -253,6 +259,57 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 			expect(await call(elsewhere, "copy_file_to_sandbox", { file: uploaded.id })).toMatchObject({
 				status: "failed",
 			});
+		},
+		SLOW,
+	);
+
+	it(
+		"attaches a file from the sandbox to the reply, read as it is, and refuses one too large",
+		async () => {
+			const attached: { name: string; contentType: string; content: Uint8Array }[] = [];
+			const tools = await toolsFor("turn-12", "thread-h", "agent-7", (file) => {
+				attached.push(file);
+				return Effect.succeed({
+					type: "file" as const,
+					id: `file-${attached.length}`,
+					name: file.name,
+					contentType: file.contentType,
+					size: file.content.byteLength,
+				});
+			});
+			// A PNG's signature, then bytes that aren't text.
+			await run(
+				tools,
+				String.raw`mkdir -p out && printf '\x89PNG\r\n\x1a\n\x00\xff' > out/chart.png`,
+			);
+			await run(tools, String.raw`printf 'region,total\nnorth,4\n' > report.csv`);
+			await run(tools, "truncate -s 11M big.bin");
+
+			expect(await call(tools, "share_file", { path: "out/chart.png" })).toMatchObject({
+				shared: "chart.png",
+				file: "file-1",
+			});
+			expect(
+				await call(tools, "share_file", { path: "report.csv", name: "../Q3 totals.csv" }),
+			).toMatchObject({
+				shared: "_Q3 totals.csv",
+			});
+			expect(attached.map(({ name, contentType }) => ({ name, contentType }))).toEqual([
+				{ name: "chart.png", contentType: "image/png" },
+				{ name: "_Q3 totals.csv", contentType: "text/csv; charset=utf-8" },
+			]);
+			expect([...(attached[0]?.content ?? [])]).toEqual([
+				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff,
+			]);
+
+			expect(await call(tools, "share_file", { path: "big.bin" })).toMatchObject({
+				status: "failed",
+				error: expect.stringContaining("files up to 10 MB"),
+			});
+			expect(await call(tools, "share_file", { path: "nowhere.png" })).toMatchObject({
+				status: "failed",
+			});
+			expect(attached).toHaveLength(2);
 		},
 		SLOW,
 	);
