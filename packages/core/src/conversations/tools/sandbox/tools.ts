@@ -4,6 +4,7 @@ import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import { MAX_IMAGE_BYTES, SHOWN_IMAGE_FORMATS, shownImageType, withImages } from "../images.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
@@ -171,36 +172,36 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	});
 }
 
-/** Images read_file shows the model, by extension. */
-const IMAGE_TYPES: Readonly<Record<string, string>> = {
-	png: "image/png",
-	jpg: "image/jpeg",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
-	webp: "image/webp",
-};
-const MAX_IMAGE_BYTES = 5_000_000;
+/** The extensions of images read_file shows the model. */
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
 export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImages: boolean) {
 	return tool({
 		description: acceptsImages
-			? `Read a file in the pod's sandbox: a text file as text, or an image (PNG, JPEG, GIF or WebP) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
+			? `Read a file in the pod's sandbox: a text file as text, or an image (${SHOWN_IMAGE_FORMATS}) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
 			: `Read a text file in the pod's sandbox. Long files are cut off; use run_command with head, tail or grep for parts of them.`,
 		inputSchema: Schema.Struct({ path: pathIn(place) }).pipe(
 			Schema.toStandardSchemaV1,
 			Schema.toStandardJSONSchemaV1,
 		),
 		execute: ({ path }) => {
-			const mediaType = IMAGE_TYPES[posix.extname(path).slice(1).toLowerCase()];
-			const asImage = mediaType !== undefined && acceptsImages;
+			const asImage =
+				acceptsImages && IMAGE_EXTENSIONS.has(posix.extname(path).slice(1).toLowerCase());
 			return inSandbox(openSandbox, (sandbox) =>
 				sandbox.readFile(absolute(place, path), asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES).pipe(
 					Effect.map(({ content, sizeBytes }): Record<string, unknown> => {
 						if (asImage) {
-							return sizeBytes > MAX_IMAGE_BYTES
+							if (sizeBytes > MAX_IMAGE_BYTES) {
+								return {
+									status: "failed",
+									error: `The image is larger than ${MAX_IMAGE_BYTES} bytes.`,
+								};
+							}
+							const mediaType = shownImageType(content);
+							return mediaType === undefined
 								? {
 										status: "failed",
-										error: `The image is larger than ${MAX_IMAGE_BYTES} bytes.`,
+										error: `The file isn't a ${SHOWN_IMAGE_FORMATS} image, whatever its name says.`,
 									}
 								: {
 										text: `The image at ${absolute(place, path)}.`,
@@ -247,37 +248,4 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
  */
 export function allowedHostsNote(allowedHosts: readonly string[]): string {
 	return `The pod's sandbox, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
-}
-
-export interface Image {
-	/** Base 64. */
-	data: string;
-	mediaType: string;
-}
-
-/**
- * A tool's output as the model is given it: a result with images as text and
- * images, when the model can take them; anything else as it is.
- */
-export function withImages(output: unknown, acceptsImages: boolean) {
-	if (!output || typeof output !== "object" || !("images" in output)) {
-		return { type: "json" as const, value: output as never };
-	}
-	const { images, ...rest } = output as { images: readonly Image[] } & Record<string, unknown>;
-	const text =
-		typeof rest.text === "string"
-			? [rest.note, rest.text].filter((part) => typeof part === "string").join("\n\n")
-			: JSON.stringify(rest);
-	if (!acceptsImages) return { type: "text" as const, value: text };
-	return {
-		type: "content" as const,
-		value: [
-			{ type: "text" as const, text },
-			...images.map((image) => ({
-				type: "image-data" as const,
-				data: image.data,
-				mediaType: image.mediaType,
-			})),
-		],
-	};
 }

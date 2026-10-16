@@ -107,7 +107,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 					turnId,
 					threadId,
 					agentId,
-					model: "no-such-model",
+					acceptsImages: false,
 				}),
 			),
 		).then((offered) => offered.tools);

@@ -1,7 +1,15 @@
+import { mediaTypeEssence } from "@sugabots/contracts";
 import { tool } from "ai";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { ThreadFiles } from "../../thread-files/thread-files.ts";
+import {
+	type Image,
+	MAX_IMAGE_BYTES,
+	SHOWN_IMAGE_FORMATS,
+	shownImageType,
+	withImages,
+} from "../images.ts";
 
 export const READ_THREAD_FILE_TOOL = "read_thread_file";
 
@@ -40,24 +48,29 @@ export type ReadThreadFileResult =
 			/** Where to start the next call to read on, when there is more. */
 			continueFrom?: number;
 	  }
+	| { text: string; images: Image[] }
 	| { refused: string };
 
 /**
- * The `read_thread_file` tool: reads part of a file in this thread, such as a tool
- * result too large to have been given whole, by line or by searching it.
- * Offered on every turn, so the tools a thread sends never change for it.
+ * The `read_thread_file` tool: reads part of a file in this thread, such as a
+ * file a person attached or a tool result too large to have been given whole,
+ * by line or by searching it, or shows an image to a model that takes them.
+ * Offered on every turn, so the tools a thread sends change only when its
+ * agent's model does.
  */
 export function readThreadFileTool({
 	threadId,
 	files,
+	acceptsImages,
 	run,
 }: {
 	threadId: string;
 	files: Pick<ThreadFiles.Interface, "read">;
+	acceptsImages: boolean;
 	run: RunEffect<never>;
 }) {
 	return tool({
-		description: `Read a file in this thread, such as a tool result too large to have been given to you whole, which named its file and how to read on. Returns up to ${DEFAULT_LINES} lines from \`offset\`, each after its line number, with the file's total lines and, when there is more, the line to continue from. Give \`pattern\` to get only the lines containing it instead.`,
+		description: `Read a file in this thread: one a person attached, or a tool result too large to have been given to you whole, which named its file and how to read on. For a text file, returns up to ${DEFAULT_LINES} lines from \`offset\`, each after its line number, with the file's total lines and, when there is more, the line to continue from. Give \`pattern\` to get only the lines containing it instead.${acceptsImages ? ` A ${SHOWN_IMAGE_FORMATS} image is shown to you instead.` : ""}`,
 		inputSchema: Schema.Struct({
 			file: Schema.String.annotate({ description: "The file's id." }),
 			offset: Schema.optional(
@@ -84,12 +97,41 @@ export function readThreadFileTool({
 			run(
 				Effect.gen(function* () {
 					const found = yield* files.read({ threadId, fileId: file });
-					if (!isText(found.contentType)) {
+					const notText = {
+						refused: `The file is ${found.contentType}, not text, so it has no lines to read.`,
+					};
+					// The file's start says what it is, so one that is neither text nor
+					// an image is refused without reading the rest of it.
+					const start = Option.getOrElse(
+						yield* Stream.runHead(found.stream),
+						() => new Uint8Array(),
+					);
+					const wholeFile = Effect.flatMap(files.read({ threadId, fileId: file }), ({ stream }) =>
+						collect(stream),
+					);
+					const imageType = shownImageType(start);
+					if (imageType !== undefined) {
+						if (!acceptsImages) {
+							return { refused: "The file is an image, and you can't be shown images." };
+						}
+						if (found.size > MAX_IMAGE_BYTES) {
+							return {
+								refused: `The image is ${found.size} bytes, larger than the ${MAX_IMAGE_BYTES} that can be shown.`,
+							};
+						}
 						return {
-							refused: `The file is ${found.contentType}, not text, so it has no lines to read.`,
+							text: `The image ${found.name ?? file}.`,
+							images: [{ data: (yield* wholeFile).toString("base64"), mediaType: imageType }],
 						};
 					}
-					const text = yield* Stream.mkString(Stream.decodeText(found.stream));
+					if (declaredText(found.contentType)) {
+						// As declared text, in whatever encoding, with what isn't UTF-8 replaced.
+						const text = new TextDecoder().decode(yield* wholeFile);
+						return readLines(text, { offset: offset ?? 1, limit: limit ?? DEFAULT_LINES, pattern });
+					}
+					if (!startsAsText(start)) return notText;
+					const text = strictText(yield* wholeFile);
+					if (text === undefined) return notText;
 					return readLines(text, { offset: offset ?? 1, limit: limit ?? DEFAULT_LINES, pattern });
 				}).pipe(
 					Effect.catchTags({
@@ -103,11 +145,44 @@ export function readThreadFileTool({
 					}),
 				),
 			),
+		toModelOutput: ({ output }) => withImages(output, acceptsImages),
 	});
 }
 
-function isText(contentType: string): boolean {
-	return contentType.startsWith("text/") || contentType.startsWith("application/json");
+/** Whether a file was given a text type: read as text, whatever its bytes. */
+function declaredText(contentType: string): boolean {
+	const essence = mediaTypeEssence(contentType);
+	return essence.startsWith("text/") || essence === "application/json";
+}
+
+/**
+ * Whether a file's first bytes read as text: UTF-8 without a NUL byte. Many
+ * text files, such as source code, arrive with a type that says otherwise or
+ * with none, so a file not declared text is judged by its bytes.
+ */
+function startsAsText(bytes: Uint8Array): boolean {
+	if (bytes.includes(0)) return false;
+	try {
+		// Streaming, so a character cut off at the end of the chunk is not an error.
+		new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** `bytes` as UTF-8 text without a NUL byte, or undefined when they are not that. */
+function strictText(bytes: Uint8Array): string | undefined {
+	if (bytes.includes(0)) return undefined;
+	try {
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch {
+		return undefined;
+	}
+}
+
+function collect<E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<Buffer, E> {
+	return Effect.map(Stream.runCollect(stream), (chunks) => Buffer.concat(chunks));
 }
 
 /**
