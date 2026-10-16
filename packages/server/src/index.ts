@@ -9,6 +9,7 @@ import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
+import { UnsentUploads } from "@sugabots/core/conversations/thread-files/unsent-uploads";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
@@ -120,6 +121,7 @@ const Background = Layer.mergeAll(
 	Routines.schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
+	UnsentUploads.layer,
 	PresetSeeding.layer,
 	PodSandboxes.pauseSweepLayer,
 );

@@ -1,16 +1,22 @@
-import { BadRequest, Conflict } from "@sugabots/contracts/http";
+import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
+import { BadRequest, Conflict, NotFound, PayloadTooLarge } from "@sugabots/contracts/http";
+import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { Effect } from "effect";
+import { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
+import { userText } from "@sugabots/errors";
+import { Effect, Stream } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
+import { fileResponse } from "./file-response.ts";
 
 export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 	Effect.gen(function* () {
 		const chats = yield* Chats.Service;
 		const view = yield* ChatView.Service;
+		const files = yield* ChatFiles.Service;
 		return handlers
 			.handle("list", ({ params, query }) =>
 				view
@@ -50,9 +56,48 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						replyTo: payload.replyTo,
 					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handleRaw("uploadFile", ({ params, query, request }) =>
+				// Raw, so the file streams into the blob store rather than being read
+				// into memory first.
+				Effect.gen(function* () {
+					// Refused before any of it is read, when it says how large it is.
+					if (Number(request.headers["content-length"]) > MAX_ATTACHMENT_BYTES) {
+						return yield* new ThreadFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
+					}
+					return yield* files.upload({
+						chatId: params.chatId,
+						name: query.name,
+						type: query.type,
+						stream: request.stream.pipe(
+							Stream.mapError(
+								() => new BadRequest({ message: userText`The upload was interrupted` }),
+							),
+						),
+					});
+				}).pipe(Effect.catchTags(storeOutagesAsDefects), asSessionUser, asHttpError(fileErrors)),
+			)
+			.handle("file", ({ params }) =>
+				files
+					.read({ chatId: params.chatId, fileId: params.fileId })
+					.pipe(
+						Effect.map(fileResponse),
+						Effect.catchTags(storeOutagesAsDefects),
+						asSessionUser,
+						asHttpError(fileErrors),
+					),
 			);
 	}),
 );
+
+/**
+ * A blob store that cannot be reached, or refuses, is the installation's
+ * fault, not the caller's: logged, and answered as a server error.
+ */
+const storeOutagesAsDefects = {
+	BlobStoreUnavailable: Effect.die,
+	BlobStoreRejected: Effect.die,
+} as const;
 
 const chatErrors = {
 	...refusals,
@@ -61,4 +106,11 @@ const chatErrors = {
 	ReplyTargetNotFound: BadRequest,
 	ChatAgentHasNoModel: Conflict,
 	InvalidChatCursor: BadRequest,
+};
+
+const fileErrors = {
+	...refusals,
+	ThreadFileTooLarge: PayloadTooLarge,
+	TooManyUnsentUploads: Conflict,
+	ThreadFileNotFound: NotFound,
 };
