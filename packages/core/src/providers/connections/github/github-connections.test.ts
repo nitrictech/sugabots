@@ -5,9 +5,11 @@ import { onPostgresAs } from "../../../workspaces/testing.ts";
 import {
 	INSTALLATION_ID,
 	installedConnection,
+	json,
 	listsRepositories,
 	madeConnection,
 	mintsTokens,
+	type Route,
 	reachingGitHub,
 	standInGitHub,
 	workspaceWithPod,
@@ -20,7 +22,19 @@ import { GitHubConnections } from "./github-connections.ts";
  * `acme/web` and `acme/infra`, against Postgres.
  */
 describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres", () => {
-	const github = standInGitHub(mintsTokens, listsRepositories);
+	// Once set, GitHub has renamed `acme/web` to `acme/website`, keeping its id.
+	let renamed = false;
+	const listsRenamed: Route = ({ path }) =>
+		renamed && path === "/installation/repositories"
+			? json({
+					total_count: 2,
+					repositories: [
+						{ id: 101, full_name: "acme/website", private: true },
+						{ id: 102, full_name: "acme/infra", private: false },
+					],
+				})
+			: undefined;
+	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
 	let fixture: Awaited<ReturnType<typeof workspaceWithPod>>;
@@ -115,6 +129,35 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 		expect(after?.connection.configurationRevision).toBe(
 			(connected?.connection.configurationRevision ?? 0) + 2,
 		);
+	});
+
+	it("keeps a repository GitHub renames, by its id", async () => {
+		const renaming = await workspaceWithPod("Renaming");
+		const { podId, adminId } = renaming;
+		const renamedId = await installedConnection(gitHubApps, renaming);
+		await as(adminId).addRepository({ podId, connectionId: renamedId, repository: "acme/web" });
+		renamed = true;
+		try {
+			const listed = await as(adminId).addRepository({
+				podId,
+				connectionId: renamedId,
+				repository: "acme/infra",
+			});
+			const connected = await runOnPostgres(
+				connections.forPod({ workspaceId: renaming.workspaceId, podId }),
+			);
+			github.asked.length = 0;
+			await runOnPostgres(connected?.readToken() ?? Effect.void);
+
+			expect(listed.repositories.map((one) => one.repository)).toEqual([
+				"acme/infra",
+				"acme/website",
+			]);
+			const asked = github.asked.find((request) => request.path.endsWith("/access_tokens"));
+			expect(asked?.body).toMatchObject({ repository_ids: [101, 102] });
+		} finally {
+			renamed = false;
+		}
 	});
 
 	it("refuses to choose repositories before the connection's app is installed", async () => {

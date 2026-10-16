@@ -7,7 +7,7 @@ import {
 } from "@sugabots/contracts";
 import type { JSONSchema7, Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
-import type { Database } from "../../database/database.ts";
+import { type Database, effectRunner } from "../../database/database.ts";
 import {
 	ConnectionRepository,
 	everyToolOff,
@@ -27,7 +27,7 @@ import {
 	type EgressHttpClient,
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
-import { gitHubNote } from "./github/tools.ts";
+import { gitHubNote, gitHubTools, type Workspace } from "./github/tools.ts";
 
 /**
  * The tools an agent inherits from its pod for one turn.
@@ -45,8 +45,8 @@ import { gitHubNote } from "./github/tools.ts";
  * log, rather than the turn failing: the agent can still answer with what it
  * has, and the connection's own test is where the owner learns why.
  *
- * A GitHub connection has no server to reach; what the model is told of it
- * comes with the connections' instructions (see `github/tools.ts`).
+ * A GitHub connection's tools are Sugabots' own (see `github/tools.ts`), with
+ * no server to reach; they are offered the same way, keyed by its handle.
  */
 
 export interface OfferedTool {
@@ -82,8 +82,11 @@ export interface Interface {
 	): Effect.Effect<ConnectionToolSet, never, Database>;
 }
 
-/** What a turn's connections work for, for the kinds that aren't MCP servers. */
+/** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
 export interface TurnSide {
+	readonly turnId: string;
+	/** The pod's sandbox, while the turn may use it. */
+	readonly workspace: Workspace | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */
 	readonly sandboxSignsIn: boolean;
 }
@@ -137,7 +140,7 @@ export interface Parts {
 	 * read once per turn, and the client their calls go through.
 	 */
 	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
-	/** The pod's GitHub connection; a case without one says nothing of GitHub. */
+	/** The pod's GitHub connection; a case without one offers no GitHub tools. */
 	github?: Pick<GitHubConnections.Interface, "forPod">;
 }
 
@@ -152,15 +155,18 @@ export function from({
 	const kept = new Map<string, KeptListing>();
 	const failedAt = new Map<string, number>();
 
-	/** What the model is told of the pod's GitHub connection. */
+	/** The pod's GitHub connection's tools, and what the model is told of them. */
 	const gitHubOffered = (workspaceId: string, podId: string, turn: TurnSide) =>
 		Effect.gen(function* () {
 			const connected = github ? yield* github.forPod({ workspaceId, podId }) : undefined;
 			if (!connected || everyToolOff(connected.connection)) {
 				return { tools: {}, instructions: {} };
 			}
+			const run = effectRunner({
+				runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<Database>()),
+			});
 			return {
-				tools: {},
+				tools: gitHubTools({ connected, ...turn, run }),
 				instructions: {
 					[connected.connection.handle]: gitHubNote(connected, turn.sandboxSignsIn),
 				},
