@@ -65,6 +65,11 @@ function reachScript(host: string) {
 	return `python3 -c "import urllib.request; urllib.request.urlopen('https://${host}', timeout=10)"`;
 }
 
+/** A command that prints what an HTTPS request to `url` answers. */
+function echoScript(url: string) {
+	return `python3 -c "import urllib.request; print(urllib.request.urlopen('${url}', timeout=20).read().decode())"`;
+}
+
 function failureTag(exit: Exit.Exit<unknown, { _tag: string }>) {
 	if (Exit.isSuccess(exit)) return "success";
 	const failure = exit.cause.reasons.find(Cause.isFailReason);
@@ -97,9 +102,51 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 					(await run(sandbox.exec(reachScript(host), EXEC))).exitCode === 0;
 
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([true, false]);
-				await run(sandbox.setAllowedHosts(["github.com"]));
+				await run(
+					sandbox.setNetwork({ allowedHosts: ["github.com"], credentials: [], environment: {} }),
+				);
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([false, true]);
-				await run(sandbox.setAllowedHosts(SPEC.allowedHosts));
+				await run(
+					sandbox.setNetwork({ allowedHosts: SPEC.allowedHosts, credentials: [], environment: {} }),
+				);
+			},
+			SLOW,
+		);
+
+		it(
+			"adds credentials to its HTTPS requests outside it, and gives login shells only placeholders",
+			async () => {
+				const { credentials: scope } = (await run(provider)).capabilities;
+				// A provider that can't add credentials is never given any.
+				if (scope === "none") return;
+				const echoed = async (path: string) =>
+					(await run(sandbox.exec(echoScript(`https://httpbin.org${path}`), EXEC))).stdout.text;
+
+				await run(
+					sandbox.setNetwork({
+						allowedHosts: ["httpbin.org"],
+						credentials: [
+							{
+								host: "httpbin.org",
+								pathPrefix: scope === "host-and-path" ? "/anything/signed/" : undefined,
+								header: "X-Sugabots-Test",
+								value: Redacted.make("the-credential"),
+							},
+						],
+						environment: { SUGABOTS_TEST_TOKEN: "a-placeholder" },
+					}),
+				);
+				const signed = await echoed("/anything/signed/repository");
+				const elsewhere = await echoed("/anything/other/repository");
+				const shell = await run(sandbox.exec("bash -lc 'env'", EXEC));
+				await run(
+					sandbox.setNetwork({ allowedHosts: SPEC.allowedHosts, credentials: [], environment: {} }),
+				);
+
+				expect(signed).toContain("the-credential");
+				if (scope === "host-and-path") expect(elsewhere).not.toContain("the-credential");
+				expect(shell.stdout.text).toContain("SUGABOTS_TEST_TOKEN=a-placeholder");
+				expect(shell.stdout.text).not.toContain("the-credential");
 			},
 			SLOW,
 		);

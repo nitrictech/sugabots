@@ -1,13 +1,14 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
 import { type UserText, userText } from "@sugabots/errors";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
 import { Database, query, serviceOperations } from "../database/database.ts";
 import { sandboxLease, sandbox as sandboxTable } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { allowedHostsOf } from "./allowed-hosts.ts";
+import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 import type { SandboxLeaseHolderKind } from "./sql.ts";
@@ -18,6 +19,8 @@ export const LEASE = Duration.seconds(90);
 export const LEASE_RENEWAL = Duration.seconds(30);
 /** How long a sandbox sits with no turn using it before it is paused. */
 export const IDLE_BEFORE_PAUSE = Duration.minutes(5);
+/** How long before its credentials expire a sandbox in use is given new ones. */
+const CREDENTIAL_REFRESH_MARGIN = Duration.minutes(10);
 /** How often the sweep looks for idle sandboxes to pause. */
 const PAUSE_SWEEP_INTERVAL = Duration.minutes(1);
 
@@ -40,7 +43,10 @@ export interface Interface {
 		provider: SandboxProviderRepository.Configured,
 		holder: Holder,
 	) => Effect.Effect<Opened, Sandboxes.Unavailable>;
-	/** Extends `holder`'s leases. Nothing happens if it has none. */
+	/**
+	 * Extends `holder`'s leases, and signs their sandboxes in afresh when their
+	 * credentials are about to expire. Nothing happens if it has none.
+	 */
 	readonly renew: (holder: Holder) => Effect.Effect<void>;
 	/** Ends `holder`'s leases, starting the idle time of the sandboxes it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
@@ -56,13 +62,11 @@ export interface Interface {
 	) => Effect.Effect<void, Sandboxes.Unavailable>;
 	/**
 	 * Keeps the running sandboxes of the workspace's pods, or of one pod, to
-	 * the hosts each may reach now. A paused one is kept to them when it is
-	 * next opened; one that can't be reached is logged and left for then too.
+	 * the hosts each may reach now, signed in as each pod is now. A paused one
+	 * is brought up to date when it is next opened; one that can't be reached
+	 * is logged and left for then too.
 	 */
-	readonly applyAllowedHosts: (where: {
-		workspaceId: string;
-		podId?: string;
-	}) => Effect.Effect<void>;
+	readonly applyNetwork: (where: { workspaceId: string; podId?: string }) => Effect.Effect<void>;
 	/** Whether `providerId` has made any sandbox that still exists. */
 	readonly anyMadeBy: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
@@ -96,6 +100,7 @@ export const make = Effect.gen(function* () {
 	const sandboxes = yield* Sandboxes.Service;
 	const ids = yield* Ids.Service;
 	const providers = yield* SandboxProviderRepository.Service;
+	const signIns = yield* SandboxCredentials.Service;
 	const operation = yield* serviceOperations<Interface>("PodSandboxes");
 	// One change to a pod's sandbox at a time: two turns' first commands make
 	// one sandbox, and the sweep never pauses one a turn is opening.
@@ -108,6 +113,56 @@ export const make = Effect.gen(function* () {
 		}
 		return semaphore.withPermits(1);
 	};
+
+	// When each pod's sandbox must be signed in again, from when it last was by
+	// this process. Another process's sandboxes are signed in on first renewal.
+	const signInDue = new Map<string, number>();
+
+	/**
+	 * Sets what the pod's sandbox may reach and what it is signed in with,
+	 * as far as its provider can add credentials.
+	 */
+	const applyNetwork = (pod: Pod, sandbox: Sandboxes.Sandbox, at: Sandboxes.Provider) =>
+		Effect.gen(function* () {
+			const [allowedHosts, signedIn] = yield* Effect.all([
+				allowedHostsOf(pod),
+				signIns.forPod(pod),
+			]);
+			yield* sandbox.setNetwork({
+				allowedHosts,
+				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
+				environment: at.capabilities.credentials === "none" ? {} : signedIn.environment,
+			});
+			if (signedIn.expiresAt === undefined) {
+				signInDue.delete(pod.podId);
+				return;
+			}
+			const due = DateTime.subtractDuration(signedIn.expiresAt, CREDENTIAL_REFRESH_MARGIN);
+			signInDue.set(pod.podId, DateTime.toEpochMillis(due));
+		});
+
+	/** Brings a running sandbox's network up to date, as {@link applyNetwork} does on open. */
+	const applyNetworkWhileRunning = (row: SandboxRow) =>
+		oneAtATime(row.podId)(
+			Effect.gen(function* () {
+				const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
+				if (!configured) return;
+				const at = sandboxes.forConnection(configured.connection);
+				const { sandbox } = yield* at.open(row.providerSandboxId);
+				yield* applyNetwork(row, sandbox, at);
+			}),
+		).pipe(
+			Effect.catchTags({
+				SandboxMissing: () => Effect.void,
+				// Its replacement is made with the network allowed then.
+				SandboxStopped: () => Effect.void,
+				SandboxUnavailable: (failure) =>
+					Effect.logWarning(
+						"Could not bring a sandbox's network up to date; it is when next opened",
+						failure,
+					),
+			}),
+		);
 
 	const recorded = (pod: Pod) =>
 		query((db) =>
@@ -208,8 +263,6 @@ export const make = Effect.gen(function* () {
 			}
 			const at = sandboxes.forConnection(provider.connection);
 			return yield* at.open(row.providerSandboxId).pipe(
-				// What the workspace allows may have changed since the sandbox last ran.
-				Effect.tap(({ sandbox }) => Effect.flatMap(allowedHostsOf(pod), sandbox.setAllowedHosts)),
 				Effect.map(
 					({ sandbox, resumed }): Opened => ({
 						sandbox,
@@ -366,7 +419,16 @@ export const make = Effect.gen(function* () {
 		open: (pod, provider, holder) =>
 			operation(
 				"open",
-				oneAtATime(pod.podId)(Effect.tap(opened(pod, provider), () => lease(pod, holder))),
+				oneAtATime(pod.podId)(
+					opened(pod, provider).pipe(
+						// What the workspace allows, and what the pod signs in to, may
+						// have changed since the sandbox last ran.
+						Effect.tap(({ sandbox }) =>
+							applyNetwork(pod, sandbox, sandboxes.forConnection(provider.connection)),
+						),
+						Effect.tap(() => lease(pod, holder)),
+					),
+				),
 			),
 
 		renew: (holder) =>
@@ -375,7 +437,31 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const now = yield* DateTime.now;
 					const expiresAt = DateTime.toDateUtc(DateTime.addDuration(now, LEASE));
-					yield* query((db) => db.update(sandboxLease).set({ expiresAt }).where(heldBy(holder)));
+					const renewed = yield* query((db) =>
+						db
+							.update(sandboxLease)
+							.set({ expiresAt })
+							.where(heldBy(holder))
+							.returning({ sandboxId: sandboxLease.sandboxId }),
+					);
+					if (renewed.length === 0) return;
+					const rows = yield* query((db) =>
+						db
+							.select()
+							.from(sandboxTable)
+							.where(
+								inArray(
+									sandboxTable.id,
+									renewed.map(({ sandboxId }) => sandboxId),
+								),
+							),
+					);
+					const nowMillis = DateTime.toEpochMillis(now);
+					for (const row of rows) {
+						const due = signInDue.get(row.podId);
+						if (due !== undefined && due > nowMillis) continue;
+						yield* applyNetworkWhileRunning(row);
+					}
 				}),
 			),
 
@@ -437,9 +523,9 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		applyAllowedHosts: ({ workspaceId, podId }) =>
+		applyNetwork: ({ workspaceId, podId }) =>
 			operation(
-				"applyAllowedHosts",
+				"applyNetwork",
 				Effect.gen(function* () {
 					const running = yield* query((db) =>
 						db
@@ -453,29 +539,7 @@ export const make = Effect.gen(function* () {
 								),
 							),
 					);
-					for (const row of running) {
-						yield* oneAtATime(row.podId)(
-							Effect.gen(function* () {
-								const configured = yield* providers.connection(workspaceId, row.sandboxProviderId);
-								if (!configured) return;
-								const { sandbox } = yield* sandboxes
-									.forConnection(configured.connection)
-									.open(row.providerSandboxId);
-								yield* sandbox.setAllowedHosts(yield* allowedHostsOf(row));
-							}),
-						).pipe(
-							Effect.catchTags({
-								SandboxMissing: () => Effect.void,
-								// Its replacement is made with the hosts allowed then.
-								SandboxStopped: () => Effect.void,
-								SandboxUnavailable: (failure) =>
-									Effect.logWarning(
-										"Could not apply the workspace's allowed hosts to a sandbox; it gets them when next opened",
-										failure,
-									),
-							}),
-						);
-					}
+					for (const row of running) yield* applyNetworkWhileRunning(row);
 				}),
 			),
 
@@ -771,4 +835,22 @@ export class UpgradeFailed
 	get userMessage() {
 		return this.reason;
 	}
+}
+
+/**
+ * What of `credentials` a provider that adds them by `scope` can add: by
+ * host alone, the first for each host, which then covers its every path.
+ */
+function fittedTo(
+	scope: Sandboxes.Capabilities["credentials"],
+	credentials: readonly Sandboxes.Credential[],
+): readonly Sandboxes.Credential[] {
+	if (scope === "none") return [];
+	const kept = new Map<string, Sandboxes.Credential>();
+	for (const credential of credentials) {
+		const fitted = scope === "host" ? { ...credential, pathPrefix: undefined } : credential;
+		const key = `${fitted.host} ${fitted.pathPrefix ?? ""} ${fitted.header}`;
+		if (!kept.has(key)) kept.set(key, fitted);
+	}
+	return [...kept.values()];
 }

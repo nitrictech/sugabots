@@ -14,6 +14,7 @@ import {
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
+import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import { SandboxTools } from "../sandbox.ts";
 import { DesktopViewer } from "./viewer.ts";
@@ -60,6 +61,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 						SandboxProviderRepository.layer,
 					),
 				),
+				Effect.provide(SandboxCredentials.none),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
