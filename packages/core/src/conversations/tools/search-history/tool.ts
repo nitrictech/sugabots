@@ -3,8 +3,9 @@ import { tool } from "ai";
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { agent, message, user } from "../../../database/schema.ts";
-import { formatHistoryTime } from "../../threads/message-text.ts";
+import { agent, message, threadFile, user } from "../../../database/schema.ts";
+import { loadFileParts } from "../../threads/file-parts.ts";
+import { describeAttachment, formatHistoryTime } from "../../threads/message-text.ts";
 import { participantColumns, toMessage } from "../../threads/participants.ts";
 
 const MAX_MATCHES = 10;
@@ -114,17 +115,26 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 		)
 		// One more than is returned, to tell whether there are more.
 		.limit(MAX_MATCHES + 1);
+	const returned = rows.slice(0, MAX_MATCHES);
+	// Each message lists the files it carried, so a file found this way can be read again.
+	const files = yield* loadFileParts(
+		db,
+		returned.map(({ message: row }) => row.id),
+	);
 	return {
-		messages: rows.slice(0, MAX_MATCHES).map(({ message: row, ...author }): HistoryMatch => {
+		messages: returned.map(({ message: row, ...author }): HistoryMatch => {
 			const found = toMessage(row, author);
+			const said =
+				row.content.length <= MATCH_CHARACTERS
+					? row.content
+					: `${row.content.slice(0, MATCH_CHARACTERS)}…`;
 			return {
 				author:
 					found.author.kind === "routine_trigger" ? found.author.routineName : found.author.name,
 				at: formatHistoryTime(row.createdAt),
-				text:
-					row.content.length <= MATCH_CHARACTERS
-						? row.content
-						: `${row.content.slice(0, MATCH_CHARACTERS)}…`,
+				text: [said, ...(files.get(row.id) ?? []).map(describeAttachment)]
+					.filter((line) => line !== "")
+					.join("\n"),
 			};
 		}),
 		more: rows.length > MAX_MATCHES,
@@ -153,12 +163,19 @@ function wordMatch(words: string): { where: SQL; best: SQL[] } {
 		terms.length > 0
 			? and(...terms.map((term) => ilike(message.content, `%${escapeLike(term)}%`)))
 			: undefined;
+	// A file is found by its name too, as a message with only files says nothing else.
+	const carriesNamed =
+		terms.length > 0
+			? sql`exists (select 1 from ${threadFile} where ${threadFile.messageId} = ${message.id} and ${and(
+					...terms.map((term) => ilike(threadFile.name, `%${escapeLike(term)}%`)),
+				)})`
+			: undefined;
 	const rank = sql`greatest(
 		ts_rank(to_tsvector('english', ${message.content}), websearch_to_tsquery('english', ${words})),
 		ts_rank(to_tsvector('simple', ${message.content}), websearch_to_tsquery('simple', ${words}))
 	)`;
 	return {
-		where: or(english, simple, substring) as SQL,
+		where: or(english, simple, substring, carriesNamed) as SQL,
 		best: [desc(sql`(${english}) or (${simple})`), desc(rank)],
 	};
 }

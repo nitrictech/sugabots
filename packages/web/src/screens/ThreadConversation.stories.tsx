@@ -1,4 +1,5 @@
 import type {
+	FilePart,
 	Message,
 	MessagePart,
 	MessageReaction,
@@ -47,6 +48,9 @@ function message(id: string, author: Message["author"], content: string): Messag
 
 const POD = "0199a3a0-0000-7000-8000-00000000000b";
 
+/** Where a file would be served. Most stories have none, so nothing asks for one. */
+const fileUrlOf = (fileId: string) => `/files/${fileId}`;
+
 function toolCall(id: string, tool: string): ToolCallPart {
 	return {
 		type: "tool_call",
@@ -77,6 +81,7 @@ const meta = preview.meta({
 		participants: [host, person],
 		podId: POD,
 		onOpenThread: fn(),
+		fileUrlOf,
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -96,6 +101,100 @@ const meta = preview.meta({
 			);
 		},
 	],
+});
+
+/** A picture drawn as an SVG, so the story needs no server and looks the same every run. */
+function pictureUrl(label: string, hue: number): string {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="hsl(${hue} 45% 32%)"/><text x="320" y="250" font-family="sans-serif" font-size="40" fill="white" text-anchor="middle">${label}</text></svg>`;
+	return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const attachedFiles: FilePart[] = [
+	["01", "pricing-page-old.png", "image/png", 412_000],
+	["02", "pricing-page-new.png", "image/png", 398_000],
+	["03", "acme-email.png", "image/png", 220_000],
+	["04", "acme-retail-request.pdf", "application/pdf", 245_760],
+].map(([suffix, name, contentType, size]) => ({
+	type: "file",
+	id: `0199a3a0-0000-7000-8000-0000000003${suffix}`,
+	name: String(name),
+	contentType: String(contentType),
+	size: Number(size),
+}));
+const filesOnly: FilePart = {
+	type: "file",
+	id: "0199a3a0-0000-7000-8000-000000000305",
+	name: "q4-pipeline.csv",
+	contentType: "text/csv",
+	size: 18_400,
+};
+const pictures = new Map(
+	attachedFiles
+		.slice(0, 3)
+		.map((file, index) => [file.id, pictureUrl(file.name.replace(".png", ""), 200 + index * 50)]),
+);
+
+const askedWithFiles: Message = {
+	...message(
+		"0199a3a0-0000-7000-8000-000000000310",
+		person,
+		"Here's Acme's request and both pricing pages. Can you check the numbers?",
+	),
+	parts: [
+		{
+			type: "text",
+			text: "Here's Acme's request and both pricing pages. Can you check the numbers?",
+		},
+		...attachedFiles,
+	],
+};
+const sentFilesOnly: Message = {
+	...message("0199a3a0-0000-7000-8000-000000000311", person, ""),
+	parts: [filesOnly],
+	createdAt: "2026-09-22T04:32:00.000Z",
+};
+/** The pictures where they are drawn, and every other file where it would be served. */
+const servedAt = (fileId: string) => pictures.get(fileId) ?? fileUrlOf(fileId);
+const stillSending: Message = {
+	...message("0199a3a0-0000-7000-8000-000000000312", person, "Numbers attached"),
+	parts: [{ type: "text", text: "Numbers attached" }, ...attachedFiles.slice(2)],
+};
+
+/**
+ * Files a person attached: under the words of a message with text, and on
+ * their own in a message that has nothing else. Images open full size; the
+ * PDF and the sheet download.
+ */
+export const WithFiles = meta.story({
+	args: {
+		fileUrlOf: servedAt,
+		messages: [askedWithFiles, sentFilesOnly],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/Can you check the numbers/)).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Open pricing-page-old.png" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Download acme-retail-request.pdf" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Download q4-pipeline.csv" }),
+		).toBeInTheDocument();
+	},
+});
+
+/** A message still being sent: its files show, without links until the API can serve them. */
+export const FilesWhileSending = meta.story({
+	args: {
+		fileUrlOf: servedAt,
+		messages: [stillSending],
+		sending: new Set([stillSending.id]),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("PDF · 240 KB")).toBeInTheDocument();
+		await expect(canvas.queryByRole("link", { name: /^Download/ })).toBeNull();
+	},
 });
 
 /**

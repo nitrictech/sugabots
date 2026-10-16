@@ -1,6 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
 	type CollaborationPart,
+	type FilePart,
 	isNarration,
 	type Message,
 	type MessageReplyTo,
@@ -26,6 +27,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
+import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
 import { textWithMentions } from "./mentions.tsx";
@@ -82,6 +84,7 @@ export function ThreadConversation({
 	onReply,
 	onJumpToMessage,
 	reacting,
+	fileUrlOf,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -151,6 +154,11 @@ export function ThreadConversation({
 	 * a reaction. Without it, reactions are only shown.
 	 */
 	reacting?: Reacting;
+	/**
+	 * Where a file attached to a message is served. A message still being sent
+	 * shows its files without links, as the API can't serve them until it has it.
+	 */
+	fileUrlOf: (fileId: string) => string;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -196,6 +204,7 @@ export function ThreadConversation({
 								onReply={onReply}
 								onJumpToMessage={onJumpToMessage}
 								reacting={reacting}
+								fileUrlOf={fileUrlOf}
 								onOpenThread={onOpenThread}
 								onOpenArtifact={onOpenArtifact}
 								onOpenDesktop={onOpenDesktop}
@@ -266,6 +275,9 @@ function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySe
 }
 
 const NONE_QUEUED: ReadonlySet<string> = new Set();
+/** Where a file is served while its message is still being sent: nowhere yet. */
+const notServedYet: FileUrlOf = () => undefined;
+
 const NONE_SENDING: ReadonlySet<string> = new Set();
 
 /** Screens that cannot hover, which is to say touch screens. */
@@ -385,6 +397,7 @@ function MessageRow({
 	onReply,
 	onJumpToMessage,
 	reacting,
+	fileUrlOf,
 	onOpenThread,
 	onOpenArtifact,
 	onOpenDesktop,
@@ -414,6 +427,8 @@ function MessageRow({
 	onReply?: (message: Message) => void;
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
+	/** Where a file attached to it is served. */
+	fileUrlOf: (fileId: string) => string;
 	onOpenThread: (threadId: string) => void;
 	onOpenArtifact?: (artifactId: string) => void;
 	onOpenDesktop?: () => void;
@@ -435,6 +450,7 @@ function MessageRow({
 	const agent = author.kind === "agent" ? author : undefined;
 	const size = ROW[compact ? "compact" : "regular"];
 	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
+	const files = message.parts.filter((part): part is FilePart => part.type === "file");
 	const segments = segmentsOf(message);
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
@@ -560,6 +576,9 @@ function MessageRow({
 						</div>
 					);
 				})}
+				{files.length > 0 && (
+					<MessageFiles files={files} urlOf={sending ? notServedYet : fileUrlOf} />
+				)}
 				{agent &&
 					previews &&
 					onOpenDesktop &&

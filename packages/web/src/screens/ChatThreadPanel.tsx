@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
+import { chatFileUrl } from "@/lib/chat-files.ts";
 import { routineSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
@@ -170,6 +171,7 @@ export function ChatThreadPanel({
 					</p>
 				)}
 				<ThreadConversation
+					fileUrlOf={(fileId) => chatFileUrl(chatId, fileId)}
 					messages={
 						type === "routine"
 							? details.messages.filter((message) => message.author.kind !== "routine_trigger")
