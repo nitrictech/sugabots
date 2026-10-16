@@ -81,6 +81,15 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: uploadedAttachmentSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, PayloadTooLarge, Conflict, ...refused],
 		}),
+		/**
+		 * Removes one of the caller's uploads before it is sent. Removing one
+		 * already gone, sent, or someone else's changes nothing.
+		 */
+		HttpApiEndpoint.delete("removeFile", "/chats/:chatId/files/:fileId", {
+			params: { chatId: Schema.String, fileId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: refused,
+		}),
 		/** A file attached to a message in the chat, with its own media type. */
 		HttpApiEndpoint.get("file", "/chats/:chatId/files/:fileId", {
 			params: { chatId: Schema.String, fileId: Schema.String },

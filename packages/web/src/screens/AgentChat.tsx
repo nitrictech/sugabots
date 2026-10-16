@@ -8,6 +8,7 @@ import {
 	type SessionUser,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
@@ -31,6 +32,7 @@ import {
 	useOptimisticChatItems,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
+import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
@@ -54,6 +56,7 @@ import { ChatHeader, type ChatPlace } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { FileDropTarget } from "./FileDropTarget.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import {
@@ -120,6 +123,7 @@ export function AgentChat({
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent.id);
+	const attachments = useComposerAttachments(chat.data?.id);
 	const [peopleOnly, setPeopleOnly] = useState(false);
 	useTypingSignal(chat.data?.mainThreadId, draft);
 	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
@@ -202,8 +206,10 @@ export function AgentChat({
 	}, []);
 
 	async function submit() {
+		if (send.isPending) return;
+		const files = attachments.takeForSending(draft);
+		if (!files) return;
 		const message = draft.trim();
-		if (!message || send.isPending) return;
 		const submitted = draft;
 		const answering = replyingTo;
 		setDraft("");
@@ -215,13 +221,15 @@ export function AgentChat({
 				message,
 				peopleOnly: writingToPeople,
 				replyTo: answering,
+				...(files.fileIds.length > 0 && { attachments: files.fileIds }),
 			});
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
-		} catch {
+		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));
 			setReplyingTo((current) => current ?? answering);
+			files.putBack(failure);
 		}
 	}
 
@@ -310,112 +318,121 @@ export function AgentChat({
 				)}
 			>
 				{header}
-				<div
-					ref={attachViewport}
-					role="log"
-					aria-label="Chat messages"
-					onScroll={(event) => {
-						const element = event.currentTarget;
-						const atFoot =
-							element.scrollHeight - element.scrollTop - element.clientHeight <
-							LATEST_IN_VIEW_TOLERANCE_PX;
-						followingLatest.current = atFoot;
-						setLatestInView(atFoot);
-					}}
-					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
+				<FileDropTarget
+					onDropFiles={agent.model === null ? undefined : attachments.attach}
+					className="flex min-h-0 flex-1 flex-col"
 				>
-					{/* Anchored to the bottom, so a short chat sits just above the composer. */}
-					<div className="flex min-h-full w-full flex-col justify-end">
-						{messages.isError && (
-							<div className="px-5">
-								<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
-							</div>
-						)}
-						{messages.hasNextPage && (
-							<Button
-								variant="link"
-								size="bare"
-								className="self-center"
-								disabled={messages.isFetchingNextPage}
-								onClick={() => void loadOlder()}
-							>
-								{messages.isFetchingNextPage ? "Loading…" : "Load older messages"}
-							</Button>
-						)}
-						{messages.isSuccess && !messages.hasNextPage && <ChatIntro agent={agent} />}
-						{groups.map((group) => (
-							<Fragment key={group.key}>
-								{group.separated && <DaySeparator at={group.at} />}
-								{group.kind === "messages" ? (
-									<ThreadConversation
-										messages={group.messages}
-										host={host}
-										isRunning={false}
-										participants={mentionable}
-										dividers={false}
-										onOpenThread={openThread}
-										onOpenArtifact={openArtifact}
-										onOpenDesktop={openDesktop}
-										previews={!staged}
-										podId={pod.id}
-										approvalCapabilities={details.capabilities}
-										queued={queued}
-										sending={sending}
-										showsTyping={false}
-										highlightedMessageId={jump.pointedOut}
-										threadActivityAt={threadActivityAt}
-										authorLinkOf={authorLinkOf}
-										onReply={replyTo}
-										onJumpToMessage={jumpTo}
-										reacting={reacting}
-									/>
-								) : (
-									<ActivityLine
-										item={group.item}
-										host={host}
-										entry={entries.find((entry) => entry.threadId === group.item.threadId)}
-										onOpen={() => openThread(group.item.threadId)}
-									/>
-								)}
-							</Fragment>
-						))}
-						{jump.notFound && (
-							<p role="status" className="m-0 px-5 py-2 text-center text-muted-foreground text-sm">
-								Could not find the message you opened in this chat.
-							</p>
-						)}
-						<ThreadNotices notices={notices} />
+					<div
+						ref={attachViewport}
+						role="log"
+						aria-label="Chat messages"
+						onScroll={(event) => {
+							const element = event.currentTarget;
+							const atFoot =
+								element.scrollHeight - element.scrollTop - element.clientHeight <
+								LATEST_IN_VIEW_TOLERANCE_PX;
+							followingLatest.current = atFoot;
+							setLatestInView(atFoot);
+						}}
+						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
+					>
+						{/* Anchored to the bottom, so a short chat sits just above the composer. */}
+						<div className="flex min-h-full w-full flex-col justify-end">
+							{messages.isError && (
+								<div className="px-5">
+									<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
+								</div>
+							)}
+							{messages.hasNextPage && (
+								<Button
+									variant="link"
+									size="bare"
+									className="self-center"
+									disabled={messages.isFetchingNextPage}
+									onClick={() => void loadOlder()}
+								>
+									{messages.isFetchingNextPage ? "Loading…" : "Load older messages"}
+								</Button>
+							)}
+							{messages.isSuccess && !messages.hasNextPage && <ChatIntro agent={agent} />}
+							{groups.map((group) => (
+								<Fragment key={group.key}>
+									{group.separated && <DaySeparator at={group.at} />}
+									{group.kind === "messages" ? (
+										<ThreadConversation
+											messages={group.messages}
+											host={host}
+											isRunning={false}
+											participants={mentionable}
+											dividers={false}
+											onOpenThread={openThread}
+											onOpenArtifact={openArtifact}
+											onOpenDesktop={openDesktop}
+											previews={!staged}
+											podId={pod.id}
+											approvalCapabilities={details.capabilities}
+											queued={queued}
+											sending={sending}
+											showsTyping={false}
+											highlightedMessageId={jump.pointedOut}
+											threadActivityAt={threadActivityAt}
+											authorLinkOf={authorLinkOf}
+											onReply={replyTo}
+											onJumpToMessage={jumpTo}
+											reacting={reacting}
+										/>
+									) : (
+										<ActivityLine
+											item={group.item}
+											host={host}
+											entry={entries.find((entry) => entry.threadId === group.item.threadId)}
+											onOpen={() => openThread(group.item.threadId)}
+										/>
+									)}
+								</Fragment>
+							))}
+							{jump.notFound && (
+								<p
+									role="status"
+									className="m-0 px-5 py-2 text-center text-muted-foreground text-sm"
+								>
+									Could not find the message you opened in this chat.
+								</p>
+							)}
+							<ThreadNotices notices={notices} />
+						</div>
 					</div>
-				</div>
-				<div className="shrink-0 px-4 md:px-5">
-					{agent.model === null ? (
-						<AgentNotSetUp agent={agent} pod={pod} />
-					) : (
-						<ChatComposer
-							label={composerLabel}
-							value={draft}
-							onValueChange={setDraft}
-							onSubmit={submit}
-							submitLabel="Send message"
-							submitDisabled={!draft.trim() || send.isPending}
-							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
-							className="w-full"
-							mentionable={composerMentionable}
-							peopleOnly={
-								otherPeople.length > 0
-									? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
-									: undefined
-							}
-							replyingTo={
-								replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
-							}
-						/>
-					)}
-					{/* Always its height, so nothing moves as somebody starts or stops typing. */}
-					<div className="flex h-[26px] items-center">
-						{anyoneTyping(typers) && <TypingIndicator typers={typers} className="px-1" />}
+					<div className="shrink-0 px-4 md:px-5">
+						{agent.model === null ? (
+							<AgentNotSetUp agent={agent} pod={pod} />
+						) : (
+							<ChatComposer
+								label={composerLabel}
+								value={draft}
+								onValueChange={setDraft}
+								onSubmit={submit}
+								submitLabel="Send message"
+								sending={send.isPending}
+								error={send.isError ? sendFailureMessage(send.error) : undefined}
+								className="w-full"
+								mentionable={composerMentionable}
+								peopleOnly={
+									otherPeople.length > 0
+										? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
+										: undefined
+								}
+								replyingTo={
+									replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
+								}
+								attachments={attachments}
+							/>
+						)}
+						{/* Always its height, so nothing moves as somebody starts or stops typing. */}
+						<div className="flex h-[26px] items-center">
+							{anyoneTyping(typers) && <TypingIndicator typers={typers} className="px-1" />}
+						</div>
 					</div>
-				</div>
+				</FileDropTarget>
 			</div>
 			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
 			{staged?.kind === "artifact" ? (
@@ -458,6 +475,20 @@ export function AgentChat({
 			)}
 		</div>
 	);
+}
+
+/**
+ * Under the composer when a message is not sent. A file that was gone comes
+ * back as a failed chip to retry; any other refusal says what to change.
+ */
+function sendFailureMessage(failure: unknown): string {
+	if (isFileGoneRefusal(failure)) {
+		return "Message not sent. Some files were no longer there. Retry them to send.";
+	}
+	if (isApiFailure(failure) && failure._tag === "BadRequest") {
+		return `Message not sent. ${failure.message}.`;
+	}
+	return "Message not sent. Your draft is still here.";
 }
 
 type ChatActivityItem = Extract<ChatMessageItem, { kind: "collaboration" | "routine" }>;
