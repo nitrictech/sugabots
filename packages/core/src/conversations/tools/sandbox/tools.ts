@@ -11,7 +11,7 @@ export const READ_FILE_TOOL = "read_file";
 export const WRITE_FILE_TOOL = "write_file";
 
 const DEFAULT_TIMEOUT_SECONDS = 120;
-const MAX_TIMEOUT_SECONDS = 300;
+const MAX_TIMEOUT_SECONDS = 900;
 /** Of each stream, kept from the end. */
 const MAX_OUTPUT_CHARACTERS = 20_000;
 const MAX_READ_CHARACTERS = 100_000;
