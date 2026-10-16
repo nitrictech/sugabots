@@ -136,6 +136,59 @@ const releaseWatch = placed(
 	[cron("0 9 * * 1-5"), cron("0 17 * * 5"), { kind: "webhook", auth: { kind: "bearer" } }],
 	{ results: "keep_in_run" },
 );
+const GITHUB_CONNECTION_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6a";
+const pullRequestReviews = placed(
+	10,
+	"Pull request reviews",
+	oncall,
+	engineering,
+	{
+		kind: "github",
+		connectionId: GITHUB_CONNECTION_ID,
+		repository: "acme/web",
+		events: ["pull_request_opened", "pull_request_review"],
+	},
+	{ results: "keep_in_run" },
+);
+
+/** Each pod's GitHub connection, to `acme`, working on `acme/web` and `acme/infra`. */
+const podRepositories = [
+	http.get(`${API}/pods/:podId/connections`, ({ params }) =>
+		HttpResponse.json([
+			{
+				id: GITHUB_CONNECTION_ID,
+				workspaceId: engineering.workspaceId,
+				podId: params.podId,
+				name: "GitHub",
+				handle: "github",
+				kind: "github",
+				url: "https://github.com/acme",
+				auth: "header",
+				signedIn: true,
+				secretHeader: null,
+				hasSecret: false,
+				appSettingsUrl:
+					"https://github.com/organizations/acme/settings/apps/sugabots-engineering-4b6a",
+				status: "connected",
+				toolCounts: { allow: 5, ask: 2, off: 0 },
+				lastTestedAt: "2026-10-05T09:30:00.000Z",
+				lastTestError: null,
+				connectedBy: "Sam Rivera",
+				createdAt: "2026-10-05T09:30:00.000Z",
+			},
+		]),
+	),
+	http.get(`${API}/pods/:podId/connections/:connectionId/repositories`, () =>
+		HttpResponse.json({
+			account: "acme",
+			repositories: ["acme/web", "acme/infra"].map((repository) => ({
+				repository,
+				addedByName: "Sam Rivera",
+				addedAt: "2026-10-05T09:30:00.000Z",
+			})),
+		}),
+	),
+];
 
 const everyRoutine = [
 	overnight,
@@ -349,13 +402,21 @@ export const SeveralTriggers = meta.story({
 	},
 });
 
-/** Add trigger's first step: the kinds of trigger. */
+/** Add trigger's first step: the kinds of trigger, Sugabots' own, then the integrations the bot's pod is connected to. */
 export const AddTrigger = meta.story({
-	render: () => <StoryApp path={pageOf(overnight)} />,
-	play: async ({ canvas }) => {
+	beforeEach({ msw }) {
+		msw.use(routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
+	},
+	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
+	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas);
 		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
+		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
+		await expect(within(step).getByRole("link", { name: /^Connect more in/ })).toBeVisible();
+		await userEvent.type(within(step).getByRole("searchbox", { name: "Search triggers" }), "sched");
+		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
+		await expect(within(step).queryByRole("button", { name: /^Webhook/ })).toBeNull();
 	},
 });
 
@@ -482,6 +543,44 @@ export const NewWebhook = meta.story({
 			dialog.getByText(/^With no secret, anyone who has the address can run it\./),
 		).toBeInTheDocument();
 		await expect(dialog.getByRole("button", { name: "Add trigger" })).toBeEnabled();
+	},
+});
+
+/** A repository's events: which of the pod's GitHub connection's repositories, and what happening there runs it. */
+export const RepositoryTrigger = meta.story({
+	beforeEach({ msw }) {
+		msw.use(routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
+	},
+	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("button", { name: /^On acme\/web/ }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		const dialog = within(await openFirstTrigger(canvas));
+		// The pod's GitHub connection, then its repositories, load once the trigger opens.
+		await expect(
+			await dialog.findByRole("switch", { name: "A pull request is reviewed" }),
+		).toBeChecked();
+		await expect(dialog.getByRole("switch", { name: "Checks fail" })).not.toBeChecked();
+	},
+});
+
+/** A new routine on a repository waits for one to be picked, from its bot's pod's. */
+export const NewRepositoryRoutine = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...podRepositories);
+	},
+	render: () => <StoryApp path={`${routines}/new`} />,
+	play: async ({ canvas, userEvent }) => {
+		const step = await openAddTrigger(canvas);
+		await userEvent.click(await within(step).findByRole("button", { name: /^GitHub/ }));
+		const dialog = within(await screen.findByRole("dialog", { name: "GitHub" }));
+		await expect(dialog.getByRole("button", { name: "Add trigger" })).toBeDisabled();
+		await userEvent.click(await dialog.findByRole("button", { name: "acme/infra" }));
+		await userEvent.click(dialog.getByRole("button", { name: "Add trigger" }));
+		await expect(
+			await canvas.findByRole("button", { name: /^On acme\/infra/ }),
+		).toBeInTheDocument();
 	},
 });
 

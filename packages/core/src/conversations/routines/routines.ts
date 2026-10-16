@@ -2,6 +2,7 @@ export * as Routines from "./routines.ts";
 
 import type {
 	AcceptedRoutineExecution,
+	GitHubTrigger,
 	NewRoutine,
 	Routine,
 	RoutineCurrentSecret,
@@ -23,17 +24,20 @@ import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { routine, routineTrigger } from "../../database/schema.ts";
+import { agent, connection, routine, routineTrigger } from "../../database/schema.ts";
+import type { RepositoryActivity } from "../../providers/connections/github/github-events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
+import { makeConnectionEvents } from "./connection-events.ts";
 import { RoutineRepository } from "./repository.ts";
 import {
 	inScope,
 	type OnAgent,
 	type RoutineDeliveryIdTooLong,
 	RoutineNotFound,
+	RoutineRepositoryNotInPod,
 	type RoutineTriggerConflict,
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
@@ -74,7 +78,8 @@ export interface Interface {
 		| AuthorizationDenied
 		| RoutineRepository.RoutineNameTaken
 		| InvalidRoutineSchedule
-		| WebhookSecretTooShort,
+		| WebhookSecretTooShort
+		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
 	/**
@@ -102,7 +107,8 @@ export interface Interface {
 		| RoutineNotFound
 		| TooManyRoutineTriggers
 		| InvalidRoutineSchedule
-		| WebhookSecretTooShort,
+		| WebhookSecretTooShort
+		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
 	/**
@@ -119,7 +125,8 @@ export interface Interface {
 		| RoutineTriggerNotFound
 		| RoutineTriggerKindChanged
 		| InvalidRoutineSchedule
-		| WebhookSecretTooShort,
+		| WebhookSecretTooShort
+		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
 	readonly removeTrigger: (
@@ -236,6 +243,30 @@ export class Webhooks extends Context.Service<Webhooks, WebhooksInterface>()(
 	"@sugabots/core/Routines/Webhooks",
 ) {}
 
+/**
+ * Runs connection routines for what happened at their connections' services.
+ * The service's signature on the delivery is what admits it, checked before
+ * this is asked, so this asks for no actor.
+ */
+export interface ConnectionEventsInterface {
+	/**
+	 * Accepts a run of each enabled routine `activity` runs through
+	 * `connectionId`, while the connection has the repository. A delivery
+	 * GitHub sends again starts no new runs.
+	 */
+	readonly accept: (input: {
+		workspaceId: string;
+		connectionId: string;
+		deliveryId: string;
+		activity: RepositoryActivity;
+	}) => Effect.Effect<AcceptedRoutineExecution[]>;
+}
+
+export class ConnectionEvents extends Context.Service<
+	ConnectionEvents,
+	ConnectionEventsInterface
+>()("@sugabots/core/Routines/ConnectionEvents") {}
+
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Routines");
 	const authorization = yield* Authorization.Service;
@@ -245,15 +276,20 @@ export const make = Effect.gen(function* () {
 	const view = yield* makeView;
 
 	/**
-	 * What `input` writes for a trigger, given the trigger it rewrites, if
-	 * any, and whether the routine runs: a schedule's next time while it
-	 * does, and a webhook's secret.
+	 * What `input` writes for a trigger of the agent `owner`'s routine, given
+	 * the trigger it rewrites, if any, and whether the routine runs: a
+	 * schedule's next time while it does, and a webhook's secret.
 	 */
 	const triggerValues = (
+		owner: { id: string; workspaceId: string },
 		input: RoutineTriggerInput,
 		current: schema.RoutineTriggerRow | undefined,
 		state: RoutineState,
-	): Effect.Effect<Written, InvalidRoutineSchedule | WebhookSecretTooShort> =>
+	): Effect.Effect<
+		Written,
+		InvalidRoutineSchedule | WebhookSecretTooShort | RoutineRepositoryNotInPod,
+		Database
+	> =>
 		Effect.gen(function* () {
 			switch (input.kind) {
 				case "cron": {
@@ -288,6 +324,10 @@ export const make = Effect.gen(function* () {
 						secret: checked.secret,
 					};
 				}
+				case "github": {
+					const settings = yield* inPodsConnection(owner, input);
+					return { values: { ...NO_SECRET, settings, nextScheduledAt: null }, secret: null };
+				}
 			}
 		});
 
@@ -321,7 +361,7 @@ export const make = Effect.gen(function* () {
 						const { agent: owner, actor } = yield* authorization.agent(agentId, "routine.manage");
 						const state = input.state ?? "enabled";
 						const written = yield* Effect.forEach(input.triggers, (trigger) =>
-							triggerValues(trigger, undefined, state),
+							triggerValues(owner, trigger, undefined, state),
 						);
 						const row = yield* repository.create({
 							workspaceId: owner.workspaceId,
@@ -380,7 +420,12 @@ export const make = Effect.gen(function* () {
 						if (existing.length >= MAX_ROUTINE_TRIGGERS) {
 							return yield* new TooManyRoutineTriggers();
 						}
-						const written = yield* triggerValues(input, undefined, current.state);
+						const written = yield* triggerValues(
+							{ id: scope.agentId, workspaceId: scope.workspaceId },
+							input,
+							undefined,
+							current.state,
+						);
 						const added = yield* repository.addTriggers(scope, [written.values]);
 						return {
 							routine: yield* routineWithTriggers(current),
@@ -402,7 +447,12 @@ export const make = Effect.gen(function* () {
 						const current = yield* routineIn(scope);
 						const trigger = yield* triggerIn(scope, addressed.triggerId);
 						if (trigger.kind !== input.kind) return yield* new RoutineTriggerKindChanged();
-						const written = yield* triggerValues(input, trigger, current.state);
+						const written = yield* triggerValues(
+							{ id: scope.agentId, workspaceId: scope.workspaceId },
+							input,
+							trigger,
+							current.state,
+						);
 						const updated = yield* repository.updateTrigger(
 							scope,
 							addressed.triggerId,
@@ -533,6 +583,10 @@ export const webhooksLayer = Layer.effect(Webhooks, makeWebhooks).pipe(
 	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
 );
 
+export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnectionEvents).pipe(
+	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
+);
+
 export { routineExecutionIdOf, toRoutineExecution } from "./execution.ts";
 export { InvalidRoutineExecutionCursor } from "./routine-view.ts";
 /** Accepts the runs of cron routines as they fall due. */
@@ -592,6 +646,49 @@ const triggerIn = (scope: Scope, triggerId: string) =>
 		);
 		if (!row) return yield* new RoutineTriggerNotFound();
 		return row;
+	});
+
+/**
+ * `trigger`'s settings, once its connection is one of the agent's pod's and
+ * the repository one of the connection's, written as the connection has it,
+ * since GitHub's names ignore case.
+ */
+const inPodsConnection = (
+	owner: { id: string; workspaceId: string },
+	trigger: GitHubTrigger,
+): Effect.Effect<
+	Extract<schema.RoutineTriggerSettings, { kind: "github" }>,
+	RoutineRepositoryNotInPod,
+	Database
+> =>
+	Effect.gen(function* () {
+		const [connected] = yield* query((db) =>
+			db
+				.select({ settings: connection.settings })
+				.from(connection)
+				.innerJoin(
+					agent,
+					and(eq(agent.podId, connection.podId), eq(agent.workspaceId, connection.workspaceId)),
+				)
+				.where(
+					and(
+						eq(agent.id, owner.id),
+						eq(agent.workspaceId, owner.workspaceId),
+						eq(connection.id, trigger.connectionId),
+					),
+				)
+				.limit(1),
+		);
+		const found = connected?.settings?.repositories.find(
+			(one) => one.path.toLowerCase() === trigger.repository.toLowerCase(),
+		);
+		if (!found) return yield* new RoutineRepositoryNotInPod();
+		return {
+			kind: "github",
+			connectionId: trigger.connectionId,
+			repository: found.path,
+			events: [...new Set(trigger.events)],
+		};
 	});
 
 /** What a new webhook trigger checks its callers with until somebody chooses. */

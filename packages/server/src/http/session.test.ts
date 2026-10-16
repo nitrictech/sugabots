@@ -17,6 +17,7 @@ const OPEN_ENDPOINTS = new Set([
 	"GET /health",
 	"POST /hooks/routines/:routineId",
 	"POST /hooks/triggers/:triggerId",
+	"POST /hooks/connections/:connectionId",
 ]);
 
 const PLACEHOLDERS: Record<string, string> = {

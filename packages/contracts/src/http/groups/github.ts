@@ -6,12 +6,13 @@ import {
 	connectionRepositoryChangeSchema,
 	GITHUB_APP_INSTALLED_PATH,
 	GITHUB_APP_MADE_PATH,
+	GITHUB_WEBHOOK_PATH,
 	gitHubAppFormSchema,
 	gitHubAppInstallSchema,
 	newGitHubAppSchema,
 } from "../../github.ts";
 import { uuidSchema } from "../../uuid.ts";
-import { BadRequest, Conflict, NotFound, refused } from "../errors.ts";
+import { BadRequest, Conflict, NotFound, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 const pod = { podId: uuidSchema };
@@ -80,3 +81,17 @@ export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 		}),
 	)
 	.middleware(Session) {}
+
+/**
+ * Where a GitHub connection's app delivers events. Without a session: a
+ * delivery is admitted by its signature under the app's webhook secret, over
+ * the body exactly as sent.
+ */
+export class GitHubWebhooksApi extends HttpApiGroup.make("gitHubWebhooks").add(
+	HttpApiEndpoint.post("delivery", `${GITHUB_WEBHOOK_PATH}/:connectionId`, {
+		params: { connectionId: uuidSchema },
+		payload: Schema.Json,
+		success: HttpApiSchema.Empty(204),
+		error: [BadRequest, Unauthorized],
+	}),
+) {}

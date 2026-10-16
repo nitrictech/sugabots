@@ -1,4 +1,4 @@
-import type { RoutineExecution } from "@sugabots/contracts";
+import type { RepositoryEvent, RoutineExecution } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, Minus } from "lucide-react";
@@ -73,17 +73,30 @@ function useStartedBy(workspaceId: string): (userId: string) => string {
 	};
 }
 
-/** What started a run: its schedule, its address being called, or a person. */
+/** What started a run: its schedule, its address being called, its repository, or a person. */
 function runSource(run: RoutineExecution, startedBy: (userId: string) => string): string {
 	switch (run.trigger.kind) {
 		case "cron":
 			return "Scheduled";
 		case "webhook":
 			return "Webhook";
+		case "github":
+			return `${REPOSITORY_EVENT_RUN_LABELS[run.trigger.event]} by ${run.trigger.sender}`;
 		case "manual":
 			return `Run by ${startedBy(run.trigger.requestedByUserId)}`;
 	}
 }
+
+/** What happened at a repository, as the line of the run it started says it. */
+const REPOSITORY_EVENT_RUN_LABELS: Record<RepositoryEvent, string> = {
+	pull_request_opened: "Pull request opened",
+	pull_request_review: "Pull request reviewed",
+	pull_request_comment: "Pull request comment",
+	issue_opened: "Issue opened",
+	issue_comment: "Issue comment",
+	checks_failed: "Checks failed",
+	push: "Pushed",
+};
 
 /** When a run was started, with its day: "Today, 22:00", "Yesterday, 9:00", "Mon, 9:00". */
 function formatRunTime(at: Date, now: Date): string {

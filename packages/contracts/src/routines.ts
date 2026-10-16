@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { agentSchema } from "./agents.ts";
+import { repositoryEventSchema, repositoryPathSchema } from "./github.ts";
 import { podSlugSchema } from "./pods.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -44,7 +45,7 @@ const timezoneSchema = Schema.Trim.check(
 export const routineStateSchema = Schema.Literals(["enabled", "paused"]);
 export type RoutineState = typeof routineStateSchema.Type;
 
-export const routineTriggerKindSchema = Schema.Literals(["cron", "webhook"]);
+export const routineTriggerKindSchema = Schema.Literals(["cron", "webhook", "github"]);
 export type RoutineTriggerKind = typeof routineTriggerKindSchema.Type;
 
 /**
@@ -205,6 +206,16 @@ export type RoutineSchedule = typeof routineScheduleSchema.Type;
 /** A schedule picked by its parts rather than written as cron. */
 export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
 
+/**
+ * A GitHub trigger's connection, its bot's pod's GitHub connection, the
+ * repository there it watches, and the events there that start a run.
+ */
+const gitHubTriggerFields = {
+	connectionId: uuidSchema,
+	repository: repositoryPathSchema,
+	events: Schema.Array(repositoryEventSchema).check(Schema.isMinLength(1)),
+};
+
 /** One of the things that start a routine; a routine may have several, of any kinds. */
 export const routineTriggerSchema = Schema.Union([
 	Schema.Struct({
@@ -216,9 +227,13 @@ export const routineTriggerSchema = Schema.Union([
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
 	Schema.Struct({ id: uuidSchema, kind: Schema.Literal("webhook"), auth: webhookAuthSchema }),
+	Schema.Struct({ id: uuidSchema, kind: Schema.Literal("github"), ...gitHubTriggerFields }),
 ]);
 
 export type RoutineTrigger = typeof routineTriggerSchema.Type;
+
+/** A GitHub routine's connection, repository and the events there that run it. */
+export type GitHubTrigger = Omit<Extract<RoutineTrigger, { kind: "github" }>, "kind" | "id">;
 
 export const routineSchema = Schema.Struct({
 	id: uuidSchema,
@@ -276,10 +291,16 @@ const scheduledTriggerInputSchema = Schema.Struct({
 	timezone: timezoneSchema,
 });
 
+const gitHubTriggerInputSchema = Schema.Struct({
+	kind: Schema.Literal("github"),
+	...gitHubTriggerFields,
+});
+
 /** A trigger as written, to add to a routine or to replace one of its own of the same kind. */
 export const routineTriggerInputSchema = Schema.Union([
 	scheduledTriggerInputSchema,
 	webhookTriggerInputSchema,
+	gitHubTriggerInputSchema,
 ]);
 
 export type RoutineTriggerInput = typeof routineTriggerInputSchema.Type;
@@ -317,7 +338,12 @@ export const routineExecutionStateSchema = Schema.Literals([
 
 export type RoutineExecutionState = typeof routineExecutionStateSchema.Type;
 
-export const routineExecutionTriggerKindSchema = Schema.Literals(["cron", "webhook", "manual"]);
+export const routineExecutionTriggerKindSchema = Schema.Literals([
+	"cron",
+	"webhook",
+	"github",
+	"manual",
+]);
 export type RoutineExecutionTriggerKind = typeof routineExecutionTriggerKindSchema.Type;
 
 const jsonValueSchema = Schema.Unknown.check(
@@ -340,6 +366,29 @@ export const routineExecutionTriggerSchema = Schema.Union([
 			),
 		),
 		payload: jsonValueSchema,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("github"),
+		connectionId: uuidSchema,
+		receivedAt: isoTimestampSchema,
+		/** The service's id for the delivery, which a retry of it repeats. */
+		deliveryId: Schema.String.check(
+			Schema.isMinLength(1),
+			Schema.isMaxLength(MAX_IDEMPOTENCY_KEY_CHARACTERS),
+		),
+		event: repositoryEventSchema,
+		repository: Schema.String,
+		/** Who did it, by their name at the service. */
+		sender: Schema.String,
+		/** Where to see it at the service. */
+		url: Schema.String,
+		/** The pull request or issue it is about, if any. */
+		number: Schema.NullOr(Schema.Int),
+		title: Schema.NullOr(Schema.String),
+		/** What was written: a comment's or review's words, or a new issue's or pull request's description. */
+		text: Schema.NullOr(Schema.String),
+		/** The branch it is on, if any. */
+		branch: Schema.NullOr(Schema.String),
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("manual"),
