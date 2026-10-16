@@ -2,6 +2,7 @@ import {
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionToolSetting,
+	connectionMarkFor,
 	connectionPresetFor,
 	connectionToolMutating,
 	type Pod,
@@ -18,6 +19,7 @@ import {
 	useConnectionWithTools,
 } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { useInstallGitHubApp } from "@/lib/github-connections.ts";
 import { podSettingsLink } from "@/lib/links.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Alert, Success } from "@/ui/alert.tsx";
@@ -61,19 +63,25 @@ export function ConnectionPage({
 }) {
 	const canManage = pod.permissions.manageConnections;
 	const actions = useConnectionActions(pod.id);
+	const installApp = useInstallGitHubApp(pod.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
 	const preset = connectionPresetFor(connection.url);
+	const mark = connectionMarkFor(connection);
+	// A GitHub connection's tools are Sugabots' own: it has no server to sign in to or check.
+	const isServer = connection.kind === "mcp";
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const failure = checked
 		? !checked.reachable && (checked.error ?? "The server did not answer.")
 		: connection.status === "error" && (connection.lastTestError ?? "The last check failed.");
-	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
+	const error =
+		actions.update.error ?? actions.signIn.error ?? actions.test.error ?? installApp.error;
 	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
 		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 	const signIn = () => actions.signIn.mutate({ connectionId: connection.id });
+	const install = () => installApp.mutate(connection.id);
 
 	async function disconnect() {
 		try {
@@ -88,7 +96,7 @@ export function ConnectionPage({
 	return (
 		<SettingsPage back={back}>
 			<div className="flex items-center gap-3.5">
-				<ConnectionMark presetId={preset?.id} name={connection.name} size="lg" />
+				<ConnectionMark presetId={mark} name={connection.name} size="lg" />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<h2 className="m-0 truncate font-bold text-[22px] text-foreground tracking-[-0.01em]">
 						{connection.name}
@@ -117,19 +125,24 @@ export function ConnectionPage({
 					</Button>
 				)}
 				<MoreMenu label={`More for ${connection.name}`}>
-					{canManage && connection.auth === "oauth" && (
+					{isServer && canManage && connection.auth === "oauth" && (
 						<DropdownMenuItem onClick={signIn}>
 							{connection.signedIn ? "Sign in again" : "Sign in"}
 						</DropdownMenuItem>
 					)}
-					{canManage && connection.auth === "header" && (
+					{isServer && canManage && connection.auth === "header" && (
 						<DropdownMenuItem onClick={() => setReplacingSecret(true)}>
 							{secretActionLabel(connection)}
 						</DropdownMenuItem>
 					)}
-					<DropdownMenuItem onClick={() => actions.test.mutate({ connectionId: connection.id })}>
-						Check connection
-					</DropdownMenuItem>
+					{connection.kind === "github" && canManage && connection.signedIn && (
+						<DropdownMenuItem onClick={install}>Change access on GitHub</DropdownMenuItem>
+					)}
+					{isServer && (
+						<DropdownMenuItem onClick={() => actions.test.mutate({ connectionId: connection.id })}>
+							Check connection
+						</DropdownMenuItem>
+					)}
 					{canManage && (
 						<DropdownMenuItem
 							variant="destructive"
@@ -143,7 +156,22 @@ export function ConnectionPage({
 			</div>
 			{/* Hidden while none of what it may show applies, so it leaves no gap. */}
 			<div className="flex flex-col gap-3 empty:hidden">
-				{!connection.signedIn && (
+				{!connection.signedIn && connection.kind === "github" && (
+					<SettingsGroup>
+						<SettingsRow
+							label="Not installed yet"
+							sub="Bots can't use GitHub until the pod's app is installed on the account it works on."
+							trailing={
+								canManage && (
+									<Button size="sm" disabled={installApp.isPending} onClick={install}>
+										Install on GitHub
+									</Button>
+								)
+							}
+						/>
+					</SettingsGroup>
+				)}
+				{!connection.signedIn && isServer && (
 					<SettingsGroup>
 						<SettingsRow
 							label="Not signed in yet"
@@ -181,7 +209,7 @@ export function ConnectionPage({
 						</a>
 					</Alert>
 				)}
-				{failure && canManage && connection.auth === "header" && !replacingSecret && (
+				{failure && isServer && canManage && connection.auth === "header" && !replacingSecret && (
 					<Button
 						size="sm"
 						variant="secondary"
@@ -204,7 +232,25 @@ export function ConnectionPage({
 				open={removing}
 				onOpenChange={setRemoving}
 				title={`Disconnect ${connection.name}?`}
-				description="Bots in this pod can no longer use its tools. Connecting it again means signing in or entering its details again."
+				description={
+					connection.kind === "github" ? (
+						<>
+							Bots in this pod can no longer use its tools or its repositories. The pod's app stays
+							on GitHub until you delete it there:{" "}
+							<a
+								href={`${connection.appSettingsUrl ?? connection.url}/advanced`}
+								target="_blank"
+								rel="noreferrer"
+								className="focus-ring rounded-sm font-medium text-link"
+							>
+								Delete GitHub App
+							</a>{" "}
+							in its advanced settings.
+						</>
+					) : (
+						"Bots in this pod can no longer use its tools. Connecting it again means signing in or entering its details again."
+					)
+				}
 				confirmLabel="Disconnect"
 				pending={actions.remove.isPending}
 				error={actions.remove.error ? failureMessage(actions.remove.error) : undefined}

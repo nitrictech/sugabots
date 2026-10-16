@@ -125,12 +125,19 @@ export const connectionSchema = Schema.Struct({
 	name: Schema.String,
 	/** Prefixes the server's tool names for the model: `exa.web_search_exa`. */
 	handle: handleSchema,
+	kind: connectionKindSchema,
+	/** The MCP server's address; for GitHub, the page of the account its app is installed on, or of the app until it is. */
 	url: providerUrlSchema,
 	auth: connectionAuthSchema,
-	/** For `oauth`, whether the sign-in has been completed and tokens are held. Always true for `header`. */
+	/**
+	 * For `oauth`, whether the sign-in has been completed and tokens are held;
+	 * for GitHub, whether its app is installed. Always true for `header`.
+	 */
 	signedIn: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
+	/** For GitHub, where the owner of the connection's app changes or deletes it; null otherwise. */
+	appSettingsUrl: Schema.NullOr(Schema.String),
 	status: providerStatusSchema,
 	/**
 	 * How many of the tools the server listed when last asked are at each
@@ -309,6 +316,14 @@ export const connectionCatalog: readonly ConnectionPreset[] = [
 export function connectionPresetFor(url: string): ConnectionPreset | undefined {
 	const host = hostOf(url);
 	return host ? connectionCatalog.find((preset) => hostOf(preset.url) === host) : undefined;
+}
+
+/**
+ * The mark a connection is drawn with: GitHub's for a GitHub connection, a
+ * catalog app's for its server, and none, so its letters, for any other.
+ */
+export function connectionMarkFor(connection: { kind: ConnectionKind; url: string }) {
+	return connection.kind === "github" ? "github" : connectionPresetFor(connection.url)?.id;
 }
 
 /** The host of an address, without `URL`, which the contracts run without a DOM for. */
