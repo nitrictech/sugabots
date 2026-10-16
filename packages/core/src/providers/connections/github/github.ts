@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 import { type DomainError, userText } from "@sugabots/errors";
-import { Clock, DateTime, Effect, ErrorReporter, Schema } from "effect";
+import { Clock, DateTime, Effect, ErrorReporter, Redacted, Schema } from "effect";
 import type { GitHubAppOwner } from "../../../database/schema.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -321,6 +321,22 @@ export const decoded =
 
 function requestFailed(failure: { status: number | undefined; reason: string }) {
 	return new GitHubRequestFailed(failure);
+}
+
+/** What git signs in with, as `username` and `token` over HTTP basic authentication. */
+export interface GitCredential {
+	readonly username: string;
+	readonly token: string;
+}
+
+/** The `Authorization` header's value that signs git in over HTTP with `credential`. */
+export function basicAuthorizationValue({ username, token }: GitCredential) {
+	return `Basic ${Buffer.from(`${username}:${token}`).toString("base64")}`;
+}
+
+/** {@link basicAuthorizationValue}, kept out of logs. */
+export function redactedBasicAuthorization(credential: GitCredential) {
+	return Redacted.make(basicAuthorizationValue(credential));
 }
 
 /**

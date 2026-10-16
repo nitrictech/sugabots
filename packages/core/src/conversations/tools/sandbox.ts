@@ -9,6 +9,7 @@ import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
+import { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
@@ -54,6 +55,8 @@ export interface Offered {
 	readonly usable: boolean;
 	/** What the model is told of the sandbox with the turn, as it may change between turns. */
 	readonly note: string | undefined;
+	/** Whether the sandbox's provider signs its requests in, outside it. */
+	readonly signsIn: boolean;
 }
 
 /**
@@ -70,6 +73,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const providers = yield* SandboxProviderRepository.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
+	const sandboxes = yield* Sandboxes.Service;
 	const network = yield* SandboxNetwork.Service;
 	const operation = yield* serviceOperations<Interface>("SandboxTools");
 	const offeredIn = ({
@@ -114,6 +118,7 @@ export const make = Effect.gen(function* () {
 						}),
 						usable: false,
 						note: NO_SANDBOX_NOTE,
+						signsIn: false,
 					};
 				}
 				const [allowedHosts, blocked] = yield* operation(
@@ -161,6 +166,7 @@ export const make = Effect.gen(function* () {
 					}),
 					usable: true,
 					note: allowedHostsNote(allowedHosts),
+					signsIn: sandboxes.forConnection(provider.connection).capabilities.credentials !== "none",
 				};
 			}),
 	});
@@ -169,7 +175,12 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([PodSandboxes.layer, SandboxNetwork.layer, SandboxProviderRepository.layer]),
+	Layer.provide([
+		PodSandboxes.layer,
+		Sandboxes.layer,
+		SandboxNetwork.layer,
+		SandboxProviderRepository.layer,
+	]),
 );
 
 /** What a turn's tools work through. */
@@ -208,5 +219,12 @@ export interface Turn {
 
 /** No sandbox tools, for cases that offer none. */
 export const none: Interface = {
-	forTurn: () => Effect.succeed({ tools: {}, requests: {}, usable: false, note: undefined }),
+	forTurn: () =>
+		Effect.succeed({
+			tools: {},
+			requests: {},
+			usable: false,
+			note: undefined,
+			signsIn: false,
+		}),
 };

@@ -40,9 +40,10 @@ const AFTER_STATE_EXPIRES_MILLISECONDS = 2 * 60 * 60 * 1000;
 /** A pod's own GitHub App, made and installed through GitHub's pages, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () => {
 	let gitHubApps: GitHubApps.Interface;
+	let connections: GitHubConnections.Interface;
 
 	beforeAll(async () => {
-		[gitHubApps] = await servedAt("https://sugabots.example.com");
+		[gitHubApps, connections] = await servedAt("https://sugabots.example.com");
 	});
 
 	afterAll(closeDatabase);
@@ -95,6 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 			appSettingsUrl: "https://github.com/organizations/acme/settings/apps/acme-sugabots",
 		});
 		expect(webhookUrl.endsWith(`/${pending?.id}`)).toBe(true);
+		expect(await runOnPostgres(connections.forPod(fixture))).toBeUndefined();
 
 		const notOurs = await as(adminId).installed({ installationId: 999, state: stateIn(made.url) });
 		const installed = await as(adminId).installed({
@@ -111,6 +113,8 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		expect(await listedIn(fixture)).toMatchObject([
 			{ id: pending?.id, url: "https://github.com/acme", signedIn: true },
 		]);
+		const connected = await runOnPostgres(connections.forPod(fixture));
+		expect(connected?.account).toBe("acme");
 	});
 
 	it("records the app installed again, on another account", async () => {
@@ -135,6 +139,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 			connectionId,
 		});
 		expect(await listedIn(fixture)).toMatchObject([{ url: "https://github.com/acme-labs" }]);
+		expect((await runOnPostgres(connections.forPod(fixture)))?.account).toBe("acme-labs");
 	});
 
 	it("keeps a pod to one GitHub connection", async () => {

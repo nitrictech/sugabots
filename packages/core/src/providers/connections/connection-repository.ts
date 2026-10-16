@@ -574,7 +574,7 @@ export function toolsOf<Tool>(row: {
 }
 
 /** Whether the connection has tools and every one of them is off. */
-function everyToolOff(row: ConnectionRow): boolean {
+export function everyToolOff(row: ConnectionRow): boolean {
 	const tools = toolsOf(row);
 	return tools.length > 0 && tools.every((tool) => toolAccessOf(row.toolAccess, tool) === "off");
 }

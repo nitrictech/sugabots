@@ -1,8 +1,9 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import {
+	INSTALLATION_ID,
 	installedConnection,
 	listsRepositories,
 	madeConnection,
@@ -39,6 +40,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	afterAll(closeDatabase);
 
 	const as = (userId: string) => onPostgresAs(userId)(connections);
+	const pod = () => ({ workspaceId: fixture.workspaceId, podId: fixture.podId });
 
 	it("lists what the app reaches, for someone who manages the pod's connections", async () => {
 		const { podId, adminId, memberId } = fixture;
@@ -69,8 +71,32 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 		});
 	});
 
-	it("adds a repository the app reaches, and removes one", async () => {
+	it("signs the sandbox in to read only the connection's repositories, with git, as its account", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+
+		const signedIn = await runOnPostgres(connected.sandboxSignIn());
+
+		expect(signedIn.credentials.map(({ host, pathPrefix }) => ({ host, pathPrefix }))).toEqual([
+			{ host: "github.com", pathPrefix: "/acme/" },
+		]);
+		const [git] = signedIn.credentials;
+		const token = Buffer.from(
+			(git ? Redacted.value(git.value) : "").replace("Basic ", ""),
+			"base64",
+		).toString();
+		expect(token).toMatch(new RegExp(`^x-access-token:token-${INSTALLATION_ID}-\\d+$`));
+		const asked = github.asked.find((request) => request.path.endsWith("/access_tokens"));
+		expect(asked?.body).toEqual({
+			repository_ids: [101],
+			permissions: { contents: "read", metadata: "read" },
+		});
+	});
+
+	it("adds a repository and removes one, each a change of the connection's configuration", async () => {
 		const { podId, adminId } = fixture;
+		const connected = await runOnPostgres(connections.forPod(pod()));
 
 		const added = await as(adminId).addRepository({
 			podId,
@@ -82,9 +108,13 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 			connectionId,
 			repository: "acme/web",
 		});
+		const after = await runOnPostgres(connections.forPod(pod()));
 
 		expect(added.repositories.map((one) => one.repository)).toEqual(["acme/infra", "acme/web"]);
 		expect(left.repositories.map((one) => one.repository)).toEqual(["acme/infra"]);
+		expect(after?.connection.configurationRevision).toBe(
+			(connected?.connection.configurationRevision ?? 0) + 2,
+		);
 	});
 
 	it("refuses to choose repositories before the connection's app is installed", async () => {
