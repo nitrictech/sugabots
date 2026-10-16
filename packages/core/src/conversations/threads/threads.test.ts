@@ -1011,6 +1011,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		const search = searchHistoryTool({
 			threadId: details.thread.id,
 			before: prepared.keptFrom,
+			usesSandbox: false,
 			run: runOnPostgres,
 		});
 		const searchFor = (input: { query?: string; after?: string; before?: string }) =>
@@ -1168,6 +1169,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		const search = searchHistoryTool({
 			threadId: details.thread.id,
 			before: new Date(Date.now() + 60_000),
+			usesSandbox: false,
 			run: runOnPostgres,
 		});
 		const found = async (query: string) => {
@@ -1237,6 +1239,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		const search = searchHistoryTool({
 			threadId: details.thread.id,
 			before: new Date(Date.now() + 60_000),
+			usesSandbox: true,
 			run: runOnPostgres,
 		});
 		const found = async (input: { query?: string; after?: string }) => {
@@ -1245,14 +1248,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		};
 
 		expect(await found({ query: "signed contract" })).toEqual([
-			`Here is the signed contract\n[Attached contract.pdf (application/pdf, 2.0 KB) as file ${fileIdOf("contract.pdf")}, which read_thread_file reads]`,
+			`Here is the signed contract\n[Attached contract.pdf (application/pdf, 2.0 KB) as file ${fileIdOf("contract.pdf")}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
 		]);
 		// By its name, for a message that says nothing else.
 		expect(await found({ query: "chart.png" })).toEqual([
-			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads]`,
+			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
 		]);
 		expect(await found({ after: started.toISOString() })).toContain(
-			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads]`,
+			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
 		);
 	});
 

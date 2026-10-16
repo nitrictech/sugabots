@@ -1,9 +1,13 @@
+import { createHash } from "node:crypto";
 import type { ToolSet } from "ai";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+	agent,
+	message,
 	pod,
 	sandboxAllowedHost,
+	thread,
 	user,
 	workspace,
 	workspaceMember,
@@ -12,6 +16,7 @@ import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SandboxTools } from "./sandbox.ts";
 
 /**
@@ -28,6 +33,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 	let sandboxTools: SandboxTools.Interface;
 	let podSandboxes: PodSandboxes.Interface;
 	let thePod: PodSandboxes.Pod;
+	let ownerId: string;
 	const scope = Effect.runSync(Scope.make());
 
 	beforeAll(async () => {
@@ -50,6 +56,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
+		ownerId = owner.id;
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id }),
 		);
@@ -149,6 +156,103 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 
 			expect((await call(later, "read_file", { path: "notes.txt" })).content).toBe("thread b");
 			expect((await call(elsewhere, "read_file", { path: "notes.txt" })).status).toBe("failed");
+		},
+		SLOW,
+	);
+
+	it(
+		"copies a file in the thread into its folder when asked, under a safe name",
+		async () => {
+			const [host] = await onDatabase((db) =>
+				db
+					.insert(agent)
+					.values({
+						workspaceId: thePod.workspaceId,
+						podId: thePod.podId,
+						name: "Editor",
+						handle: `editor-${Date.now()}`,
+						color: "green",
+						face: "pill",
+					})
+					.returning(),
+			);
+			if (!host) throw new Error("fixture");
+			const newThread = async (title: string) => {
+				const [made] = await onDatabase((db) =>
+					db
+						.insert(thread)
+						.values({
+							workspaceId: thePod.workspaceId,
+							podId: thePod.podId,
+							hostAgentId: host.id,
+							type: "collaboration",
+							title,
+						})
+						.returning(),
+				);
+				if (!made) throw new Error("fixture");
+				return made;
+			};
+			const where = await newThread("Pictures");
+			const [sent] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: where.id,
+						authorUserId: ownerId,
+						kind: "text",
+						status: "complete",
+						parts: [],
+						content: "",
+					})
+					.returning(),
+			);
+			if (!sent) throw new Error("fixture");
+			// Not text: a NUL and bytes that aren't UTF-8 must come through as they are.
+			const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x0a]);
+			const files = await runOnPostgres(Effect.provide(ThreadFiles.Service, ThreadFiles.layer));
+			const uploaded = await runOnPostgres(
+				files.upload({
+					threadId: where.id,
+					uploaderId: ownerId,
+					name: "../dot.png",
+					maxSize: 1_000,
+					maxUnsent: 20,
+					content: { stream: Stream.succeed(bytes), contentType: "image/png" },
+				}),
+			);
+			await runOnPostgres(
+				files.attach({
+					threadId: where.id,
+					messageId: sent.id,
+					uploaderId: ownerId,
+					fileIds: [uploaded.id],
+				}),
+			);
+			const tools = await toolsFor("turn-9", where.id, host.id);
+			const hash = createHash("sha256").update(bytes).digest("hex");
+
+			const path = `attachments/${uploaded.id}/_dot.png`;
+			const copy = () => call(tools, "copy_file_to_sandbox", { file: uploaded.id });
+
+			expect(await copy()).toMatchObject({ path, alreadyCopied: false });
+			expect(await run(tools, `sha256sum ${path} | cut -d' ' -f1`)).toBe(hash);
+			// Nothing half copied is left beside it.
+			expect(await run(tools, `ls -A attachments/${uploaded.id}`)).toBe("_dot.png");
+
+			// Copying again keeps the changes made to the copy.
+			await run(tools, `echo inverted > ${path}`);
+			expect(await copy()).toMatchObject({ path, alreadyCopied: true });
+			expect(await run(tools, `cat ${path}`)).toBe("inverted");
+
+			await run(tools, `rm ${path}`);
+			expect(await copy()).toMatchObject({ path, alreadyCopied: false });
+			expect(await run(tools, `sha256sum ${path} | cut -d' ' -f1`)).toBe(hash);
+
+			const elsewhere = await toolsFor("turn-10", (await newThread("Other")).id, host.id);
+			expect(await call(elsewhere, "copy_file_to_sandbox", { file: uploaded.id })).toMatchObject({
+				status: "failed",
+			});
 		},
 		SLOW,
 	);

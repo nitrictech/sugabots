@@ -1,6 +1,8 @@
 import { mediaTypeEssence } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { tool } from "ai";
 import { Effect, Option, Schema, Stream } from "effect";
+import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { ThreadFiles } from "../../thread-files/thread-files.ts";
 import {
@@ -28,17 +30,25 @@ export const MAX_READ_CHARACTERS = 40_000;
 
 const MAX_PATTERN_CHARACTERS = 500;
 
-const NOT_FOUND = {
-	refused: "There is no file with that id in this thread.",
-} satisfies ReadThreadFileResult;
-
-const UNAVAILABLE = {
-	refused: "The file can't be read right now. Try again shortly.",
-} satisfies ReadThreadFileResult;
-
-const REJECTED = {
-	refused: "Files can't be read in this installation.",
-} satisfies ReadThreadFileResult;
+/**
+ * What an agent is told when a file in its thread can't be read. A store that
+ * refuses is set up wrong, which trying again won't fix, so that is logged.
+ */
+export function unreadableFileRefusal(
+	failure: ThreadFiles.FileNotFound | BlobStore.Failure,
+): Effect.Effect<UserText> {
+	switch (failure._tag) {
+		case "ThreadFileNotFound":
+			return Effect.succeed(userText`There is no file with that id in this thread.`);
+		case "BlobStoreUnavailable":
+			return Effect.succeed(userText`The file can't be read right now. Try again shortly.`);
+		case "BlobStoreRejected":
+			return Effect.as(
+				Effect.logError("The blob store rejected reading a file", failure),
+				userText`Files can't be read in this installation.`,
+			);
+	}
+}
 
 export type ReadThreadFileResult =
 	| {
@@ -134,15 +144,9 @@ export function readThreadFileTool({
 					if (text === undefined) return notText;
 					return readLines(text, { offset: offset ?? 1, limit: limit ?? DEFAULT_LINES, pattern });
 				}).pipe(
-					Effect.catchTags({
-						ThreadFileNotFound: () => Effect.succeed(NOT_FOUND),
-						BlobStoreUnavailable: () => Effect.succeed(UNAVAILABLE),
-						BlobStoreRejected: (rejected) =>
-							Effect.as(
-								Effect.logError("The blob store rejected reading a file", rejected),
-								REJECTED,
-							),
-					}),
+					Effect.catch((failure) =>
+						Effect.map(unreadableFileRefusal(failure), (refused) => ({ refused })),
+					),
 				),
 			),
 		toModelOutput: ({ output }) => withImages(output, acceptsImages),
