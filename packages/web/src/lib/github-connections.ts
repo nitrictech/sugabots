@@ -1,6 +1,13 @@
 import type { GitHubAppForm } from "@sugabots/contracts";
-import { useMutation } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
+import { useEffect } from "react";
 import { client } from "@/api.ts";
 
 /**
@@ -31,6 +38,77 @@ export function useInstallGitHubApp(podId: string) {
 			window.location.assign(url);
 		},
 	});
+}
+
+const reachableRepositories = (podId: string, connectionId: string) =>
+	queryOptions({
+		queryKey: ["github-reachable-repositories", podId, connectionId],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(
+				client.api.gitHubConnections.reachableRepositories({ params: { podId, connectionId } }),
+				{ signal },
+			),
+		staleTime: 60_000,
+	});
+
+/** What a GitHub connection's app reaches, to choose the connection's repositories from. */
+export function useReachableRepositories(podId: string, connectionId: string) {
+	return useQuery(reachableRepositories(podId, connectionId));
+}
+
+/** Starts listing what the connection's app reaches, while `wanted`, so choosing from it is quick. */
+export function usePrefetchReachableRepositories(
+	podId: string,
+	connectionId: string,
+	wanted: boolean,
+) {
+	const queryClient = useQueryClient();
+	useEffect(() => {
+		if (wanted) void queryClient.prefetchQuery(reachableRepositories(podId, connectionId));
+	}, [queryClient, podId, connectionId, wanted]);
+}
+
+/** A GitHub connection's repositories, and changing them. */
+export function useConnectionRepositories(podId: string, connectionId: string | undefined) {
+	const queryClient = useQueryClient();
+	const queryKey = ["connection-repositories", podId, connectionId];
+	const store = { onSuccess: (data: unknown) => queryClient.setQueryData(queryKey, data) };
+	const params = () => {
+		if (!connectionId) throw new Error("No GitHub connection");
+		return { podId, connectionId };
+	};
+	return {
+		repositories: useQuery({
+			queryKey,
+			queryFn: connectionId
+				? ({ signal }) =>
+						Effect.runPromise(
+							client.api.gitHubConnections.repositories({ params: { podId, connectionId } }),
+							{ signal },
+						)
+				: skipToken,
+		}),
+		add: useMutation({
+			mutationFn: (repository: string) =>
+				Effect.runPromise(
+					client.api.gitHubConnections.addRepository({
+						params: params(),
+						payload: { repository },
+					}),
+				),
+			...store,
+		}),
+		remove: useMutation({
+			mutationFn: (repository: string) =>
+				Effect.runPromise(
+					client.api.gitHubConnections.removeRepository({
+						params: params(),
+						payload: { repository },
+					}),
+				),
+			...store,
+		}),
+	};
 }
 
 /** GitHub takes a manifest only as a posted form, so the browser leaves with one. */

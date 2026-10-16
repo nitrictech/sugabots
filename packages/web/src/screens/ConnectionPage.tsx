@@ -29,6 +29,7 @@ import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
+import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import {
 	AccessMenu,
 	type AccessSetting,
@@ -222,6 +223,14 @@ export function ConnectionPage({
 				{checked?.reachable && !actions.test.isPending && <Success>Connection successful</Success>}
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</div>
+			{connection.kind === "github" && (
+				<GitHubRepositoriesGroup
+					podId={pod.id}
+					connectionId={connection.id}
+					appSettingsUrl={connection.appSettingsUrl ?? connection.url}
+					canManage={canManage}
+				/>
+			)}
 			<ConnectionTools
 				pod={pod}
 				connectionId={connection.id}
