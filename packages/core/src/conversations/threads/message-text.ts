@@ -1,5 +1,6 @@
 import {
 	type CollaborationPart,
+	type FilePart,
 	type Message,
 	type MessageReplyTo,
 	messageAuthorName,
@@ -31,6 +32,7 @@ export function messageTextWithPlacedParts(message: Message): string {
 		.map((part) => {
 			if (part.type === "text") return part.text;
 			if (part.type === "collaboration") return describeCollaboration(part);
+			if (part.type === "file") return describeAttachment(part);
 			return describeToolCall(part);
 		})
 		.join("\n\n")
@@ -67,6 +69,21 @@ export function describeToolCall(call: ToolCallPart, resultFile?: string): strin
 					: DESCRIBED_OUTPUT_CHARACTERS,
 			)}${resultFile ? `; the result is kept as file ${resultFile}, which ${READ_THREAD_FILE_TOOL} reads` : ""}]`;
 	}
+}
+
+/**
+ * A file attached to a message as one bracketed line: the agent is given what
+ * it is and how to read it, not its content, which may be large or not text.
+ */
+export function describeAttachment(file: FilePart): string {
+	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}) as file ${file.id}, which ${READ_THREAD_FILE_TOOL} reads]`;
+}
+
+/** A file's size as people write it, such as 2.1 MB. */
+function sizeOf(bytes: number): string {
+	if (bytes < 1024) return `${bytes} bytes`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const FoundToolNames = Schema.Struct({
