@@ -68,14 +68,15 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  * relayed from a process whose relay is down.
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
-const TURN_TIMEOUT = Duration.minutes(10);
+/** Above run_command's longest timeout, so a slow command leaves the turn time to answer. */
+const TURN_TIMEOUT = Duration.minutes(30);
 /**
  * The longest a turn waits for a rate-limited provider before running again.
  * Past it, the turn ends and its message tells people when to try.
  */
 const MAX_RETRY_WAIT = Duration.minutes(1);
 /** How many model calls a turn may make, across its segments. */
-const TURN_MODEL_CALLS = 20;
+const TURN_MODEL_CALLS = 100;
 
 /**
  * The services a segment runs on: the conversation services, the model, the
