@@ -25,14 +25,14 @@ export function toFilePart(row: AttachedFileRow): FilePart {
 	return {
 		type: "file",
 		id: row.id,
-		// The table's checks keep messages to uploads, and every upload is named.
+		// The table's checks name every file on a message: an upload or an agent's attachment.
 		name: row.name ?? "",
 		contentType: row.contentType,
 		size: row.size,
 	};
 }
 
-/** The files attached to each of these messages, in the order they were sent, by message id. */
+/** The files on each of these messages, in their order on it, by message id. */
 export const loadFileParts = Effect.fn("FileParts.loadFileParts")(function* (
 	db: Executor,
 	messageIds: readonly string[],

@@ -435,6 +435,10 @@ const streamReply = (
 				threadId: prepared.context.thread.id,
 				agentId: prepared.context.agent.id,
 				acceptsImages: prepared.context.agent.acceptsImages,
+				// A chat serves the files in its own thread, so only there can people be shown one.
+				...(prepared.context.thread.type === "chat" && {
+					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
+				}),
 			});
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
@@ -568,7 +572,13 @@ const streamReply = (
 				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
 				if (finished.approvalRequests.length === 0) {
 					const { content, collaborations } = yield* Ref.get(reply);
-					if (content.trim() === "" && collaborations.length === 0) {
+					const answered = content.trim() !== "" || collaborations.length > 0;
+					// Files the agent shared answer as words do. Looked up only when nothing else answered.
+					const carriesFiles = Effect.map(
+						turns.replyFiles(replyTurnOf(prepared)),
+						(files) => files.length > 0,
+					);
+					if (!answered && !(yield* carriesFiles)) {
 						return yield* new ReplyWithoutAnswer();
 					}
 					return { kind: "completed" as const, contextTokens };

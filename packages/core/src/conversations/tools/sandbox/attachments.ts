@@ -39,12 +39,12 @@ export function sandboxPathOf(file: ThreadFile): string {
 }
 
 /**
- * `name`, as a person's computer gave it, made safe as one file name: no
- * folders, nothing hidden or read as a command's option, no characters that
- * break a line or reorder what's shown, and short enough for Linux, keeping
- * its extension.
+ * `name`, as a person's computer or an agent gave it, made safe as one file
+ * name: no folders, nothing hidden or read as a command's option, no
+ * characters that break a line or reorder what's shown, and short enough for
+ * Linux, keeping its extension.
  */
-function safeFileName(name: string | undefined): string {
+export function safeFileName(name: string | undefined): string {
 	const cleaned = (name ?? "")
 		.replace(/[/\\\p{Cc}]/gu, "_")
 		.replace(/\p{Cf}/gu, "")

@@ -556,6 +556,35 @@ describe("runSegment", () => {
 		expect(turns.abandon).not.toHaveBeenCalled();
 	});
 
+	it("completes a reply that says nothing but carries a file the agent attached", async () => {
+		const { execution, turns } = fakes();
+		vi.mocked(turns.replyFiles).mockReturnValue(
+			Effect.succeed([
+				{
+					type: "file",
+					id: "0199a3a0-0000-7000-8000-0000000000f1",
+					name: "chart.png",
+					contentType: "image/png",
+					size: 4_096,
+				},
+			]),
+		);
+
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model: scriptedModel(""),
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+			}),
+		);
+
+		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply(""), expect.anything());
+		expect(turns.fail).not.toHaveBeenCalled();
+	});
+
 	it("finishes a turn that may not run without streaming", async () => {
 		const { execution, turns } = fakes();
 		vi.mocked(execution.prepare).mockReturnValueOnce(
@@ -674,6 +703,7 @@ function fakes() {
 		cancel: vi.fn(() => Effect.void),
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
 		abandon: vi.fn(() => Effect.undefined),
+		replyFiles: vi.fn(() => Effect.succeed([])),
 	};
 	return { execution, turns };
 }
@@ -683,7 +713,14 @@ interface Given {
 	execution: Pick<TurnExecution.Interface, "prepare">;
 	turns: Pick<
 		TurnRepository.Interface,
-		"saveReply" | "suspend" | "complete" | "fail" | "cancel" | "isCancellationRequested" | "abandon"
+		| "saveReply"
+		| "suspend"
+		| "complete"
+		| "fail"
+		| "cancel"
+		| "isCancellationRequested"
+		| "abandon"
+		| "replyFiles"
 	>;
 	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	collaborations: Partial<Collaborations.Interface>;

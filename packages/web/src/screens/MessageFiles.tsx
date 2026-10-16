@@ -13,9 +13,9 @@ import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 export type FileUrlOf = (fileId: string) => string | undefined;
 
 /**
- * The files attached to a sent message, under its words: its images as
- * pictures, each opening full size in a new tab, then every other file as a
- * chip to download. A file not served yet shows without a link.
+ * The files on a message, a person's or a bot's reply, under its words: its
+ * images as pictures, each opening full size in a new tab, then every other
+ * file as a chip to download. A file not served yet shows without a link.
  */
 export function MessageFiles({ files, urlOf }: { files: readonly FilePart[]; urlOf: FileUrlOf }) {
 	const images = files.filter((file) => lookOf(file) === "image");

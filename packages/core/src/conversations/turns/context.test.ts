@@ -399,6 +399,31 @@ ${line}`,
 		});
 	});
 
+	it("leaves an agent's own attached files to its tool calls, and describes another's", () => {
+		const input = context();
+		const [, own, others] = input.messages;
+		if (!own || !others) throw new Error("Context fixture has no agents' messages");
+		const chart = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f4",
+			name: "chart.png",
+			contentType: "image/png",
+			size: 4_096,
+		} as const;
+		input.agent = { ...input.agent, usesSandbox: true };
+		input.messages[1] = { ...own, parts: [...own.parts, chart] };
+		input.messages[2] = { ...others, parts: [...others.parts, chart] };
+
+		const history = modelPrompt(input, environment()).messages;
+
+		expect(history[1]).toEqual({ role: "assistant", content: "I am checking it." });
+		expect(history[2]).toMatchObject({
+			role: "user",
+			content: `Reviewer (@reviewer) (agent): Migration is present.
+[Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
+		});
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];

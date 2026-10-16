@@ -296,6 +296,10 @@ async function applyThreadEvent(
 		const { toolCall } = update;
 		applyMessage = (message) => withPlacedPart(message, toolCall);
 		refreshArtifactsAfter(queries, toolCall);
+	} else if (update.type === "message.files_changed") {
+		messageId = update.messageId;
+		const { files } = update;
+		applyMessage = (message) => ({ ...message, parts: [...partsWithoutFiles(message), ...files] });
 	} else if (update.type === "message.failed") {
 		messageId = update.messageId;
 		const { error } = update;
@@ -366,9 +370,19 @@ function withPlacedPart(message: Message, part: PlacedPart): Message {
 	return { ...message, parts: rebuiltParts(message, message.content, updated) };
 }
 
-/** The parts drawn afresh from the text and what was placed in it. */
-function rebuiltParts(_message: Message, content: string, placed: PlacedPart[]): MessagePart[] {
-	return messagePartsFor(content, placed);
+/**
+ * The parts drawn afresh from the text and what was placed in it, with the
+ * message's files after them, which are never placed in its text.
+ */
+function rebuiltParts(message: Message, content: string, placed: PlacedPart[]): MessagePart[] {
+	return [
+		...messagePartsFor(content, placed),
+		...message.parts.filter((part) => part.type === "file"),
+	];
+}
+
+function partsWithoutFiles(message: Message): MessagePart[] {
+	return message.parts.filter((part) => part.type !== "file");
 }
 
 /** `details` with `read` in place of what it had of the same person, unless it had them further on. */
