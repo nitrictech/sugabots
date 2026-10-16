@@ -8,6 +8,7 @@ import {
 } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
+import { COPY_FILE_TO_SANDBOX_TOOL } from "../tools/sandbox/tools.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 
 /** The tool an agent searches its thread's older history with. */
@@ -32,7 +33,7 @@ export function messageTextWithPlacedParts(message: Message): string {
 		.map((part) => {
 			if (part.type === "text") return part.text;
 			if (part.type === "collaboration") return describeCollaboration(part);
-			if (part.type === "file") return describeAttachment(part);
+			if (part.type === "file") return describeAttachment(part, { usesSandbox: false });
 			return describeToolCall(part);
 		})
 		.join("\n\n")
@@ -74,9 +75,18 @@ export function describeToolCall(call: ToolCallPart, resultFile?: string): strin
 /**
  * A file attached to a message as one bracketed line: the agent is given what
  * it is and how to read it, not its content, which may be large or not text.
+ * An agent that `usesSandbox` is also told it can copy the file into the
+ * sandbox. That depends on the agent, not on whether its sandbox is up, so
+ * the line stays the same in the history its later requests repeat.
  */
-export function describeAttachment(file: FilePart): string {
-	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}) as file ${file.id}, which ${READ_THREAD_FILE_TOOL} reads]`;
+export function describeAttachment(
+	file: FilePart,
+	{ usesSandbox }: { usesSandbox: boolean },
+): string {
+	const reads = usesSandbox
+		? `which ${READ_THREAD_FILE_TOOL} reads, or ${COPY_FILE_TO_SANDBOX_TOOL} copies`
+		: `which ${READ_THREAD_FILE_TOOL} reads`;
+	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}) as file ${file.id}, ${reads}]`;
 }
 
 /** A file's size as people write it, such as 2.1 MB. */

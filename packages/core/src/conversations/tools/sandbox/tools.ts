@@ -1,15 +1,22 @@
 import { posix } from "node:path";
 import { UserText, userText } from "@sugabots/errors";
 import { tool } from "ai";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Stream } from "effect";
+import type { BlobStore } from "../../../blob-store/blob-store.ts";
+import type { RunEffect } from "../../../database/database.ts";
+import type { Ids } from "../../../ids/ids.ts";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import type { ThreadFiles } from "../../thread-files/thread-files.ts";
 import { MAX_IMAGE_BYTES, SHOWN_IMAGE_FORMATS, shownImageType, withImages } from "../images.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
+import { unreadableFileRefusal } from "../read-thread-file/tool.ts";
+import { type Copy, copyIntoSandbox } from "./attachments.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
 export const WRITE_FILE_TOOL = "write_file";
+export const COPY_FILE_TO_SANDBOX_TOOL = "copy_file_to_sandbox";
 
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const MAX_TIMEOUT_SECONDS = 900;
@@ -221,6 +228,72 @@ export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImag
 		},
 		toModelOutput: ({ output }) => withImages(output, acceptsImages),
 	});
+}
+
+/**
+ * Copies a file in the thread into the thread's folder in the sandbox, when
+ * the agent wants to work on it there, and says where the copy is. The file
+ * is looked up first, so an id that names none never starts the sandbox.
+ */
+export function copyFileToSandboxTool({
+	openSandbox,
+	place,
+	threadId,
+	files,
+	ids,
+	run,
+}: {
+	openSandbox: OpenSandbox;
+	place: Place;
+	threadId: string;
+	files: Pick<ThreadFiles.Interface, "read">;
+	ids: Ids.Interface;
+	run: RunEffect<never>;
+}) {
+	return tool({
+		description: `Copy a file in this thread, such as one a person attached, into the thread's folder in the pod's sandbox, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the thread's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the thread, remove the copy and copy the file again.`,
+		inputSchema: Schema.Struct({
+			file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)).annotate({
+				description: "The file's id, from the line that names it",
+			}),
+		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+		execute: ({ file }) =>
+			run(
+				files.read({ threadId, fileId: file }).pipe(
+					Effect.flatMap((found) =>
+						Effect.promise(() =>
+							inSandbox(openSandbox, (sandbox) => copyThreadFile(sandbox, place, found, ids)),
+						),
+					),
+					Effect.catch(refusedRead),
+				),
+			),
+	});
+}
+
+/** Copies `found` into the sandbox, reading its bytes only when there is no copy yet. */
+function copyThreadFile(
+	sandbox: Sandboxes.Sandbox,
+	place: Place,
+	found: ThreadFiles.StoredFile,
+	ids: Ids.Interface,
+): Effect.Effect<Copy | Failed, Sandboxes.Unavailable | Sandboxes.FileFailed> {
+	const content = Effect.map(Stream.runCollect(found.stream), (chunks) => Buffer.concat(chunks));
+	return copyIntoSandbox(sandbox, place.folder, found, content, ids).pipe(
+		// The file can still go while it is read, such as with its thread.
+		Effect.catchTags({
+			ThreadFileNotFound: refusedRead,
+			BlobStoreUnavailable: refusedRead,
+			BlobStoreRejected: refusedRead,
+		}),
+	);
+}
+
+function refusedRead(failure: ThreadFiles.FileNotFound | BlobStore.Failure) {
+	return Effect.map(
+		unreadableFileRefusal(failure),
+		(error): Failed => ({ status: "failed", error }),
+	);
 }
 
 export function writeFileTool(openSandbox: OpenSandbox, place: Place) {

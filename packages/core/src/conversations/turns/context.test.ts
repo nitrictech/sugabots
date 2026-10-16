@@ -377,6 +377,28 @@ ${line}`,
 		});
 	});
 
+	it("tells an agent that works in the sandbox it can copy an attached file there", () => {
+		const input = context();
+		const asked = input.messages[0];
+		if (!asked) {
+			throw new Error("Context fixture has no person's message");
+		}
+		const chart = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f3",
+			name: "chart.png",
+			contentType: "image/png",
+			size: 4_096,
+		} as const;
+		input.agent = { ...input.agent, usesSandbox: true };
+		input.messages[0] = { ...asked, content: "", parts: [chart] };
+
+		expect(modelPrompt(input, environment()).messages[0]).toEqual({
+			role: "user",
+			content: `Sam (@sam): [Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
+		});
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];
