@@ -1,3 +1,4 @@
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Duration, Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -261,6 +262,27 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		expect(await textOf(read.stream)).toBe("draft");
 	});
 
+	it("reads as a message's file only one attached to a message", async () => {
+		const { threadId, userId } = await aThread();
+		const result = await files.write({ threadId, content: text("long result") });
+		const uploaded = await files.upload({
+			threadId,
+			uploaderId: userId,
+			name: "notes.txt",
+			maxSize: 1024,
+			maxUnsent: 20,
+			content: text("draft"),
+		});
+		const readMessageFile = (fileId: string) => files.readMessageFile({ threadId, fileId });
+
+		await expect(readMessageFile(result.id)).rejects.toBeInstanceOf(ThreadFiles.FileNotFound);
+		await expect(readMessageFile(uploaded.id)).rejects.toBeInstanceOf(ThreadFiles.FileNotFound);
+
+		await send(threadId, userId, [uploaded.id]);
+
+		expect(await textOf((await readMessageFile(uploaded.id)).stream)).toBe("draft");
+	});
+
 	it("refuses an upload over its own limit, keeping nothing", async () => {
 		const { threadId, userId } = await aThread();
 
@@ -366,6 +388,57 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		expect(left.map(({ id }) => id).sort()).toEqual([sent.id, result.id].sort());
 		expect((await blobsUnder()).map(({ key }) => key).sort()).toEqual(
 			[sent.id, result.id].map((id) => BlobStore.key("threads", threadId, "files", id)).sort(),
+		);
+	});
+
+	it("attaches an agent's files to its reply in order, up to what a message carries, and removes them when it starts again", async () => {
+		const { threadId, agentId } = await aThread();
+		const [reply] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "streaming",
+					parts: [],
+					content: "",
+				})
+				.returning({ id: message.id }),
+		);
+		if (!reply) throw new Error("Could not create reply");
+		const attach = (name: string) =>
+			runOnPostgres(
+				Effect.flatMap(ThreadFiles.Service, (service) =>
+					service.withReplyFile(
+						{
+							threadId,
+							messageId: reply.id,
+							name,
+							contentType: "text/csv",
+							content: new TextEncoder().encode(name),
+						},
+						service.attachToReply,
+					),
+				).pipe(Effect.provide(ThreadFiles.layer.pipe(Layer.orDie))),
+			);
+
+		const first = await attach("first.csv");
+		const second = await attach("second.csv");
+		expect(await files.replyAttachments(reply.id)).toEqual([first, second]);
+		expect(await textOf((await files.read({ threadId, fileId: second.id })).stream)).toBe(
+			"second.csv",
+		);
+
+		for (let attached = 2; attached < MAX_ATTACHMENTS_PER_MESSAGE; attached++) {
+			await attach(`more-${attached}.csv`);
+		}
+		await expect(attach("one-too-many.csv")).rejects.toBeInstanceOf(ThreadFiles.TooManyReplyFiles);
+
+		await files.removeReplyAttachments({ threadId, messageId: reply.id });
+		expect(await files.replyAttachments(reply.id)).toEqual([]);
+		await expect(files.read({ threadId, fileId: first.id })).rejects.toBeInstanceOf(
+			ThreadFiles.FileNotFound,
 		);
 	});
 

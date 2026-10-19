@@ -1,7 +1,8 @@
 import { UserText, userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { agent, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
@@ -67,6 +68,21 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
+		const blobsInThread = () =>
+			runOnPostgres(
+				Effect.flatMap(BlobStore.Service, (store) =>
+					store.list(BlobStore.key("threads", prepared.context.thread.id)),
+				),
+			);
+		const shared = await turns.attachFile(replyTurnOf(prepared), {
+			name: "chart.png",
+			contentType: "image/png",
+			content: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+		});
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.files_changed", files: [shared] }),
+		);
+		expect(await blobsInThread()).toHaveLength(1);
 		expect(
 			await turns.fail(replyTurnOf(prepared), emptyReply, {
 				userMessage: providerDown,
@@ -82,6 +98,9 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			status: "streaming",
 		});
 		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
+		// The reply starts over without the file its last run shared, blob and all.
+		expect(await turns.replyFiles(replyTurnOf(second))).toEqual([]);
+		expect(await blobsInThread()).toEqual([]);
 		// Running again could act again, so the turn stops here for a person.
 		expect(
 			await turns.fail(
@@ -109,6 +128,22 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "message.failed", willRetry: false, error: told }),
 		);
+		// A file shared by a call still running when the turn ended isn't shared.
+		await expect(
+			turns.attachFile(replyTurnOf(prepared), {
+				name: "late.csv",
+				contentType: "text/csv",
+				content: new Uint8Array([0x61]),
+			}),
+		).rejects.toBeInstanceOf(TurnRepository.ReplyEnded);
+		expect(await turns.replyFiles(replyTurnOf(prepared))).toEqual([]);
+		expect(
+			await runOnPostgres(
+				Effect.flatMap(BlobStore.Service, (store) =>
+					store.list(BlobStore.key("threads", prepared.context.thread.id)),
+				),
+			),
+		).toEqual([]);
 	});
 
 	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {

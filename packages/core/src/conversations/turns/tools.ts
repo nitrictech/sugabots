@@ -23,7 +23,7 @@ import {
 	ROUTINES_KEY,
 	routineTools,
 } from "../tools/routines/tool.ts";
-import { READ_FILE_TOOL } from "../tools/sandbox/tools.ts";
+import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/sandbox/tools.ts";
 import type { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
@@ -106,6 +106,12 @@ const NO_SANDBOX = userText`This bot has no sandbox to work in.`;
 
 const readDocs = readDocsTool(docPages);
 
+/**
+ * The sandbox tools after which a failed turn can run again: they change
+ * nothing in the sandbox, and the files a reply shared go when it starts again.
+ */
+const RERUNNABLE_SANDBOX_TOOLS: ReadonlySet<string> = new Set([READ_FILE_TOOL, SHARE_FILE_TOOL]);
+
 /** The tools sent with the turn's requests, and the catalog `tool_search` finds the rest in. */
 export interface TurnTools {
 	tools: ToolSet;
@@ -136,7 +142,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	// a turn that fails afterwards is not run again.
 	for (const [key, tool] of Object.entries(deps.sandbox.tools)) {
 		tools[key] = deps.sandbox.usable
-			? recorded(key, tool, { ...recording, mutating: key !== READ_FILE_TOOL })
+			? recorded(key, tool, { ...recording, mutating: !RERUNNABLE_SANDBOX_TOOLS.has(key) })
 			: refused(key, tool, NO_SANDBOX, recording);
 	}
 	// What a request does once allowed changes something, so a turn that fails

@@ -1,10 +1,11 @@
 export * as TurnRepository from "./repository.ts";
 
-import { type Message, messagePartsFor } from "@sugabots/contracts";
-import type { UserText } from "@sugabots/errors";
+import { type FilePart, type Message, messagePartsFor } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import type { ModelMessage } from "ai";
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
+import type { BlobStore } from "../../blob-store/blob-store.ts";
 import {
 	type Database,
 	query,
@@ -22,8 +23,10 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
 import {
 	type Ended,
@@ -70,6 +73,21 @@ export interface Interface {
 	) => Effect.Effect<OpenedSystemAgentTurn | NotRunnable>;
 	/** Persists the reply so far, so a crash loses at most a second of text. */
 	readonly saveReply: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
+	/**
+	 * Attaches `file` to the turn's reply, after the files already on it, and
+	 * announces what the reply carries now. Fails with `ReplyEnded` once the
+	 * turn is no longer running, and `TooManyReplyFiles` once the reply
+	 * carries as many as a message can.
+	 */
+	readonly attachFile: (
+		turn: ReplyTurn,
+		file: ReplyFile,
+	) => Effect.Effect<
+		FilePart,
+		ReplyEnded | ThreadFiles.TooManyReplyFiles | ThreadFiles.FileTooLarge | BlobStore.Failure
+	>;
+	/** The files the turn's reply carries, in the order attached. */
+	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
 	/**
 	 * Parks the turn with this model transcript until people decide the tool
 	 * approvals it asked for. `false` when the turn is no longer running,
@@ -144,6 +162,7 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const admission = yield* WorkAdmission.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
+	const files = yield* ThreadFiles.Service;
 
 	/** Writes the state the lifecycle decided, plus what else the command records. */
 	const write = (
@@ -387,8 +406,13 @@ export const make = Effect.gen(function* () {
 						if (!restarted) {
 							return yield* Effect.die(new Error("A turn being run again has no reply message"));
 						}
-						// The reply starts again, so the calls its last run made go with its parts.
+						// The reply starts again, so the calls its last run made go with its
+						// parts, and the files it attached with them.
 						yield* toolCalls.forgetReply(restarted.id);
+						yield* files.removeReplyAttachments({
+							threadId: restarted.threadId,
+							messageId: restarted.id,
+						});
 						const reply = toMessage(restarted, request.author);
 						yield* announceStart(request, existing.id, reply);
 						return { _tag: "Opened", turnId: existing.id, reply, checkpoint: undefined };
@@ -415,6 +439,39 @@ export const make = Effect.gen(function* () {
 			),
 
 		saveReply: (reply, draft) => operation("saveReply", Effect.asVoid(writeReply(reply, draft))),
+		attachFile: (reply, file) =>
+			operation(
+				"attachFile",
+				files.withReplyFile(
+					{ threadId: reply.threadId, messageId: reply.messageId, ...file },
+					(stored) =>
+						transaction(
+							Effect.gen(function* () {
+								// Locked, as ending the turn locks it: a call still running when the
+								// turn was cancelled finds it ended, and shares nothing.
+								const [running] = yield* query((db) =>
+									db
+										.select({ id: turn.id })
+										.from(turn)
+										.where(and(eq(turn.id, reply.turnId), eq(turn.status, "running")))
+										.for("update"),
+								);
+								if (!running) return yield* new ReplyEnded();
+								const attached = yield* files.attachToReply(stored);
+								const carried = yield* files.replyAttachments(reply.messageId);
+								yield* emit([
+									ConversationEvent.MessageFilesChanged({
+										threadId: reply.threadId,
+										messageId: reply.messageId,
+										files: carried,
+									}),
+								]);
+								return attached;
+							}),
+						),
+				),
+			),
+		replyFiles: (reply) => operation("replyFiles", files.replyAttachments(reply.messageId)),
 
 		suspend: (reply, checkpoint, approvals) =>
 			operation(
@@ -687,7 +744,25 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(ToolCallRepository.layer));
+/** Ending a turn ends its tool calls, and restarting a reply removes the files it attached. */
+export const layer = layerNoDeps.pipe(Layer.provide([ToolCallRepository.layer, ThreadFiles.layer]));
+
+/** A file an agent attaches to its reply: its name, media type and bytes. */
+export interface ReplyFile {
+	readonly name: string;
+	readonly contentType: string;
+	readonly content: Uint8Array;
+}
+
+/** A file was shared to a reply after its turn had ended, as when it was cancelled. */
+export class ReplyEnded extends Data.TaggedError("ReplyEnded") implements UserFacing {
+	override get message() {
+		return "A file was shared to a reply whose turn had ended";
+	}
+	get userMessage() {
+		return userText`The reply has ended, so the file wasn't shared`;
+	}
+}
 
 /** Where an agent's turn is: its thread and workspace, and the reply it writes. */
 export interface ReplyTurn {

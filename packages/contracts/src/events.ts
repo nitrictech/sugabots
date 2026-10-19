@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { customerThreadTypeSchema } from "./chats.ts";
 import {
 	collaborationPartSchema,
+	filePartSchema,
 	messageReactionsSchema,
 	messageSchema,
 	messageStatusSchema,
@@ -63,6 +64,15 @@ export const eventPayloadSchemas = {
 		threadId,
 		messageId,
 		reactions: messageReactionsSchema,
+	}),
+	/**
+	 * An agent attached a file to its reply; `files` is all the reply carries
+	 * now. A reply that starts again comes with `turn.started`, without them.
+	 */
+	"message.files_changed": Schema.Struct({
+		threadId,
+		messageId,
+		files: Schema.Array(filePartSchema),
 	}),
 	/** An agent's reply called a built-in tool; the part is `running`. */
 	"tool_call.started": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
@@ -140,6 +150,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"message.completed",
 	"message.failed",
 	"message.reactions_changed",
+	"message.files_changed",
 	"tool_call.started",
 	"tool_call.completed",
 	"tool_call.updated",
@@ -259,6 +270,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("message.completed", P["message.completed"]),
 	withEnvelope("message.failed", P["message.failed"]),
 	withEnvelope("message.reactions_changed", P["message.reactions_changed"]),
+	withEnvelope("message.files_changed", P["message.files_changed"]),
 	withEnvelope("tool_call.started", P["tool_call.started"]),
 	withEnvelope("tool_call.completed", P["tool_call.completed"]),
 	withEnvelope("tool_call.updated", P["tool_call.updated"]),

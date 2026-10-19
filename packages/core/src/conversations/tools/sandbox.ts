@@ -13,6 +13,7 @@ import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
+	type AttachToReply,
 	allowedHostsNote,
 	COPY_FILE_TO_SANDBOX_TOOL,
 	copyFileToSandboxTool,
@@ -24,14 +25,16 @@ import {
 	RUN_COMMAND_TOOL,
 	readFileTool,
 	runCommandTool,
+	SHARE_FILE_TOOL,
+	shareFileTool,
 	WRITE_FILE_TOOL,
 	writeFileTool,
 } from "./sandbox/tools.ts";
 
 /**
  * The tools that work in a pod's sandbox: `run_command`, `read_file`,
- * `write_file` and `copy_file_to_sandbox`, and the `browser_` tools of a
- * browser the agent drives there (see `browser/browser.ts`), and
+ * `write_file`, `copy_file_to_sandbox` and `share_file`, and the `browser_`
+ * tools of a browser the agent drives there (see `browser/browser.ts`), and
  * `request_network_access`, whose calls wait for a person, to reach a host
  * the sandbox may not. Offered to every turn, and usable while the agent uses
  * the sandbox and the workspace has an enabled sandbox provider, looked up on
@@ -86,6 +89,7 @@ export const make = Effect.gen(function* () {
 		browser,
 		run,
 		blocked,
+		attach,
 	}: Behind) => ({
 		tools: {
 			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
@@ -99,6 +103,7 @@ export const make = Effect.gen(function* () {
 				ids,
 				run,
 			}),
+			...(attach ? { [SHARE_FILE_TOOL]: shareFileTool(openSandbox, place, attach) } : {}),
 			...browserTools(browser, acceptsImages),
 		},
 		requests: {
@@ -106,7 +111,7 @@ export const make = Effect.gen(function* () {
 		},
 	});
 	return Service.of({
-		forTurn: ({ pod, turnId, threadId, agentId, acceptsImages, usesSandbox }) =>
+		forTurn: ({ pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach }) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
 				const place = placeOf({ threadId, agentId });
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
@@ -117,6 +122,7 @@ export const make = Effect.gen(function* () {
 							threadId,
 							place,
 							acceptsImages,
+							attach,
 							openSandbox: NEVER_OPENED,
 							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
 							run: NEVER_RUN,
@@ -165,6 +171,7 @@ export const make = Effect.gen(function* () {
 						threadId,
 						place,
 						acceptsImages,
+						attach,
 						openSandbox,
 						browser,
 						run,
@@ -199,6 +206,7 @@ interface Behind {
 	readonly run: RunEffect<never>;
 	/** Hosts a request is refused for without asking anyone. */
 	readonly blocked: readonly string[];
+	readonly attach: AttachToReply | undefined;
 }
 
 // Behind tools that aren't usable, whose calls are refused before they run.
@@ -221,6 +229,12 @@ export interface Turn {
 	readonly agentId: string;
 	/** Whether the agent's model takes images, which results then may carry. */
 	readonly acceptsImages: boolean;
+	/**
+	 * Attaches a file to the turn's reply, where people can be shown it: only
+	 * in a chat's own thread, whose files the chat serves. Without it, the
+	 * turn has no `share_file`.
+	 */
+	readonly attach?: AttachToReply;
 }
 
 /** No sandbox tools, for cases that offer none. */

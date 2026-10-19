@@ -1,22 +1,45 @@
 import { posix } from "node:path";
+import {
+	attachmentNameSchema,
+	type FilePart,
+	MAX_ATTACHMENTS_PER_MESSAGE,
+} from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { tool } from "ai";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Semaphore, Stream } from "effect";
+import { contentType as mediaTypeForName } from "mime-types";
 import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { Ids } from "../../../ids/ids.ts";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import type { UserFacing } from "../../../user-message.ts";
 import type { ThreadFiles } from "../../thread-files/thread-files.ts";
 import { MAX_IMAGE_BYTES, SHOWN_IMAGE_FORMATS, shownImageType, withImages } from "../images.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
 import { unreadableFileRefusal } from "../read-thread-file/tool.ts";
-import { type Copy, copyIntoSandbox } from "./attachments.ts";
+import { type Copy, copyIntoSandbox, safeFileName } from "./attachments.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
 export const WRITE_FILE_TOOL = "write_file";
 export const COPY_FILE_TO_SANDBOX_TOOL = "copy_file_to_sandbox";
+export const SHARE_FILE_TOOL = "share_file";
+
+/**
+ * The largest file an agent can share. It is read as the agents' user,
+ * through a command that prints it as base64, which holds the whole file in
+ * the server's memory on the way out.
+ */
+const MAX_SHARED_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_SHARED_FILE_MEGABYTES = MAX_SHARED_FILE_BYTES / (1024 * 1024);
+
+/** Attaches a file, read out of the sandbox, to the reply being written. */
+export type AttachToReply = (file: {
+	name: string;
+	contentType: string;
+	content: Uint8Array;
+}) => Effect.Effect<FilePart, UserFacing | BlobStore.Failure>;
 
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const MAX_TIMEOUT_SECONDS = 900;
@@ -293,6 +316,83 @@ function refusedRead(failure: ThreadFiles.FileNotFound | BlobStore.Failure) {
 	return Effect.map(
 		unreadableFileRefusal(failure),
 		(error): Failed => ({ status: "failed", error }),
+	);
+}
+
+/**
+ * Shows people a file from the sandbox: it is attached to the agent's reply,
+ * where people see it as soon as it is. One file at a time, since each is
+ * held whole on its way out.
+ */
+export function shareFileTool(openSandbox: OpenSandbox, place: Place, attach: AttachToReply) {
+	const oneAtATime = Semaphore.makeUnsafe(1);
+	return tool({
+		description: `Share a file from the pod's sandbox with the people in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
+		inputSchema: Schema.Struct({
+			path: pathIn(place),
+			name: Schema.optional(
+				attachmentNameSchema.annotate({
+					description: "The name people see, such as chart.png. The file's own name unless given.",
+				}),
+			),
+		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+		execute: ({ path, name }) =>
+			inSandbox(openSandbox, (sandbox) =>
+				oneAtATime.withPermits(1)(shareFrom(sandbox, absolute(place, path), name, attach)),
+			),
+	});
+}
+
+/** What sharing a file tells the agent: the name people see it under, and its id. */
+interface Shared {
+	shared: string;
+	file: string;
+	note: UserText;
+}
+
+/** Reads the file at `path` as the agents' user, then attaches it to the reply, refusing one too large. */
+function shareFrom(
+	sandbox: Sandboxes.Sandbox,
+	path: string,
+	name: string | undefined,
+	attach: AttachToReply,
+): Effect.Effect<Shared | Failed, Sandboxes.Unavailable | Sandboxes.FileFailed> {
+	const tooLarge = (sizeBytes: number): Failed => ({
+		status: "failed",
+		error: userText`The file is ${Math.round(sizeBytes / 104_857.6) / 10} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB can be shared.`,
+	});
+	return Effect.gen(function* () {
+		// Its size alone first, so a file too large is never read.
+		const { sizeBytes } = yield* sandbox.readFile(path, 0);
+		if (sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(sizeBytes);
+		const read = yield* sandbox.readFile(path, MAX_SHARED_FILE_BYTES);
+		if (read.sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(read.sizeBytes);
+		const shownName = safeFileName(name ?? posix.basename(path));
+		const contentType =
+			shownImageType(read.content) ?? (mediaTypeForName(shownName) || "application/octet-stream");
+		return yield* attach({ name: shownName, contentType, content: read.content }).pipe(
+			Effect.map((file): Shared | Failed => ({
+				shared: file.name,
+				file: file.id,
+				note: userText`People see it under your reply now; it needn't be described again.`,
+			})),
+			Effect.catchTags({
+				BlobStoreUnavailable: (failure) =>
+					notKept(failure, userText`The file couldn't be kept right now. Try again shortly.`),
+				BlobStoreRejected: (failure) =>
+					notKept(failure, userText`The workspace's file storage refused the file.`),
+			}),
+			Effect.catch((failure) =>
+				Effect.succeed<Failed>({ status: "failed", error: failure.userMessage }),
+			),
+		);
+	});
+}
+
+/** Logs why the file store couldn't keep a shared file, and tells the agent `error`. */
+function notKept(failure: BlobStore.Failure, error: UserText) {
+	return Effect.logWarning("Keeping a file an agent shared failed", failure).pipe(
+		Effect.as<Failed>({ status: "failed", error }),
 	);
 }
 

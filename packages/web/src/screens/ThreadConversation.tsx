@@ -346,7 +346,11 @@ function segmentsOf(message: Message): Segment[] {
 		}
 		// Attached files are not part of the message's text.
 		if (part.type === "file") return;
-		const followed = index < message.parts.length - 1 && part.text.trim() !== "";
+		// Files go after all of a reply's text as they are attached, so one shared
+		// mid-reply does not mean the text before it is finished.
+		const followed =
+			part.text.trim() !== "" &&
+			message.parts.slice(index + 1).some((later) => later.type !== "file");
 		const settled = finished || followed;
 		if (settled && !isNarration(message.parts, index)) {
 			segments.push({ type: "text", key: `text@${written}`, text: part.text });
@@ -456,7 +460,9 @@ function MessageRow({
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
 	const showsSomething =
-		calls.length > 0 || segments.some((segment) => segment.type !== "text" || segment.text);
+		calls.length > 0 ||
+		files.length > 0 ||
+		segments.some((segment) => segment.type !== "text" || segment.text);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (message.status === "streaming" && !showsSomething) return null;
 	const finished = message.status === "complete" && !sending;
