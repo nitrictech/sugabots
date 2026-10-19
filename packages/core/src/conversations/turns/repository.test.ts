@@ -137,6 +137,13 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			}),
 		).rejects.toBeInstanceOf(TurnRepository.ReplyEnded);
 		expect(await turns.replyFiles(replyTurnOf(prepared))).toEqual([]);
+		expect(
+			await runOnPostgres(
+				Effect.flatMap(BlobStore.Service, (store) =>
+					store.list(BlobStore.key("threads", prepared.context.thread.id)),
+				),
+			),
+		).toEqual([]);
 	});
 
 	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {

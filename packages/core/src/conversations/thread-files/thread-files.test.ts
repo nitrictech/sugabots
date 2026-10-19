@@ -408,13 +408,20 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		);
 		if (!reply) throw new Error("Could not create reply");
 		const attach = (name: string) =>
-			files.attachToReply({
-				threadId,
-				messageId: reply.id,
-				name,
-				contentType: "text/csv",
-				content: new TextEncoder().encode(name),
-			});
+			runOnPostgres(
+				Effect.flatMap(ThreadFiles.Service, (service) =>
+					service.withReplyFile(
+						{
+							threadId,
+							messageId: reply.id,
+							name,
+							contentType: "text/csv",
+							content: new TextEncoder().encode(name),
+						},
+						service.attachToReply,
+					),
+				).pipe(Effect.provide(ThreadFiles.layer.pipe(Layer.orDie))),
+			);
 
 		const first = await attach("first.csv");
 		const second = await attach("second.csv");

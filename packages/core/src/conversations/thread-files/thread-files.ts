@@ -93,17 +93,28 @@ export interface Interface {
 	/** The files in the thread kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (threadId: string) => Effect.Effect<ReadonlyMap<string, string>>;
 	/**
-	 * Keeps `content` as a file an agent attached to its reply `messageId`,
-	 * after the reply's other files. Fails with `TooManyReplyFiles` once the
-	 * reply carries as many as a message can.
+	 * Puts `content` in the blob store as a file for an agent's reply
+	 * `messageId`, then runs `use` with it, for `use` to attach with
+	 * `attachToReply`. The blob is written before `use` runs, so nothing `use`
+	 * locks waits on it, and removed if `use` fails. Run outside a transaction:
+	 * one that rolls back after `use` succeeds would leave the blob until the
+	 * thread goes.
 	 */
-	readonly attachToReply: (file: {
-		threadId: string;
-		messageId: string;
-		name: string;
-		contentType: string;
-		content: Uint8Array;
-	}) => Effect.Effect<FilePart, TooManyReplyFiles | FileTooLarge | BlobStore.Failure>;
+	readonly withReplyFile: <A, E, R>(
+		file: {
+			threadId: string;
+			messageId: string;
+			name: string;
+			contentType: string;
+			content: Uint8Array;
+		},
+		use: (stored: StoredReplyFile) => Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E | FileTooLarge | BlobStore.Failure, R>;
+	/**
+	 * Attaches `stored` to its reply, after the reply's other files. Fails with
+	 * `TooManyReplyFiles` once the reply carries as many as a message can.
+	 */
+	readonly attachToReply: (stored: StoredReplyFile) => Effect.Effect<FilePart, TooManyReplyFiles>;
 	/** The files an agent attached to its reply `messageId`, in the order attached. */
 	readonly replyAttachments: (messageId: string) => Effect.Effect<readonly FilePart[]>;
 	/**
@@ -141,15 +152,12 @@ export const make = Effect.gen(function* () {
 	const maxFileBytes = yield* Config.option(maxFileBytesConfig);
 
 	/**
-	 * Keeps `content` as a new file in the thread, its row saying where it came
-	 * from. The blob first: a row is never without its blob. A row that then
-	 * fails to insert would leave a blob nothing reads, so it is removed; if
-	 * that fails too, it goes with the thread's folder.
+	 * Puts `content` in the blob store as a new file in the thread, with no row
+	 * yet: a row is never without its blob.
 	 */
-	const keep = <E>(
+	const putBlob = <E>(
 		threadId: string,
 		content: BlobStore.Content<E>,
-		source: FileSource,
 		maxSize = Number.POSITIVE_INFINITY,
 	) =>
 		Effect.gen(function* () {
@@ -163,20 +171,31 @@ export const make = Effect.gen(function* () {
 					? content.stream
 					: BlobStore.atMost(content.stream, limit);
 			const id = yield* ids.next;
-			const key = fileKey(threadId, id);
-			const { size } = yield* blobs.put(key, { stream, contentType }).pipe(
+			const { size } = yield* blobs.put(fileKey(threadId, id), { stream, contentType }).pipe(
 				Effect.catchIf(
 					(error) => error instanceof BlobStore.TooLarge,
 					({ maxSize }) => new FileTooLarge({ maxSize }),
 				),
 			);
-			yield* query((db) =>
-				db.insert(threadFile).values({ id, threadId, contentType, size, ...source }),
-			).pipe(Effect.onError(() => blobs.delete(key).pipe(Effect.ignore)));
-			return { id, contentType, size };
+			return { id, contentType, size } satisfies FileDescription;
 		});
 
-	/** Removes a file's blob, once its row is gone; one that cannot be removed goes with the thread's folder. */
+	/** Keeps `content` as a new file in the thread, its row saying where it came from. */
+	const keep = <E>(
+		threadId: string,
+		content: BlobStore.Content<E>,
+		source: FileSource,
+		maxSize = Number.POSITIVE_INFINITY,
+	) =>
+		Effect.gen(function* () {
+			const kept = yield* putBlob(threadId, content, maxSize);
+			yield* query((db) => db.insert(threadFile).values({ ...kept, threadId, ...source })).pipe(
+				Effect.onError(() => removeBlob(threadId, kept.id)),
+			);
+			return kept;
+		});
+
+	/** Removes a file's blob, once its row is gone or was never kept; one that cannot be removed goes with the thread's folder. */
 	const removeBlob = (threadId: string, fileId: string) =>
 		blobs
 			.delete(fileKey(threadId, fileId))
@@ -296,11 +315,21 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
-		attachToReply: ({ threadId, messageId, name, contentType, content }) =>
+		withReplyFile: ({ threadId, messageId, name, contentType, content }, use) =>
+			operation(
+				"withReplyFile",
+				Effect.gen(function* () {
+					const kept = yield* putBlob(threadId, { stream: Stream.succeed(content), contentType });
+					const stored = { ...kept, threadId, messageId, name } as StoredReplyFile;
+					return yield* use(stored).pipe(Effect.onError(() => removeBlob(threadId, kept.id)));
+				}),
+			),
+		attachToReply: (stored) =>
 			operation(
 				"attachToReply",
 				transaction(
 					Effect.gen(function* () {
+						const { id, threadId, messageId, name, contentType, size } = stored;
 						// Locked, so files attached at once each take the next place, and the count holds.
 						yield* query((db) =>
 							db
@@ -319,12 +348,19 @@ export const make = Effect.gen(function* () {
 						);
 						const position = attached?.files ?? 0;
 						if (position >= MAX_ATTACHMENTS_PER_MESSAGE) return yield* new TooManyReplyFiles();
-						const kept = yield* keep(
-							threadId,
-							{ stream: Stream.succeed(content), contentType },
-							{ kind: "agent_attachment", name, messageId, position },
+						yield* query((db) =>
+							db.insert(threadFile).values({
+								id,
+								threadId,
+								contentType,
+								size,
+								kind: "agent_attachment",
+								name,
+								messageId,
+								position,
+							}),
 						);
-						return { type: "file", name, ...kept } as const;
+						return { type: "file", id, name, contentType, size } as const;
 					}),
 				),
 			),
@@ -426,6 +462,19 @@ export interface StoredFile extends FileDescription {
 	/** An upload's name; a tool result has none. */
 	name: string | undefined;
 	stream: Stream.Stream<Uint8Array, FileNotFound | BlobStore.Failure>;
+}
+
+declare const storedReplyFile: unique symbol;
+
+/**
+ * A file for an agent's reply whose blob `withReplyFile` has written, for
+ * `attachToReply` to attach. Only `withReplyFile` makes one.
+ */
+export interface StoredReplyFile extends FileDescription {
+	readonly [storedReplyFile]: true;
+	readonly threadId: string;
+	readonly messageId: string;
+	readonly name: string;
 }
 
 /** A file a person uploaded, with the name it had on their computer. */

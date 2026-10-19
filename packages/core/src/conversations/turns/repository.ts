@@ -442,33 +442,33 @@ export const make = Effect.gen(function* () {
 		attachFile: (reply, file) =>
 			operation(
 				"attachFile",
-				transaction(
-					Effect.gen(function* () {
-						// Locked, as ending the turn locks it: a call still running when the
-						// turn was cancelled finds it ended, and shares nothing.
-						const [running] = yield* query((db) =>
-							db
-								.select({ id: turn.id })
-								.from(turn)
-								.where(and(eq(turn.id, reply.turnId), eq(turn.status, "running")))
-								.for("update"),
-						);
-						if (!running) return yield* new ReplyEnded();
-						const attached = yield* files.attachToReply({
-							threadId: reply.threadId,
-							messageId: reply.messageId,
-							...file,
-						});
-						const carried = yield* files.replyAttachments(reply.messageId);
-						yield* emit([
-							ConversationEvent.MessageFilesChanged({
-								threadId: reply.threadId,
-								messageId: reply.messageId,
-								files: carried,
+				files.withReplyFile(
+					{ threadId: reply.threadId, messageId: reply.messageId, ...file },
+					(stored) =>
+						transaction(
+							Effect.gen(function* () {
+								// Locked, as ending the turn locks it: a call still running when the
+								// turn was cancelled finds it ended, and shares nothing.
+								const [running] = yield* query((db) =>
+									db
+										.select({ id: turn.id })
+										.from(turn)
+										.where(and(eq(turn.id, reply.turnId), eq(turn.status, "running")))
+										.for("update"),
+								);
+								if (!running) return yield* new ReplyEnded();
+								const attached = yield* files.attachToReply(stored);
+								const carried = yield* files.replyAttachments(reply.messageId);
+								yield* emit([
+									ConversationEvent.MessageFilesChanged({
+										threadId: reply.threadId,
+										messageId: reply.messageId,
+										files: carried,
+									}),
+								]);
+								return attached;
 							}),
-						]);
-						return attached;
-					}),
+						),
 				),
 			),
 		replyFiles: (reply) => operation("replyFiles", files.replyAttachments(reply.messageId)),
