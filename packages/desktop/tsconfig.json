@@ -1,0 +1,20 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"types": ["bun"],
+		// The Electrobun API is type-checked from source, and that source needs
+		// DOM's `self` and doesn't pass `noImplicitReturns`.
+		"lib": ["ESNext", "DOM"],
+		"noImplicitReturns": false,
+		// Electrobun 2 serves its API from the Hutch devkit that `electrobun prepare`
+		// writes, not from node_modules. These mirror the devkit's own tsconfig, which
+		// can't be extended because it sets `baseUrl`.
+		"paths": {
+			"electrobun": ["./.hutch/devkit/api/sdks/main/index.ts"],
+			"electrobun/main": ["./.hutch/devkit/api/sdks/main/index.ts"],
+			"electrobun/main/*": ["./.hutch/devkit/api/sdks/main/entries/*"],
+			"electrobun/view": ["./.hutch/devkit/api/browser/index.ts"]
+		}
+	},
+	"include": ["src", "*.config.ts"]
+}
