@@ -25,6 +25,8 @@ import {
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
+import { loadFileParts, toFilePart } from "./file-parts.ts";
 import {
 	authorRow,
 	type PersonIdentity,
@@ -60,20 +62,29 @@ export interface Interface {
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ChatRow>;
 	/**
-	 * Posts a person's message, making them a participant, and announces it.
-	 * Posting a message again with the same `id` returns the one already
-	 * posted, unchanged and unannounced; an `id` already used by a different
-	 * message fails, and so does quoting a message that is not in the thread.
+	 * Posts a person's message with the files they attach, making them a
+	 * participant, and announces it. Posting a message again with the same
+	 * `id` returns the one already posted, unchanged and unannounced; an `id`
+	 * already used by a different message, or the same text with other files,
+	 * fails, and so does quoting a message that is not in the thread. Fails
+	 * with `UploadsNotFound`, posting nothing, when an attachment is not one
+	 * of the author's unsent uploads in the thread.
 	 */
 	readonly post: (input: {
 		/** The id the person's client chose, which makes sending it again safe to detect. */
 		id: string;
 		threadId: string;
 		author: PersonIdentity;
+		/** May be empty when the message carries files. */
 		content: string;
+		/** Ids of the author's uploads to attach. */
+		attachments: readonly string[];
 		/** The id of the message in the thread that this one quotes and answers. */
 		replyTo?: string;
-	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict | ReplyTargetNotFound>;
+	}) => Effect.Effect<
+		Posted | AlreadyPosted,
+		MessageIdConflict | ReplyTargetNotFound | ThreadFiles.UploadsNotFound
+	>;
 	/** Brings agents into the thread, announcing the ones who were not there yet. */
 	readonly addAgents: (threadId: string, agentIds: readonly string[]) => Effect.Effect<void>;
 	/**
@@ -164,6 +175,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ThreadRepository");
 	const { emit } = yield* ConversationEvents.Service;
+	const files = yield* ThreadFiles.Service;
 
 	/** What the message has now, announced when `changed`. */
 	const reactionsAfter = (reaction: Reaction, changed: boolean) =>
@@ -262,18 +274,24 @@ export const make = Effect.gen(function* () {
 						);
 						const author = personAuthor(input.author);
 						if (existing) {
+							const attached =
+								(yield* query((db) => loadFileParts(db, [existing.id]))).get(existing.id) ?? [];
 							if (
 								existing.threadId !== input.threadId ||
 								existing.authorUserId !== input.author.id ||
 								existing.content !== input.content ||
-								(existing.replyToMessageId ?? undefined) !== input.replyTo
+								(existing.replyToMessageId ?? undefined) !== input.replyTo ||
+								!sameIds(
+									attached.map(({ id }) => id),
+									input.attachments,
+								)
 							) {
 								return yield* new MessageIdConflict();
 							}
 							const replyTo = yield* quotedIn(existing.threadId, existing.replyToMessageId);
 							return {
 								_tag: "AlreadyPosted",
-								message: withReplyTo(toMessage(existing, author), replyTo),
+								message: withReplyTo(toMessage(existing, author, { files: attached }), replyTo),
 							} as const;
 						}
 						const replyTo = yield* quotedIn(input.threadId, input.replyTo);
@@ -287,7 +305,7 @@ export const make = Effect.gen(function* () {
 									authorUserId: input.author.id,
 									kind: "text",
 									status: "complete",
-									parts: [{ type: "text", text: input.content }],
+									parts: input.content === "" ? [] : [{ type: "text", text: input.content }],
 									content: input.content,
 									replyToMessageId: input.replyTo,
 								})
@@ -307,7 +325,16 @@ export const make = Effect.gen(function* () {
 								.values({ threadId: input.threadId, userId: input.author.id })
 								.onConflictDoNothing(),
 						);
-						const posted = withReplyTo(toMessage(created, author), replyTo);
+						const attached =
+							input.attachments.length === 0
+								? []
+								: (yield* files.attach({
+										threadId: input.threadId,
+										messageId: created.id,
+										uploaderId: input.author.id,
+										fileIds: input.attachments,
+									})).map(toFilePart);
+						const posted = withReplyTo(toMessage(created, author, { files: attached }), replyTo);
 						yield* emit([
 							ConversationEvent.MessagePosted({
 								threadId: input.threadId,
@@ -689,7 +716,8 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+/** Posting a message ends its files' wait to be sent, so this provides `ThreadFiles`. */
+export const layer = Layer.effect(Service, make).pipe(Layer.provide(ThreadFiles.layer));
 
 /** A message posted now, and announced. */
 export interface Posted {
@@ -697,7 +725,7 @@ export interface Posted {
 	readonly message: Message;
 }
 
-/** A message posted before with the same id and content, returned as it was. */
+/** A message posted before with the same id, content and files, returned as it was. */
 export interface AlreadyPosted {
 	readonly _tag: "AlreadyPosted";
 	readonly message: Message;
@@ -745,6 +773,12 @@ export class ReplyTargetNotFound
 	get userMessage() {
 		return userText`The message you replied to isn't in this conversation`;
 	}
+}
+
+/** Whether two lists hold the same ids, in any order. */
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+	const wanted = new Set(right);
+	return left.length === wanted.size && left.every((id) => wanted.has(id));
 }
 
 export class MessageIdConflict extends Data.TaggedError("MessageIdConflict") implements UserFacing {

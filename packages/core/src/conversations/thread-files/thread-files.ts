@@ -1,16 +1,18 @@
 export * as ThreadFiles from "./thread-files.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, count, eq, isNotNull, lt, not, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, lt, not, sql } from "drizzle-orm";
 import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { BlobStore } from "../../blob-store/blob-store.ts";
-import { query, serviceOperations } from "../../database/database.ts";
+import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { threadFile } from "../../database/schema.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
+import type { AttachedFileRow } from "../threads/file-parts.ts";
 
 /**
- * The only reader and writer of `thread_file`: files in a thread, which its
+ * The only writer of `thread_file`, and its reader but for the files messages
+ * show, which `threads/file-parts.ts` reads: files in a thread, which its
  * agents read, and people too when a chat serves them. A file goes when its
  * thread does.
  *
@@ -56,6 +58,18 @@ export interface Interface {
 		threadId: string;
 		fileId: string;
 	}) => Effect.Effect<StoredFile, FileNotFound | BlobStore.Failure>;
+	/**
+	 * Attaches the uploads `fileIds` to `messageId` in the order listed, and
+	 * returns them in that order. Each must be one of `uploaderId`'s unsent
+	 * uploads in the thread; when any is not, including one removed for
+	 * waiting too long, fails with `UploadsNotFound` and attaches none.
+	 */
+	readonly attach: (input: {
+		threadId: string;
+		messageId: string;
+		uploaderId: string;
+		fileIds: readonly string[];
+	}) => Effect.Effect<readonly AttachedFileRow[], UploadsNotFound>;
 	/** The files in the thread kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (threadId: string) => Effect.Effect<ReadonlyMap<string, string>>;
 	/**
@@ -169,6 +183,45 @@ export const make = Effect.gen(function* () {
 					return { id: file.id, name: file.name ?? undefined, ...stored, stream };
 				}),
 			),
+		attach: ({ threadId, messageId, uploaderId, fileIds }) =>
+			operation(
+				"attach",
+				transaction(
+					Effect.gen(function* () {
+						const wanted = [...new Set(fileIds)];
+						// The ids come from the sender, and Postgres rejects a uuid
+						// comparison against anything that is not one.
+						if (!wanted.every(isUuid)) return yield* new UploadsNotFound();
+						const listedPosition = sql`case ${threadFile.id} ${sql.join(
+							wanted.map((id, position) => sql`when ${id}::uuid then ${position}::integer`),
+							sql` `,
+						)} end`;
+						const attached = yield* query((db) =>
+							db
+								.update(threadFile)
+								.set({ messageId, position: listedPosition })
+								.where(
+									and(
+										inArray(threadFile.id, wanted),
+										eq(threadFile.threadId, threadId),
+										eq(threadFile.uploaderId, uploaderId),
+										unsentUpload,
+									),
+								)
+								.returning({
+									id: threadFile.id,
+									name: threadFile.name,
+									contentType: threadFile.contentType,
+									size: threadFile.size,
+								}),
+						);
+						// Failing rolls back the ones that were found.
+						if (attached.length !== wanted.length) return yield* new UploadsNotFound();
+						const listed = new Map(attached.map((file) => [file.id, file]));
+						return wanted.flatMap((id) => listed.get(id) ?? []);
+					}),
+				),
+			),
 		resultFiles: (threadId) =>
 			operation(
 				"resultFiles",
@@ -267,6 +320,12 @@ export class FileNotFound
 {
 	get userMessage() {
 		return userText`That file isn't there`;
+	}
+}
+
+export class UploadsNotFound extends Data.TaggedError("UploadsNotFound") implements UserFacing {
+	get userMessage() {
+		return userText`A file to send is no longer there. Remove it and attach it again`;
 	}
 }
 

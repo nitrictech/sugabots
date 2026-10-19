@@ -12,6 +12,7 @@ import { query, serviceOperations, transaction } from "../../database/database.t
 import { agent, pod } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
+import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { toChat } from "./chat.ts";
@@ -33,13 +34,17 @@ export interface Interface {
 		hostAgentId: string;
 	}) => Effect.Effect<Chat, AuthorizationDenied | ChatPlacementRejected, CurrentActor.Service>;
 	/**
-	 * Posts the actor's message into the chat's main thread and gives the
-	 * floor. Posting the same message again returns it unchanged.
+	 * Posts the actor's message into the chat's main thread, with the files
+	 * they uploaded to it, and gives the floor. Posting the same message again
+	 * returns it unchanged.
 	 */
 	readonly post: (input: {
 		chatId: string;
 		messageId: string;
+		/** May be empty when the message carries files. */
 		content: string;
+		/** Ids of the actor's uploads to the chat, not yet sent. None unless set. */
+		attachments?: readonly string[];
 		/** Written for the other people, so no bot replies. Off unless set. */
 		peopleOnly?: boolean;
 		/** The id of the message in the chat's main thread that this one quotes and answers. */
@@ -49,6 +54,7 @@ export interface Interface {
 		| ResourceHidden
 		| ThreadRepository.MessageIdConflict
 		| ThreadRepository.ReplyTargetNotFound
+		| ThreadFiles.UploadsNotFound
 		| ChatAgentHasNoModel,
 		CurrentActor.Service
 	>;
@@ -98,6 +104,7 @@ export const make = Effect.gen(function* () {
 							author: sender,
 							content: input.content,
 							replyTo: input.replyTo,
+							attachments: input.attachments ?? [],
 						});
 						if (posted._tag === "AlreadyPosted") return posted.message;
 						// Checked once the message is known to be new, so sending it again
