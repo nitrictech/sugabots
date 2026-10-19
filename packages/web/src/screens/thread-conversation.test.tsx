@@ -341,6 +341,19 @@ describe("a reply still being written", () => {
 		expect(screen.getByRole("article").textContent).toContain("Here are the 2 issues in Cycle 33.");
 	});
 
+	it("keeps back the text a reply is still writing after it shares a file", () => {
+		const chart: MessagePart = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f1",
+			name: "chart.png",
+			contentType: "image/png",
+			size: 2048,
+		};
+		show([reply([{ type: "text", text: "Here is the cha" }, chart], { status: "streaming" })]);
+
+		expect(screen.queryByText(/Here is the cha/)).toBeNull();
+	});
+
 	it("says the bot is typing between one call and the next", () => {
 		show([reply([toolCall("sentry__search_issues")], { status: "streaming" })]);
 
