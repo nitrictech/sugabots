@@ -44,7 +44,10 @@ export interface Interface {
 		chatId: string;
 		fileId: string;
 	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** A file attached to a message in the chat. An upload not yet sent is not found. */
+	/**
+	 * A file attached to a message in the chat. Any other file in its thread,
+	 * such as an upload not yet sent or a tool call's result, is not found.
+	 */
 	readonly read: (input: {
 		chatId: string;
 		fileId: string;
@@ -92,7 +95,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"read",
 				Effect.flatMap(visibility.chat(chatId), ({ mainThreadId }) =>
-					files.read({ threadId: mainThreadId, fileId }),
+					files.readMessageFile({ threadId: mainThreadId, fileId }),
 				),
 			),
 	});

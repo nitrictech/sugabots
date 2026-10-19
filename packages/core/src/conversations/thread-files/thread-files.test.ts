@@ -262,6 +262,27 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		expect(await textOf(read.stream)).toBe("draft");
 	});
 
+	it("reads as a message's file only one attached to a message", async () => {
+		const { threadId, userId } = await aThread();
+		const result = await files.write({ threadId, content: text("long result") });
+		const uploaded = await files.upload({
+			threadId,
+			uploaderId: userId,
+			name: "notes.txt",
+			maxSize: 1024,
+			maxUnsent: 20,
+			content: text("draft"),
+		});
+		const readMessageFile = (fileId: string) => files.readMessageFile({ threadId, fileId });
+
+		await expect(readMessageFile(result.id)).rejects.toBeInstanceOf(ThreadFiles.FileNotFound);
+		await expect(readMessageFile(uploaded.id)).rejects.toBeInstanceOf(ThreadFiles.FileNotFound);
+
+		await send(threadId, userId, [uploaded.id]);
+
+		expect(await textOf((await readMessageFile(uploaded.id)).stream)).toBe("draft");
+	});
+
 	it("refuses an upload over its own limit, keeping nothing", async () => {
 		const { threadId, userId } = await aThread();
 

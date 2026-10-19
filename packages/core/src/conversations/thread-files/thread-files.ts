@@ -2,7 +2,7 @@ export * as ThreadFiles from "./thread-files.ts";
 
 import { type FilePart, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
-import { and, count, eq, inArray, isNotNull, lt, not, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, lt, type SQLWrapper, sql } from "drizzle-orm";
 import {
 	Config,
 	Context,
@@ -67,6 +67,14 @@ export interface Interface {
 	 * while it is read.
 	 */
 	readonly read: (file: {
+		threadId: string;
+		fileId: string;
+	}) => Effect.Effect<StoredFile, FileNotFound | BlobStore.Failure>;
+	/**
+	 * A file attached to a message in the thread, as `read` gives it. Fails
+	 * with `FileNotFound` for any other file, such as a tool call's result.
+	 */
+	readonly readMessageFile: (file: {
 		threadId: string;
 		fileId: string;
 	}) => Effect.Effect<StoredFile, FileNotFound | BlobStore.Failure>;
@@ -178,6 +186,29 @@ export const make = Effect.gen(function* () {
 				),
 			);
 
+	/** The file `fileId` in the thread, when its row also matches `which`. */
+	const readWhere = (threadId: string, fileId: string, which: SQLWrapper) =>
+		Effect.gen(function* () {
+			// The id comes from the model or a URL, and Postgres rejects a uuid
+			// comparison against anything that is not one.
+			if (!isUuid(fileId)) return yield* new FileNotFound({ fileId });
+			const [file] = yield* query((db) =>
+				db
+					.select({ id: threadFile.id, name: threadFile.name })
+					.from(threadFile)
+					.where(and(eq(threadFile.id, fileId), eq(threadFile.threadId, threadId), which)),
+			);
+			if (!file) return yield* new FileNotFound({ fileId });
+			// A row is never without its blob, as `keep` puts the blob first.
+			const stored = yield* blobs
+				.get(fileKey(threadId, file.id))
+				.pipe(Effect.catchTag("BlobNotFound", Effect.die));
+			const stream = stored.stream.pipe(
+				Stream.catchTag("BlobNotFound", () => Stream.fail(new FileNotFound({ fileId }))),
+			);
+			return { id: file.id, name: file.name ?? undefined, ...stored, stream };
+		});
+
 	return Service.of({
 		write: ({ threadId, toolCallId, content }) =>
 			operation("write", keep(threadId, content, { kind: "tool_result", toolCallId })),
@@ -208,35 +239,9 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 		read: ({ threadId, fileId }) =>
-			operation(
-				"read",
-				Effect.gen(function* () {
-					// The id comes from the model, and Postgres rejects a uuid
-					// comparison against anything that is not one.
-					if (!isUuid(fileId)) return yield* new FileNotFound({ fileId });
-					const [file] = yield* query((db) =>
-						db
-							.select({ id: threadFile.id, name: threadFile.name })
-							.from(threadFile)
-							.where(
-								and(
-									eq(threadFile.id, fileId),
-									eq(threadFile.threadId, threadId),
-									not(unsentUpload),
-								),
-							),
-					);
-					if (!file) return yield* new FileNotFound({ fileId });
-					// A row is never without its blob, as `keep` puts the blob first.
-					const stored = yield* blobs
-						.get(fileKey(threadId, file.id))
-						.pipe(Effect.catchTag("BlobNotFound", Effect.die));
-					const stream = stored.stream.pipe(
-						Stream.catchTag("BlobNotFound", () => Stream.fail(new FileNotFound({ fileId }))),
-					);
-					return { id: file.id, name: file.name ?? undefined, ...stored, stream };
-				}),
-			),
+			operation("read", readWhere(threadId, fileId, sql`not ${unsentUpload}`)),
+		readMessageFile: ({ threadId, fileId }) =>
+			operation("readMessageFile", readWhere(threadId, fileId, isNotNull(threadFile.messageId))),
 		attach: ({ threadId, messageId, uploaderId, fileIds }) =>
 			operation(
 				"attach",
