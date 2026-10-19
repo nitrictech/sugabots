@@ -1,26 +1,41 @@
 import {
 	type AgentParticipant,
 	canStartMention,
+	MAX_ATTACHMENTS_PER_MESSAGE,
 	type MessageReplyTo,
 	messageAuthorName,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { AtSign, Send, UsersRound, X } from "lucide-react";
+import { AtSign, Paperclip, Send, UsersRound, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+	type ComposerAttachment,
+	type ComposerAttachments,
+	canSend,
+	sendReadiness,
+} from "@/lib/composer-attachments.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
+
+/** A 30px icon button on the row beneath the draft, such as the paperclip and the @. */
+const toolButtonClassName =
+	"focus-ring grid size-[30px] place-items-center rounded-tail text-muted-foreground transition-colors hover:bg-chip";
 
 /**
  * Where a message is written: a box that grows with its text and sends on
- * Enter (Shift+Enter for a new line), with the @ and the send button on a row
- * beneath the draft. Typing `@`, or pressing the @, offers everyone in
- * `mentionable` whose name or handle matches what follows it; choosing one
- * writes their handle into the draft. With `peopleOnly`, a button beside the @
- * says whether the bot will answer, and it or Tab moves between writing to the bot,
- * the default, and writing to the other people only. With `replyingTo`, a strip
+ * Enter (Shift+Enter for a new line), with the paperclip, the @ and the send
+ * button on a row beneath the draft. The paperclip attaches files, as dropping
+ * or pasting them does; they sit above the text as they upload. Send is off
+ * until there is text or a file and every file has uploaded, and while
+ * `sending`. Typing `@`, or pressing the @, offers everyone in `mentionable`
+ * whose name or handle matches what follows it; choosing one writes their
+ * handle into the draft. With `peopleOnly`, a button beside the @ says whether
+ * the bot will answer, and it or Tab moves between writing to the bot, the
+ * default, and writing to the other people only. With `replyingTo`, a strip
  * over the draft names the message it answers; its × or Escape stops replying.
  */
 export function ChatComposer({
@@ -29,12 +44,13 @@ export function ChatComposer({
 	onValueChange,
 	onSubmit,
 	submitLabel,
-	submitDisabled,
+	sending = false,
 	error,
 	className,
 	mentionable,
 	peopleOnly,
 	replyingTo,
+	attachments,
 }: {
 	/** Names the box for assistive technology, and is its placeholder. */
 	label: string;
@@ -42,7 +58,8 @@ export function ChatComposer({
 	onValueChange: (value: string) => void;
 	onSubmit: () => void | Promise<void>;
 	submitLabel: string;
-	submitDisabled: boolean;
+	/** A message is on its way, so another cannot be sent yet. */
+	sending?: boolean;
 	error?: ReactNode;
 	className?: string;
 	/** Who the draft can mention. */
@@ -56,6 +73,8 @@ export function ChatComposer({
 	};
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
+	/** The files attached to the message, and what attaches, removes and retries them. */
+	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -175,6 +194,13 @@ export function ChatComposer({
 				{replyingTo && (
 					<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
 				)}
+				<AttachmentTray
+					items={attachments.items}
+					onRemove={attachments.remove}
+					onRetry={attachments.retry}
+					focusDraft={() => textarea.current?.focus()}
+				/>
+				<LeftOutNote count={attachments.leftOut} />
 				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3">
 					<label htmlFor={id} className="sr-only">
 						{label}
@@ -199,6 +225,13 @@ export function ChatComposer({
 							setDismissedMentionAt(typing?.start);
 						}}
 						onKeyDown={handleKeyDown}
+						onPaste={(event) => {
+							const { files, types } = event.clipboardData;
+							// Office apps put a picture of what was copied beside its text, which is what was meant.
+							if (!attachments.attach || files.length === 0 || types.includes("text/plain")) return;
+							event.preventDefault();
+							attachments.attach([...files]);
+						}}
 						aria-autocomplete="list"
 						aria-controls={mentionMenuOpen ? mentionListId : undefined}
 						aria-activedescendant={
@@ -222,12 +255,16 @@ export function ChatComposer({
 					)}
 				</div>
 				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5">
+					<AttachButton
+						full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+						onAttach={attachments.attach}
+					/>
 					<Tooltip label="Mention a bot or person" side="top">
 						<button
 							type="button"
 							aria-label="Mention a bot or person"
 							onClick={startMention}
-							className="focus-ring grid size-[30px] place-items-center rounded-tail text-muted-foreground transition-colors hover:bg-chip"
+							className={toolButtonClassName}
 						>
 							<AtSign size={16} strokeWidth={2} />
 						</button>
@@ -241,12 +278,12 @@ export function ChatComposer({
 					)}
 					<span className="flex-1" />
 					<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
-						Enter to send
+						{sendHint(attachments.items)}
 					</span>
 					<button
 						type="submit"
 						aria-label={submitLabel}
-						disabled={submitDisabled}
+						disabled={sending || !canSend(value, attachments.items)}
 						className={cn(
 							"focus-ring grid size-[30px] place-items-center rounded-[8px] text-primary-foreground transition-colors disabled:bg-chip-strong",
 							toPeople ? "bg-people-only-send" : "bg-primary hover:bg-primary-hover",
@@ -315,6 +352,78 @@ function AudienceChip({
 			</button>
 		</Tooltip>
 	);
+}
+
+/**
+ * The paperclip, which opens the system's file picker. Off until the chat
+ * exists, and once the message has as many files as one can carry, saying so
+ * when pointed at.
+ */
+function AttachButton({
+	full,
+	onAttach,
+}: {
+	full: boolean;
+	onAttach: ((files: File[]) => void) | undefined;
+}) {
+	const picker = useRef<HTMLInputElement>(null);
+	const unavailable = full || onAttach === undefined;
+	return (
+		<>
+			<input
+				ref={picker}
+				type="file"
+				multiple
+				hidden
+				onChange={(event) => {
+					const files = [...(event.currentTarget.files ?? [])];
+					// Cleared, so choosing the same file again still counts as a change.
+					event.currentTarget.value = "";
+					if (files.length > 0) onAttach?.(files);
+				}}
+			/>
+			<Tooltip
+				label={
+					full ? `${MAX_ATTACHMENTS_PER_MESSAGE} files is the most for one message` : "Attach files"
+				}
+				side="top"
+			>
+				<button
+					type="button"
+					aria-label="Attach files"
+					aria-disabled={unavailable || undefined}
+					onClick={() => {
+						if (!unavailable) picker.current?.click();
+					}}
+					className={cn(toolButtonClassName, unavailable && "opacity-40 hover:bg-transparent")}
+				>
+					<Paperclip aria-hidden size={16} strokeWidth={2} />
+				</button>
+			</Tooltip>
+		</>
+	);
+}
+
+/** Beside Send: what holds the message back, else how full it is of files, else how to send it. */
+function sendHint(items: readonly ComposerAttachment[]): string {
+	const readiness = sendReadiness(items);
+	if (!readiness.ready && readiness.failed > 0) {
+		const action = items.some(({ upload }) => upload.state === "failed" && upload.retryable)
+			? "Remove or retry"
+			: "Remove";
+		return readiness.failed === 1
+			? `${action} the file that failed`
+			: `${action} the ${readiness.failed} files that failed`;
+	}
+	if (!readiness.ready) {
+		return readiness.uploading === 1
+			? "1 file uploading"
+			: `${readiness.uploading} files uploading`;
+	}
+	if (items.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
+		return `${MAX_ATTACHMENTS_PER_MESSAGE} of ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
+	}
+	return "Enter to send";
 }
 
 /**

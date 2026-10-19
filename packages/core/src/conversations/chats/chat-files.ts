@@ -36,6 +36,14 @@ export interface Interface {
 		| BlobStore.Failure,
 		CurrentActor.Service
 	>;
+	/**
+	 * Removes one of the actor's uploads to the chat before it is sent, such as
+	 * one taken off the message they are writing. Anything else is left as it is.
+	 */
+	readonly removeUpload: (input: {
+		chatId: string;
+		fileId: string;
+	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/** A file attached to a message in the chat. An upload not yet sent is not found. */
 	readonly read: (input: {
 		chatId: string;
@@ -69,6 +77,15 @@ export const make = Effect.gen(function* () {
 						maxUnsent: MAX_ATTACHMENTS_PER_MESSAGE,
 						content: { stream, contentType: mediaTypeOf(name, type) },
 					});
+				}),
+			),
+		removeUpload: ({ chatId, fileId }) =>
+			operation(
+				"removeUpload",
+				Effect.gen(function* () {
+					const { mainThreadId } = yield* visibility.chat(chatId);
+					const { userId } = yield* CurrentActor.Service;
+					yield* files.removeUnsentUpload({ threadId: mainThreadId, uploaderId: userId, fileId });
 				}),
 			),
 		read: ({ chatId, fileId }) =>

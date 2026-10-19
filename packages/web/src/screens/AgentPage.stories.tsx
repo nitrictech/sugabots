@@ -673,3 +673,127 @@ export const ArtifactOnAPhone = meta.story({
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
 	},
 });
+
+const uploadedFileId = "0199a3a0-0000-7000-8000-000000000a51";
+/** What the last message sent asked for, as the API received it. */
+let lastSent: { message: string; attachments?: string[] } | undefined;
+
+const attachmentHandlers = [
+	http.post(`${API}/chats/:chatId/files`, ({ request }) => {
+		const query = new URL(request.url).searchParams;
+		return HttpResponse.json(
+			{
+				id: uploadedFileId,
+				name: query.get("name"),
+				contentType: query.get("type") ?? "application/octet-stream",
+				size: 4,
+			},
+			{ status: 201 },
+		);
+	}),
+	http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
+		lastSent = (await request.json()) as typeof lastSent;
+		return HttpResponse.json(
+			said("61", "you", lastSent?.message ?? "", "2026-09-18T06:10:00.000Z"),
+			{
+				status: 201,
+			},
+		);
+	}),
+	...appHandlers({ messages: { [growthDesk.id]: conversation } }),
+];
+
+/**
+ * A file chosen with the paperclip uploads straight away. Once it has, a message with
+ * no text can carry it, and sending clears it from the composer.
+ */
+export const AttachAndSend = meta.story({
+	beforeEach({ msw }) {
+		lastSent = undefined;
+		msw.use(...attachmentHandlers);
+	},
+	play: async ({ canvas, canvasElement }) => {
+		await canvas.findByRole("textbox", { name: `Message ${growthDesk.name}` }, { timeout: 10_000 });
+		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
+		if (!picker) throw new Error("The composer has no file picker");
+		await userEvent.upload(
+			picker,
+			new File(["%PDF"], "acme-retail-request.pdf", { type: "application/pdf" }),
+		);
+		const files = canvas.getByRole("list", { name: "Attached files" });
+		await expect(within(files).getByRole("listitem")).toHaveAttribute(
+			"title",
+			expect.stringContaining("acme-retail-request.pdf"),
+		);
+		const send = canvas.getByRole("button", { name: "Send message" });
+		await waitFor(() => expect(send).toBeEnabled());
+		await userEvent.click(send);
+		await waitFor(() => expect(lastSent?.attachments).toEqual([uploadedFileId]));
+		await expect(lastSent?.message).toBe("");
+		await expect(canvas.queryByRole("list", { name: "Attached files" })).not.toBeInTheDocument();
+	},
+});
+
+/**
+ * The API refuses a message when a file it carries is gone, such as one
+ * cleared for waiting too long. Its files come back failed, saying why, and
+ * Retry uploads each again from the computer.
+ */
+export const SendRefusedFileGone = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/chats/:chatId/messages`, () =>
+				HttpResponse.json(
+					{
+						_tag: "BadRequest",
+						message: "A file to send is no longer there. Remove it and attach it again",
+						error: {
+							_tag: "UploadsNotFound",
+							userMessage: "A file to send is no longer there. Remove it and attach it again",
+							isRetryable: false,
+						},
+					},
+					{ status: 400 },
+				),
+			),
+			...attachmentHandlers,
+		);
+	},
+	play: async ({ canvas, canvasElement }) => {
+		await canvas.findByRole("textbox", { name: `Message ${growthDesk.name}` }, { timeout: 10_000 });
+		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
+		if (!picker) throw new Error("The composer has no file picker");
+		await userEvent.upload(
+			picker,
+			new File(["%PDF"], "acme-retail-request.pdf", { type: "application/pdf" }),
+		);
+		const send = canvas.getByRole("button", { name: "Send message" });
+		await waitFor(() => expect(send).toBeEnabled());
+		await userEvent.click(send);
+
+		const retry = await canvas.findByRole("button", { name: "Retry acme-retail-request.pdf" });
+		await expect(retry).toHaveAccessibleDescription(
+			/It was no longer there when the message was sent/,
+		);
+		await expect(
+			canvas.getByText(/It was no longer there when the message was sent/),
+		).toBeVisible();
+		await expect(send).toBeDisabled();
+
+		await userEvent.click(retry);
+		await waitFor(() => expect(send).toBeEnabled());
+	},
+});
+
+/** Files dragged anywhere over the chat below its header can be dropped to attach them. */
+export const DraggingFiles = meta.story({
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const dataTransfer = new DataTransfer();
+		dataTransfer.items.add(new File(["%PDF"], "acme-retail-request.pdf"));
+		log.dispatchEvent(
+			new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer }),
+		);
+		await expect(await canvas.findByText("Drop files to attach")).toBeVisible();
+	},
+});

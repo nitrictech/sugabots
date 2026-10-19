@@ -16,6 +16,7 @@ import { vi } from "vitest";
  * for a refusal.
  */
 export const client = {
+	baseUrl: "https://api.test",
 	api: {
 		health: vi.fn(),
 		me: vi.fn(),
@@ -112,6 +113,7 @@ export const client = {
 			messages: vi.fn(),
 			history: vi.fn(),
 			send: vi.fn(),
+			removeFile: vi.fn(),
 		},
 		events: {
 			workspace: vi.fn(),

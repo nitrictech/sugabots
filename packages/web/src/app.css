@@ -114,6 +114,19 @@
 	/* Green text for something that worked. Both pass AA on a panel. */
 	--success-text: light-dark(#1a7f37, #4ade80);
 
+	/*
+	 * A file attached in the composer: the page drawn for a document and the badge
+	 * naming its type. One that failed uses the destructive colours.
+	 */
+	--file-page: light-dark(#ffffff, #e7e8ec);
+	--file-page-line: light-dark(#d4d6dc, #b9bcc4);
+	--file-page-heading: light-dark(#9a9ea8, #8b8f99);
+	--file-badge-sheet: #1a7a43;
+	--file-badge-other: light-dark(#5f646e, #4b5060);
+	/* Over the chat while files are dragged onto it, and the wash inside its dashed edge. */
+	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(11, 12, 15, 0.8));
+	--drop-target: light-dark(oklch(0.96 0.03 268 / 0.7), oklch(0.2 0.03 268 / 0.55));
+
 	/* A person with no photo: initials on a grey disc. */
 	--person-avatar: light-dark(#dcdee3, #3a3d45);
 	--person-avatar-foreground: light-dark(#3d4048, #dfe1e6);
@@ -183,6 +196,13 @@
 	--color-success-text: var(--success-text);
 	--color-success: var(--success);
 	--color-destructive: var(--destructive);
+	--color-file-page: var(--file-page);
+	--color-file-page-line: var(--file-page-line);
+	--color-file-page-heading: var(--file-page-heading);
+	--color-file-badge-sheet: var(--file-badge-sheet);
+	--color-file-badge-other: var(--file-badge-other);
+	--color-drop-veil: var(--drop-veil);
+	--color-drop-target: var(--drop-target);
 	--color-person-avatar: var(--person-avatar);
 	--color-person-avatar-foreground: var(--person-avatar-foreground);
 	/* Set on an element by `botColorVariables()` from `@sugabots/avatars`. */

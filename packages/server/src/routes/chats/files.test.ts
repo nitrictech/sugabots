@@ -123,6 +123,21 @@ describe("uploading a chat file", () => {
 	});
 });
 
+describe("removing an unsent upload", () => {
+	it("removes it for the person asking, answering with no content", async () => {
+		let removed: unknown;
+		const response = await app({
+			removeUpload: (input) => {
+				removed = input;
+				return Effect.void;
+			},
+		}).request(`/chats/${CHAT}/files/${FILE}`, { method: "DELETE", headers: signedIn });
+
+		expect(response.status).toBe(204);
+		expect(removed).toEqual({ chatId: CHAT, fileId: FILE });
+	});
+});
+
 describe("serving a chat file", () => {
 	it("shows an image in place, as its own type and never sniffed for another", async () => {
 		const response = await serving({
