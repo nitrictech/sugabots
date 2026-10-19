@@ -4,14 +4,18 @@ import type { UserText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
+import { Ids } from "../../ids/ids.ts";
 import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	allowedHostsNote,
+	COPY_FILE_TO_SANDBOX_TOOL,
+	copyFileToSandboxTool,
 	type OpenSandbox,
 	openOncePerTurn,
 	type Place,
@@ -25,14 +29,14 @@ import {
 } from "./sandbox/tools.ts";
 
 /**
- * The tools that work in a pod's sandbox: `run_command`, `read_file` and
- * `write_file`, and the `browser_` tools of a browser the agent drives there
- * (see `browser/browser.ts`), and `request_network_access`, whose calls wait
- * for a person, to reach a host the sandbox may not. Offered to every turn,
- * and usable while the agent uses the sandbox and the workspace has an
- * enabled sandbox provider, looked up on every call, so enabling one applies
- * from the next turn. The sandbox is opened by a turn's first call to one of
- * the tools, not when the turn starts.
+ * The tools that work in a pod's sandbox: `run_command`, `read_file`,
+ * `write_file` and `copy_file_to_sandbox`, and the `browser_` tools of a
+ * browser the agent drives there (see `browser/browser.ts`), and
+ * `request_network_access`, whose calls wait for a person, to reach a host
+ * the sandbox may not. Offered to every turn, and usable while the agent uses
+ * the sandbox and the workspace has an enabled sandbox provider, looked up on
+ * every call, so enabling one applies from the next turn. The sandbox is
+ * opened by a turn's first call to one of the tools, not when the turn starts.
  */
 export interface Interface {
 	/**
@@ -70,9 +74,12 @@ export const make = Effect.gen(function* () {
 	const providers = yield* SandboxProviderRepository.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
 	const network = yield* SandboxNetwork.Service;
+	const files = yield* ThreadFiles.Service;
+	const ids = yield* Ids.Service;
 	const operation = yield* serviceOperations<Interface>("SandboxTools");
 	const offeredIn = ({
 		turnId,
+		threadId,
 		place,
 		acceptsImages,
 		openSandbox,
@@ -84,6 +91,14 @@ export const make = Effect.gen(function* () {
 			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
 			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
 			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
+			[COPY_FILE_TO_SANDBOX_TOOL]: copyFileToSandboxTool({
+				openSandbox,
+				place,
+				threadId,
+				files,
+				ids,
+				run,
+			}),
 			...browserTools(browser, acceptsImages),
 		},
 		requests: {
@@ -99,6 +114,7 @@ export const make = Effect.gen(function* () {
 					return {
 						...offeredIn({
 							turnId,
+							threadId,
 							place,
 							acceptsImages,
 							openSandbox: NEVER_OPENED,
@@ -146,6 +162,7 @@ export const make = Effect.gen(function* () {
 				return {
 					...offeredIn({
 						turnId,
+						threadId,
 						place,
 						acceptsImages,
 						openSandbox,
@@ -163,12 +180,18 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([PodSandboxes.layer, SandboxNetwork.layer, SandboxProviderRepository.layer]),
+	Layer.provide([
+		PodSandboxes.layer,
+		SandboxNetwork.layer,
+		SandboxProviderRepository.layer,
+		ThreadFiles.layer,
+	]),
 );
 
 /** What a turn's tools work through. */
 interface Behind {
 	readonly turnId: string;
+	readonly threadId: string;
 	readonly place: Place;
 	readonly acceptsImages: boolean;
 	readonly openSandbox: OpenSandbox;

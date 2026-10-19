@@ -218,6 +218,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		searchHistoryTool({
 			threadId: prepared.context.thread.id,
 			before: prepared.context.compaction?.keptFrom,
+			usesSandbox: prepared.context.agent.usesSandbox,
 			run: deps.run,
 		}),
 		recording,

@@ -40,11 +40,14 @@ interface HistorySearch {
 export function searchHistoryTool({
 	threadId,
 	before: keptFrom,
+	usesSandbox,
 	run,
 }: {
 	threadId: string;
 	/** Where the history the bot reads word for word starts, once compacted; nothing from then on is searched. */
 	before: Date | undefined;
+	/** Whether the agent works in the pod's sandbox, so is told it can copy attachments into it. */
+	usesSandbox: boolean;
 	run: RunEffect;
 }) {
 	return tool({
@@ -82,7 +85,7 @@ export function searchHistoryTool({
 				...(after ? { after: DateTime.toDate(DateTime.makeUnsafe(after)) } : {}),
 				...(before ? { before: DateTime.toDate(DateTime.makeUnsafe(before)) } : {}),
 			};
-			return run(query((db) => searchHistory(db, threadId, keptFrom, search)));
+			return run(query((db) => searchHistory(db, threadId, keptFrom, search, usesSandbox)));
 		},
 	});
 }
@@ -92,6 +95,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 	threadId: string,
 	keptFrom: Date,
 	{ words, after, before }: HistorySearch,
+	usesSandbox: boolean,
 ) {
 	const until = before && before < keptFrom ? before : keptFrom;
 	const matching = words ? wordMatch(words) : undefined;
@@ -132,7 +136,10 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 				author:
 					found.author.kind === "routine_trigger" ? found.author.routineName : found.author.name,
 				at: formatHistoryTime(row.createdAt),
-				text: [said, ...(files.get(row.id) ?? []).map(describeAttachment)]
+				text: [
+					said,
+					...(files.get(row.id) ?? []).map((file) => describeAttachment(file, { usesSandbox })),
+				]
 					.filter((line) => line !== "")
 					.join("\n"),
 			};

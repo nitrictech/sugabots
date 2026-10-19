@@ -75,7 +75,7 @@ export function modelPrompt(
 		...(context.compaction ? [compactionSummary(context.compaction)] : []),
 		...withReactions(
 			context.messages.filter((message) => message.status === "complete"),
-			context.agent.id,
+			{ agentId: context.agent.id, usesSandbox: context.agent.usesSandbox },
 			resultFiles,
 		),
 	];
@@ -115,7 +115,7 @@ function compactionSummary(compaction: TurnCompaction): Models.PromptMessage {
  */
 function withReactions(
 	messages: readonly Message[],
-	currentAgentId: string,
+	reader: Reader,
 	resultFiles: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
 	const reactions = messages
@@ -123,7 +123,7 @@ function withReactions(
 			(message.reactions ?? []).flatMap(({ emoji, people }) =>
 				people.map((person) => ({
 					at: person.at,
-					line: `${person.name} reacted ${emoji} to ${whose(message, currentAgentId)} message: "${quotedPreview(message)}"`,
+					line: `${person.name} reacted ${emoji} to ${whose(message, reader.agentId)} message: "${quotedPreview(message)}"`,
 				})),
 			),
 		)
@@ -152,10 +152,17 @@ function withReactions(
 	return [
 		...messages.flatMap((message) => [
 			...reactionsBefore(message.createdAt),
-			...promptMessagesFor(message, currentAgentId, resultFiles),
+			...promptMessagesFor(message, reader, resultFiles),
 		]),
 		...reactionsBefore(),
 	];
+}
+
+/** The agent whose prompt the history is written for. */
+interface Reader {
+	agentId: string;
+	/** Whether it works in the pod's sandbox, which it can copy the thread's files into. */
+	usesSandbox: boolean;
 }
 
 function whose(message: Message, currentAgentId: string): string {
@@ -165,13 +172,13 @@ function whose(message: Message, currentAgentId: string): string {
 
 function promptMessagesFor(
 	message: Message,
-	currentAgentId: string,
+	reader: Reader,
 	resultFiles: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
 	const attachments = message.parts.flatMap((part) =>
-		part.type === "file" ? [describeAttachment(part)] : [],
+		part.type === "file" ? [describeAttachment(part, reader)] : [],
 	);
-	const authored = authoredMessage(message, currentAgentId, attachments);
+	const authored = authoredMessage(message, reader.agentId, attachments);
 	const records = message.parts.flatMap((part): string[] => {
 		if (part.type === "text" || part.type === "file") return [];
 		if (part.type === "collaboration") return [describeCollaboration(part)];
