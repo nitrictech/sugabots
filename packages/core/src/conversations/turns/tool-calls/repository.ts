@@ -24,6 +24,7 @@ import {
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { withImagesCounted } from "../../tools/images.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
 import {
@@ -188,7 +189,10 @@ export const make = Effect.gen(function* () {
 						const closed = yield* apply(
 							row,
 							ToolCallEvent.Close({
-								outcome: "error" in outcome ? outcome : { output: boundedJson(outcome.output) },
+								outcome:
+									"error" in outcome
+										? outcome
+										: { output: boundedJson(withImagesCounted(outcome.output)) },
 							}),
 						);
 						if (!closed) return undefined;

@@ -224,7 +224,12 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	);
 	tools[READ_THREAD_FILE_TOOL] = recorded(
 		READ_THREAD_FILE_TOOL,
-		readThreadFileTool({ threadId: prepared.context.thread.id, files: deps.files, run: deps.run }),
+		readThreadFileTool({
+			threadId: prepared.context.thread.id,
+			files: deps.files,
+			acceptsImages: prepared.context.agent.acceptsImages,
+			run: deps.run,
+		}),
 		recording,
 	);
 	const routinesOff = prepared.context.agent.disabledTools.includes(ROUTINES_KEY);

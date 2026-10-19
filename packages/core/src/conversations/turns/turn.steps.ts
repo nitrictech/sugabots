@@ -434,7 +434,7 @@ const streamReply = (
 				turnId: prepared.turnId,
 				threadId: prepared.context.thread.id,
 				agentId: prepared.context.agent.id,
-				model: prepared.context.agent.model,
+				acceptsImages: prepared.context.agent.acceptsImages,
 			});
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(

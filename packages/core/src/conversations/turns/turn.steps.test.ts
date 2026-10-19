@@ -92,6 +92,7 @@ const prepared: PreparedTurn = {
 			disabledTools: [],
 			interviewing: false,
 			usesSandbox: false,
+			acceptsImages: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

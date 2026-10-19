@@ -13,6 +13,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
+import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -163,6 +164,7 @@ export const make = Effect.gen(function* () {
 						const windowTokens = yield* query((db) =>
 							loadContextWindow(db, loaded.workspaceId, model),
 						);
+						const acceptsImages = yield* modelAcceptsImages(loaded.workspaceId, model);
 						const messages = loaded.messages
 							.reverse()
 							.map((stored) => messageFromRelations(stored));
@@ -189,6 +191,7 @@ export const make = Effect.gen(function* () {
 									name: speaker.name,
 									handle: speaker.handle,
 									model,
+									acceptsImages,
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
@@ -285,6 +288,8 @@ export interface TurnContext {
 		name: string;
 		handle: string;
 		model: string;
+		/** Whether its model takes images, which tools can then show it. */
+		acceptsImages: boolean;
 		prompt: string;
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];

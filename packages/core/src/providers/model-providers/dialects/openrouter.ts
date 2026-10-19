@@ -1,5 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { ProviderModelCapability } from "@sugabots/contracts";
+import { wrapLanguageModel } from "ai";
 import { Effect, Schema, SchemaGetter } from "effect";
 import { recognizeAnthropicFailure } from "./anthropic.ts";
 import {
@@ -9,6 +10,7 @@ import {
 	type ProviderModelFields,
 } from "./dialect.ts";
 import { openaiCompatible, recognizeOpenAIFailure } from "./openai-compatible.ts";
+import { toolImagesFromUser } from "./tool-images.ts";
 
 const names = Schema.Array(Schema.String).pipe(
 	Schema.withDecodingDefault(Effect.succeed([])),
@@ -32,14 +34,17 @@ export const openrouter: ProviderDialect = {
 	// OpenRouter serves both OpenAI-style and Anthropic models, so check for either's errors.
 	recognizeFailure: (report) => recognizeOpenAIFailure(report) ?? recognizeAnthropicFailure(report),
 	languageModel: (endpoint, modelId, fetch) =>
-		createOpenRouter({
-			apiKey: endpoint.apiKey ?? "",
-			baseURL: endpoint.baseUrl,
-			headers: endpoint.headers,
-			fetch,
-			// Include usage at the end of each stream; costs are recorded from it.
-			compatibility: "strict",
-		})(modelId),
+		wrapLanguageModel({
+			model: createOpenRouter({
+				apiKey: endpoint.apiKey ?? "",
+				baseURL: endpoint.baseUrl,
+				headers: endpoint.headers,
+				fetch,
+				// Include usage at the end of each stream; costs are recorded from it.
+				compatibility: "strict",
+			})(modelId),
+			middleware: toolImagesFromUser,
+		}),
 	cacheBreakpoint: (modelId) =>
 		modelId.startsWith(ANTHROPIC_MODELS)
 			? { openrouter: { cacheControl: { type: "ephemeral" } } }
