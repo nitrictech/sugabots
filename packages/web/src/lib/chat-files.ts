@@ -64,6 +64,11 @@ export function uploadChatFile({
 	});
 }
 
+/** Where a file attached to a message in the chat is served, shown in place or downloaded. */
+export function chatFileUrl(chatId: string, fileId: string): string {
+	return `${client.baseUrl}/chats/${encodeURIComponent(chatId)}/files/${encodeURIComponent(fileId)}`;
+}
+
 /**
  * Removes an upload that will not be sent, so it stops counting toward the
  * files a person can have waiting. Nothing waits on it, and a failure is left

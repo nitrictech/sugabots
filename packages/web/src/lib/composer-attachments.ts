@@ -1,7 +1,9 @@
 import {
 	attachmentNameSchema,
+	type FilePart,
 	MAX_ATTACHMENT_BYTES,
 	MAX_ATTACHMENTS_PER_MESSAGE,
+	type UploadedAttachment,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { Option, Schema } from "effect";
@@ -12,7 +14,8 @@ import { removeChatFile, UploadInterrupted, uploadChatFile } from "@/lib/chat-fi
 export type AttachmentUpload =
 	/** `progress` runs from 0 to 1. */
 	| { state: "uploading"; progress: number }
-	| { state: "uploaded"; fileId: string }
+	/** `attachment` is the file as the API kept it, which may not be as the browser said. */
+	| { state: "uploaded"; attachment: UploadedAttachment }
 	/**
 	 * Not uploaded, or no longer there to send, for `reason`. Only a
 	 * `retryable` failure can go differently when the same file is tried again.
@@ -51,7 +54,8 @@ export type ComposerAttachments = {
 
 /** The files taken to send with a message. */
 export type FilesForSending = {
-	fileIds: string[];
+	/** The files as the message will show them, which it can before the API answers. */
+	parts: FilePart[];
 	/**
 	 * Returns the files to the composer, in front of any attached since, when
 	 * the message failed with `sendFailure`. Files the API no longer had come
@@ -129,7 +133,7 @@ export function useComposerAttachments(chatId: string | undefined): ComposerAtta
 					return;
 				}
 				inFlight.current.delete(key);
-				setUpload(key, { state: "uploaded", fileId: uploaded.id });
+				setUpload(key, { state: "uploaded", attachment: uploaded });
 			},
 			(failure: unknown) => {
 				if (!stillWanted()) return;
@@ -160,7 +164,9 @@ export function useComposerAttachments(chatId: string | undefined): ComposerAtta
 		if (!item) return;
 		inFlight.current.get(key)?.abort();
 		inFlight.current.delete(key);
-		if (chatId && item.upload.state === "uploaded") removeChatFile(chatId, item.upload.fileId);
+		if (chatId && item.upload.state === "uploaded") {
+			removeChatFile(chatId, item.upload.attachment.id);
+		}
 		setLeftOut(0);
 		commit((items) => items.filter((candidate) => candidate.key !== key));
 	}
@@ -180,7 +186,9 @@ export function useComposerAttachments(chatId: string | undefined): ComposerAtta
 		commit(() => []);
 		let returned = false;
 		return {
-			fileIds,
+			parts: taken.flatMap(({ upload }): FilePart[] =>
+				upload.state === "uploaded" ? [{ type: "file", ...upload.attachment }] : [],
+			),
 			putBack: (sendFailure) => {
 				if (returned) return;
 				returned = true;
@@ -284,7 +292,7 @@ export function isFileGoneRefusal(failure: unknown): boolean {
 }
 
 function uploadedFileIds(items: readonly ComposerAttachment[]): string[] {
-	return items.flatMap(({ upload }) => (upload.state === "uploaded" ? [upload.fileId] : []));
+	return items.flatMap(({ upload }) => (upload.state === "uploaded" ? [upload.attachment.id] : []));
 }
 
 /** The API's messages leave off the full stop a sentence beside others needs. */

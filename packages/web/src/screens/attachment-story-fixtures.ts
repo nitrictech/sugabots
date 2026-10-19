@@ -31,13 +31,20 @@ function storyFile(name: string, type: string, content = "Story fixture"): File 
 }
 
 const pricingPage = storyFile("pricing-page-new.svg", "image/svg+xml", PRICING_PAGE_SVG);
-const done = (fileId: string): AttachmentUpload => ({ state: "uploaded", fileId });
+/** `file`, uploaded and kept by the API as `id`. */
+function uploaded(file: File, id: string): ComposerAttachment {
+	const contentType = file.type || "application/octet-stream";
+	return attached(file, {
+		state: "uploaded",
+		attachment: { id, name: file.name, contentType, size: file.size },
+	});
+}
 
 export const pricingPageUploading = attached(pricingPage, { state: "uploading", progress: 0.64 });
-export const pricingPageReady = attached(pricingPage, done("0199a3a0-0000-7000-8000-000000000a01"));
-export const acmeRequest = attached(
+export const pricingPageReady = uploaded(pricingPage, "0199a3a0-0000-7000-8000-000000000a01");
+export const acmeRequest = uploaded(
 	storyFile("acme-retail-request.pdf", "application/pdf"),
-	done("0199a3a0-0000-7000-8000-000000000a02"),
+	"0199a3a0-0000-7000-8000-000000000a02",
 );
 export const callRecordingTooLarge = attached(storyFile("sales-call-recording.mp4", "video/mp4"), {
 	state: "tooLarge",
@@ -56,19 +63,19 @@ export const brandGuideUploading = attached(storyFile("brand-guide.key", ""), {
 	state: "uploading",
 	progress: 0.12,
 });
-export const pipelineSheet = attached(
+export const pipelineSheet = uploaded(
 	storyFile("q4-pipeline.csv", "text/csv"),
-	done("0199a3a0-0000-7000-8000-000000000a03"),
+	"0199a3a0-0000-7000-8000-000000000a03",
 );
-export const signedOrderForm = attached(
+export const signedOrderForm = uploaded(
 	storyFile("northwind-labs-signed-order-form.pdf", "application/pdf"),
-	done("0199a3a0-0000-7000-8000-000000000a04"),
+	"0199a3a0-0000-7000-8000-000000000a04",
 );
 
 /** As many invoices as one message can carry. */
 export const invoicesAtLimit = Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) =>
-	attached(
+	uploaded(
 		storyFile(`invoice-${1041 + index}.pdf`, "application/pdf"),
-		done(`0199a3a0-0000-7000-8000-000000000b${String(index).padStart(2, "0")}`),
+		`0199a3a0-0000-7000-8000-000000000b${String(index).padStart(2, "0")}`,
 	),
 );

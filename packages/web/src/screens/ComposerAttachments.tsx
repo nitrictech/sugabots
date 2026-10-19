@@ -11,7 +11,9 @@ import {
 	useState,
 } from "react";
 import type { AttachmentUpload, ComposerAttachment } from "@/lib/composer-attachments.ts";
+import { extensionOf, type FileLook, fileLookOf } from "@/lib/file-looks.ts";
 import { listNames } from "@/lib/name-list.ts";
+import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
@@ -247,24 +249,6 @@ export function AttachmentChip({
 	);
 }
 
-type FileLook = "image" | "pdf" | "sheet" | "other";
-
-const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xls", "xlsx", "ods", "numbers"]);
-
-function fileLookOf(file: File): FileLook {
-	if (file.type.startsWith("image/")) return "image";
-	const extension = extensionOf(file.name);
-	if (file.type === "application/pdf" || extension === "pdf") return "pdf";
-	if (file.type === "text/csv" || SHEET_EXTENSIONS.has(extension)) return "sheet";
-	return "other";
-}
-
-/** The part of `name` after its last dot, lowercased, or "" when it has none. */
-function extensionOf(name: string): string {
-	const dot = name.lastIndexOf(".");
-	return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
-
 function uploadStatusOf(upload: AttachmentUpload): string | undefined {
 	switch (upload.state) {
 		case "uploading":
@@ -384,21 +368,6 @@ function UploadProgress({ name, fraction }: { name: string; fraction: number }) 
 		</span>
 	);
 }
-
-/** Shows `text` on one line, cutting from its middle when it is too long, so its end and extension stay. */
-function MiddleTruncated({ text, className }: { text: string; className: string }) {
-	const extensionLength = extensionOf(text).length;
-	const tailLength = Math.min(Math.ceil(text.length / 2), extensionLength + MIDDLE_TRUNCATION_KEPT);
-	return (
-		<span className={cn("flex min-w-0 whitespace-nowrap", className)}>
-			<span className="truncate">{text.slice(0, text.length - tailLength)}</span>
-			<span className="shrink-0">{text.slice(text.length - tailLength)}</span>
-		</span>
-	);
-}
-
-/** How many characters before the extension stay when a name is cut short. */
-const MIDDLE_TRUNCATION_KEPT = 3;
 
 /** Whether `element` is taller than it shows, following its size and `contentKey`. */
 function useOverflowsVertically(

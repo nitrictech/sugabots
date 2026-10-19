@@ -2,6 +2,7 @@ import {
 	type Chat,
 	type ChatList,
 	type ChatMessageItem,
+	type FilePart,
 	handleFromName,
 	type MessageReplyTo,
 	type NewMessage,
@@ -360,20 +361,26 @@ export function useChatHistory(chatId: string | undefined) {
 	};
 }
 
-/** A message to send, with the whole quote it answers, so it shows quoting it before the API answers. */
-type SentChatMessage = Omit<NewMessage, "replyTo"> & { replyTo?: MessageReplyTo };
+/**
+ * A message to send, with the whole quote it answers and the files it
+ * attaches, so it shows both before the API answers.
+ */
+export type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
+	replyTo?: MessageReplyTo;
+	files?: readonly FilePart[];
+};
 
 export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 	const queries = useQueryClient();
 	return useMutation({
-		mutationFn: async ({ replyTo, ...input }: SentChatMessage) => {
+		mutationFn: async ({ replyTo, files = [], ...message }: MessageToSend) => {
 			if (!chat) throw new NotReadyError();
-			return Effect.runPromise(
-				client.api.chats.send({
-					params: { chatId: chat.id },
-					payload: { ...input, replyTo: replyTo?.id },
-				}),
-			);
+			const payload: NewMessage = {
+				...message,
+				...(replyTo && { replyTo: replyTo.id }),
+				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
+			};
+			return Effect.runPromise(client.api.chats.send({ params: { chatId: chat.id }, payload }));
 		},
 		onMutate: async (input) => {
 			if (!chat) return;
@@ -393,7 +400,10 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 					},
 					kind: "text",
 					status: "complete",
-					parts: [{ type: "text", text: input.message }],
+					parts: [
+						...(input.message === "" ? [] : [{ type: "text" as const, text: input.message }]),
+						...(input.files ?? []),
+					],
 					content: input.message,
 					...(input.replyTo ? { replyTo: input.replyTo } : {}),
 					createdAt: timestampAfter(

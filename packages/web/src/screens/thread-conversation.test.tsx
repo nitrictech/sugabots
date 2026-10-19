@@ -101,6 +101,7 @@ function show(
 	const thread = (shown: Message[], participants = over.participants ?? [host]) => (
 		<QueryClientProvider client={queryClient}>
 			<ThreadConversation
+				fileUrlOf={(fileId) => `/files/${fileId}`}
 				messages={shown}
 				host={host}
 				isRunning={false}

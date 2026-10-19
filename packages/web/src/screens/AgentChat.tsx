@@ -24,6 +24,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
+import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	useChat,
 	useChatHistory,
@@ -221,7 +222,7 @@ export function AgentChat({
 				message,
 				peopleOnly: writingToPeople,
 				replyTo: answering,
-				...(files.fileIds.length > 0 && { attachments: files.fileIds }),
+				files: files.parts,
 			});
 			scrollToLatest();
 			await sent;
@@ -368,6 +369,7 @@ export function AgentChat({
 											onOpenThread={openThread}
 											onOpenArtifact={openArtifact}
 											onOpenDesktop={openDesktop}
+											fileUrlOf={(fileId) => chatFileUrl(chat.data.id, fileId)}
 											previews={!staged}
 											podId={pod.id}
 											approvalCapabilities={details.capabilities}
