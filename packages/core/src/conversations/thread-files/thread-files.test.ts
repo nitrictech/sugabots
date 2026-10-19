@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { ConfigProvider, Effect, Layer, Stream } from "effect";
+import { ConfigProvider, Duration, Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import { BlobDeletions } from "../../blob-store/deletions.ts";
@@ -46,7 +46,12 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 				.returning(),
 		);
 		if (!created) throw new Error("Could not create thread");
-		return { threadId: created.id, podId: owner.podId, agentId: owner.agentId };
+		return {
+			threadId: created.id,
+			podId: owner.podId,
+			agentId: owner.agentId,
+			userId: owner.userId,
+		};
 	}
 
 	/** A finished call to a tool in a turn of `agentId`'s in `threadId`. */
@@ -168,6 +173,136 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 				db.select().from(threadFile).where(eq(threadFile.threadId, threadId)),
 			),
 		).toEqual([]);
+	});
+
+	/** A message from `userId` in `threadId`, that files can be attached to. */
+	async function aMessage(threadId: string, userId: string) {
+		const [sent] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorUserId: userId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "",
+				})
+				.returning({ id: message.id }),
+		);
+		if (!sent) throw new Error("Could not create message");
+		return sent.id;
+	}
+
+	const attach = (fileId: string, messageId: string) =>
+		onDatabase((db) =>
+			db.update(threadFile).set({ messageId, position: 0 }).where(eq(threadFile.id, fileId)),
+		);
+
+	it("keeps an upload unreadable until it is attached to a message", async () => {
+		const { threadId, userId } = await aThread();
+		const uploaded = await files.upload({
+			threadId,
+			uploaderId: userId,
+			name: "notes.txt",
+			maxSize: 1024,
+			maxUnsent: 20,
+			content: text("draft"),
+		});
+
+		await expect(files.read({ threadId, fileId: uploaded.id })).rejects.toBeInstanceOf(
+			ThreadFiles.FileNotFound,
+		);
+
+		await attach(uploaded.id, await aMessage(threadId, userId));
+		const read = await files.read({ threadId, fileId: uploaded.id });
+
+		expect(uploaded).toEqual({
+			id: expect.any(String),
+			name: "notes.txt",
+			contentType: "text/plain; charset=utf-8",
+			size: 5,
+		});
+		expect(read).toMatchObject({ name: "notes.txt", size: 5 });
+		expect(await textOf(read.stream)).toBe("draft");
+	});
+
+	it("refuses an upload over its own limit, keeping nothing", async () => {
+		const { threadId, userId } = await aThread();
+
+		await expect(
+			files.upload({
+				threadId,
+				uploaderId: userId,
+				name: "big.bin",
+				maxSize: 4,
+				maxUnsent: 20,
+				content: text("too long"),
+			}),
+		).rejects.toEqual(new ThreadFiles.FileTooLarge({ maxSize: 4 }));
+		expect(
+			await onDatabase((db) =>
+				db.select().from(threadFile).where(eq(threadFile.threadId, threadId)),
+			),
+		).toEqual([]);
+	});
+
+	it("refuses an upload past its uploader's unsent ones, counting only those", async () => {
+		const { threadId, userId } = await aThread();
+		const other = await aRoutineOwner();
+		const upload = (uploaderId: string, name: string) =>
+			files.upload({
+				threadId,
+				uploaderId,
+				name,
+				maxSize: 1024,
+				maxUnsent: 2,
+				content: text(name),
+			});
+		const first = await upload(userId, "one.txt");
+		await upload(userId, "two.txt");
+
+		await expect(upload(userId, "three.txt")).rejects.toEqual(
+			new ThreadFiles.TooManyUnsentUploads({ maxUnsent: 2 }),
+		);
+		// Someone else's unsent uploads are theirs to count.
+		await expect(upload(other.userId, "theirs.txt")).resolves.toMatchObject({ name: "theirs.txt" });
+		// Sending one frees its place.
+		await attach(first.id, await aMessage(threadId, userId));
+		await expect(upload(userId, "three.txt")).resolves.toMatchObject({ name: "three.txt" });
+	});
+
+	it("removes uploads left unsent, with their blobs, and nothing else", async () => {
+		const { threadId, userId } = await aThread();
+		const upload = (name: string) =>
+			files.upload({
+				threadId,
+				uploaderId: userId,
+				name,
+				maxSize: 1024,
+				maxUnsent: 20,
+				content: text(name),
+			});
+		await upload("abandoned.txt");
+		const sent = await upload("sent.txt");
+		await attach(sent.id, await aMessage(threadId, userId));
+		const result = await files.write({ threadId, content: text("a tool's result") });
+		const blobsUnder = () =>
+			runOnPostgres(
+				Effect.flatMap(BlobStore.Service, (blobs) =>
+					blobs.list(BlobStore.key("threads", threadId)),
+				),
+			);
+
+		await files.removeUnsentUploads(Duration.zero);
+
+		const left = await onDatabase((db) =>
+			db.select({ id: threadFile.id }).from(threadFile).where(eq(threadFile.threadId, threadId)),
+		);
+		expect(left.map(({ id }) => id).sort()).toEqual([sent.id, result.id].sort());
+		expect((await blobsUnder()).map(({ key }) => key).sort()).toEqual(
+			[sent.id, result.id].map((id) => BlobStore.key("threads", threadId, "files", id)).sort(),
+		);
 	});
 
 	it("deletes a thread's blobs once a cascade has deleted the thread", async () => {

@@ -1,15 +1,22 @@
 export * as ThreadFiles from "./thread-files.ts";
 
-import { and, eq, isNotNull } from "drizzle-orm";
-import { Config, Context, Data, Effect, Layer, Option, Schema, Stream } from "effect";
+import { userText } from "@sugabots/errors";
+import { and, count, eq, isNotNull, lt, not, sql } from "drizzle-orm";
+import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { threadFile } from "../../database/schema.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
+import type { UserFacing } from "../../user-message.ts";
 
 /**
- * The only reader and writer of `thread_file`: files in a thread, which only
- * that thread's agents can read. A file goes when its thread does.
+ * The only reader and writer of `thread_file`: files in a thread, which its
+ * agents read, and people too when a chat serves them. A file goes when its
+ * thread does.
+ *
+ * A file is a tool's result, kept with `write`, or a person's upload, kept
+ * with `upload`. An upload stays unsent, and unreadable, until it is attached
+ * to a message; one never attached is removed by `removeUnsentUploads`.
  */
 export interface Interface {
 	/**
@@ -24,19 +31,39 @@ export interface Interface {
 		content: BlobStore.Content<E>;
 	}) => Effect.Effect<FileDescription, E | FileTooLarge | BlobStore.Failure>;
 	/**
+	 * Keeps `content` as a file `uploaderId` uploaded to the thread, unsent
+	 * until it is attached to a message. Fails as `write` does, with
+	 * `FileTooLarge` past `maxSize` bytes, and with `TooManyUnsentUploads`,
+	 * keeping nothing, when the uploader already has `maxUnsent` unsent
+	 * uploads in the thread. Uploads at the same moment may each pass that
+	 * check, so it bounds them only roughly.
+	 */
+	readonly upload: <E>(file: {
+		threadId: string;
+		uploaderId: string;
+		name: string;
+		maxSize: number;
+		maxUnsent: number;
+		content: BlobStore.Content<E>;
+	}) => Effect.Effect<Upload, E | FileTooLarge | TooManyUnsentUploads | BlobStore.Failure>;
+	/**
 	 * The file. Fails with `FileNotFound` when no file in the thread has that
-	 * id, including when `fileId` is not an id at all. The stream fails with
-	 * `FileNotFound` if the thread is deleted while it is read.
+	 * id, including when `fileId` is not an id at all, and for an unsent
+	 * upload. The stream fails with `FileNotFound` if the thread is deleted
+	 * while it is read.
 	 */
 	readonly read: (file: {
 		threadId: string;
 		fileId: string;
-	}) => Effect.Effect<
-		FileDescription & { stream: Stream.Stream<Uint8Array, FileNotFound | BlobStore.Failure> },
-		FileNotFound | BlobStore.Failure
-	>;
+	}) => Effect.Effect<StoredFile, FileNotFound | BlobStore.Failure>;
 	/** The files in the thread kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (threadId: string) => Effect.Effect<ReadonlyMap<string, string>>;
+	/**
+	 * Removes every upload still unsent `unsentFor` after it was uploaded, and
+	 * returns how many. A blob that cannot be removed is left to go with its
+	 * thread's folder.
+	 */
+	readonly removeUnsentUploads: (unsentFor: Duration.Duration) => Effect.Effect<number>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ThreadFiles") {}
@@ -46,31 +73,70 @@ export const make = Effect.gen(function* () {
 	const blobs = yield* BlobStore.Service;
 	const ids = yield* Ids.Service;
 	const maxFileBytes = yield* Config.option(maxFileBytesConfig);
+
+	/**
+	 * Keeps `content` as a new file in the thread, its row saying where it came
+	 * from. The blob first: a row is never without its blob. A row that then
+	 * fails to insert would leave a blob nothing reads, so it is removed; if
+	 * that fails too, it goes with the thread's folder.
+	 */
+	const keep = <E>(
+		threadId: string,
+		content: BlobStore.Content<E>,
+		source: FileSource,
+		maxSize = Number.POSITIVE_INFINITY,
+	) =>
+		Effect.gen(function* () {
+			const { contentType } = content;
+			const limit = Math.min(
+				maxSize,
+				Option.getOrElse(maxFileBytes, () => Number.POSITIVE_INFINITY),
+			);
+			const stream =
+				limit === Number.POSITIVE_INFINITY
+					? content.stream
+					: BlobStore.atMost(content.stream, limit);
+			const id = yield* ids.next;
+			const key = fileKey(threadId, id);
+			const { size } = yield* blobs.put(key, { stream, contentType }).pipe(
+				Effect.catchIf(
+					(error) => error instanceof BlobStore.TooLarge,
+					({ maxSize }) => new FileTooLarge({ maxSize }),
+				),
+			);
+			yield* query((db) =>
+				db.insert(threadFile).values({ id, threadId, contentType, size, ...source }),
+			).pipe(Effect.onError(() => blobs.delete(key).pipe(Effect.ignore)));
+			return { id, contentType, size };
+		});
+
 	return Service.of({
 		write: ({ threadId, toolCallId, content }) =>
+			operation("write", keep(threadId, content, { kind: "tool_result", toolCallId })),
+		upload: ({ threadId, uploaderId, name, maxSize, maxUnsent, content }) =>
 			operation(
-				"write",
+				"upload",
 				Effect.gen(function* () {
-					const { contentType } = content;
-					const stream = Option.match(maxFileBytes, {
-						onNone: () => content.stream,
-						onSome: (maxSize) => BlobStore.atMost(content.stream, maxSize),
-					});
-					const id = yield* ids.next;
-					const key = fileKey(threadId, id);
-					// The blob first: a row is never without its blob. A row that then
-					// fails to insert would leave a blob nothing reads, so it is removed;
-					// if that fails too, it goes with the thread's folder.
-					const { size } = yield* blobs.put(key, { stream, contentType }).pipe(
-						Effect.catchIf(
-							(error) => error instanceof BlobStore.TooLarge,
-							({ maxSize }) => new FileTooLarge({ maxSize }),
-						),
+					const [{ unsent } = { unsent: 0 }] = yield* query((db) =>
+						db
+							.select({ unsent: count() })
+							.from(threadFile)
+							.where(
+								and(
+									eq(threadFile.threadId, threadId),
+									eq(threadFile.uploaderId, uploaderId),
+									unsentUpload,
+								),
+							),
 					);
-					yield* query((db) =>
-						db.insert(threadFile).values({ id, threadId, toolCallId, contentType, size }),
-					).pipe(Effect.onError(() => blobs.delete(key).pipe(Effect.ignore)));
-					return { id, contentType, size };
+					if (unsent >= maxUnsent) return yield* new TooManyUnsentUploads({ maxUnsent });
+					const file = yield* keep(
+						threadId,
+						content,
+						{ kind: "upload", uploaderId, name },
+						maxSize,
+					);
+					return { ...file, name };
 				}),
 			),
 		read: ({ threadId, fileId }) =>
@@ -82,19 +148,25 @@ export const make = Effect.gen(function* () {
 					if (!isUuid(fileId)) return yield* new FileNotFound({ fileId });
 					const [file] = yield* query((db) =>
 						db
-							.select({ id: threadFile.id })
+							.select({ id: threadFile.id, name: threadFile.name })
 							.from(threadFile)
-							.where(and(eq(threadFile.id, fileId), eq(threadFile.threadId, threadId))),
+							.where(
+								and(
+									eq(threadFile.id, fileId),
+									eq(threadFile.threadId, threadId),
+									not(unsentUpload),
+								),
+							),
 					);
 					if (!file) return yield* new FileNotFound({ fileId });
-					// A row is never without its blob, as `write` puts the blob first.
+					// A row is never without its blob, as `keep` puts the blob first.
 					const stored = yield* blobs
 						.get(fileKey(threadId, file.id))
 						.pipe(Effect.catchTag("BlobNotFound", Effect.die));
 					const stream = stored.stream.pipe(
 						Stream.catchTag("BlobNotFound", () => Stream.fail(new FileNotFound({ fileId }))),
 					);
-					return { id: file.id, ...stored, stream };
+					return { id: file.id, name: file.name ?? undefined, ...stored, stream };
 				}),
 			),
 		resultFiles: (threadId) =>
@@ -110,6 +182,40 @@ export const make = Effect.gen(function* () {
 					return new Map(
 						rows.flatMap(({ id, toolCallId }) => (toolCallId ? [[toolCallId, id]] : [])),
 					);
+				}),
+			),
+		removeUnsentUploads: (unsentFor) =>
+			operation(
+				"removeUnsentUploads",
+				Effect.gen(function* () {
+					// Measured on the database's clock, which stamped `created_at`.
+					const removed = yield* query((db) =>
+						db
+							.delete(threadFile)
+							.where(
+								and(
+									unsentUpload,
+									lt(
+										threadFile.createdAt,
+										sql`now() - make_interval(secs => ${Duration.toSeconds(unsentFor)})`,
+									),
+								),
+							)
+							.returning({ id: threadFile.id, threadId: threadFile.threadId }),
+					);
+					yield* Effect.forEach(
+						removed,
+						({ id, threadId }) =>
+							blobs
+								.delete(fileKey(threadId, id))
+								.pipe(
+									Effect.catchCause((cause) =>
+										Effect.logWarning("Removing an unsent upload's blob failed", cause),
+									),
+								),
+						{ discard: true },
+					);
+					return removed.length;
 				}),
 			),
 	});
@@ -133,14 +239,69 @@ export interface FileDescription {
 	size: number;
 }
 
-export class FileNotFound extends Data.TaggedError("ThreadFileNotFound")<{
-	fileId: string;
-}> {}
+/** A file being read: its description, its name when it is an upload, and its bytes. */
+export interface StoredFile extends FileDescription {
+	/** An upload's name; a tool result has none. */
+	name: string | undefined;
+	stream: Stream.Stream<Uint8Array, FileNotFound | BlobStore.Failure>;
+}
 
-export class FileTooLarge extends Data.TaggedError("ThreadFileTooLarge")<{
-	/** The largest size kept, in bytes. */
-	maxSize: number;
-}> {}
+/** A file a person uploaded, with the name it had on their computer. */
+export interface Upload extends FileDescription {
+	name: string;
+}
+
+/** An upload not yet attached to a message, which only its uploader knows of. */
+const unsentUpload = sql`(${threadFile.kind} = 'upload' and ${threadFile.messageId} is null)`;
+
+/** Which kind of file a row is, with the columns that kind sets. */
+type FileSource =
+	| { kind: "tool_result"; toolCallId: string | undefined }
+	| { kind: "upload"; uploaderId: string; name: string };
+
+export class FileNotFound
+	extends Data.TaggedError("ThreadFileNotFound")<{
+		fileId: string;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`That file isn't there`;
+	}
+}
+
+export class TooManyUnsentUploads
+	extends Data.TaggedError("TooManyUnsentUploads")<{
+		/** How many unsent uploads one person may have in a thread. */
+		maxUnsent: number;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`You can have ${this.maxUnsent} files waiting to be sent at most. Send or remove some first`;
+	}
+}
+
+export class FileTooLarge
+	extends Data.TaggedError("ThreadFileTooLarge")<{
+		/** The largest size kept, in bytes. */
+		maxSize: number;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		const { amount, unit } = sizeForPeople(this.maxSize);
+		return userText`The file is larger than ${amount} ${unit}, the most that can be kept`;
+	}
+}
+
+/** `bytes` as people read a file's size, such as 30 MB or 512 KB. */
+function sizeForPeople(bytes: number): { amount: number; unit: "MB" | "KB" } {
+	const mebibytes = bytes / (1024 * 1024);
+	return mebibytes >= 1
+		? { amount: Math.floor(mebibytes), unit: "MB" }
+		: { amount: Math.max(1, Math.floor(bytes / 1024)), unit: "KB" };
+}
 
 /**
  * Under the thread's folder, `threads/<threadId>`, which the

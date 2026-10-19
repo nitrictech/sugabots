@@ -40,6 +40,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	messageId: "0199a3a0-0000-7000-8000-00000000000f",
 	// 👍, as a client puts it in the address.
 	emoji: "%F0%9F%91%8D",
+	fileId: "0199a3a0-0000-7000-8000-000000000010",
 };
 
 function fill(pattern: string): string {

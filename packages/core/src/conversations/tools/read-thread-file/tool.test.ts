@@ -19,6 +19,7 @@ async function read(
 				threadId === THREAD && fileId === FILE
 					? Effect.succeed({
 							id: FILE,
+							name: undefined,
 							contentType,
 							size: text.length,
 							stream: Stream.succeed(new TextEncoder().encode(text)),

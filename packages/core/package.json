@@ -38,11 +38,13 @@
 		"e2b": "2.52.0",
 		"effect": "catalog:",
 		"linkedom": "^0.18.13",
+		"mime-types": "^3.0.2",
 		"minisearch": "^7.2.0",
 		"turndown": "^7.2.4",
 		"undici": "7.29.1"
 	},
 	"devDependencies": {
+		"@types/mime-types": "^3.0.1",
 		"@types/pg": "catalog:",
 		"@types/turndown": "^5.0.6",
 		"pg": "^8.23.0"

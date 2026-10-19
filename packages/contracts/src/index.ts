@@ -6,6 +6,7 @@ export * from "./agents.ts";
 export * from "./api.ts";
 export * from "./appearance.ts";
 export * from "./artifacts.ts";
+export * from "./attachments.ts";
 export * from "./built-in-tools.ts";
 export * from "./chats.ts";
 export * from "./connections.ts";

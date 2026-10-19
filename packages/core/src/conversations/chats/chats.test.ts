@@ -1,6 +1,6 @@
 import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq, like } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Visibility } from "../../authorization/visibility.ts";
 import { EventBus } from "../../database/events/bus.ts";
@@ -32,6 +32,7 @@ import { conversationsForTests } from "../testing.ts";
 import { ThreadView } from "../thread-view.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
+import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
 
@@ -1461,6 +1462,29 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					{ threadId: childThreadId, unread: false },
 				]),
 			);
+		});
+	});
+
+	it("keeps an uploaded file as the type it was given, or else the type its name suggests", async () => {
+		const { id: chatId } = await chats.open({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
+		const upload = (name: string, type: string | undefined) =>
+			files.upload({ chatId, name, type, stream: Stream.succeed(new TextEncoder().encode("x")) });
+
+		// Browsers give no type for many text files, which bots must still read as text.
+		expect(await upload("notes.md", undefined)).toMatchObject({
+			contentType: "text/markdown; charset=utf-8",
+		});
+		expect(await upload("report.csv", "application/octet-stream")).toMatchObject({
+			contentType: "text/csv; charset=utf-8",
+		});
+		expect(await upload("chart", "image/png")).toMatchObject({ contentType: "image/png" });
+		expect(await upload("data", undefined)).toMatchObject({
+			contentType: "application/octet-stream",
 		});
 	});
 });
