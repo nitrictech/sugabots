@@ -11,7 +11,7 @@ import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
@@ -23,6 +23,7 @@ import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/netw
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
+import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -90,7 +91,6 @@ const prepared: PreparedTurn = {
 			model: "claude-sonnet-4-20250514",
 			prompt: "",
 			disabledTools: [],
-			interviewing: false,
 			usesSandbox: false,
 			acceptsImages: false,
 		},
@@ -346,6 +346,7 @@ describe("runSegment", () => {
 			SEARCH_HISTORY_TOOL,
 			READ_THREAD_FILE_TOOL,
 			...ROUTINE_TOOLS,
+			SAVE_INSTRUCTIONS_TOOL,
 			"collaborate",
 		]);
 		const approvals = received?.toolApproval as
@@ -750,7 +751,7 @@ function segmentWith(given: Given) {
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
-				unimplemented(AgentRepository.Service, {}),
+				unimplemented(AgentAdministration.Service, {}),
 				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
 				unimplemented(Artifacts.Authoring, {}),
 				unimplemented(BotRoutines.Service, given.routines ?? {}),

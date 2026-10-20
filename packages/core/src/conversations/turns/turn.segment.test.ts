@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { agent, message, toolCall, turn, user } from "../../database/schema.ts";
+import { agent, message, toolCall, turn, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
@@ -345,7 +345,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		]);
 	});
 
-	describe("a bot still on its interview", () => {
+	describe("saving its own instructions", () => {
 		beforeEach(async () => {
 			await onDatabase((db) =>
 				db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, hostId)),
@@ -362,8 +362,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			return row;
 		};
 
-		it("saves the instructions its creator agreed to in place of the interview", async () => {
-			const model = Models.fromStream((input) =>
+		const savingTheDraft = () =>
+			Models.fromStream((input) =>
 				Effect.sync(() =>
 					streamed(
 						(async function* () {
@@ -380,7 +380,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				),
 			);
 
-			await segmentWith(model);
+		it("saves the instructions the person it answers agreed to", async () => {
+			await segmentWith(savingTheDraft());
 
 			expect(await storedAgent()).toEqual({
 				prompt: "You triage support tickets.",
@@ -389,32 +390,20 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			expect(await storedReply()).toMatchObject({ content: 'Saved: {"saved":true}.' });
 		});
 
-		it("is not offered the tool when someone other than its creator asked", async () => {
-			const [someoneElse] = await onDatabase((db) =>
-				db
-					.insert(user)
-					.values({ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` })
-					.returning({ id: user.id }),
-			);
+		it("refuses a person who may not edit the bot", async () => {
 			await onDatabase((db) =>
-				db.update(agent).set({ createdById: someoneElse?.id }).where(eq(agent.id, hostId)),
-			);
-			const offered: string[][] = [];
-			const model = Models.fromStream((input) =>
-				Effect.sync(() => {
-					offered.push(Object.keys(input.tools ?? {}));
-					return streamed(
-						(async function* () {
-							yield "Happy to help.";
-						})(),
-					);
-				}),
+				db
+					.update(workspaceMember)
+					.set({ role: "viewer" })
+					.where(eq(workspaceMember.workspaceId, prepared.context.thread.workspaceId)),
 			);
 
-			await segmentWith(model);
+			await segmentWith(savingTheDraft());
 
-			expect(offered).toEqual([expect.not.arrayContaining([SAVE_INSTRUCTIONS_TOOL])]);
 			expect(await storedAgent()).toMatchObject({ prompt: INTERVIEW_PROMPT });
+			expect(await storedReply()).toMatchObject({
+				content: expect.stringContaining('"refused"'),
+			});
 		});
 	});
 });
