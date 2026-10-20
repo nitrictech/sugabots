@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { ChatMyDevice } from "./MyDeviceButton.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
 
 /** The list a page covers on a phone, which its Back returns to. */
@@ -78,6 +79,7 @@ export function ChatHeader({
 			) : (
 				<span className="flex-1" />
 			)}
+			<ChatMyDevice agent={agent} pod={pod} />
 			<ChatSandbox agent={agent} pod={pod} onOpen={onOpenDesktop} />
 			{place.kind === "away" ? (
 				place.trailing

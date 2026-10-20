@@ -1,5 +1,6 @@
 import Electrobun, { BrowserView, BrowserWindow, Tray, Utils } from "electrobun/main";
-import type { SetupRPC } from "../shared/rpc.ts";
+import type { ApprovalRPC, CommandRequest, SetupRPC } from "../shared/rpc.ts";
+import { connectDevice } from "./device.ts";
 import { findServer } from "./server.ts";
 import { loadServer, saveServer } from "./settings.ts";
 
@@ -8,6 +9,7 @@ const serverOverride = process.env.SUGABOTS_URL;
 
 let appWindow: BrowserWindow | undefined;
 let setupWindow: BrowserWindow | undefined;
+let device: { origin: string; disconnect: () => void } | undefined;
 
 /** The chosen server's window, or the picker when there is none yet. */
 async function openApp() {
@@ -22,6 +24,7 @@ async function openApp() {
 }
 
 function openServer(origin: string) {
+	connectTo(origin);
 	if (appWindow) {
 		appWindow.webview.loadURL(origin);
 	} else {
@@ -73,6 +76,63 @@ function openSetup() {
 		setupWindow = undefined;
 		quitWithoutTray();
 	});
+}
+
+/** Offers this computer's tools to the server at `origin`, and to no other. */
+function connectTo(origin: string) {
+	if (device?.origin === origin) return;
+	device?.disconnect();
+	device = { origin, ...connectDevice({ origin, approve: askToRun }) };
+}
+
+/** Asks the owner, in a window over the app's, whether a bot may run `request` here. */
+function askToRun(request: CommandRequest): Promise<boolean> {
+	return new Promise((resolve) => {
+		let answered = false;
+		const answer = (allow: boolean) => {
+			if (answered) return;
+			answered = true;
+			resolve(allow);
+		};
+		const approval: BrowserWindow = new BrowserWindow({
+			title: "Allow this command?",
+			url: "views://approve/index.html",
+			frame: centredOver(appWindow, APPROVAL_SIZE),
+			// A fixed-size window, as dialogs are, which window managers that tile also float.
+			styleMask: { Resizable: false, Miniaturizable: false },
+			rpc: BrowserView.defineRPC<ApprovalRPC>({
+				handlers: {
+					requests: {
+						command: () => request,
+						decide: ({ allow }) => {
+							answer(allow);
+							// After the reply is sent, since this closes the window it came from.
+							setTimeout(() => approval.close());
+						},
+					},
+				},
+			}),
+		});
+		approval.setAlwaysOnTop(true);
+		// Closing the window without answering is a no.
+		approval.on("close", () => answer(false));
+	});
+}
+
+const APPROVAL_SIZE = { width: 520, height: 340 };
+
+/** A frame of `size` centred over `parent`, or with no position for the window manager to choose. */
+function centredOver(
+	parent: BrowserWindow | undefined,
+	size: { width: number; height: number },
+): { x?: number; y?: number; width: number; height: number } {
+	if (!parent?.isVisible()) return size;
+	const frame = parent.getFrame();
+	return {
+		...size,
+		x: Math.round(frame.x + (frame.width - size.width) / 2),
+		y: Math.round(frame.y + (frame.height - size.height) / 2),
+	};
 }
 
 /** Without a tray there would be no way back to a closed app, so closing its last window quits it. */

@@ -13,6 +13,7 @@ import { UnsentUploads } from "@sugabots/core/conversations/thread-files/unsent-
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import { DeviceTools } from "@sugabots/core/conversations/tools/devices";
 import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
@@ -22,6 +23,7 @@ import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
+import { Devices } from "@sugabots/core/devices/devices";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
@@ -86,7 +88,8 @@ const OutsideSystems = Layer.mergeAll(
 	SandboxTools.layer,
 	DesktopViewer.layer,
 	ConnectionTools.layer,
-);
+	DeviceTools.layer,
+).pipe(Layer.provideMerge(Devices.layer));
 
 /** Accounts, members, pods, agents, their artifacts and the providers they use, and trying a model. */
 const WorkspacesAndProviders = Layer.mergeAll(

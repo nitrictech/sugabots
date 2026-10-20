@@ -19,6 +19,7 @@ import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { DeviceTools } from "../tools/devices.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
@@ -750,6 +751,7 @@ function segmentWith(given: Given) {
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
 				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),
 				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
+				Layer.succeed(DeviceTools.Service, DeviceTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),

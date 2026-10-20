@@ -1,0 +1,48 @@
+body {
+	display: block;
+	padding: 24px;
+}
+
+h1 {
+	margin: 0 0 16px;
+	font-size: 16px;
+	font-weight: 600;
+}
+
+pre {
+	margin: 0;
+	max-height: 160px;
+	overflow: auto;
+	padding: 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	font:
+		13px / 1.5 ui-monospace,
+		monospace;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.folder {
+	margin: 8px 0 20px;
+	color: var(--muted-foreground);
+	font-size: 13px;
+	word-break: break-all;
+}
+
+.actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+button.secondary {
+	background: var(--panel);
+	color: var(--foreground);
+	box-shadow: inset 0 0 0 1px var(--border);
+}
+
+button.secondary:hover {
+	background: var(--border);
+}

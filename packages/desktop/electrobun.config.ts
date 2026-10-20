@@ -17,10 +17,14 @@ export default {
 		},
 		views: {
 			setup: { entrypoint: "src/setup/index.ts" },
+			approve: { entrypoint: "src/approve/index.ts" },
 		},
 		copy: {
 			"src/setup/index.html": "views/setup/index.html",
 			"src/setup/index.css": "views/setup/index.css",
+			"src/approve/index.html": "views/approve/index.html",
+			"src/approve/index.css": "views/approve/index.css",
+			"src/shared/base.css": "views/assets/base.css",
 			"../avatars/assets/sugabots-logo.svg": "views/assets/sugabots-logo.svg",
 			"node_modules/@fontsource-variable/rubik/files/rubik-latin-wght-normal.woff2":
 				"views/assets/rubik.woff2",

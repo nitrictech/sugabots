@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Allow this command?</title>
+		<link rel="stylesheet" href="views://assets/base.css" />
+		<link rel="stylesheet" href="index.css" />
+		<script src="index.js" defer></script>
+	</head>
+	<body>
+		<main>
+			<h1>A bot wants to run a command on this computer</h1>
+			<pre id="command"></pre>
+			<p class="folder">in <span id="cwd"></span></p>
+			<div class="actions">
+				<button type="button" id="deny" class="secondary">Deny</button>
+				<button type="button" id="allow">Allow</button>
+			</div>
+		</main>
+	</body>
+</html>

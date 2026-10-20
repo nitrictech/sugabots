@@ -30,6 +30,7 @@ import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { DeviceTools } from "../tools/devices.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import {
 	callToolApproval,
@@ -83,6 +84,7 @@ type SegmentServices =
 	| BuiltInTools.Service
 	| SandboxTools.Service
 	| ConnectionTools.Service
+	| DeviceTools.Service
 	| EventBus.Service
 	| TurnExecution.Service
 	| TurnRepository.Service
@@ -389,6 +391,7 @@ const streamReply = (
 			const events = yield* EventBus.Service;
 			const builtInTools = yield* BuiltInTools.Service;
 			const connectionTools = yield* ConnectionTools.Service;
+			const deviceTools = yield* DeviceTools.Service;
 			const sandboxTools = yield* SandboxTools.Service;
 			const turns = yield* TurnRepository.Service;
 			const toolCalls = yield* ToolCallRepository.Service;
@@ -435,8 +438,8 @@ const streamReply = (
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
 			});
-			// The connections' sessions live as long as the turn.
-			const connections = yield* Effect.acquireRelease(
+			// The connections' and devices' sessions live as long as the turn.
+			const podConnections = yield* Effect.acquireRelease(
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
 					turnId: prepared.turnId,
 					agentId: prepared.context.agent.id,
@@ -445,6 +448,14 @@ const streamReply = (
 				}),
 				(opened) => Effect.promise(() => opened.close()),
 			);
+			const devices = yield* Effect.acquireRelease(
+				deviceTools.forThread(prepared.context.thread.id),
+				(opened) => Effect.promise(() => opened.close()),
+			);
+			const connections = {
+				...podConnections,
+				tools: { ...podConnections.tools, ...devices.tools },
+			};
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				if ("builtIn" in binding) {

@@ -19,3 +19,20 @@ export type SetupRPC = {
 	}>;
 	webview: RPCSchema;
 };
+
+/** A command a bot asked to run, waiting for the person's answer. */
+export interface CommandRequest {
+	readonly command: string;
+	readonly cwd: string;
+}
+
+/** Between an approval window and the main process. */
+export type ApprovalRPC = {
+	bun: RPCSchema<{
+		requests: {
+			command: { params: undefined; response: CommandRequest };
+			decide: { params: { allow: boolean }; response: undefined };
+		};
+	}>;
+	webview: RPCSchema;
+};

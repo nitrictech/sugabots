@@ -71,17 +71,28 @@ export async function connectServer(
 	fetch: EgressHttpClient,
 	timeoutMs = SERVER_TIMEOUT_MS,
 ): Promise<ServerSession> {
+	return connectOver(
+		{
+			type: "http",
+			url: target.url,
+			headers: target.headers,
+			authProvider: target.authProvider,
+			fetch,
+		},
+		timeoutMs,
+	);
+}
+
+/** Opens a session over a transport the caller made, such as a desktop app's socket. */
+export async function connectOver(
+	transport: Parameters<typeof createMCPClient>[0]["transport"],
+	timeoutMs = SERVER_TIMEOUT_MS,
+): Promise<ServerSession> {
 	const open = (protocolVersionDiscovery: boolean) =>
 		createMCPClient({
 			clientName: "sugabots",
 			version: VERSION,
-			transport: {
-				type: "http",
-				url: target.url,
-				headers: target.headers,
-				authProvider: target.authProvider,
-				fetch,
-			},
+			transport,
 			initializationOptions: { timeout: timeoutMs },
 			protocolVersionDiscovery,
 		});
