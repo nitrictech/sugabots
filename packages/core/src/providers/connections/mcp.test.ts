@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -10,6 +10,12 @@ import { listServerTools } from "./mcp.ts";
  * handshake runs: initialise, list, close. The server checks a header, which
  * is how a connection's secret reaches it.
  */
+
+async function text(request: IncomingMessage): Promise<string> {
+	let body = "";
+	for await (const chunk of request) body += chunk;
+	return body;
+}
 
 let http: Server;
 let url: string;
@@ -39,10 +45,23 @@ beforeAll(async () => {
 			response.writeHead(401).end("who are you");
 			return;
 		}
+		const raw = await text(request);
+		const body = raw ? JSON.parse(raw) : undefined;
+		// Like Parley: a server on an older protocol refusing the newest one's discovery outright.
+		if (request.url === "/older-mcp" && body?.method === "server/discover") {
+			response.writeHead(400, { "content-type": "application/json" }).end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: body.id,
+					error: { code: -32022, message: "Unsupported protocol version" },
+				}),
+			);
+			return;
+		}
 		// Stateless: a transport per request, which is all a tool listing needs.
 		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 		await fixtureServer().connect(transport);
-		await transport.handleRequest(request, response);
+		await transport.handleRequest(request, response, body);
 		response.on("close", () => void transport.close());
 	});
 	await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
@@ -69,6 +88,15 @@ describe("listing a server's tools", () => {
 			],
 		});
 		expect(seen).toContain("open-sesame");
+	});
+
+	it("falls back to the older handshake when a server refuses the newest protocol", async () => {
+		const found = await listServerTools(
+			{ url: url.replace(/\/mcp$/, "/older-mcp"), headers: { "x-fixture-key": "open-sesame" } },
+			fetch,
+		);
+
+		expect(found).toMatchObject({ ok: true, tools: [{ name: "lookup" }, { name: "wipe" }] });
 	});
 
 	it("reports a refused secret as a sentence", async () => {

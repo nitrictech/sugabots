@@ -62,23 +62,35 @@ export interface ServerSession {
 
 const SERVER_TIMEOUT_MS = 15_000;
 
+/** The JSON-RPC error a server answers with when it does not speak the protocol version asked for. */
+const UNSUPPORTED_PROTOCOL_VERSION = -32022;
+
 /** Opens a session; the caller closes it when the turn or the test is done. */
 export async function connectServer(
 	target: ServerTarget,
 	fetch: EgressHttpClient,
 	timeoutMs = SERVER_TIMEOUT_MS,
 ): Promise<ServerSession> {
-	const client = await createMCPClient({
-		clientName: "sugabots",
-		version: VERSION,
-		transport: {
-			type: "http",
-			url: target.url,
-			headers: target.headers,
-			authProvider: target.authProvider,
-			fetch,
-		},
-		initializationOptions: { timeout: timeoutMs },
+	const open = (protocolVersionDiscovery: boolean) =>
+		createMCPClient({
+			clientName: "sugabots",
+			version: VERSION,
+			transport: {
+				type: "http",
+				url: target.url,
+				headers: target.headers,
+				authProvider: target.authProvider,
+				fetch,
+			},
+			initializationOptions: { timeout: timeoutMs },
+			protocolVersionDiscovery,
+		});
+	// The SDK first asks for the newest protocol, and gives up when a server on an
+	// older one says so rather than ignoring the request. Such a server still
+	// answers the older handshake, which skipping discovery falls back to.
+	const client = await open(true).catch((cause) => {
+		if (!isServerError(cause) || cause.code !== UNSUPPORTED_PROTOCOL_VERSION) throw cause;
+		return open(false);
 	});
 	const runnable = new WeakMap<ServerListing, Record<string, Tool>>();
 	return {
@@ -165,6 +177,9 @@ function describe(cause: unknown, target: ServerTarget): UserText {
 		return userText`Nothing answers as an MCP server at that address. Check the path, which often ends in /mcp`;
 	}
 	if (status) return userText`The server answered with an error. Try again later (HTTP ${status})`;
+	if (isServerError(cause)) {
+		return userText`The server turned down the session. Try again later (MCP error ${cause.code})`;
+	}
 	return userText`The server could not be reached. Check the address and port, and that the server is running`;
 }
 
