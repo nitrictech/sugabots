@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { storyModel } from "@/story-app.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 
 const WORKSPACE = growthDesk.workspaceId;
@@ -125,6 +126,7 @@ const meta = preview.meta({
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
 				client.setQueryData(["connections", revenue.id], connections);
+				client.setQueryData(["models", WORKSPACE], { models: [storyModel] });
 				client.setQueryData(
 					["workspaces"],
 					[
@@ -163,6 +165,7 @@ const meta = preview.meta({
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
+		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
 		await expect(canvas.getByText("You")).toBeVisible();
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
