@@ -7,7 +7,7 @@ import type { ToolCallPart } from "@sugabots/contracts";
  *
  * What the bot says just before a call is narration ("Now let me get the
  * cycle:"). The thread leaves it out, where it would read as a sentence
- * pointing at nothing; the tool line stands for what it introduced.
+ * pointing at nothing; the tool line shows it over the calls it introduced.
  */
 
 /**

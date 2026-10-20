@@ -14,7 +14,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, CornerUpLeft, Reply } from "lucide-react";
-import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
+import { Fragment, type MouseEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
@@ -166,6 +166,7 @@ export function ThreadConversation({
 	const lastReplyTyping =
 		lastMessage !== undefined && lastMessage.author.kind === "agent" && isTyping(lastMessage);
 	const looks = useConnectionLooks(podId);
+	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
 		<div className="flex flex-col">
@@ -191,6 +192,7 @@ export function ThreadConversation({
 								startsGroup={divider || startsGroup(previous, message)}
 								participants={participants}
 								looks={looks}
+								fileNames={fileNames}
 								podId={podId}
 								approvalCapabilities={approvalCapabilities}
 								compact={compact}
@@ -311,6 +313,17 @@ function waitingOn(message: Message): string | undefined {
 	return last?.type === "collaboration" ? last.agentName : undefined;
 }
 
+/** The names of the files attached in the thread, by id. */
+function fileNamesIn(messages: readonly Message[]): ReadonlyMap<string, string> {
+	return new Map(
+		messages.flatMap((message) =>
+			message.parts.flatMap((part) =>
+				part.type === "file" ? [[part.id, part.name] as const] : [],
+			),
+		),
+	);
+}
+
 /** Whether a person was asked to allow the call, rather than policy allowing it on its own. */
 function wasPutToSomeone(call: ToolCallPart): boolean {
 	const status = call.approval?.status;
@@ -388,6 +401,7 @@ function MessageRow({
 	startsGroup,
 	participants,
 	looks,
+	fileNames,
 	podId,
 	approvalCapabilities,
 	compact,
@@ -412,6 +426,8 @@ function MessageRow({
 	startsGroup: boolean;
 	participants: ThreadParticipant[];
 	looks: ReturnType<typeof useConnectionLooks>;
+	/** The thread's files by id, for the tool line's calls that read them. */
+	fileNames: ReadonlyMap<string, string>;
 	podId: string;
 	approvalCapabilities: ApprovalCapabilities | undefined;
 	compact: boolean;
@@ -522,7 +538,7 @@ function MessageRow({
 						</span>
 					</div>
 				)}
-				{agent && <ToolLine calls={calls} looks={looks} />}
+				{agent && <ToolLine parts={message.parts} looks={looks} fileNames={fileNames} />}
 				{segments.map((segment) => {
 					if (segment.type === "collaboration") {
 						const recipient = participants.find(
