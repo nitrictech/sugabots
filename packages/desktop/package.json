@@ -5,7 +5,7 @@
 	"license": "MIT",
 	"type": "module",
 	"scripts": {
-		"dev": "electrobun prepare && electrobun dev --watch",
+		"start": "electrobun prepare && electrobun dev --watch",
 		"typecheck": "electrobun prepare && tsc --noEmit",
 		"package": "electrobun prepare && electrobun build --env=stable"
 	},

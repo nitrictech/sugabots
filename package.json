@@ -29,7 +29,7 @@
 		"build": "bun run --filter '*' build",
 		"start:api": "bun run --cwd packages/server start",
 		"dev": "portless",
-		"dev:desktop": "bun run --cwd packages/desktop dev",
+		"dev:desktop": "bun run --cwd packages/desktop start",
 		"storybook": "bun run --cwd packages/web storybook",
 		"build:storybook": "bun run --cwd packages/web build:storybook",
 		"test:storybook": "bun run --cwd packages/web test:storybook",

@@ -11,7 +11,7 @@ With `bun run dev` running, start it from the repository root with
 `bun run dev:desktop`, or from this directory:
 
 ```sh
-bun run dev       # build, launch, and rebuild on change
+bun run start     # build, launch, and rebuild on change
 bun run package   # stable build for this OS, into artifacts/
 ```
 

@@ -9,6 +9,18 @@ const serverOverride = process.env.SUGABOTS_URL;
 let appWindow: BrowserWindow | undefined;
 let setupWindow: BrowserWindow | undefined;
 
+/** The chosen server's window, or the picker when there is none yet. */
+async function openApp() {
+	if (appWindow) {
+		appWindow.show();
+		appWindow.activate();
+		return;
+	}
+	const server = serverOverride ?? (await loadServer());
+	if (server) openServer(server);
+	else openSetup();
+}
+
 function openServer(origin: string) {
 	if (appWindow) {
 		appWindow.webview.loadURL(origin);
@@ -23,9 +35,9 @@ function openServer(origin: string) {
 		});
 		appWindow.on("close", () => {
 			appWindow = undefined;
+			quitWithoutTray();
 		});
 	}
-	// Closed after the app window exists, so the app never has no window and quits.
 	setupWindow?.close();
 }
 
@@ -59,20 +71,28 @@ function openSetup() {
 	});
 	setupWindow.on("close", () => {
 		setupWindow = undefined;
+		quitWithoutTray();
 	});
+}
+
+/** Without a tray there would be no way back to a closed app, so closing its last window quits it. */
+function quitWithoutTray() {
+	if (tray.id === 0 && !appWindow && !setupWindow) Utils.quit();
 }
 
 const tray = new Tray({ image: "views://assets/sugabots-logo.svg", template: false });
 // Tray leaves its id at 0 when the desktop has no tray (GNOME without the
 // AppIndicator extension, or Windows until there is an .ico).
-if (tray.id === 0) console.warn("No system tray; Change server is unavailable.");
+if (tray.id === 0) console.warn("No system tray; closing the window quits Sugabots.");
 tray.setMenu([
+	{ type: "normal", label: "Open Sugabots", action: "open" },
 	{ type: "normal", label: "Change server…", action: "change-server" },
 	{ type: "divider" },
 	{ type: "normal", label: "Quit Sugabots", action: "quit" },
 ]);
 tray.on("tray-clicked", (event) => {
 	const { action } = (event as { data: { action: string } }).data;
+	if (action === "open") openApp();
 	if (action === "change-server") openSetup();
 	if (action === "quit") Utils.quit();
 });
@@ -84,6 +104,4 @@ Electrobun.events.on("new-window-open", (event: { data: { detail: unknown } }) =
 	Utils.openExternal(url);
 });
 
-const server = serverOverride ?? (await loadServer());
-if (server) openServer(server);
-else openSetup();
+await openApp();

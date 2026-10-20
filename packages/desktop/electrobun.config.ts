@@ -6,6 +6,10 @@ export default {
 		identifier: "io.nitric.sugabots.desktop",
 		version: "0.0.0-dev",
 	},
+	runtime: {
+		// The app stays in the tray when its windows close; the tray's Quit ends it.
+		exitOnLastWindowClosed: false,
+	},
 	build: {
 		mainProcess: "bun",
 		bun: {
