@@ -232,11 +232,10 @@ export class ProviderRateLimited
 		return describe(this.cause);
 	}
 	get userMessage() {
-		const minutes = this.retryAfter && Math.ceil(Duration.toMinutes(this.retryAfter));
-		if (!minutes) {
+		if (!this.retryAfter) {
 			return userText`${this.provider} is limiting how often this workspace can ask it. Try again shortly.`;
 		}
-		return userText`${this.provider} is limiting how often this workspace can ask it. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+		return userText`${this.provider} is limiting how often this workspace can ask it. Try again in ${describeWait(this.retryAfter)}.`;
 	}
 }
 
@@ -467,6 +466,14 @@ function classifyStatus(
 	if (status === 503 || recognized === "overloaded") return new ProviderOverloaded(fields);
 	if (status === 408 || status >= 500) return new ProviderServerError(fields);
 	return new ProviderRejectedRequest(fields);
+}
+
+/** A wait as people read it, rounded up: "10 seconds", "1 minute", "2 minutes". */
+function describeWait(wait: Duration.Duration): UserText {
+	const seconds = Math.ceil(Duration.toSeconds(wait));
+	if (seconds < 60) return seconds === 1 ? userText`1 second` : userText`${seconds} seconds`;
+	const minutes = Math.ceil(seconds / 60);
+	return minutes === 1 ? userText`1 minute` : userText`${minutes} minutes`;
 }
 
 /** How long a 429 asks to be left: `retry-after-ms`, which OpenAI sends, or `retry-after` in seconds. */

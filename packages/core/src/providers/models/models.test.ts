@@ -46,6 +46,7 @@ vi.mock("ai", async (importOriginal) => {
 		TypeValidationError: ai.TypeValidationError,
 		stepCountIs: vi.fn(),
 		streamText: sdk.streamText,
+		wrapLanguageModel: ({ model }: { model: unknown }) => model,
 	};
 });
 
@@ -556,6 +557,12 @@ describe("a failed model request", () => {
 			userMessage:
 				"OpenRouter is limiting how often this workspace can ask it. Try again in 2 minutes.",
 		});
+	});
+
+	it("says a wait under a minute in seconds", () => {
+		expect(classify(answered(429, {}, { "retry-after": "10" })).userMessage).toBe(
+			"OpenRouter is limiting how often this workspace can ask it. Try again in 10 seconds.",
+		);
 	});
 
 	it.each([
