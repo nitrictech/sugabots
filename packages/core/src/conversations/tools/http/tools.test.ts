@@ -82,7 +82,9 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 
 async function toolsFor(connection: ConnectionTarget) {
 	const offered = ConnectionTools.from({
-		connections: { targetsForPod: () => Effect.succeed([connection]) },
+		connections: {
+			targetsForPod: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
+		},
 		httpClients: clients,
 	});
 	return (await run(offered.forPod("w", "p", NO_TURN))).tools;

@@ -25,6 +25,7 @@ const wiki: TestConnection = {
 	kind: "mcp",
 	auth: "header",
 	signedIn: true,
+	signInExpired: false,
 	secretHeader: "authorization",
 	hasSecret: false,
 	appSettingsUrl: null,

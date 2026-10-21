@@ -159,14 +159,14 @@ function ConnectionCard({
 			>
 				{(connection.auth === "oauth" || !isServer) && (
 					<SettingsRow
-						label={isServer ? "Signed in as" : "Installed by"}
-						sub={
-							connection.signedIn
-								? undefined
+						label={
+							connection.signInExpired
+								? "Sign-in expired"
 								: isServer
-									? `Bots can't use ${connection.name} until someone signs in.`
-									: "Bots can't use GitHub until the pod's app is installed on the account it works on."
+									? "Signed in as"
+									: "Installed by"
 						}
+						sub={accountRowNote(connection)}
 						trailing={
 							connection.signedIn ? (
 								<span className="flex min-w-0 items-center gap-3">
@@ -188,7 +188,7 @@ function ConnectionCard({
 								canManage &&
 								(isServer ? (
 									<SettingsRowButton disabled={actions.signIn.isPending} onClick={signIn}>
-										Sign in
+										{connection.signInExpired ? "Sign in again" : "Sign in"}
 									</SettingsRowButton>
 								) : (
 									<SettingsRowButton disabled={installApp.isPending} onClick={install}>
@@ -359,6 +359,18 @@ function SignedInPerson({ name }: { name: string | null }) {
 }
 
 /** What changing a header connection's secret is called: adding one, or replacing the one it has. */
+/** Why bots can't use the connection yet, while it has no account to work through. */
+function accountRowNote(connection: Connection): string | undefined {
+	if (connection.signedIn) return undefined;
+	if (connection.kind === "github") {
+		return "Bots can't use GitHub until the pod's app is installed on the account it works on.";
+	}
+	if (connection.signInExpired) {
+		return `${connection.name} refused the last sign-in. Bots can't use it until someone signs in again.`;
+	}
+	return `Bots can't use ${connection.name} until someone signs in.`;
+}
+
 function secretActionLabel(connection: Connection): string {
 	if (connection.secretHeader === null) return "Add access token";
 	return connection.hasSecret ? "Replace secret" : "Add secret";

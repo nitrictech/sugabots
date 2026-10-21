@@ -77,6 +77,7 @@ function connection(
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: "Authorization",
 		hasSecret: true,
 		appSettingsUrl: null,

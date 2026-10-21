@@ -11,7 +11,7 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
 import { type ConnectionRow, connection, user } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { isSignedIn, toolsOf } from "./connection-repository.ts";
+import { isSignedIn, signInExpired, toolsOf } from "./connection-repository.ts";
 import * as GitHub from "./github/github.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
@@ -98,6 +98,7 @@ function toConnection(
 			url: row.url,
 			auth: row.authKind,
 			signedIn: isSignedIn(row, cipher),
+			signInExpired: signInExpired(row, cipher),
 			secretHeader: row.secretHeader,
 			hasSecret: row.secretEncrypted !== null,
 			appSettingsUrl: row.settings ? GitHub.appSettingsUrl(row.settings) : null,

@@ -10,6 +10,7 @@ import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
 import { connectServer } from "../../providers/connections/mcp.ts";
+import { SignInRequired } from "../../providers/connections/oauth.ts";
 import { ConnectionTools } from "./connections.ts";
 
 /**
@@ -92,7 +93,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 
 function toolsFor(...targets: ConnectionTarget[]) {
 	const offered = ConnectionTools.from({
-		connections: { targetsForPod: () => Effect.succeed(targets) },
+		connections: { targetsForPod: () => Effect.succeed({ targets, signInExpired: [] }) },
 		httpClients: { for: () => fetch },
 	});
 	return offered;
@@ -186,7 +187,9 @@ describe("a turn's connection tools", () => {
 			toolAccess: {},
 		});
 		const offered = ConnectionTools.from({
-			connections: { targetsForPod: () => Effect.succeed([linear, target()]) },
+			connections: {
+				targetsForPod: () => Effect.succeed({ targets: [linear, target()], signInExpired: [] }),
+			},
 			httpClients: { for: () => fetch },
 			// Linear's address, answered by the fixture server.
 			connect: (server, client) => connectServer({ ...server, url }, client),
@@ -210,6 +213,37 @@ describe("a turn's connection tools", () => {
 			expect(set.tools.linear__upload_file?.description).toContain(
 				"linear__prepare_attachment_upload",
 			);
+		} finally {
+			await set.close();
+		}
+	});
+
+	it("names a connection whose sign-in was refused apart from one that will not answer", async () => {
+		const linear = target({
+			connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
+			handle: "linear",
+			url: "https://mcp.linear.app/mcp",
+			auth: "oauth",
+		});
+		const offered = ConnectionTools.from({
+			connections: {
+				targetsForPod: () =>
+					Effect.succeed({
+						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
+						signInExpired: ["notion"],
+					}),
+			},
+			httpClients: { for: () => fetch },
+			connect: (server, client) =>
+				server.url === linear.url
+					? Promise.reject(new SignInRequired())
+					: connectServer(server, client),
+		});
+
+		const set = await run(offered.forPod("w", "p", NO_TURN));
+		try {
+			expect(set.signInExpired).toEqual(["notion", "linear"]);
+			expect(set.unavailable).toEqual(["locked"]);
 		} finally {
 			await set.close();
 		}
@@ -286,7 +320,7 @@ describe("a turn's connection tools", () => {
 		it("asks again once the connection has been edited", async () => {
 			const targets = [target()];
 			const offered = ConnectionTools.from({
-				connections: { targetsForPod: () => Effect.succeed(targets) },
+				connections: { targetsForPod: () => Effect.succeed({ targets, signInExpired: [] }) },
 				httpClients: { for: () => fetch },
 			});
 			await run(turnOn(offered));
