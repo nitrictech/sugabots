@@ -52,16 +52,6 @@ export interface Interface {
 		agentId: string,
 	) => Effect.Effect<void, SystemAgentImmutable>;
 	/**
-	 * Replaces the agent's prompt and description with what its interview
-	 * settled on, if its prompt is still `INTERVIEW_PROMPT`. False when it is
-	 * not, so a prompt somebody wrote in the meantime is never overwritten.
-	 */
-	readonly finishInterview: (
-		workspaceId: string,
-		agentId: string,
-		settled: { prompt: string; description: string },
-	) => Effect.Effect<boolean>;
-	/**
 	 * The Personal pod's Personal Assistant, placed there on `model`, or with
 	 * no model, if it is missing. It starts with `INTERVIEW_PROMPT`. One already there is returned exactly as its
 	 * owner left it.
@@ -224,24 +214,6 @@ export const make = Effect.gen(function* () {
 					}
 					return crew;
 				}),
-			),
-
-		finishInterview: (workspaceId, agentId, { prompt, description }) =>
-			operation(
-				"finishInterview",
-				query((db) =>
-					db
-						.update(agent)
-						.set({ prompt, description })
-						.where(
-							and(
-								eq(agent.id, agentId),
-								eq(agent.workspaceId, workspaceId),
-								eq(agent.prompt, INTERVIEW_PROMPT),
-							),
-						)
-						.returning({ id: agent.id }),
-				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
 		remove: (workspaceId, agentId) =>

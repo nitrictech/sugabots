@@ -3,6 +3,7 @@ export * as Conversations from "./conversations.ts";
 import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
+import { AgentAdministration } from "../workspaces/agents/agent-administration.ts";
 import { ChatFiles } from "./chats/chat-files.ts";
 import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
@@ -38,6 +39,8 @@ const services = Layer.mergeAll(
 	Routines.webhooksLayer,
 	// The turn's steps read it from here, for the routine tools.
 	BotRoutines.layer,
+	// The turn's steps read it from here, for save_instructions.
+	AgentAdministration.layer,
 	RoutineRunner.layer,
 	Summaries.layer,
 	Compactions.layer,

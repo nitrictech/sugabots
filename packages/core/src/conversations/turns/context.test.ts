@@ -467,7 +467,6 @@ function context(): TurnContext {
 			model: "claude-sonnet-4-20250514",
 			prompt: "Check facts carefully.",
 			disabledTools: [],
-			interviewing: false,
 			usesSandbox: false,
 			acceptsImages: false,
 		},

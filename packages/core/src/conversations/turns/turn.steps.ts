@@ -21,7 +21,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
@@ -90,7 +90,7 @@ type SegmentServices =
 	| Collaborations.Service
 	| Artifacts.Authoring
 	| ApprovedToolCalls.Service
-	| AgentRepository.Service
+	| AgentAdministration.Service
 	| ThreadFiles.Service
 	| BotRoutines.Service
 	| Ids.Service;
@@ -395,7 +395,7 @@ const streamReply = (
 			const collaborations = yield* Collaborations.Service;
 			const artifacts = yield* Artifacts.Authoring;
 			const approvals = yield* ApprovedToolCalls.Service;
-			const agents = yield* AgentRepository.Service;
+			const agents = yield* AgentAdministration.Service;
 			const files = yield* ThreadFiles.Service;
 			const routines = yield* BotRoutines.Service;
 			const signal = yield* Effect.abortSignal;
