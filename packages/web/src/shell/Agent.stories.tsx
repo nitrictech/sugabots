@@ -38,7 +38,7 @@ export const Palette = meta.story({
 		</div>
 	),
 	play: async ({ canvasElement }) => {
-		const faces = canvasElement.querySelectorAll('svg > circle[r="20"]');
+		const faces = canvasElement.querySelectorAll('svg > g[fill] > circle[r="20"]');
 		await expect(faces).toHaveLength(agentColors.length * agentFaces.length);
 	},
 });
