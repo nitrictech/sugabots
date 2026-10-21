@@ -125,6 +125,11 @@ export const connectionSchema = Schema.Struct({
 	auth: connectionAuthSchema,
 	/** For `oauth`, whether the sign-in has been completed and tokens are held. Always true for `header`. */
 	signedIn: Schema.Boolean,
+	/**
+	 * For `oauth`, whether a turn found the sign-in refused, so it is not
+	 * signed in until someone signs in again. Always false for `header`.
+	 */
+	signInExpired: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
 	status: providerStatusSchema,

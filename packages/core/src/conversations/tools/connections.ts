@@ -16,7 +16,7 @@ import {
 	type ServerListing,
 	type ServerSession,
 } from "../../providers/connections/mcp.ts";
-import type { OAuthProviders } from "../../providers/connections/oauth.ts";
+import { needsSignIn, type OAuthProviders } from "../../providers/connections/oauth.ts";
 import { toolAccessOf } from "../../providers/connections/tool-access.ts";
 import {
 	Egress,
@@ -38,7 +38,9 @@ import {
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
- * has, and the connection's own test is where the owner learns why.
+ * has, and the connection's own test is where the owner learns why. One whose
+ * sign-in was refused is left out too, but named apart, since it stays out of
+ * every turn until a person signs in again.
  */
 
 export interface OfferedTool {
@@ -60,6 +62,8 @@ export interface ConnectionToolSet {
 	tools: Record<string, OfferedTool>;
 	/** Connections left out because their server couldn't be listed. */
 	unavailable: string[];
+	/** Connections left out until someone signs in again, by handle. */
+	signInExpired: string[];
 	/** What each connection's server says about using its tools, by handle. */
 	instructions: Record<string, string>;
 	/** Ends every session behind these tools. */
@@ -133,8 +137,8 @@ export function from({
 	return {
 		forPod: (workspaceId, podId) =>
 			Effect.gen(function* () {
-				const targets = yield* connections.targetsForPod(workspaceId, podId);
-				if (targets.length === 0) return nothingOffered;
+				const { targets, signInExpired } = yield* connections.targetsForPod(workspaceId, podId);
+				if (targets.length === 0) return { ...nothingOffered, signInExpired };
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const now = yield* Clock.currentTimeMillis;
 				const sessions = new Map<string, Promise<ServerSession>>();
@@ -192,30 +196,39 @@ export function from({
 					targets,
 					(target) =>
 						Effect.tryPromise(() => loadListing(target)).pipe(
-							Effect.catch((failure) =>
-								Effect.as(
+							Effect.catch((failure): Effect.Effect<ListingOutcome> => {
+								if (needsSignIn(failure.cause)) {
+									return Effect.as(
+										Effect.logWarning(
+											`Connection ${target.handle} left out of the turn until someone signs in again`,
+										),
+										"sign_in_expired" as const,
+									);
+								}
+								return Effect.as(
 									Effect.logError(
 										`Connection ${target.handle} left out of the turn`,
 										failure.cause,
 									),
-									undefined,
-								),
-							),
+									"unavailable" as const,
+								);
+							}),
 						),
 					{ concurrency: "unbounded" },
 				);
 				const listed = targets.flatMap((target, index) => {
 					const listing = listings[index];
-					return listing ? [{ target, listing }] : [];
+					return typeof listing === "object" ? [{ target, listing }] : [];
 				});
+				const leftOut = (outcome: ListingOutcome) =>
+					targets.filter((_, index) => listings[index] === outcome).map((target) => target.handle);
 				return {
 					tools: Object.assign(
 						{},
 						...listed.map(({ target, listing }) => buildOfferedTools(target, listing, openSession)),
 					),
-					unavailable: targets
-						.filter((_, index) => listings[index] === undefined)
-						.map((target) => target.handle),
+					unavailable: leftOut("unavailable"),
+					signInExpired: [...signInExpired, ...leftOut("sign_in_expired")],
 					instructions: Object.fromEntries(
 						listed.flatMap(({ target, listing }) =>
 							listing.instructions ? [[target.handle, listing.instructions]] : [],
@@ -230,6 +243,9 @@ export function from({
 			}),
 	};
 }
+
+/** What asking a connection's server for its tools came to. */
+type ListingOutcome = ServerListing | "unavailable" | "sign_in_expired";
 
 function buildOfferedTools(
 	target: ConnectionTarget,
@@ -260,6 +276,7 @@ function buildOfferedTools(
 const nothingOffered: ConnectionToolSet = {
 	tools: {},
 	unavailable: [],
+	signInExpired: [],
 	instructions: {},
 	close: async () => undefined,
 };

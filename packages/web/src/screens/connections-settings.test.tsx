@@ -24,6 +24,7 @@ const wiki: TestConnection = {
 	url: "https://wiki.wikimple.com/mcp",
 	auth: "header",
 	signedIn: true,
+	signInExpired: false,
 	secretHeader: "authorization",
 	hasSecret: false,
 	status: "connected",

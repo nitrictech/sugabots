@@ -517,6 +517,7 @@ const streamReply = (
 				toolCatalog: toolCatalogNote({
 					catalog,
 					unavailable: connections.unavailable,
+					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 				}),
 				sandbox: sandbox.note,

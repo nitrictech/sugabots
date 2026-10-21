@@ -11,7 +11,7 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
 import { type ConnectionRow, connection, user } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { isSignedIn } from "./connection-repository.ts";
+import { isSignedIn, signInExpired } from "./connection-repository.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
 /** A tool as the server described it, less its description. */
@@ -91,6 +91,7 @@ function toConnection(
 			url: row.url,
 			auth: row.authKind,
 			signedIn: isSignedIn(row, cipher),
+			signInExpired: signInExpired(row, cipher),
 			secretHeader: row.secretHeader,
 			hasSecret: row.secretEncrypted !== null,
 			status: configurationStatus({

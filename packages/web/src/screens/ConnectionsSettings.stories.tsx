@@ -38,6 +38,7 @@ function connection(
 		podId: revenue.id,
 		auth: "header",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: "Authorization",
 		hasSecret: true,
 		status: "connected",
@@ -128,6 +129,16 @@ const connections: TestConnection[] = [
 		tools: [],
 		lastTestedAt: null,
 	}),
+	connection(6, {
+		name: "Asana",
+		handle: "asana",
+		url: "https://mcp.asana.com/sse",
+		auth: "oauth",
+		signedIn: false,
+		signInExpired: true,
+		secretHeader: null,
+		hasSecret: false,
+	}),
 ];
 
 const meta = preview.meta({
@@ -142,8 +153,8 @@ const meta = preview.meta({
 
 /**
  * Each connection with what its tools are set to, one set tool by tool with no
- * one setting chosen, the one that failed its check, and the one waiting on a
- * sign-in.
+ * one setting chosen, the one that failed its check, the one waiting on a
+ * sign-in, and the one whose sign-in expired.
  */
 export const States = meta.story({
 	play: async ({ canvas }) => {
@@ -177,6 +188,9 @@ export const States = meta.story({
 				name: "Sign in",
 			}),
 		).toBeInTheDocument();
+		const asana = canvas.getByRole("article", { name: "Asana" });
+		await expect(within(asana).getByText(/^Sign-in expired/)).toBeInTheDocument();
+		await expect(within(asana).getByRole("button", { name: "Sign in again" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
 	},
 });

@@ -131,22 +131,35 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		const wiki = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		const tracker = await create({ name: "Tracker", url: "https://tracker.example.com/mcp" });
 		await create({ name: "Linear", url: "https://mcp.linear.app/mcp", auth: "oauth" });
+		const notion = await create({
+			name: "Notion",
+			url: "https://mcp.notion.com/mcp",
+			auth: "oauth",
+		});
+		await connections.saveOauthRecord(workspaceId, notion.id, {
+			clientInformation: { client_id: "client-1" },
+			signInRejectedAt: "2026-10-05T21:00:08.000Z",
+		});
 		await listTools(wiki.id, [lookup, edit]);
 		await connections.update(workspaceId, podId, wiki.id, { toolAccess: { edit: "off" } });
 		await listTools(tracker.id, [lookup, wipe]);
 		await connections.update(workspaceId, podId, tracker.id, { toolAccess: { lookup: "off" } });
 
-		const targets = await connections.targetsForPod(workspaceId, podId);
+		const forPod = await connections.targetsForPod(workspaceId, podId);
 
-		// Linear is still waiting on its sign-in, and every one of Tracker's tools
-		// is off, so neither is reached.
-		expect(targets).toEqual([
-			expect.objectContaining({
-				connectionId: wiki.id,
-				handle: "wiki",
-				toolAccess: { edit: "off" },
-			}),
-		]);
+		// Linear is still waiting on its first sign-in, Notion's was refused, and
+		// every one of Tracker's tools is off, so none of them is reached.
+		expect(forPod).toEqual({
+			targets: [
+				expect.objectContaining({
+					connectionId: wiki.id,
+					handle: "wiki",
+					toolAccess: { edit: "off" },
+				}),
+			],
+			signInExpired: ["notion"],
+		});
+		expect(await shown(notion.id)).toMatchObject({ signedIn: false, signInExpired: true });
 	});
 
 	it("gives a tool nobody chose for its default, and keeps a choice while its tool is not listed", async () => {

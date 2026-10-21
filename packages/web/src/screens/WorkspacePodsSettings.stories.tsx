@@ -52,6 +52,7 @@ function connection(
 		url,
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		status: "connected",
