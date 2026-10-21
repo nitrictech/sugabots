@@ -37,10 +37,11 @@ export interface OAuthRecord {
 	signInRejectedAt?: string;
 }
 
-/** Where a connection's record lives. */
+/** Where a connection's record lives, and the clock its changes are stamped by. */
 interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
 	save(record: OAuthRecord): Promise<void>;
+	now(): Promise<Date>;
 }
 
 interface OAuthProviderOptions {
@@ -107,7 +108,8 @@ export function storedOAuthProvider(
 		// person has under way alone.
 		state: async () => {
 			if (startedByUserId === undefined) {
-				await change({ tokens: undefined, signInRejectedAt: new Date().toISOString() });
+				const rejectedAt = await storage.now();
+				await change({ tokens: undefined, signInRejectedAt: rejectedAt.toISOString() });
 				throw new SignInRequired();
 			}
 			return randomBytes(24).toString("base64url");

@@ -121,6 +121,7 @@ function memoryStorage() {
 		save: async (next: OAuthRecord) => {
 			record = next;
 		},
+		now: async () => new Date("2026-10-05T21:00:08.000Z"),
 		record: () => record,
 	};
 }
