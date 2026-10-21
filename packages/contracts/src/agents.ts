@@ -10,19 +10,28 @@ import { uuidSchema } from "./uuid.ts";
  */
 
 /**
- * The colours a bot's face can be, in the order a colour picker shows them.
+ * The colours a bot's face can be, in the order a colour picker shows them:
+ * round the hue wheel from red.
  * Each names a face, eye and bubble palette; see `botColors` in
  * `@sugabots/avatars`.
  */
 export const agentColors = [
-	"green",
-	"sky",
-	"purple",
-	"ice",
-	"yellow",
+	"red",
 	"orange",
-	"rose",
+	"amber",
+	"yellow",
+	"lime",
+	"green",
+	"emerald",
 	"teal",
+	"sky",
+	"ice",
+	"indigo",
+	"violet",
+	"purple",
+	"fuchsia",
+	"pink",
+	"rose",
 ] as const;
 
 export const agentColorSchema = Schema.Literals(agentColors);
