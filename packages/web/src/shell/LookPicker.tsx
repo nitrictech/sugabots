@@ -41,7 +41,7 @@ export function LookPicker({
 }) {
 	return (
 		<>
-			<SettingsControlRow label="Colour">
+			<SettingsControlRow label="Colour" stackOnPhone>
 				<Swatches
 					colors={agentColors}
 					swatch={(one) => botColors[one].face}
@@ -50,10 +50,10 @@ export function LookPicker({
 					columns={8}
 				/>
 			</SettingsControlRow>
-			<SettingsControlRow label="Shape">
+			<SettingsControlRow label="Shape" stackOnPhone>
 				<ShapePicker value={shape} onChange={onShapeChange} />
 			</SettingsControlRow>
-			<SettingsControlRow label="Eyes">
+			<SettingsControlRow label="Eyes" stackOnPhone>
 				<EyesPicker value={face} onChange={onFaceChange} />
 			</SettingsControlRow>
 		</>
@@ -259,7 +259,7 @@ function ShapePicker({
 			{agentShapes.map((shape) => (
 				<label
 					key={shape}
-					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
@@ -306,7 +306,7 @@ function EyesPicker({
 			{agentFaces.map((face) => (
 				<label
 					key={face}
-					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
