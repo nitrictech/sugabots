@@ -104,6 +104,15 @@ export function useModels(enabled = true) {
 	});
 }
 
+/**
+ * What to call a bot's model: its display name once the workspace's models
+ * load, otherwise its id, which also stands for a model since switched off.
+ */
+export function useModelName(model: string | null): string | null {
+	const inUse = useModels(model !== null).data?.models.find(({ modelId }) => modelId === model);
+	return inUse?.displayName ?? model;
+}
+
 export function useCreateAgent(podId: string) {
 	const invalidate = useInvalidateAgents();
 	const workspaceId = useWorkspace().workspace?.id;

@@ -10,6 +10,7 @@ import { connectionPresetFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
+import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink, routineSettingsLink } from "@/lib/links.ts";
@@ -33,7 +34,7 @@ const ROUTINES_SHOWN = 2;
 const SUMMARY_FOLDED_OVER = 240;
 
 /**
- * A bot as a contact card, beside its chat: its face, name and pod, the way to
+ * A bot as a contact card, beside its chat: its face, name, pod and model, the way to
  * its settings, then what the chat is about, how much of the bot's short-term memory it
  * fills and who has been in it, the apps it can reach and the routines it runs.
  */
@@ -53,6 +54,7 @@ export function DetailsSidebar({
 	const backToChat = useBackToHere("Chat");
 	const activity = useThreadActivity(threadId).data;
 	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
+	const modelName = useModelName(agent.model);
 	return (
 		<ChatSidebar label="Details" onClose={onClose}>
 			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
@@ -61,6 +63,9 @@ export function DetailsSidebar({
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<h3 className="m-0 truncate font-bold text-[18px] text-foreground">{agent.name}</h3>
 						<p className="m-0 truncate text-md text-muted-foreground">{pod.name} pod</p>
+						<p className="m-0 truncate text-sm text-subtle-foreground">
+							{modelName ?? "No model chosen"}
+						</p>
 					</div>
 				</div>
 				<Link

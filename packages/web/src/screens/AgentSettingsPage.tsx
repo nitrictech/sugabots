@@ -9,7 +9,7 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
 import { useId, useState } from "react";
-import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
+import { useAgents, useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
@@ -125,9 +125,7 @@ function ContactCard({
 	onOpenInstructions: () => void;
 }) {
 	const may = pod.permissions;
-	const models = useModels();
-	const inUse = models.data?.models.find((model) => model.modelId === agent.model);
-	const modelName = inUse ? (inUse.displayName ?? inUse.modelId) : undefined;
+	const modelName = useModelName(agent.model);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
 	const navigate = useNavigate();
@@ -180,7 +178,7 @@ function ContactCard({
 				/>
 				<SettingsRow
 					label="Model"
-					trailing={<SettingsValue>{modelName ?? agent.model ?? "None chosen"}</SettingsValue>}
+					trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
 					chevron
 					onClick={onOpenModel}
 				/>
