@@ -70,11 +70,6 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 /** Above run_command's longest timeout, so a slow command leaves the turn time to answer. */
 const TURN_TIMEOUT = Duration.minutes(30);
-/**
- * The longest a turn waits for a rate-limited provider before running again.
- * Past it, the turn ends and its message tells people when to try.
- */
-const MAX_RETRY_WAIT = Duration.minutes(1);
 /** How many model calls a turn may make, across its segments. */
 const TURN_MODEL_CALLS = 100;
 
@@ -281,7 +276,7 @@ const generateReply = (
 					: undefined;
 				const waitsTooLong =
 					request?.retryAfter !== undefined &&
-					Duration.isGreaterThan(request.retryAfter, MAX_RETRY_WAIT);
+					Duration.isGreaterThan(request.retryAfter, Models.MAX_RATE_LIMIT_WAIT);
 				return logTurnFailure(prepared, failure.message).pipe(
 					Effect.andThen(
 						turns.fail(replyTurn, draft, {

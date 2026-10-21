@@ -11,6 +11,7 @@ import { DisplayName, type DomainError, userText } from "@sugabots/errors";
 import {
 	APICallError,
 	type AssistantModelMessage,
+	type LanguageModelMiddleware,
 	type ModelMessage,
 	stepCountIs,
 	streamText,
@@ -19,14 +20,17 @@ import {
 	type ToolModelMessage,
 	type ToolResultPart,
 	type ToolSet,
+	wrapLanguageModel,
 } from "ai";
 import {
+	type Cause,
 	Context,
 	Duration,
 	Effect,
 	ErrorReporter,
 	Layer,
 	Ref,
+	Result,
 	Schedule,
 	Schema,
 	type Scope,
@@ -45,12 +49,20 @@ import {
 	ModelNotOffered,
 	ProviderCredentialsMissing,
 	ProviderOAuthRefreshFailed,
+	type RecognizeFailure,
 	type RequestContext,
 	type RequestFailure,
 	type RequestStage,
 } from "./request-failures.ts";
 
 export * from "./request-failures.ts";
+
+/**
+ * The longest a rate-limited provider may ask us to wait before we ask it
+ * again. A provider asking for longer is not asked again: the request fails,
+ * and its message says when to try.
+ */
+export const MAX_RATE_LIMIT_WAIT = Duration.minutes(1);
 
 /** What asking a model once is about: which model, for which workspace, and what it is told. */
 export interface Prompt {
@@ -291,14 +303,18 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			// Every error the stream reports, not just the first, so the log shows what led to the failure.
 			const streamErrors: unknown[] = [];
 			// The SDK's callbacks run outside Effect, so they log through this.
-			const runLog = Effect.runForkWith(yield* Effect.context<never>());
+			const services = yield* Effect.context<never>();
+			const runLog = Effect.runForkWith(services);
 			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 			const result = streamText({
-				model: dialect.languageModel(
-					{ ...connection, baseUrl: requestRoot },
-					input.model,
-					httpClients.for({ baseUrl: requestRoot }),
-				),
+				model: wrapLanguageModel({
+					model: dialect.languageModel(
+						{ ...connection, baseUrl: requestRoot },
+						input.model,
+						httpClients.for({ baseUrl: requestRoot }),
+					),
+					middleware: waitingOutRateLimits(services, context, dialect.recognizeFailure),
+				}),
 				...(systemOptions
 					? { providerOptions: systemOptions }
 					: {
@@ -387,6 +403,55 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			};
 		}),
 	);
+}
+
+/** How many times one model call is sent again after the provider asks us to wait. */
+const RATE_LIMIT_RETRIES = 3;
+
+/**
+ * Sends a model call again when the provider answers 429 and says to wait no
+ * longer than `MAX_RATE_LIMIT_WAIT`, after waiting that long. Only the call's
+ * opening request is sent again, which the provider refused before streaming
+ * anything, so nothing the model said or a tool did is repeated. Aborting the
+ * call, as cancelling a turn does, ends the wait.
+ */
+function waitingOutRateLimits(
+	services: Context.Context<never>,
+	provider: RequestContext,
+	recognize: RecognizeFailure | undefined,
+): LanguageModelMiddleware {
+	const run = Effect.runPromiseWith(services);
+	/** How long the provider asked to be left, when it refused for asking too often and we will wait that long. */
+	const shortWait = (refusal: unknown) => {
+		const failure = classifyRequestFailure(refusal, { ...provider, stage: "asking", recognize });
+		return failure._tag === "ProviderRateLimited" &&
+			failure.retryAfter !== undefined &&
+			Duration.isLessThanOrEqualTo(failure.retryAfter, MAX_RATE_LIMIT_WAIT)
+			? failure.retryAfter
+			: undefined;
+	};
+	return {
+		wrapStream: async ({ doStream, params }) => {
+			const send = (
+				retriesLeft: number,
+			): Effect.Effect<Awaited<ReturnType<typeof doStream>>, Cause.UnknownError> =>
+				Effect.tryPromise(doStream).pipe(
+					Effect.catch((refused) => {
+						const wait = shortWait(refused.cause);
+						if (wait === undefined || retriesLeft === 0) return Effect.fail(refused);
+						return Effect.logWarning(
+							`${provider.provider} asked us to wait ${Duration.format(wait)} before asking again`,
+						).pipe(Effect.andThen(Effect.sleep(wait)), Effect.andThen(send(retriesLeft - 1)));
+					}),
+				);
+			const sent = await run(Effect.result(send(RATE_LIMIT_RETRIES)), {
+				signal: params.abortSignal,
+			});
+			// The SDK gets the provider's own error, which the stream's failure is classified and logged from.
+			if (Result.isFailure(sent)) throw sent.failure.cause;
+			return sent.success;
+		},
+	};
 }
 
 /**

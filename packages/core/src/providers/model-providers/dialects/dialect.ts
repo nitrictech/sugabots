@@ -99,7 +99,11 @@ export interface ProviderDialect {
 	 * Builds the model with the provider's SDK. `endpoint.baseUrl` is the
 	 * request root, and `fetch` only allows requests under it.
 	 */
-	languageModel(endpoint: RequestEndpoint, modelId: string, fetch: EgressHttpClient): LanguageModel;
+	languageModel(
+		endpoint: RequestEndpoint,
+		modelId: string,
+		fetch: EgressHttpClient,
+	): Exclude<LanguageModel, string>;
 	/**
 	 * For a provider that won't take the system prompt as a message: the
 	 * provider options that carry it instead. If unset, it's sent as a system

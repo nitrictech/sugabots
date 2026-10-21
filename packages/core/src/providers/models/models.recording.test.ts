@@ -1,6 +1,6 @@
 import { jsonSchema, tool } from "ai";
 import { Effect, ManagedRuntime } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
 import { withImages } from "../../conversations/tools/images.ts";
 import { effectRunner } from "../../database/database.ts";
@@ -199,6 +199,46 @@ describe("recording model requests", () => {
 		await answer(model);
 
 		expect(seenByProvider).toEqual(["started"]);
+	});
+});
+
+describe("a rate-limited provider", () => {
+	const rateLimited = (headers: Record<string, string>) => () =>
+		Response.json({ error: { message: "Slow down" } }, { status: 429, headers });
+
+	it("is asked again after the short wait it asks for, and the reply goes on", async () => {
+		const { model, sent } = modelAnswering([rateLimited({ "retry-after-ms": "1" }), reply]);
+
+		const { text, finished } = await answer(model);
+
+		expect(text).toBe("Found it.");
+		expect(finished._tag).toBe("Success");
+		expect(sent).toHaveLength(2);
+	});
+
+	it("is not asked again when it asks for a longer wait than we give it", async () => {
+		const { model, sent } = modelAnswering([rateLimited({ "retry-after": "120" }), reply]);
+
+		const { finished } = await answer(model);
+
+		expect(finished).toMatchObject({ _tag: "Failure" });
+		expect(sent).toHaveLength(1);
+	});
+
+	it("stops waiting when the request is aborted, and records it as aborted", async () => {
+		const { model, recorded, sent } = modelAnswering([rateLimited({ "retry-after": "30" }), reply]);
+
+		await run(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const generated = yield* model.stream(input);
+					yield* Models.forEachDelta(generated.text, () => Effect.void);
+				}),
+			).pipe(Effect.timeoutOption("50 millis")),
+		);
+
+		expect(sent).toHaveLength(1);
+		await vi.waitFor(() => expect(recorded).toMatchObject([{ outcome: "aborted" }]));
 	});
 });
 
