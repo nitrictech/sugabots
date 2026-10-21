@@ -47,7 +47,13 @@ export function DesktopStage({
 					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
 				</div>
 				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
-					<AgentAvatar color={agent.color} face={agent.face} size={22} className="shrink-0" />
+					<AgentAvatar
+						color={agent.color}
+						face={agent.face}
+						shape={agent.shape}
+						size={22}
+						className="shrink-0"
+					/>
 					<span className="min-w-0 text-soft-foreground">
 						{!mayUse ? (
 							<>You can watch what {agent.name} does here.</>

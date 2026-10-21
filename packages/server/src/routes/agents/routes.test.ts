@@ -31,6 +31,7 @@ const agent: Agent = {
 	description: null,
 	color: "teal",
 	face: "pill",
+	shape: "circle",
 	model: MODEL,
 	prompt: "",
 	disabledTools: [],

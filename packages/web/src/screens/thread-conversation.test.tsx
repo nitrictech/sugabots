@@ -27,6 +27,7 @@ const host: AgentParticipant = {
 	handle: "linear-handler",
 	color: "green",
 	face: "pill",
+	shape: "circle",
 };
 
 const user: SessionUser = {
@@ -176,6 +177,7 @@ describe("what people and bots write", () => {
 			handle: "issue-triager",
 			color: "orange",
 			face: "dot",
+			shape: "circle",
 		};
 		const answer = reply([{ type: "text", text: "I asked @issue-triager about it." }]);
 		const { update } = show([answer]);

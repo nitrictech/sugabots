@@ -38,6 +38,7 @@ export const participantColumns = {
 	agentHandle: agent.handle,
 	agentColor: agent.color,
 	agentFace: agent.face,
+	agentShape: agent.shape,
 };
 
 export interface ParticipantRow {
@@ -50,6 +51,7 @@ export interface ParticipantRow {
 	agentHandle: string | null;
 	agentColor: AgentColor | null;
 	agentFace: schema.AgentRow["face"] | null;
+	agentShape: schema.AgentRow["shape"] | null;
 }
 
 export function toParticipant(row: ParticipantRow): ThreadParticipant {
@@ -61,7 +63,14 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 			image: row.userImage,
 		});
 	}
-	if (row.agentId && row.agentName && row.agentHandle && row.agentColor !== null && row.agentFace) {
+	if (
+		row.agentId &&
+		row.agentName &&
+		row.agentHandle &&
+		row.agentColor !== null &&
+		row.agentFace &&
+		row.agentShape
+	) {
 		return {
 			kind: "agent",
 			id: row.agentId,
@@ -69,6 +78,7 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 			handle: row.agentHandle,
 			color: row.agentColor,
 			face: row.agentFace,
+			shape: row.agentShape,
 		};
 	}
 	throw new Error("Thread participant has no identity");
@@ -136,7 +146,7 @@ export function toPerson(row: PersonIdentity): PersonParticipant {
 
 /** An agent's columns, for a relational query that names who wrote or joined. */
 export const agentColumns = {
-	columns: { id: true, name: true, handle: true, color: true, face: true },
+	columns: { id: true, name: true, handle: true, color: true, face: true, shape: true },
 } as const;
 
 /** The columns and relations a relational query reads of a message a reply quotes. */
@@ -210,7 +220,7 @@ export const messageRelations = {
 
 /** Who a person is, as read with {@link personColumns}. */
 export type PersonIdentity = { id: string; name: string; email: string; image: string | null };
-type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face">;
+type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face" | "shape">;
 
 /** A message row read with `messageRelations`. */
 export interface MessageWithRelations extends schema.MessageRow {
@@ -274,6 +284,7 @@ export function authorRow(
 		agentHandle: author?.handle ?? null,
 		agentColor: author?.color ?? null,
 		agentFace: author?.face ?? null,
+		agentShape: author?.shape ?? null,
 	};
 }
 
@@ -292,13 +303,14 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 		'userId', recent.user_id, 'userName', recent.user_name, 'userEmail', recent.user_email,
 		'userImage', recent.user_image,
 		'agentId', recent.agent_id, 'agentName', recent.agent_name, 'agentHandle', recent.agent_handle,
-		'agentColor', recent.agent_color, 'agentFace', recent.agent_face
+		'agentColor', recent.agent_color, 'agentFace', recent.agent_face,
+		'agentShape', recent.agent_shape
 	) order by recent.last_active_at desc), '[]'::json)
 	from (
 		select ${user.id} as user_id, ${user.name} as user_name, ${user.email} as user_email,
 			${user.image} as user_image,
 			${agent.id} as agent_id, ${agent.name} as agent_name, ${agent.handle} as agent_handle,
-			${agent.color} as agent_color, ${agent.face} as agent_face,
+			${agent.color} as agent_color, ${agent.face} as agent_face, ${agent.shape} as agent_shape,
 			max(${message.createdAt}) as last_active_at
 		from ${message}
 		left join ${user} on ${user.id} = ${message.authorUserId}
@@ -314,7 +326,7 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 				), '-infinity'::timestamptz),
 				now() - ${RECENT_ACTIVITY_WINDOW}
 			)
-		group by 1, 2, 3, 4, 5, 6, 7, 8, 9
+		group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 	) as recent
 )`;
 

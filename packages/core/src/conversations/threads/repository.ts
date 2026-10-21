@@ -475,6 +475,7 @@ export const make = Effect.gen(function* () {
 									handle: agent.handle,
 									color: agent.color,
 									face: agent.face,
+									shape: agent.shape,
 								})
 								.from(agent)
 								.where(eq(agent.id, run.agentId))

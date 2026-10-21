@@ -145,7 +145,7 @@ function ContactCard({
 
 	return (
 		<SettingsPage
-			hero={<AgentAvatar color={agent.color} face={agent.face} size={88} />}
+			hero={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={88} />}
 			title={agent.name}
 			description={pod.name}
 			headerAction={
@@ -207,14 +207,16 @@ function ContactCard({
 	);
 }
 
-/** The bot's colour and eyes, each saved the moment it is picked. */
+/** The bot's colour, shape and eyes, each saved the moment it is picked. */
 function Look({ agent, save }: { agent: Agent; save: Save }) {
 	return (
 		<SettingsGroup label="Look">
 			<LookPicker
 				color={agent.color}
+				shape={agent.shape}
 				face={agent.face}
 				onColorChange={(color) => void save({ color }).catch(() => {})}
+				onShapeChange={(shape) => void save({ shape }).catch(() => {})}
 				onFaceChange={(face) => void save({ face }).catch(() => {})}
 			/>
 		</SettingsGroup>

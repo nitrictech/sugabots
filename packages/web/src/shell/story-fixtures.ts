@@ -1,4 +1,11 @@
-import type { Agent, AgentColor, AgentFace, Pod, PodPermissions } from "@sugabots/contracts";
+import type {
+	Agent,
+	AgentColor,
+	AgentFace,
+	AgentShape,
+	Pod,
+	PodPermissions,
+} from "@sugabots/contracts";
 import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
 
 /*
@@ -45,7 +52,13 @@ export const design = pod("a3", "Design", "plum");
 export const personal = pod("af", "Personal", null);
 
 let next = 0;
-function bot(name: string, home: Pod, color: AgentColor, face: AgentFace = "pill"): Agent {
+function bot(
+	name: string,
+	home: Pod,
+	color: AgentColor,
+	face: AgentFace = "pill",
+	shape: AgentShape = "circle",
+): Agent {
 	next += 1;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000001${String(next).padStart(2, "0")}`,
@@ -57,6 +70,7 @@ function bot(name: string, home: Pod, color: AgentColor, face: AgentFace = "pill
 		description: null,
 		color,
 		face,
+		shape,
 		model: "claude-sonnet-4-20250514",
 		prompt: "",
 		disabledTools: [],
@@ -68,9 +82,9 @@ function bot(name: string, home: Pod, color: AgentColor, face: AgentFace = "pill
 export const growthDesk = bot("Growth Desk", revenue, "green");
 export const accountManager = bot("Account Manager", revenue, "sky");
 export const leadResearcher = bot("Lead Researcher", revenue, "ice");
-export const linearHandler = bot("Linear Handler", engineering, "orange", "arc");
-export const oncall = bot("On-call", engineering, "rose", "dot");
-export const chief = bot("Chief", personal, "purple", "wink");
+export const linearHandler = bot("Linear Handler", engineering, "orange", "arc", "squircle");
+export const oncall = bot("On-call", engineering, "rose", "dot", "hexagon");
+export const chief = bot("Chief", personal, "purple", "wink", "blob");
 
 export const podsWithBots = [
 	{ pod: revenue, bots: [growthDesk, accountManager, leadResearcher] },

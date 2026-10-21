@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { agentColorSchema, agentFaceSchema } from "./agents.ts";
+import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "./agents.ts";
 import { podColorSchema } from "./pods.ts";
 import { providerPresetIdSchema } from "./provider-catalog.ts";
 
@@ -44,6 +44,7 @@ export const botUsageSchema = Schema.Struct({
 	name: Schema.NullOr(Schema.String),
 	color: Schema.NullOr(agentColorSchema),
 	face: Schema.NullOr(agentFaceSchema),
+	shape: Schema.NullOr(agentShapeSchema),
 	/** The pod the bot is in now. */
 	podName: Schema.NullOr(Schema.String),
 	...spendFields,

@@ -136,6 +136,7 @@ export const make = Effect.gen(function* () {
 					description: definition.description,
 					color: definition.color,
 					face: definition.face,
+					shape: definition.shape,
 					model: null,
 					prompt: definition.prompt,
 				})
@@ -173,6 +174,7 @@ export const make = Effect.gen(function* () {
 										description: input.description ?? null,
 										color: input.color ?? colorFromText(input.name),
 										face: input.face ?? "pill",
+										shape: input.shape ?? "circle",
 										model: input.model,
 										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
@@ -246,6 +248,7 @@ export const make = Effect.gen(function* () {
 								description: "Your private assistant.",
 								color: "sky",
 								face: "pill",
+								shape: "circle",
 								model: model ?? null,
 								prompt: INTERVIEW_PROMPT,
 							})

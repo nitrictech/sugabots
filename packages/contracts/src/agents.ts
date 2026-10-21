@@ -139,6 +139,7 @@ export const agentSchema = Schema.Struct({
 	description: Schema.NullOr(Schema.String),
 	color: agentColorSchema,
 	face: agentFaceSchema,
+	shape: agentShapeSchema,
 	/**
 	 * Which model answers. `null` when nobody has chosen one, or somebody has
 	 * cleared it — the agent's turns then refuse rather than run on a guess.
@@ -184,6 +185,7 @@ export const newAgentInPodSchema = Schema.Struct({
 	),
 	color: Schema.optional(agentColorSchema),
 	face: Schema.optional(agentFaceSchema),
+	shape: Schema.optional(agentShapeSchema),
 	model: modelIdSchema,
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),
 	disabledTools: Schema.optional(toolKeysSchema),

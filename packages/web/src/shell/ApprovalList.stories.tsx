@@ -49,6 +49,7 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			handle: growthDesk.handle,
 			color: growthDesk.color,
 			face: growthDesk.face,
+			shape: "circle",
 		},
 		podId: revenue.id,
 		threadId: storyChatFor(growthDesk).mainThreadId,

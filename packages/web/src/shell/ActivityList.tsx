@@ -161,7 +161,12 @@ function FaceOf({ item }: { item: ActivityItem }) {
 			// The bot that ran it, with what started the run on its corner.
 			return (
 				<span className="relative size-[22px]">
-					<AgentAvatar color={item.agent.color} face={item.agent.face} size={22} />
+					<AgentAvatar
+						color={item.agent.color}
+						face={item.agent.face}
+						shape={item.agent.shape}
+						size={22}
+					/>
 					<span className="absolute -right-1 -bottom-1 grid size-3.5 place-items-center rounded-full bg-chip text-soft-foreground shadow-[0_0_0_2px_var(--list)]">
 						<RoutineTriggerIcon kind={item.triggerKind} size={9} strokeWidth={2.6} />
 					</span>
@@ -173,20 +178,28 @@ function FaceOf({ item }: { item: ActivityItem }) {
 					<AgentAvatar
 						color={item.initiator.color}
 						face={item.initiator.face}
+						shape={item.initiator.shape}
 						size={22}
 						className="absolute top-0 left-0"
 					/>
 					<AgentAvatar
 						color={item.recipient.color}
 						face={item.recipient.face}
+						shape={item.recipient.shape}
 						size={22}
-						className="absolute top-0 left-3 rounded-full shadow-[0_0_0_2px_var(--list)]"
+						ringed={{ color: "var(--list)", width: 2 }}
+						className="absolute top-0 left-3"
 					/>
 				</span>
 			);
 		default:
 			return item.author.kind === "agent" ? (
-				<AgentAvatar color={item.author.color} face={item.author.face} size={22} />
+				<AgentAvatar
+					color={item.author.color}
+					face={item.author.face}
+					shape={item.author.shape}
+					size={22}
+				/>
 			) : (
 				<PersonAvatar person={item.author} size={22} />
 			);

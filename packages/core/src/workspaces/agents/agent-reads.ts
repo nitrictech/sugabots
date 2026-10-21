@@ -52,6 +52,7 @@ export const systemAgents = (workspaceId: string) =>
 				description: definition.description,
 				color: definition.color,
 				face: definition.face,
+				shape: definition.shape,
 				model: modelOf.get(definition.key) ?? null,
 			}));
 		}),

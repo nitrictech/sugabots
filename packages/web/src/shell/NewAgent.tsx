@@ -2,6 +2,7 @@ import {
 	type Agent,
 	type AgentColor,
 	type AgentFace,
+	type AgentShape,
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
@@ -54,6 +55,7 @@ export function NewAgentDialog({
 }) {
 	const [name, setName] = useState("");
 	const [color, setColor] = useState<AgentColor>("green");
+	const [shape, setShape] = useState<AgentShape>("circle");
 	const [face, setFace] = useState<AgentFace>("pill");
 	const [chosenPodId, setChosenPodId] = useState(pods[0]?.id);
 	const [choosingPod, setChoosingPod] = useState(false);
@@ -79,6 +81,7 @@ export function NewAgentDialog({
 				name: trimmedName,
 				model,
 				color,
+				shape,
 				face,
 				// A bot created without a prompt starts by interviewing its creator.
 				...(instructionsStart === "written" ? { prompt: instructions } : {}),
@@ -95,10 +98,17 @@ export function NewAgentDialog({
 
 			<DialogFormBody gap="compact">
 				<div className="flex justify-center pt-1 pb-2">
-					<AgentAvatar color={color} face={face} size={88} />
+					<AgentAvatar color={color} face={face} shape={shape} size={88} />
 				</div>
 				<SettingsGroup>
-					<LookPicker color={color} face={face} onColorChange={setColor} onFaceChange={setFace} />
+					<LookPicker
+						color={color}
+						shape={shape}
+						face={face}
+						onColorChange={setColor}
+						onShapeChange={setShape}
+						onFaceChange={setFace}
+					/>
 				</SettingsGroup>
 
 				<SettingsGroup className="mt-2">

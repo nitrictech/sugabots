@@ -28,6 +28,7 @@ const bot = {
 	handle: growthDesk.handle,
 	color: growthDesk.color,
 	face: growthDesk.face,
+	shape: growthDesk.shape,
 };
 
 /** A chat long enough that a jump to an early message has somewhere to scroll. */

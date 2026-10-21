@@ -21,6 +21,7 @@ const asker = {
 	handle: growthDesk.handle,
 	color: growthDesk.color,
 	face: growthDesk.face,
+	shape: growthDesk.shape,
 };
 const answerer = {
 	kind: "agent" as const,
@@ -29,6 +30,7 @@ const answerer = {
 	handle: linearHandler.handle,
 	color: linearHandler.color,
 	face: linearHandler.face,
+	shape: linearHandler.shape,
 };
 
 function message(

@@ -47,6 +47,7 @@ function request(
 			handle: growthDesk.handle,
 			color: growthDesk.color,
 			face: growthDesk.face,
+			shape: "circle",
 		},
 		podId: revenue.id,
 		threadId: storyChatFor(growthDesk).mainThreadId,

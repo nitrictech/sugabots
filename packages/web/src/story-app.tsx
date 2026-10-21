@@ -90,6 +90,7 @@ const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((
 	description: null,
 	color: "ice",
 	face: "pill",
+	shape: "circle",
 	model: storyModel.modelId,
 }));
 
@@ -140,6 +141,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		handle: agent.handle,
 		color: agent.color,
 		face: agent.face,
+		shape: agent.shape,
 	};
 	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {

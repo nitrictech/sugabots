@@ -66,7 +66,14 @@ export function WorkspaceAgentsSettings({ selectedAgentId }: { selectedAgentId?:
 							return (
 								<SettingsListRow
 									key={agent.id}
-									picture={<AgentAvatar color={agent.color} face={agent.face} size={36} />}
+									picture={
+										<AgentAvatar
+											color={agent.color}
+											face={agent.face}
+											shape={agent.shape}
+											size={36}
+										/>
+									}
 									label={agent.name}
 									sub={pod.name}
 									selected={agent.id === selected?.id && (selectedAgentId ? true : "wide")}

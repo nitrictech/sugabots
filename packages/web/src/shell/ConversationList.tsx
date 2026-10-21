@@ -180,7 +180,13 @@ function ConversationRow({
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
-			<AgentAvatar color={agent.color} face={agent.face} size={26} className="shrink-0" />
+			<AgentAvatar
+				color={agent.color}
+				face={agent.face}
+				shape={agent.shape}
+				size={26}
+				className="shrink-0"
+			/>
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",

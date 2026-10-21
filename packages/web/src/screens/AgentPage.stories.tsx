@@ -41,6 +41,7 @@ function said(id: string, by: "you" | "bot", text: string, at: string): Message 
 						handle: growthDesk.handle,
 						color: growthDesk.color,
 						face: growthDesk.face,
+						shape: growthDesk.shape,
 					},
 		kind: "text",
 		status: "complete",
@@ -351,6 +352,7 @@ const asker = {
 	handle: growthDesk.handle,
 	color: growthDesk.color,
 	face: growthDesk.face,
+	shape: growthDesk.shape,
 };
 const asked = {
 	kind: "agent" as const,
@@ -359,6 +361,7 @@ const asked = {
 	handle: linearHandler.handle,
 	color: linearHandler.color,
 	face: linearHandler.face,
+	shape: linearHandler.shape,
 };
 
 /** Growth Desk asks Linear Handler, and its line in the chat opens the collaboration. */

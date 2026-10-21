@@ -710,7 +710,7 @@ function useJumpToMessage({
 function ChatIntro({ agent }: { agent: Agent }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<AgentAvatar color={agent.color} face={agent.face} size={64} />
+			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
 			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
 				{agent.name}
 			</h2>

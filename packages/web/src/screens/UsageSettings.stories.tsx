@@ -75,7 +75,16 @@ function bot(
 	podName: string,
 	usd: number,
 ) {
-	return { agentId: `bot-${name}`, name, color, face, podName, usd, unpricedRequests: 0 };
+	return {
+		agentId: `bot-${name}`,
+		name,
+		color,
+		face,
+		shape: "circle" as const,
+		podName,
+		usd,
+		unpricedRequests: 0,
+	};
 }
 
 function model(
