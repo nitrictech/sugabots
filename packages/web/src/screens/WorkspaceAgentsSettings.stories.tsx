@@ -145,8 +145,8 @@ const meta = preview.meta({
 });
 
 /**
- * The list of bots beside Growth Desk's contact card: its face with the way to
- * message it, about, look, tools and routines.
+ * The list of bots beside Growth Desk's contact card: its face, with the pencil
+ * that changes its look, and the way to message it, about, tools and routines.
  */
 export const ContactCard = meta.story({
 	play: async ({ canvas }) => {
@@ -159,6 +159,20 @@ export const ContactCard = meta.story({
 			expect.stringMatching(new RegExp(`/agents/${growthDesk.handle}$`)),
 		);
 		await expect(canvas.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
+	},
+});
+
+/** Look opens from the pencil on the bot's face: colour, shape and eyes, with Shuffle, Cancel and Save, which waits for a change. */
+export const Look = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Change look" }, { timeout: 10_000 }),
+		);
+		const dialog = await within(document.body).findByRole("dialog", { name: "Look" });
+		await expect(within(dialog).getByRole("group", { name: "Shape" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Shuffle" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 });
 
@@ -253,6 +267,7 @@ export const Member = meta.story({
 			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete bot" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Change look" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
 	},
 });

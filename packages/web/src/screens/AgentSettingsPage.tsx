@@ -1,14 +1,17 @@
 import {
 	type Agent,
 	type AgentUpdate,
+	agentColors,
+	agentFaces,
+	agentShapes,
 	builtInToolCatalog,
 	connectionPresetFor,
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { MessageCircle } from "lucide-react";
-import { useId, useState } from "react";
+import { MessageCircle, Pencil, RefreshCw } from "lucide-react";
+import { useId, useRef, useState } from "react";
 import { useAgents, useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -18,12 +21,14 @@ import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { LookPicker } from "@/shell/LookPicker.tsx";
+import { LookSections } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import {
 	PageBackLink,
 	SettingsControlRow,
@@ -145,7 +150,13 @@ function ContactCard({
 
 	return (
 		<SettingsPage
-			hero={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={88} />}
+			hero={
+				may.updateAgents ? (
+					<EditableLook agent={agent} save={save} />
+				) : (
+					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={88} />
+				)
+			}
 			title={agent.name}
 			description={pod.name}
 			headerAction={
@@ -156,7 +167,6 @@ function ContactCard({
 			}
 		>
 			{failure && <Alert>{failure}</Alert>}
-			{may.updateAgents && <Look agent={agent} save={save} />}
 			<SettingsGroup label="About">
 				<TextRow
 					label="Name"
@@ -207,20 +217,102 @@ function ContactCard({
 	);
 }
 
-/** The bot's colour, shape and eyes, each saved the moment it is picked. */
-function Look({ agent, save }: { agent: Agent; save: Save }) {
+/**
+ * The bot's face, with a pencil on its corner that opens its colour, shape and
+ * eyes. Each is saved the moment it is picked; Shuffle picks all three at
+ * random, and Revert puts back the look it had when the dialog opened.
+ */
+/**
+ * The bot's face, with a pencil that opens its Look. Choices there change a
+ * draft the dialog's own face shows, and only Save sends it; leaving any other
+ * way, by Cancel, Escape or a click outside, drops it.
+ */
+function EditableLook({ agent, save }: { agent: Agent; save: Save }) {
+	const [opened, setOpened] = useState(false);
+	const current: Look = { color: agent.color, shape: agent.shape, face: agent.face };
+	// Kept once the dialog closes, so it still shows the draft as it animates away.
+	const [draft, setDraft] = useState<Look>(current);
+	const [saving, setSaving] = useState(false);
+	const [failure, setFailure] = useState<string>();
+	// Cancel takes focus on opening, rather than Shuffle, the first control, whose tooltip would show.
+	const cancel = useRef<HTMLButtonElement>(null);
+	const changed =
+		draft.color !== current.color || draft.shape !== current.shape || draft.face !== current.face;
+
+	const open = () => {
+		setFailure(undefined);
+		setDraft(current);
+		setOpened(true);
+	};
+	const close = () => setOpened(false);
+	const change = (look: Partial<Look>) => setDraft((was) => ({ ...was, ...look }));
+	const saveDraft = async () => {
+		setSaving(true);
+		setFailure(undefined);
+		try {
+			await save(draft);
+			close();
+		} catch (error) {
+			setFailure(failureMessage(error));
+		} finally {
+			setSaving(false);
+		}
+	};
+
 	return (
-		<SettingsGroup label="Look">
-			<LookPicker
-				color={agent.color}
-				shape={agent.shape}
-				face={agent.face}
-				onColorChange={(color) => void save({ color }).catch(() => {})}
-				onShapeChange={(shape) => void save({ shape }).catch(() => {})}
-				onFaceChange={(face) => void save({ face }).catch(() => {})}
-			/>
-		</SettingsGroup>
+		<div className="relative">
+			<AgentAvatar {...current} size={88} />
+			<IconButton
+				label="Change look"
+				variant="round"
+				onClick={open}
+				// The ring cutting it out of the face is a border rather than a shadow: the button's fill runs under its own border, so no hairline of the face shows between them.
+				className="absolute -right-[7px] -bottom-[7px] size-[35px] border-[3px] border-background"
+			>
+				<Pencil aria-hidden />
+			</IconButton>
+			<Dialog open={opened} onOpenChange={(isOpen) => !isOpen && close()}>
+				<DialogContent
+					sheetOnPhone
+					showCloseButton={false}
+					initialFocus={cancel}
+					className="gap-5 sm:max-w-md"
+				>
+					<div className="flex items-center gap-3">
+						<AgentAvatar {...draft} size={36} />
+						<DialogTitle className="flex-1">Look</DialogTitle>
+						<IconButton label="Shuffle" variant="round" onClick={() => change(randomLook())}>
+							<RefreshCw aria-hidden />
+						</IconButton>
+					</div>
+					<LookSections
+						{...draft}
+						onColorChange={(color) => change({ color })}
+						onShapeChange={(shape) => change({ shape })}
+						onFaceChange={(face) => change({ face })}
+					/>
+					{failure && <Alert>{failure}</Alert>}
+					<div className="flex justify-end gap-2">
+						<Button ref={cancel} variant="secondary" onClick={close}>
+							Cancel
+						</Button>
+						<Button disabled={!changed || saving} onClick={() => void saveDraft()}>
+							Save
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+		</div>
 	);
+}
+
+type Look = Pick<Agent, "color" | "shape" | "face">;
+
+const pick = <Option,>(options: readonly Option[]): Option =>
+	options[Math.floor(Math.random() * options.length)] as Option;
+
+function randomLook(): Look {
+	return { color: pick(agentColors), shape: pick(agentShapes), face: pick(agentFaces) };
 }
 
 /** A labelled line of text that saves when you leave it, or reads as a value when it cannot change. */
