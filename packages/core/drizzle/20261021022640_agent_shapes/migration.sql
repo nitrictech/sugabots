@@ -1,0 +1,1 @@
+ALTER TABLE "agent" ADD COLUMN "shape" text DEFAULT 'circle' NOT NULL;

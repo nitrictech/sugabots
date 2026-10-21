@@ -41,6 +41,39 @@ export const agentFaceSchema = Schema.Literals(agentFaces);
 export type AgentFace = typeof agentFaceSchema.Type;
 
 /**
+ * The outline that colour fills, in the order a shape picker shows them. Like
+ * the eyes, geometry the avatars package draws; a bot nobody gave a shape is a
+ * circle.
+ */
+export const agentShapes = [
+	"circle",
+	"squircle",
+	"pebble",
+	"blob",
+	"wobble",
+	"drop",
+	"leaf",
+	"dome",
+	"bowl",
+	"hexagon",
+	"octagon",
+	"triangle",
+	"pentagon",
+	"diamond",
+	"shield",
+	"star",
+	"flower",
+	"scallop",
+	"ghost",
+	"bear",
+	"antenna",
+] as const;
+
+export const agentShapeSchema = Schema.Literals(agentShapes);
+
+export type AgentShape = typeof agentShapeSchema.Type;
+
+/**
  * An upstream model id. Provider configuration is the authority on whether it
  * may be selected; this only rejects values that cannot be sent safely.
  */

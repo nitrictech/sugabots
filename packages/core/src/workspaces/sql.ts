@@ -1,6 +1,7 @@
 import type {
 	AgentColor,
 	AgentFace,
+	AgentShape,
 	AssignableWorkspaceRole,
 	PodColor,
 	PodRouting,
@@ -339,8 +340,8 @@ export const podMember = pgTable(
  * `name` is unique per workspace because a name is how a person addresses an
  * agent: `@Linear Handler` in a message has to mean one of them.
  *
- * `color` and `face` are the whole avatar. Two small columns rather than an
- * image, which is what lets an agent created at run time have a face at all.
+ * `color`, `face` and `shape` are the whole avatar. Small columns rather than
+ * an image, which is what lets an agent created at run time have a face at all.
  */
 export const agent = pgTable(
 	"agent",
@@ -362,6 +363,8 @@ export const agent = pgTable(
 		// the contract's to state, and an enum here would be a second place to change it.
 		color: text("color").$type<AgentColor>().notNull(),
 		face: text("face").$type<AgentFace>().notNull(),
+		// Every agent made before shapes existed was a circle.
+		shape: text("shape").$type<AgentShape>().notNull().default("circle"),
 		// Null when nobody has chosen one, or somebody has cleared it. A system
 		// agent with no model does not run; a crew agent's turns refuse.
 		model: text("model"),
