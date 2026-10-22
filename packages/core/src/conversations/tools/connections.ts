@@ -85,6 +85,7 @@ export interface Interface {
 /** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
 export interface TurnSide {
 	readonly turnId: string;
+	readonly agentId: string;
 	/** The pod's sandbox, while the turn may use it. */
 	readonly workspace: Workspace | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */

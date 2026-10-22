@@ -243,10 +243,135 @@ export const repositories = (http: EgressHttpClient, app: InstalledApp) =>
 		return listed;
 	});
 
-/** `owner/name`'s name: what an installation token is asked for by. */
-export function nameOf(repository: string) {
-	return repository.slice(repository.indexOf("/") + 1);
-}
+const RepositoryDetails = Schema.Struct({ default_branch: Schema.String });
+
+export const defaultBranch = (http: EgressHttpClient, token: string, repository: string) =>
+	call(http, "GET", `/repos/${repository}`, { bearer: token }).pipe(
+		Effect.flatMap(decoded(RepositoryDetails)),
+		Effect.map((details) => details.default_branch),
+	);
+
+const PullRequest = Schema.Struct({ number: Schema.Int, html_url: Schema.String });
+
+export const openPullRequest = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		head: string;
+		base: string;
+		title: string;
+		body: string;
+		draft: boolean;
+	},
+) =>
+	call(http, "POST", `/repos/${request.repository}/pulls`, {
+		bearer: token,
+		body: {
+			head: request.head,
+			base: request.base,
+			title: request.title,
+			body: request.body,
+			draft: request.draft,
+		},
+	}).pipe(
+		Effect.flatMap(decoded(PullRequest)),
+		Effect.map((made) => ({ number: made.number, url: made.html_url })),
+	);
+
+const PullRequestHead = Schema.Struct({
+	node_id: Schema.String,
+	draft: Schema.optional(Schema.Boolean),
+	head: Schema.Struct({
+		ref: Schema.String,
+		repo: Schema.NullOr(Schema.Struct({ full_name: Schema.String })),
+	}),
+});
+
+/** Where pull request `number` comes from: its branch, and the repository that branch is in, if it still exists. */
+export const pullRequestHead = (
+	http: EgressHttpClient,
+	token: string,
+	{ repository, number }: { repository: string; number: number },
+) =>
+	call(http, "GET", `/repos/${repository}/pulls/${number}`, { bearer: token }).pipe(
+		Effect.flatMap(decoded(PullRequestHead)),
+		Effect.map((pull) => ({
+			nodeId: pull.node_id,
+			draft: pull.draft ?? false,
+			branch: pull.head.ref,
+			branchRepository: pull.head.repo?.full_name,
+		})),
+	);
+
+/** Changes what's given of pull request `number`; the rest stays as it is. */
+export const updatePullRequest = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		number: number;
+		title: string | undefined;
+		body: string | undefined;
+		base: string | undefined;
+		state: "open" | "closed" | undefined;
+	},
+) =>
+	call(http, "PATCH", `/repos/${request.repository}/pulls/${request.number}`, {
+		bearer: token,
+		body: { title: request.title, body: request.body, base: request.base, state: request.state },
+	}).pipe(
+		Effect.flatMap(decoded(PullRequest)),
+		Effect.map((updated) => ({ number: updated.number, url: updated.html_url })),
+	);
+
+const GraphQlReply = Schema.Struct({
+	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.String }))),
+});
+
+/** Marks a pull request, by its node id, as a draft or as ready for review: only GitHub's GraphQL API can. */
+export const setPullRequestDraft = (
+	http: EgressHttpClient,
+	token: string,
+	{ nodeId, draft }: { nodeId: string; draft: boolean },
+) => {
+	const mutation = draft ? "convertPullRequestToDraft" : "markPullRequestReadyForReview";
+	return call(http, "POST", "/graphql", {
+		bearer: token,
+		body: {
+			query: `mutation($id: ID!) { ${mutation}(input: { pullRequestId: $id }) { clientMutationId } }`,
+			variables: { id: nodeId },
+		},
+	}).pipe(
+		Effect.flatMap(decoded(GraphQlReply)),
+		Effect.flatMap(({ errors }) =>
+			errors?.length
+				? Effect.fail(
+						requestFailed({
+							status: undefined,
+							reason: errors.map((error) => error.message).join(": "),
+						}),
+					)
+				: Effect.void,
+		),
+	);
+};
+
+const IssueComment = Schema.Struct({ html_url: Schema.String });
+
+/** Comments on issue or pull request `number`, which share their numbers and comments. */
+export const comment = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; number: number; body: string },
+) =>
+	call(http, "POST", `/repos/${request.repository}/issues/${request.number}/comments`, {
+		bearer: token,
+		body: { body: request.body },
+	}).pipe(
+		Effect.flatMap(decoded(IssueComment)),
+		Effect.map((made) => ({ url: made.html_url })),
+	);
 
 /** How long an app's own token lasts; GitHub takes at most ten minutes. */
 const APP_JWT_SECONDS = 9 * 60;
@@ -275,7 +400,7 @@ const ErrorBody = Schema.Struct({
 /** A request to GitHub's API, signed in with `bearer`, answering with the decoded JSON body. */
 export function call(
 	http: EgressHttpClient,
-	method: "GET" | "POST" | "DELETE",
+	method: "GET" | "POST" | "PATCH" | "DELETE",
 	path: string,
 	options: { bearer?: string; body?: unknown },
 ) {
