@@ -406,8 +406,8 @@ describe("ongoing agent Chat", () => {
 		const collaboration = screen.getByRole("button", {
 			name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 		});
-		// Both bots' faces, each a disc filling its 40-unit viewbox.
-		expect(collaboration.querySelectorAll('svg > circle[r="20"]')).toHaveLength(2);
+		// Both bots' faces, each a disc filling its 40-unit viewbox, in the head's own colour group.
+		expect(collaboration.querySelectorAll('svg > g[fill] > circle[r="20"]')).toHaveLength(2);
 		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
 	});
 

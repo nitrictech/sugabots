@@ -4,5 +4,6 @@ export * from "./bot-colors.ts";
 export * from "./bot-crowd.ts";
 export * from "./bot-face.tsx";
 export * from "./face-marks.ts";
+export * from "./head-shapes.ts";
 export * from "./sugabots-logo.ts";
 export * from "./sugabots-mark.tsx";

@@ -21,6 +21,7 @@ import { botColors } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
 import type { BotLook } from "../src/bot-face.tsx";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
+import { type HeadPart, headShape } from "../src/head-shapes.ts";
 import { LOGO_SIZE, sugabotsLogo } from "../src/sugabots-logo.ts";
 
 function markElement(mark: FaceMark, eyesHex: string): string {
@@ -34,17 +35,27 @@ function markElement(mark: FaceMark, eyesHex: string): string {
 	}
 }
 
-function faceElements({ color, face }: BotLook): string {
+function partElement(part: HeadPart, fill: string): string {
+	return part.kind === "circle"
+		? `<circle cx="${part.cx}" cy="${part.cy}" r="${part.r}" fill="${fill}"/>`
+		: `<path d="${part.d}" fill="${fill}"/>`;
+}
+
+function faceElements({ color, face, shape = "circle" }: BotLook): string {
 	const faceHex = botColors[color].face;
 	const eyesHex = botColors[color].eyes;
-	const radius = FACE_VIEWBOX_SIZE / 2;
-	const disc = `<circle cx="${radius}" cy="${radius}" r="${radius}" fill="${faceHex}"/>`;
-	return (
-		disc +
-		faceMarks(face)
-			.map((mark) => markElement(mark, eyesHex))
-			.join("")
-	);
+	const head = headShape(shape);
+	const centre = FACE_VIEWBOX_SIZE / 2;
+	const { x, y, scale } = head.eyes;
+	const parts = head.parts.map((part) => partElement(part, faceHex)).join("");
+	const marks = faceMarks(face)
+		.map((mark) => markElement(mark, eyesHex))
+		.join("");
+	// Eyes where a circle has them need no moving, which keeps a circle's markup as it was before shapes.
+	const centred = x === centre && y === centre && scale === 1;
+	return centred
+		? parts + marks
+		: `${parts}<g transform="translate(${x} ${y}) scale(${scale}) translate(${-centre} ${-centre})">${marks}</g>`;
 }
 
 function writeAsset(name: string, width: number, height: number, content: string) {
@@ -67,7 +78,7 @@ function writeBotCrowd() {
 	const gapPx = 8;
 	const maxLift = Math.max(...crowd.map((bot) => bot.lift));
 	const minLift = Math.min(...crowd.map((bot) => bot.lift));
-	// No padding: a face is a circle, so rotating it never grows its bounds.
+	// No padding: the crowd's faces are circles, so rotating them never grows their bounds.
 	const width = crowd.length * facePx + (crowd.length - 1) * gapPx;
 	const height = facePx + maxLift - minLift;
 	const faces = crowd.map((bot, index) =>
