@@ -2,6 +2,7 @@ import {
 	type Connection,
 	type ConnectionPreset,
 	connectionCatalog,
+	connectionMarkFor,
 	connectionPresetFor,
 	type Pod,
 	type UnsavedConnection,
@@ -33,6 +34,7 @@ import {
 	SettingsRow,
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
+import { GitHubConnectStep } from "./GitHubConnect.tsx";
 import { AccessMenu, AccessValue, accessSettingOf, accessSummaryText } from "./tool-access.tsx";
 
 /*
@@ -80,6 +82,7 @@ export function ConnectionsSettings({
 						podId={pod.id}
 						podName={pod.name}
 						available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
+						offersGitHub={!listed.some((one) => one.kind === "github")}
 						done={() => setAdding(false)}
 					/>
 				)}
@@ -108,7 +111,6 @@ function ConnectionRow({
 	const navigate = useNavigate();
 	const backToPod = useBackToHere(pod.name);
 	const page = { ...connectionSettingsLink(pod, connection), state: backToPod };
-	const preset = connectionPresetFor(connection.url);
 	const needsSignIn = !connection.signedIn;
 	const failing = connection.signedIn && connection.status === "error";
 	const pending = actions.update.isPending || actions.signIn.isPending;
@@ -132,7 +134,11 @@ function ConnectionRow({
 				aria-label={`${connection.name}, ${line}. Open tools`}
 				className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left after:absolute after:inset-0"
 			>
-				<ConnectionMark presetId={preset?.id} name={connection.name} size="tile" />
+				<ConnectionMark
+					presetId={connectionMarkFor(connection)}
+					name={connection.name}
+					size="tile"
+				/>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-[14.5px] text-foreground">
 						{connection.name}
@@ -180,53 +186,72 @@ const signInMethodNote: Record<SignInMethod, string> = {
 	header: "The secret is sent in this header exactly as you type it.",
 };
 
-type Choice = ConnectionPreset | "custom";
+type Choice = ConnectionPreset | "custom" | "github";
 
 /** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
 	podId,
 	podName,
 	available,
+	offersGitHub,
 	done,
 }: {
 	podId: string;
 	podName: string;
 	available: readonly ConnectionPreset[];
+	/** Whether the pod may connect to GitHub, which it may only once. */
+	offersGitHub: boolean;
 	done: () => void;
 }) {
 	const [choice, setChoice] = useState<Choice>();
 	return (
 		<DialogFormFrame>
-			{choice === "custom" ? (
+			{choice === "github" ? (
+				<GitHubConnectStep podId={podId} onBack={() => setChoice(undefined)} done={done} />
+			) : choice === "custom" ? (
 				<ByUrlStep podId={podId} onBack={() => setChoice(undefined)} done={done} />
 			) : choice ? (
 				<AppStep podId={podId} preset={choice} onBack={() => setChoice(undefined)} />
 			) : (
-				<AppList podName={podName} available={available} onChoose={setChoice} done={done} />
+				<AppList
+					podName={podName}
+					available={available}
+					offersGitHub={offersGitHub}
+					onChoose={setChoice}
+					done={done}
+				/>
 			)}
 		</DialogFormFrame>
 	);
 }
 
+/** GitHub as the app list shows it, beside the catalog's MCP apps; it connects through an app of the pod's own. */
+const GITHUB_CHOICE = {
+	name: "GitHub",
+	description: "Repositories, issues and pull requests",
+};
+
 function AppList({
 	podName,
 	available,
+	offersGitHub,
 	onChoose,
 	done,
 }: {
 	podName: string;
 	available: readonly ConnectionPreset[];
+	offersGitHub: boolean;
 	onChoose: (choice: Choice) => void;
 	done: () => void;
 }) {
 	const [query, setQuery] = useState("");
 	const needle = useDeferredValue(query.trim().toLowerCase());
-	const shown = available.filter(
-		(preset) =>
-			needle === "" ||
-			preset.name.toLowerCase().includes(needle) ||
-			preset.description.toLowerCase().includes(needle),
-	);
+	const matches = (app: { name: string; description: string }) =>
+		needle === "" ||
+		app.name.toLowerCase().includes(needle) ||
+		app.description.toLowerCase().includes(needle);
+	const shown = available.filter(matches);
+	const gitHubShown = offersGitHub && matches(GITHUB_CHOICE);
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 			<DialogFormHeader title={`Add to ${podName}`} />
@@ -243,8 +268,17 @@ function AppList({
 					/>
 				</label>
 				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1">
-					{shown.length > 0 && (
+					{(gitHubShown || shown.length > 0) && (
 						<SettingsGroup>
+							{gitHubShown && (
+								<SettingsRow
+									icon={<ConnectionMark presetId="github" name={GITHUB_CHOICE.name} size="tile" />}
+									label={GITHUB_CHOICE.name}
+									sub={GITHUB_CHOICE.description}
+									chevron
+									onClick={() => onChoose("github")}
+								/>
+							)}
 							{shown.map((preset) => (
 								<SettingsRow
 									key={preset.id}
@@ -257,7 +291,7 @@ function AppList({
 							))}
 						</SettingsGroup>
 					)}
-					{shown.length === 0 && needle !== "" && (
+					{!gitHubShown && shown.length === 0 && needle !== "" && (
 						<p className="m-0 px-1 text-muted-foreground text-sm">
 							No app matches “{query.trim()}”.
 						</p>

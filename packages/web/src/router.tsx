@@ -1,5 +1,9 @@
 import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
-import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
+import {
+	CONNECTION_SIGN_IN_RETURN_PATH,
+	GITHUB_SETUP_RETURN_PATH,
+	type GitHubSetupFailure,
+} from "@sugabots/contracts";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
 import {
@@ -391,6 +395,86 @@ function SignInReturnRoute() {
 			</EmptyState>
 		</div>
 	);
+}
+
+/**
+ * Where a pod's GitHub setup returns: the API names the pod, its GitHub
+ * connection once GitHub made its app, and why setup stopped when it did.
+ */
+const gitHubSetupReturnRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: GITHUB_SETUP_RETURN_PATH,
+	validateSearch: (search: Record<string, unknown>) => ({
+		workspace: optionalString(search.workspace),
+		pod: optionalString(search.pod),
+		connection: optionalString(search.connection),
+		github_error: optionalString(search.github_error),
+	}),
+	beforeLoad: requireUser,
+	component: GitHubSetupReturnRoute,
+});
+
+function GitHubSetupReturnRoute() {
+	const {
+		workspace,
+		pod: podId,
+		connection,
+		github_error: failure,
+	} = gitHubSetupReturnRoute.useSearch();
+	const workspaces = useWorkspaces();
+	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
+	const pods = useQuery(podsQuery(workspace));
+	const pod = pods.data?.find((one) => one.id === podId);
+	const navigate = useNavigate();
+
+	useEffect(() => {
+		if (failure || !slug || !pod || !connection) return;
+		// Outside any workspace, so this names one; the link helpers are for pages inside.
+		void navigate({
+			to: "/$workspace/settings/pods/$pod/connections/$connection",
+			params: { workspace: slug, pod: pod.slug, connection },
+			replace: true,
+		});
+	}, [failure, slug, pod, connection, navigate]);
+
+	const resolving = workspace !== undefined && (pods.isPending || workspaces.isPending);
+	if ((!failure && slug && pod && connection) || resolving) {
+		return <div className="h-full bg-list" />;
+	}
+	return (
+		<div className="grid h-full place-items-center bg-list p-6">
+			<EmptyState title="GitHub setup didn't finish">
+				<p>{gitHubSetupFailureReason(failure)}</p>
+				{slug && pod ? (
+					<Link
+						to="/$workspace/settings/pods/$pod"
+						params={{ workspace: slug, pod: pod.slug }}
+						className="text-link underline"
+					>
+						Back to {pod.name}
+					</Link>
+				) : (
+					<Link to="/" className="text-link underline">
+						Return to workspace
+					</Link>
+				)}
+			</EmptyState>
+		</div>
+	);
+}
+
+const GITHUB_SETUP_FAILURES: Record<GitHubSetupFailure, string> = {
+	expired:
+		"The link had expired, or was started by someone else. Start again from the pod's connections.",
+	github: "GitHub refused or couldn't be reached. Try again in a moment.",
+	cancelled:
+		"It was cancelled on GitHub. Start again from the pod's connections when you're ready.",
+};
+
+function gitHubSetupFailureReason(failure: string | undefined) {
+	return failure && failure in GITHUB_SETUP_FAILURES
+		? GITHUB_SETUP_FAILURES[failure as GitHubSetupFailure]
+		: "The pod it was for is no longer available to you.";
 }
 
 const inviteRoute = createRoute({
@@ -1240,6 +1324,7 @@ const routeTree = rootRoute.addChildren([
 	resetPasswordRoute,
 	inviteRoute,
 	signInReturnRoute,
+	gitHubSetupReturnRoute,
 	onboardingRoute,
 	shellRoute.addChildren([
 		workspaceIndexRoute,

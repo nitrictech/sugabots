@@ -18,6 +18,7 @@ import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
+import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
@@ -117,6 +118,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(SandboxNetwork.Service),
 	unimplemented(DesktopViewer.Service),
 	unimplemented(PodSandboxSetup.Service),
+	unimplemented(GitHubApps.Service),
 	unimplemented(ConnectionSetup.Service),
 	unimplemented(ModelTrials.Service),
 	unimplemented(Usage.Service),

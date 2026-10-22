@@ -33,10 +33,12 @@ function connection(
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
 		podId: revenue.id,
+		kind: "mcp",
 		auth: "header",
 		signedIn: true,
 		secretHeader: "Authorization",
 		hasSecret: true,
+		appSettingsUrl: null,
 		status: "connected",
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
@@ -104,10 +106,12 @@ const notion = connection(3, {
 	name: "Notion",
 	handle: "notion",
 	url: "https://mcp.notion.com/mcp",
+	kind: "mcp",
 	auth: "oauth",
 	signedIn: false,
 	secretHeader: null,
 	hasSecret: false,
+	appSettingsUrl: null,
 	status: "missing_key",
 	tools: [],
 	lastTestedAt: null,
@@ -137,6 +141,29 @@ const posthog = connection(5, {
 	})),
 });
 
+/** The pod's own GitHub App's connection: installed on acme, then waiting on its install. */
+const gitHubApp = connection(6, {
+	name: "GitHub",
+	handle: "github-app",
+	url: "https://github.com/acme",
+	kind: "github",
+	secretHeader: null,
+	hasSecret: false,
+	appSettingsUrl: "https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
+	access: "ask",
+});
+const gitHubAppPending = connection(7, {
+	name: "GitHub",
+	handle: "github-app",
+	url: "https://github.com/apps/sugabots-revenue-09a7",
+	kind: "github",
+	signedIn: false,
+	secretHeader: null,
+	hasSecret: false,
+	appSettingsUrl: "https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
+	access: "ask",
+});
+
 const pagePath = (one: TestConnection) =>
 	`/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
 
@@ -147,7 +174,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
-		const served = [current, stripe, notion, github, posthog];
+		const served = [current, stripe, notion, github, posthog, gitHubApp, gitHubAppPending];
 		msw.use(
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
@@ -252,6 +279,43 @@ export const NotSignedIn = meta.story({
 			await canvas.findByRole("button", { name: "Sign in" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("No actions found yet.")).toBeInTheDocument();
+	},
+});
+
+/** The pod's GitHub App's connection, installed: its tools, and no install step. */
+export const GitHubApp = meta.story({
+	render: () => <StoryApp path={pagePath(gitHubApp)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "GitHub" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Install on GitHub" })).toBeNull();
+	},
+});
+
+/** Disconnecting GitHub says the app stays there, and links to its settings to delete it. */
+export const DisconnectingGitHub = meta.story({
+	render: () => <StoryApp path={pagePath(gitHubApp)} />,
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Disconnect" }, { timeout: 10_000 }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: "Disconnect GitHub?" });
+		await expect(within(dialog).getByRole("link", { name: "Delete GitHub App" })).toHaveAttribute(
+			"href",
+			"https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7/advanced",
+		);
+	},
+});
+
+/** Made on GitHub but not installed yet: Install on GitHub, where an MCP server has Sign in. */
+export const GitHubAppNotInstalled = meta.story({
+	render: () => <StoryApp path={pagePath(gitHubAppPending)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("button", { name: "Install on GitHub" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Sign in" })).toBeNull();
 	},
 });
 
