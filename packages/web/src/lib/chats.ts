@@ -116,8 +116,6 @@ export type AttentionCounts = {
 	unreadMentions: number;
 	/** Approvals waiting on the person. */
 	waitingApprovals: number;
-	/** Messages the person has not read in any chat, mentions among them. */
-	unreadMessages: number;
 };
 
 /**
@@ -126,17 +124,12 @@ export type AttentionCounts = {
  * counted among its latest items only.
  */
 export function useAttentionCounts(): AttentionCounts {
-	const { data: markers } = usePodChatMarkers();
 	const { data: approvals } = useApprovalInbox();
 	const { data: activity } = useActivityFeed();
 	return {
 		unreadMentions:
 			activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0,
 		waitingApprovals: approvals?.waiting.length ?? 0,
-		unreadMessages: Object.values(markers?.pods ?? {}).reduce(
-			(total, pod) => total + pod.unreadMessages,
-			0,
-		),
 	};
 }
 

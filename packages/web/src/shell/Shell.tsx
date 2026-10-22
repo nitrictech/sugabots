@@ -1,7 +1,7 @@
 import { Outlet } from "@tanstack/react-router";
 import { cn } from "cn";
 import type { ReactNode } from "react";
-import { appBadgeOf, useAppBadge } from "@/lib/app-badge.ts";
+import { useAppBadge } from "@/lib/app-badge.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
@@ -11,8 +11,8 @@ import { Rail } from "@/shell/Rail.tsx";
 export function Shell() {
 	useWorkspaceEvents();
 	useVisibleHeight();
-	const attention = useAttentionCounts();
-	useAppBadge(appBadgeOf(attention));
+	const { unreadMentions, waitingApprovals } = useAttentionCounts();
+	useAppBadge(unreadMentions + waitingApprovals);
 
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (

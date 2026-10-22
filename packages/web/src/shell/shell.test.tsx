@@ -2331,7 +2331,7 @@ describe("the app's badge", () => {
 		await waitFor(() => expect(document.title).toBe("Sugabots (1)"));
 	});
 
-	it("shows a dot for unread messages that are not for you", async () => {
+	it("leaves the icon and the title alone for unread messages that are not for you", async () => {
 		const { setAppBadge } = badging();
 		pageTitle();
 		client.api.chats.podMarkers.mockReturnValue(
@@ -2339,8 +2339,9 @@ describe("the app's badge", () => {
 		);
 		mount(linearPage);
 
-		await waitFor(() => expect(setAppBadge).toHaveBeenCalledWith());
-		expect(document.title).toBe("• Sugabots");
+		await screen.findByRole("link", { name: /2 unread messages/ });
+		expect(document.title).toBe("Sugabots");
+		expect(setAppBadge).not.toHaveBeenCalled();
 	});
 
 	it("clears the icon and the title once nothing is waiting", async () => {

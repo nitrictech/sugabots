@@ -1,65 +1,29 @@
-import { useEffect, useEffectEvent } from "react";
-import type { AttentionCounts } from "./chats.ts";
+import { useEffect } from "react";
 import { matchesMedia } from "./media.ts";
 
 /**
- * What the app shows outside the page: how many things are for the person, a
- * dot when only other messages are unread, or nothing.
+ * Shows `count` outside the page: on the icon of Sugabots installed as an
+ * app, and in the title. Nothing shows while it is zero. The title goes back
+ * as it was when the count goes, and the icon is cleared when the caller
+ * unmounts.
  */
-export type AppBadge = { kind: "count"; count: number } | { kind: "dot" } | { kind: "none" };
-
-/** Mentions and approvals are for the person, so they are counted; other unread messages are a dot. */
-export function appBadgeOf({
-	unreadMentions,
-	waitingApprovals,
-	unreadMessages,
-}: AttentionCounts): AppBadge {
-	const count = unreadMentions + waitingApprovals;
-	if (count > 0) return { kind: "count", count };
-	if (unreadMessages > 0) return { kind: "dot" };
-	return { kind: "none" };
-}
-
-/**
- * Shows `badge` outside the page: on the icon of Sugabots installed as an
- * app, and in the title. The title goes back as it was when the badge goes,
- * and the icon is cleared when the caller unmounts.
- */
-export function useAppBadge(badge: AppBadge) {
-	const marker = titleMarkerOf(badge);
-	// Sets the icon straight to the new badge: clearing it first, between two counts, would flicker.
-	const showBadgeOnIcon = useEffectEvent(() => showOnIcon(badge));
+export function useAppBadge(count: number) {
 	useEffect(() => {
-		showBadgeOnIcon();
-		if (marker === undefined) return;
-		return markTitle(marker);
-	}, [marker]);
-	useEffect(() => () => showOnIcon({ kind: "none" }), []);
-}
-
-function titleMarkerOf(badge: AppBadge): string | undefined {
-	switch (badge.kind) {
-		case "count":
-			return `(${badge.count})`;
-		case "dot":
-			return "•";
-		case "none":
-			return undefined;
-	}
+		// Sets the icon straight to the new count: clearing it first, between two counts, would flicker.
+		showOnIcon(count);
+		if (count === 0) return;
+		return markTitle(`(${count})`);
+	}, [count]);
+	useEffect(() => () => showOnIcon(0), []);
 }
 
 /**
- * Shows `badge` on the installed app's icon. `none` clears it, including a
+ * Shows `count` on the installed app's icon. Zero clears it, including a
  * badge from before a reload, which the icon keeps.
  */
-function showOnIcon(badge: AppBadge) {
+function showOnIcon(count: number) {
 	if (!("setAppBadge" in navigator)) return;
-	const showing =
-		badge.kind === "count"
-			? navigator.setAppBadge(badge.count)
-			: badge.kind === "dot"
-				? navigator.setAppBadge()
-				: navigator.clearAppBadge();
+	const showing = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
 	// Either may be rejected; the title still shows the badge.
 	showing.catch(() => {});
 }
