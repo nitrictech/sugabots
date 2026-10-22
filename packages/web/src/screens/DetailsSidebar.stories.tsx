@@ -96,6 +96,7 @@ function connection(id: string, name: string, url: string): Connection {
 		url,
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		status: "connected",

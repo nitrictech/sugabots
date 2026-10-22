@@ -119,7 +119,7 @@ export function ConnectionPage({
 				<MoreMenu label={`More for ${connection.name}`}>
 					{canManage && connection.auth === "oauth" && (
 						<DropdownMenuItem onClick={signIn}>
-							{connection.signedIn ? "Sign in again" : "Sign in"}
+							{connection.signedIn || connection.signInExpired ? "Sign in again" : "Sign in"}
 						</DropdownMenuItem>
 					)}
 					{canManage && connection.auth === "header" && (
@@ -146,12 +146,16 @@ export function ConnectionPage({
 				{!connection.signedIn && (
 					<SettingsGroup>
 						<SettingsRow
-							label="Not signed in yet"
-							sub={`Bots can't use ${connection.name} until someone signs in.`}
+							label={connection.signInExpired ? "Sign-in expired" : "Not signed in yet"}
+							sub={
+								connection.signInExpired
+									? `${connection.name} refused the last sign-in. Bots can't use it until someone signs in again.`
+									: `Bots can't use ${connection.name} until someone signs in.`
+							}
 							trailing={
 								canManage && (
 									<Button size="sm" disabled={actions.signIn.isPending} onClick={signIn}>
-										Sign in
+										{connection.signInExpired ? "Sign in again" : "Sign in"}
 									</Button>
 								)
 							}

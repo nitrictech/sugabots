@@ -43,6 +43,7 @@ const wiki: Connection = {
 	url: "https://wiki.example.com/mcp",
 	auth: "header",
 	signedIn: true,
+	signInExpired: false,
 	secretHeader: null,
 	hasSecret: false,
 	status: "connected",

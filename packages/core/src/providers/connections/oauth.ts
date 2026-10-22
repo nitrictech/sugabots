@@ -30,12 +30,18 @@ export interface OAuthRecord {
 	state?: string;
 	/** Who started the sign-in under way, the only person who may finish it. */
 	startedByUserId?: string;
+	/**
+	 * When the authorization server last refused the tokens and no one was
+	 * there to sign in again, as an ISO timestamp. Cleared by the next tokens.
+	 */
+	signInRejectedAt?: string;
 }
 
-/** Where a connection's record lives. */
+/** Where a connection's record lives, and the clock its changes are stamped by. */
 interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
 	save(record: OAuthRecord): Promise<void>;
+	now(): Promise<Date>;
 }
 
 interface OAuthProviderOptions {
@@ -44,8 +50,9 @@ interface OAuthProviderOptions {
 	clientName: string;
 	/**
 	 * Who is starting a sign-in, recorded with its `state`. Left out by a
-	 * provider that only uses or refreshes tokens, so a sign-in it starts
-	 * cannot be finished by anybody.
+	 * provider that only uses or refreshes tokens, which refuses to start a
+	 * sign-in, since nobody could finish it: it drops the tokens, records
+	 * the rejection, and throws {@link SignInRequired}.
 	 */
 	startedByUserId?: string;
 }
@@ -89,14 +96,24 @@ export function storedOAuthProvider(
 		authorizationServerInformation: async () => (await record()).authorizationServer,
 		saveAuthorizationServerInformation: (authorizationServer) => change({ authorizationServer }),
 		tokens: async () => (await record()).tokens,
-		saveTokens: (tokens) => change({ tokens }),
+		saveTokens: (tokens) => change({ tokens, signInRejectedAt: undefined }),
 		codeVerifier: async () => {
 			const verifier = (await record()).codeVerifier;
 			if (!verifier) throw new Error("No sign-in is under way for this connection");
 			return verifier;
 		},
 		saveCodeVerifier: (codeVerifier) => change({ codeVerifier }),
-		state: () => randomBytes(24).toString("base64url"),
+		// The SDK asks for a state only once the tokens it holds, refreshed or not,
+		// won't do. Refusing here, before anything is saved, leaves a sign-in a
+		// person has under way alone.
+		state: async () => {
+			if (startedByUserId === undefined) {
+				const rejectedAt = await storage.now();
+				await change({ tokens: undefined, signInRejectedAt: rejectedAt.toISOString() });
+				throw new SignInRequired();
+			}
+			return randomBytes(24).toString("base64url");
+		},
 		saveState: (state) => change({ state, startedByUserId }),
 		storedState: async () => (await record()).state,
 		redirectToAuthorization: (url) => {
@@ -174,9 +191,23 @@ export function signInStartFailure(cause: unknown): SignInStartFailure {
 	return "unknown";
 }
 
-/** Whether a failure means the connection needs signing in again rather than fixing. */
+/**
+ * The authorization server refused the connection's tokens, and only a person
+ * signing in again can fix it.
+ */
+export class SignInRequired extends Error {
+	override readonly name = "SignInRequired";
+	constructor() {
+		super("The connection needs signing in again");
+	}
+}
+
+/** Whether a failure, or what caused it, means the connection needs signing in again rather than fixing. */
 export function needsSignIn(cause: unknown): boolean {
-	return cause instanceof UnauthorizedError;
+	for (let current = cause; current instanceof Error; current = current.cause) {
+		if (current instanceof SignInRequired || current instanceof UnauthorizedError) return true;
+	}
+	return false;
 }
 
 /** Providers backed by the connection table, one per connection asked for. */

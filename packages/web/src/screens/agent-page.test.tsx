@@ -80,6 +80,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 		url: "https://mcp.linear.app/mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		status: "connected",

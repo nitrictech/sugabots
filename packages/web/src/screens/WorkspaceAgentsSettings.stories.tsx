@@ -75,6 +75,7 @@ function connection(
 		url,
 		auth: "header",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: "Authorization",
 		hasSecret: true,
 		status: "connected",

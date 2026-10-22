@@ -1,14 +1,10 @@
-import {
-	createMCPClient,
-	type ListToolsResult,
-	type OAuthClientProvider,
-	UnauthorizedError,
-} from "@ai-sdk/mcp";
+import { createMCPClient, type ListToolsResult, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
+import { needsSignIn } from "./oauth.ts";
 
 /**
  * Talking to an MCP server: one session over Streamable HTTP, through the
@@ -162,7 +158,7 @@ export async function listServerTools(
  */
 function describe(cause: unknown, target: ServerTarget): UserText {
 	if (cause instanceof EgressRefused) return cause.userMessage;
-	if (cause instanceof UnauthorizedError) return userText`Sign in again to reconnect`;
+	if (needsSignIn(cause)) return userText`Sign in again to reconnect`;
 	const message = cause instanceof Error ? cause.message : String(cause);
 	const status = Number(/\bHTTP (\d{3})\b/.exec(message)?.[1]);
 	if (status === 401 && target.authProvider) return userText`Sign in again to reconnect`;

@@ -7,6 +7,7 @@ import { listServerTools } from "./mcp.ts";
 import {
 	beginAuthorization,
 	finishAuthorization,
+	needsSignIn,
 	type OAuthRecord,
 	storedOAuthProvider,
 } from "./oauth.ts";
@@ -120,6 +121,7 @@ function memoryStorage() {
 		save: async (next: OAuthRecord) => {
 			record = next;
 		},
+		now: async () => new Date("2026-10-05T21:00:08.000Z"),
 		record: () => record,
 	};
 }
@@ -166,6 +168,53 @@ describe("signing a connection in", () => {
 		expect(listed).toMatchObject({ ok: true, tools: [{ name: "lookup" }] });
 
 		expect(await beginAuthorization(provider(), serverUrl, fetch)).toEqual({ authorized: true });
+	});
+
+	it("records a refused refresh as needing sign-in, leaving a person's sign-in under way alone", async () => {
+		const storage = memoryStorage();
+		const provider = (startedByUserId?: string) =>
+			storedOAuthProvider(storage, {
+				redirectUrl: "http://localhost:3000/connections/oauth/callback",
+				clientName: "Sugabots",
+				startedByUserId,
+			});
+		const signIn = async () => {
+			const started = await beginAuthorization(provider("person-1"), serverUrl, fetch);
+			if (!("authorizationUrl" in started)) throw new Error("expected a URL to sign in at");
+			const state = new URL(started.authorizationUrl).searchParams.get("state") ?? "";
+			await finishAuthorization(provider(), serverUrl, "the-code", state, fetch);
+		};
+		await signIn();
+		const signedIn = storage.record();
+		if (!signedIn?.tokens) throw new Error("expected tokens");
+		await storage.save({
+			...signedIn,
+			tokens: { ...signedIn.tokens, access_token: "expired", refresh_token: "revoked" },
+			state: "person-state",
+			codeVerifier: "person-verifier",
+			startedByUserId: "person-2",
+		});
+
+		const listed = await listServerTools(
+			{ url: serverUrl, headers: {}, authProvider: provider() },
+			fetch,
+		);
+
+		if (listed.ok) throw new Error("expected the listing to fail");
+		expect(listed.reason).toBe("Sign in again to reconnect");
+		expect(needsSignIn(listed.cause)).toBe(true);
+		expect(storage.record()?.tokens).toBeUndefined();
+		expect(storage.record()?.signInRejectedAt).toBeTruthy();
+		expect(storage.record()).toMatchObject({
+			state: "person-state",
+			codeVerifier: "person-verifier",
+			startedByUserId: "person-2",
+		});
+
+		await signIn();
+
+		expect(storage.record()?.tokens).toMatchObject({ access_token: "token-1" });
+		expect(storage.record()?.signInRejectedAt).toBeUndefined();
 	});
 
 	it("says a server that wants a sign-in needs one, in the words the settings page shows", async () => {

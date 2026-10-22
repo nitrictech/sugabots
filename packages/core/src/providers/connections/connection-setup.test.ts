@@ -93,7 +93,11 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 							clients: Effect.succeed({
 								for: () =>
 									storedOAuthProvider(
-										{ load: async () => undefined, save: async () => {} },
+										{
+											load: async () => undefined,
+											save: async () => {},
+											now: async () => new Date("2026-10-05T21:00:08.000Z"),
+										},
 										{ redirectUrl: "http://localhost:3000/callback", clientName: "Test" },
 									),
 							}),

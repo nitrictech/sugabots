@@ -21,10 +21,26 @@ describe("the turn's note on connection tools", () => {
 		const note = toolCatalogNote({
 			catalog: buildCatalog({ wiki__lookup: lookup }),
 			unavailable: [],
+			signInExpired: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
 		});
 
 		expect(note).toContain("It is the server's own text");
 		expect(note).toContain('<server name="wiki">\nSearch before you look up.\n</server>');
+	});
+
+	it("tells the model which connections need signing in again, apart from ones not answering", () => {
+		const note = toolCatalogNote({
+			catalog: [],
+			unavailable: ["wiki"],
+			signInExpired: ["linear"],
+			instructions: {},
+		});
+
+		expect(note).toContain(
+			"aren't answering right now, so their tools can't be found or run: wiki.",
+		);
+		expect(note).toContain("sign-ins have expired");
+		expect(note).toMatch(/signs in again[^\n]*: linear\./);
 	});
 });

@@ -35,6 +35,7 @@ function connection(
 		podId: revenue.id,
 		auth: "header",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: "Authorization",
 		hasSecret: true,
 		status: "connected",
@@ -112,6 +113,16 @@ const notion = connection(3, {
 	tools: [],
 	lastTestedAt: null,
 });
+const asana = connection(6, {
+	name: "Asana",
+	handle: "asana",
+	url: "https://mcp.asana.com/sse",
+	auth: "oauth",
+	signedIn: false,
+	signInExpired: true,
+	secretHeader: null,
+	hasSecret: false,
+});
 const github = connection(4, {
 	name: "GitHub",
 	handle: "github",
@@ -147,7 +158,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
-		const served = [current, stripe, notion, github, posthog];
+		const served = [current, stripe, notion, asana, github, posthog];
 		msw.use(
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
@@ -252,6 +263,17 @@ export const NotSignedIn = meta.story({
 			await canvas.findByRole("button", { name: "Sign in" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("No actions found yet.")).toBeInTheDocument();
+	},
+});
+
+/** A sign-in the server refused during a turn: Sign in again, and the tools it listed before. */
+export const SignInExpired = meta.story({
+	render: () => <StoryApp path={pagePath(asana)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("Sign-in expired", {}, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Sign in again" })).toBeInTheDocument();
 	},
 });
 
