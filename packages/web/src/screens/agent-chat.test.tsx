@@ -1114,18 +1114,18 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
-	it("lists who has written in the Chat lately, most recent first", async () => {
+	it("lists who is in the thread, the viewer as You", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 
 		const rail = await screen.findByRole("complementary", { name: "Details" });
-		const recent = (
-			await within(rail).findByRole("heading", { name: "Recent participants" })
-		).closest("section");
-		if (!recent) throw new Error("Recent participants has no section");
-		const [first, second, ...rest] = within(recent).getAllByRole("listitem");
-		expect(first?.textContent).toContain(linear.name);
-		expect(second?.textContent).toContain(sam.name);
+		const members = (await within(rail).findByRole("heading", { name: "In this thread" })).closest(
+			"section",
+		);
+		if (!members) throw new Error("In this thread has no section");
+		const [first, second, ...rest] = within(members).getAllByRole("listitem");
+		expect(first?.textContent).toContain("You");
+		expect(second?.textContent).toContain(linear.name);
 		expect(rest).toEqual([]);
 	});
 

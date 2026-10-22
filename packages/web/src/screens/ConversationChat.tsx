@@ -64,10 +64,11 @@ import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatHeader, type ChatPlace, PeopleChatHeader } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
-import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { DetailsSidebar, PeopleDetails, type ThreadContents } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
+import { RoutineDetails } from "./RoutineDetails.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
 import {
 	DaySeparator,
@@ -364,7 +365,17 @@ export function ConversationChat({
 			place={place}
 		/>
 	) : (
-		<PeopleChatHeader title={title ?? ""} done={done} pod={pod} place={place} />
+		<PeopleChatHeader
+			title={title ?? ""}
+			done={done}
+			details={
+				place.kind === "own" && !staged
+					? { open: place.detailsOpen, onChange: place.onDetailsChange }
+					: undefined
+			}
+			pod={pod}
+			place={place}
+		/>
 	);
 	if (!details || (agent && !host))
 		return (
@@ -397,6 +408,13 @@ export function ConversationChat({
 		? `Message ${listNames(otherPeople.map((person) => person.name))}`
 		: `Message ${agent?.name ?? pod.name}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
+	const contents: ThreadContents = {
+		participants: details.participants,
+		files: shownMessages.flatMap((message) =>
+			message.parts.filter((part): part is FilePart => part.type === "file"),
+		),
+		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
+	};
 	const hint = isPodChat
 		? threadWith
 			? `Sending starts a thread with ${threadWith.name}.`
@@ -600,17 +618,34 @@ export function ConversationChat({
 					onOpenArtifact={openArtifact}
 				/>
 			) : (
-				agent &&
 				place.kind === "own" &&
-				place.detailsOpen && (
+				place.detailsOpen &&
+				!isPodChat &&
+				(details.routine && agent ? (
+					<RoutineDetails
+						agent={agent}
+						pod={pod}
+						conversationId={conversationId}
+						standing={details.routine}
+						onOpenThread={openThread}
+						onClose={() => place.onDetailsChange(false)}
+					/>
+				) : agent ? (
 					<DetailsSidebar
 						agent={agent}
 						pod={pod}
 						threadId={details.thread.id}
 						user={user}
+						contents={contents}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				)
+				) : (
+					<PeopleDetails
+						user={user}
+						contents={contents}
+						onClose={() => place.onDetailsChange(false)}
+					/>
+				))
 			)}
 		</div>
 	);

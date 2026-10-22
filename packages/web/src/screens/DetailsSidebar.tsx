@@ -1,6 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type {
 	Agent,
+	FilePart,
 	Pod,
 	SessionUser,
 	ThreadParticipant,
@@ -8,7 +9,7 @@ import type {
 } from "@sugabots/contracts";
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { RefreshCw, Settings2 } from "lucide-react";
+import { FileText, RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
@@ -29,6 +30,7 @@ import { ContextMeter } from "./ContextMeter.tsx";
 
 /** How many rows a list shows before Show more. */
 const PARTICIPANTS_SHOWN = 3;
+const FILES_SHOWN = 3;
 const ROUTINES_SHOWN = 2;
 /** A summary longer than this is folded to four lines until asked for the rest. */
 const SUMMARY_FOLDED_OVER = 240;
@@ -36,19 +38,23 @@ const SUMMARY_FOLDED_OVER = 240;
 /**
  * A bot as a contact card, beside its chat: its face, name, pod and model, the way to
  * its settings, then what the chat is about, how much of the bot's short-term memory it
- * fills and who has been in it, the apps it can reach and the routines it runs.
+ * fills, who is in it and the files shared there, the apps it can reach and the
+ * routines it runs.
  */
 export function DetailsSidebar({
 	agent,
 	pod,
 	threadId,
 	user,
+	contents,
 	onClose,
 }: {
 	agent: Agent;
 	pod: Pod;
 	threadId: string;
 	user: SessionUser;
+	/** Who is in the thread, and the files shared in it. */
+	contents: ThreadContents;
 	onClose: () => void;
 }) {
 	const backToChat = useBackToHere("Chat");
@@ -88,19 +94,94 @@ export function DetailsSidebar({
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}
-				{activity && activity.recentParticipants.length > 0 && (
-					<SidebarSection title="Recent participants">
-						<Expandable items={activity.recentParticipants} shown={PARTICIPANTS_SHOWN}>
-							{(participant) => (
-								<ParticipantRow key={participant.id} participant={participant} user={user} />
-							)}
-						</Expandable>
-					</SidebarSection>
-				)}
+				<InThisThread participants={contents.participants} user={user} />
+				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 				<Routines pod={pod} agent={agent} />
 				<Tools pod={pod} agent={agent} />
 			</div>
 		</ChatSidebar>
+	);
+}
+
+/** Who is in a thread, and the files shared in it, each opening where it is served. */
+export interface ThreadContents {
+	participants: readonly ThreadParticipant[];
+	/** The files in the messages loaded so far, oldest first: older pages add theirs as they load. */
+	files: readonly FilePart[];
+	fileUrlOf: (fileId: string) => string;
+}
+
+/** A thread between people, beside it: who is in it, and the files shared there. */
+export function PeopleDetails({
+	user,
+	contents,
+	onClose,
+}: {
+	user: SessionUser;
+	contents: ThreadContents;
+	onClose: () => void;
+}) {
+	return (
+		<ChatSidebar label="Details" onClose={onClose}>
+			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
+				<InThisThread participants={contents.participants} user={user} />
+				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
+			</div>
+		</ChatSidebar>
+	);
+}
+
+/** Everyone in the thread: each bot, and each person, the viewer as You. */
+function InThisThread({
+	participants,
+	user,
+}: {
+	participants: readonly ThreadParticipant[];
+	user: SessionUser;
+}) {
+	if (participants.length === 0) return null;
+	return (
+		<SidebarSection title="In this thread">
+			<Expandable items={[...participants]} shown={PARTICIPANTS_SHOWN}>
+				{(participant) => (
+					<ParticipantRow key={participant.id} participant={participant} user={user} />
+				)}
+			</Expandable>
+		</SidebarSection>
+	);
+}
+
+/** The files shared in the thread, newest first, each opening as it is served. */
+function SharedFiles({
+	files,
+	fileUrlOf,
+}: {
+	files: readonly FilePart[];
+	fileUrlOf: (fileId: string) => string;
+}) {
+	if (files.length === 0) return null;
+	return (
+		<SidebarSection title="Files">
+			<Expandable items={[...files].reverse()} shown={FILES_SHOWN}>
+				{(file) => (
+					<li key={file.id} className="border-border border-b last:border-b-0">
+						<a
+							href={fileUrlOf(file.id)}
+							target="_blank"
+							rel="noreferrer"
+							className="focus-ring flex items-center gap-2.5 px-3.5 py-[9px] transition-colors hover:bg-panel"
+						>
+							<span className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground">
+								<FileText aria-hidden size={14} strokeWidth={2} />
+							</span>
+							<span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
+								{file.name}
+							</span>
+						</a>
+					</li>
+				)}
+			</Expandable>
+		</SidebarSection>
 	);
 }
 
@@ -224,7 +305,7 @@ function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
 }
 
 /** The apps the bot can reach, which are its pod's connections, each opening the bot's settings. */
-function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
+export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(pod.id);
 	const list = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
