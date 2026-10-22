@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CurrentActor } from "../../../authorization/current-actor.ts";
@@ -17,11 +17,12 @@ import {
 	workspaceWithPod,
 } from "./github.test-support.ts";
 import { GitHubApps } from "./github-app.ts";
+import { GitHubConnections } from "./github-connections.ts";
 
 const servedAt = (publicUrl: string) =>
 	runOnPostgres(
-		Effect.all([GitHubApps.Service]).pipe(
-			Effect.provide(GitHubApps.layer),
+		Effect.all([GitHubApps.Service, GitHubConnections.Service]).pipe(
+			Effect.provide(Layer.mergeAll(GitHubApps.layer, GitHubConnections.layer)),
 			Effect.provide(reachingGitHub(standInGitHub().fetch, publicUrl)),
 		),
 	);

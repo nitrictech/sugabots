@@ -1,7 +1,8 @@
 import { GITHUB_SETUP_RETURN_PATH } from "@sugabots/contracts";
-import { Conflict, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { Installation } from "@sugabots/core/installation/installation";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
+import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -11,8 +12,11 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 
 const connectionErrors = {
 	...refusals,
+	GitHubAppNotInstalled: BadRequest,
+	GitHubRequestFailed: BadRequest,
 	NotGitHubConnection: NotFound,
 	PodHasGitHubConnection: Conflict,
+	RepositoryUnreachable: BadRequest,
 };
 
 export const gitHubConnectionRoutes = HttpApiBuilder.group(
@@ -25,6 +29,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 			// when setup stopped, why; the web app turns those into its own page.
 			const { webAppUrl } = yield* Installation.Service;
 			const gitHubApps = yield* GitHubApps.Service;
+			const connections = yield* GitHubConnections.Service;
 			const redirect = (outcome: GitHubApps.SetupOutcome) => {
 				if (outcome.kind === "next") {
 					return HttpServerResponse.redirect(outcome.url, { status: 302 });
@@ -55,6 +60,24 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 						asSessionUser,
 						asHttpError(connectionErrors),
 					),
+				)
+				.handle("reachableRepositories", ({ params }) =>
+					connections
+						.reachableRepositories(params)
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
+				)
+				.handle("repositories", ({ params }) =>
+					connections.repositories(params).pipe(asSessionUser, asHttpError(connectionErrors)),
+				)
+				.handle("addRepository", ({ params, payload }) =>
+					connections
+						.addRepository({ ...params, repository: payload.repository })
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
+				)
+				.handle("removeRepository", ({ params, payload }) =>
+					connections
+						.removeRepository({ ...params, repository: payload.repository })
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handleRaw("gitHubAppMade", ({ request, query }) =>
 					request.method === "HEAD"

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { isoTimestampSchema } from "./timestamps.ts";
 
 /**
  * Where GitHub sends the browser, under the API, once a pod's GitHub App is
@@ -53,3 +54,41 @@ export type GitHubAppForm = typeof gitHubAppFormSchema.Type;
 
 /** Where the browser goes to install the connection's app, or to change which repositories it reaches. */
 export const gitHubAppInstallSchema = Schema.Struct({ url: Schema.String });
+
+/** A repository's path, as GitHub writes it: `owner/name`. */
+export const repositoryPathSchema = Schema.String.check(
+	Schema.isMaxLength(255),
+	Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/, {
+		message: "Enter a repository as owner/name",
+	}),
+);
+
+/** A repository the connection's app reaches, which the connection may work on. */
+export const accountRepositorySchema = Schema.Struct({
+	repository: repositoryPathSchema,
+	private: Schema.Boolean,
+});
+
+export type AccountRepository = typeof accountRepositorySchema.Type;
+
+/**
+ * The repositories a GitHub connection's tools work on, the account they
+ * belong to, and where its app is changed or deleted on GitHub.
+ */
+export const connectionRepositoriesSchema = Schema.Struct({
+	/** Null until the connection's app is installed. */
+	account: Schema.NullOr(Schema.String),
+	repositories: Schema.Array(
+		Schema.Struct({
+			repository: repositoryPathSchema,
+			/** Who added it; null once they've left. */
+			addedByName: Schema.NullOr(Schema.String),
+			addedAt: isoTimestampSchema,
+		}),
+	),
+});
+
+export type ConnectionRepositories = typeof connectionRepositoriesSchema.Type;
+
+/** A repository to add to or remove from a GitHub connection. */
+export const connectionRepositoryChangeSchema = Schema.Struct({ repository: repositoryPathSchema });

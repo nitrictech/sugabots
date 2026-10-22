@@ -110,10 +110,10 @@ let mintedTokens = 0;
 export const listsRepositories: Route = ({ path, bearer }) => {
 	if (path !== "/installation/repositories") return undefined;
 	const repositories = bearer.startsWith(`token-${OTHER_INSTALLATION_ID}-`)
-		? [{ full_name: "acme-labs/lab", private: true }]
+		? [{ id: 301, full_name: "acme-labs/lab", private: true }]
 		: [
-				{ full_name: "acme/web", private: true },
-				{ full_name: "acme/infra", private: false },
+				{ id: 101, full_name: "acme/web", private: true },
+				{ id: 102, full_name: "acme/infra", private: false },
 			];
 	return json({ total_count: repositories.length, repositories });
 };
