@@ -16,7 +16,8 @@ import {
 	type GitHubConnectionSettings,
 	user,
 } from "../../../database/schema.ts";
-import { Egress } from "../../network/egress.ts";
+import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import { Egress, type EgressHttpClient } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
 import { openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
@@ -72,6 +73,8 @@ export interface Interface {
 		AuthorizationDenied | NotGitHubConnection,
 		CurrentActor.Service
 	>;
+	/** The pod's GitHub connection, for its turns and sandbox; undefined until its app is installed. */
+	readonly forPod: (pod: Pod) => Effect.Effect<Connected | undefined>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -222,6 +225,29 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
+
+		forPod: (pod) =>
+			operation(
+				"forPod",
+				Effect.gen(function* () {
+					const [row] = yield* query((db) =>
+						db
+							.select()
+							.from(connection)
+							.where(
+								and(
+									eq(connection.workspaceId, pod.workspaceId),
+									eq(connection.podId, pod.podId),
+									eq(connection.kind, "github"),
+								),
+							)
+							.limit(1),
+					);
+					const app = row && installedApp(credentials, row);
+					if (!row?.settings || !app) return undefined;
+					return new Connected(row, app, row.settings.repositories, http);
+				}),
+			),
 	});
 });
 
@@ -255,6 +281,79 @@ function installedApp(
 		installation: { id: settings.installationId, account: settings.account },
 		privateKey: openAppCredential(credentials, appCredentialEncrypted).privateKey,
 	};
+}
+
+/** The username git sends an installation token with. */
+const TOKEN_USERNAME = "x-access-token";
+
+/**
+ * A pod's GitHub connection as its turns and sandbox use it: each token is
+ * for its account's installation, and only for its repositories.
+ */
+export class Connected {
+	readonly connection: ConnectionRow;
+	/** Its repositories' paths, as GitHub last wrote them. */
+	readonly repositories: readonly string[];
+	/** GitHub's id for each of its repositories, by path. */
+	private readonly ids: ReadonlyMap<string, number>;
+	private readonly app: GitHub.InstalledApp;
+	private readonly http: EgressHttpClient;
+
+	constructor(
+		connection: ConnectionRow,
+		app: GitHub.InstalledApp,
+		repositories: readonly GitHubConnectionRepository[],
+		http: EgressHttpClient,
+	) {
+		this.connection = connection;
+		this.app = app;
+		this.repositories = repositories.map((one) => one.path);
+		this.ids = new Map(repositories.map((one) => [one.path, one.id]));
+		this.http = http;
+	}
+
+	get account() {
+		return this.app.installation.account;
+	}
+
+	/** `repository` as the connection has it, if it is one of its, whatever its case. */
+	repository(repository: string): string | undefined {
+		return this.repositories.find((one) => one.toLowerCase() === repository.toLowerCase());
+	}
+
+	/**
+	 * What the pod's sandbox reads the repositories with: git's sign-in to the
+	 * account's paths, added outside the sandbox by its provider. Nothing for
+	 * GitHub's API, whose paths don't all name the account.
+	 */
+	sandboxSignIn() {
+		return Effect.map(
+			GitHub.accessToken(this.http, this.app, {
+				repositoryIds: [...this.ids.values()],
+				permissions: { contents: "read", metadata: "read" },
+			}),
+			(token): SandboxSignIn => ({
+				credentials: [
+					{
+						host: new URL(GitHub.WEB_URL).host,
+						pathPrefix: `/${this.account}/`,
+						header: "Authorization",
+						value: GitHub.redactedBasicAuthorization({
+							username: TOKEN_USERNAME,
+							token: token.token,
+						}),
+					},
+				],
+				expiresAt: token.expiresAt,
+			}),
+		);
+	}
+}
+
+/** What a pod's sandbox is signed in to GitHub with, and when it must be replaced. */
+export interface SandboxSignIn {
+	readonly credentials: readonly Sandboxes.Credential[];
+	readonly expiresAt: GitHub.AccessToken["expiresAt"];
 }
 
 /** A GitHub connection whose app isn't installed on an account yet. */
