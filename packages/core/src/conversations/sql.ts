@@ -51,6 +51,12 @@ export const routine = pgTable(
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
+		/**
+		 * The pod's chat its results go to when they are posted to chat; the
+		 * pod's first chat when unset, or once this one is archived. Always a
+		 * chat in its agent's pod, which `Routines` checks before writing it.
+		 */
+		chatId: uuid("chat_id").references((): AnyPgColumn => thread.id, { onDelete: "set null" }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		/** Set when the routine's own agent made it, at `createdById`'s request. */
 		createdByAgentId: uuid("created_by_agent_id"),
@@ -160,13 +166,16 @@ export const thread = pgTable(
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		podId: uuid("pod_id").notNull(),
-		/** The bot the thread is with. Null on a pod's chat, which is the pod's people's. */
+		/**
+		 * The bot the thread is with. Null on a pod's chat, which is the pod's
+		 * people's, and on a thread between people started from one.
+		 */
 		hostAgentId: uuid("host_agent_id"),
 		/**
-		 * The conversation this thread belongs to: its own id on a conversation
-		 * or a pod's chat, and the conversation it was opened from on a collaboration or a routine
-		 * run. Null on a system agent's thread, which serves a thread rather than
-		 * belonging to one.
+		 * The conversation this thread belongs to: its own id on a conversation,
+		 * a pod's chat or a routine's thread, and the one it was opened from on a
+		 * collaboration or a routine run. Null on a system agent's thread, which
+		 * serves a thread rather than belonging to one.
 		 */
 		conversationId: uuid("conversation_id").references((): AnyPgColumn => thread.id, {
 			onDelete: "cascade",
@@ -195,6 +204,13 @@ export const thread = pgTable(
 		routineId: uuid("routine_id").references((): AnyPgColumn => routine.id, {
 			onDelete: "cascade",
 		}),
+		/**
+		 * On a pod's chat: whether it is the pod's first, named for the pod,
+		 * which every pod has once opened and which is never archived.
+		 */
+		main: boolean("main").notNull().default(false),
+		/** When somebody archived the pod's chat, which hides it from the pod's list. */
+		archivedAt: timestamp("archived_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -220,8 +236,6 @@ export const thread = pgTable(
 			name: "thread_host_agent_workspace_fkey",
 		}).onDelete("cascade"),
 		uniqueIndex("thread_system_agent_key_idx").on(table.parentThreadId, table.systemAgentKey),
-		// One thread per message in a pod's chat.
-		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
 		index("thread_workspace_created_at_idx").on(table.workspaceId, table.createdAt),
 		index("thread_pod_host_created_at_idx").on(table.podId, table.hostAgentId, table.createdAt),
 		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
@@ -233,8 +247,15 @@ export const thread = pgTable(
 		),
 		// One thread per routine.
 		uniqueIndex("thread_routine_feed_idx").on(table.routineId),
-		// One chat per pod.
-		uniqueIndex("thread_pod_chat_idx").on(table.podId).where(sql`${table.type} = 'pod_chat'`),
+		// One thread per message in a pod's chat.
+		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
+		check("thread_main_valid", sql`not ${table.main} or ${table.type} = 'pod_chat'`),
+		check(
+			"thread_archived_valid",
+			sql`${table.archivedAt} is null or (${table.type} = 'pod_chat' and not ${table.main})`,
+		),
+		// One first chat per pod.
+		uniqueIndex("thread_pod_chat_idx").on(table.podId).where(sql`${table.main}`),
 	],
 );
 

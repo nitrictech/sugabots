@@ -31,7 +31,7 @@ export function Tooltip({ label, ...props }: TooltipProps & { label: ReactNode }
 
 /**
  * A card that names what a control does now and says how to change it, such
- * as the composer's people-only toggle. For a plain name, use {@link Tooltip}.
+ * as a toggle. For a plain name, use {@link Tooltip}.
  */
 export function DetailTooltip({
 	title,

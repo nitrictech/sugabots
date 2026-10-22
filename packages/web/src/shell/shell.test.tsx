@@ -480,9 +480,9 @@ describe("the conversation list", () => {
 	it("lists a pod's threads newest first, under its chat, marking the open one", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
-				podChat: null,
+				chats: [],
 				routines: [],
-				items: [
+				threads: [
 					{
 						agent: linear,
 						conversation: conversationWith(linear),
@@ -501,7 +501,7 @@ describe("the conversation list", () => {
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
 		const rows = await within(await within(list).findByRole("list")).findAllByRole("link");
 		expect(rows.map((row) => row.textContent)).toEqual([
-			expect.stringContaining("Pod chat"),
+			expect.stringContaining("General"),
 			expect.stringContaining("Linear Handler"),
 			expect.stringContaining("Issue Triager"),
 		]);
@@ -514,6 +514,7 @@ describe("the conversation list", () => {
 
 	it("loads a thread while the pointer is on its row", async () => {
 		const linearChat = {
+			kind: "thread" as const,
 			id: "0199a3a0-0000-7000-8000-0000000000c1",
 			workspaceId: workspace.id,
 			podId: linear.podId,
@@ -526,9 +527,9 @@ describe("the conversation list", () => {
 		const unread = { lastMessage: null, waitingOn: null, unreadMessages: 0, needsApproval: false };
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
-				podChat: null,
+				chats: [],
 				routines: [],
-				items: [{ agent: linear, conversation: linearChat, ...unread }],
+				threads: [{ agent: linear, conversation: linearChat, ...unread }],
 			}),
 		);
 		mount("/suga/pods/suga-team");
@@ -562,9 +563,7 @@ describe("the conversation list", () => {
 	});
 
 	it("says a pod has no bots yet, and offers the first", async () => {
-		client.api.chats.list.mockReturnValue(
-			Effect.succeed({ podChat: null, items: [], routines: [] }),
-		);
+		client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [], threads: [], routines: [] }));
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.filter((agent) => agent.podId !== pods[1]?.id)),
 		);

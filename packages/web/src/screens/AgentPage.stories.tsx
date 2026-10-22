@@ -17,6 +17,7 @@ import {
 	storyBots,
 	storyChatDetails,
 	storyConversationFor,
+	storyPodChatDetails,
 	storyPodChatFor,
 	storyUser,
 	storyWorkspace,
@@ -101,11 +102,12 @@ export const Conversation = meta.story({
 export const PodOpensTopChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
+		await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(
-			await canvas.findByRole("heading", { name: "Pod chat", level: 1 }, { timeout: 10_000 }),
+			canvas.getByText("Everyone in the pod. Mention a bot to start a thread with it."),
 		).toBeInTheDocument();
 		const list = canvas.getByRole("region", { name: revenue.name });
-		await expect(within(list).getByRole("link", { name: /Pod chat/ })).toHaveAttribute(
+		await expect(within(list).getByRole("link", { name: /^General/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
@@ -140,12 +142,22 @@ export const PodChat = meta.story({
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
 		await expect(
-			canvas.getByText(`Everyone in ${revenue.name}. Mention a bot to start a thread with it.`),
+			canvas.getByText("Everyone in the pod. Mention a bot to start a thread with it."),
 		).toBeInTheDocument();
-		await expect(
-			canvas.getByRole("textbox", { name: `Message ${revenue.name}` }),
-		).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: "Message General" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
+	},
+});
+
+/** A pod's chat before anyone has written in it opens on the pod: who is in it, and what it is for. */
+export const PodChatEmpty = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		await expect(
+			await within(log).findByRole("heading", { name: "General", level: 2 }),
+		).toBeVisible();
+		await expect(within(log).getByText(/This is the start of/)).toBeVisible();
 	},
 });
 
@@ -205,11 +217,10 @@ export const PodChatStartsAThread = meta.story({
 		).toBeTruthy();
 		await expect(canvas.getByText("Mention a bot to start a thread.")).toBeInTheDocument();
 		await userEvent.type(
-			canvas.getByRole("textbox", { name: `Message ${revenue.name}` }),
+			canvas.getByRole("textbox", { name: "Message General" }),
 			`@${growthDesk.handle} draft the renewal note with @${accountManager.handle} `,
 		);
 		// The first bot named is the one the thread is with; the other is only mentioned.
-		await expect(canvas.getByText(`Thread with ${growthDesk.name}`)).toBeInTheDocument();
 		await expect(
 			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
 		).toBeInTheDocument();
@@ -226,7 +237,9 @@ export const NewThread = meta.story({
 			{ timeout: 10_000 },
 		);
 		await userEvent.click(await canvas.findByRole("button", { name: growthDesk.name }));
-		await expect(canvas.getByText(`Thread with ${growthDesk.name}`)).toBeInTheDocument();
+		await expect(
+			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
+		).toBeInTheDocument();
 	},
 });
 
@@ -337,6 +350,7 @@ export const FailingRoutineDetails = meta.story({
 						],
 						state: "paused",
 						results: "post_to_chat",
+						chatId: null,
 						createdById: null,
 						createdByAgentId: null,
 						createdAt: "2026-09-01T00:00:00.000Z",
@@ -354,7 +368,68 @@ export const FailingRoutineDetails = meta.story({
 		const details = await canvas.findByRole("complementary", { name: "Details" });
 		await expect(within(details).getByText("Paused after two failed runs")).toBeVisible();
 		await expect(within(details).getByRole("button", { name: "Run now" })).toBeVisible();
-		await expect(await within(details).findByText("This thread and the pod's chat")).toBeVisible();
+		await expect(await within(details).findByText("This thread and General")).toBeVisible();
+	},
+});
+
+const pricingChat = {
+	...storyPodChatFor(revenue),
+	id: "0199a3a0-0000-7000-8000-00000000c9f1",
+	title: "Pricing",
+	main: false,
+};
+
+/**
+ * A pod's other chat goes by its own name, listed under its first, and offers
+ * whoever runs the pod a way to rename or archive it.
+ */
+export const NamedChat = meta.story({
+	beforeEach({ msw }) {
+		const details = storyPodChatDetails(revenue, storyBots);
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats`, () =>
+				HttpResponse.json({
+					chats: [
+						{ conversation: storyPodChatFor(revenue), unreadMessages: 0 },
+						{ conversation: pricingChat, unreadMessages: 0 },
+					],
+					threads: [],
+					routines: [],
+				}),
+			),
+			http.get(`${API}/threads/${pricingChat.id}`, () =>
+				HttpResponse.json({
+					...details,
+					thread: {
+						...details.thread,
+						id: pricingChat.id,
+						conversationId: pricingChat.id,
+						title: "Pricing",
+					},
+				}),
+			),
+			http.get(`${API}/conversations/${pricingChat.id}/messages`, () =>
+				HttpResponse.json({ items: [], nextCursor: null }),
+			),
+			...appHandlers(),
+		);
+	},
+	render: () => (
+		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/${pricingChat.id}`} />
+	),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Pricing", level: 1 }, { timeout: 10_000 }),
+		).toBeVisible();
+		const list = canvas.getByRole("region", { name: revenue.name });
+		await expect(within(list).getByRole("link", { name: /^Pricing/ })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(canvas.getByRole("textbox", { name: "Message Pricing" })).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "More for Pricing" }));
+		await expect(await screen.findByRole("menuitem", { name: "Rename chat" })).toBeVisible();
+		await expect(screen.getByRole("menuitem", { name: "Archive chat" })).toBeVisible();
 	},
 });
 
@@ -919,11 +994,11 @@ export const Artifact = meta.story({
 		);
 		const stage = await canvas.findByRole("region", { name: pricing.title });
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
-		await expect(canvas.queryByRole("link", { name: /Pod chat/ })).toBeNull();
+		await expect(canvas.queryByRole("link", { name: /^General/ })).toBeNull();
 		await expect(canvas.queryByRole("article", { name: pricing.title })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
-		await expect(await canvas.findByRole("link", { name: /Pod chat/ })).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: /^General/ })).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Details" })).toBeVisible();
 	},
 });

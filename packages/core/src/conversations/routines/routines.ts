@@ -17,7 +17,7 @@ import type {
 	WorkspaceRoutine,
 } from "@sugabots/contracts";
 import { MAX_ROUTINE_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -26,7 +26,8 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { agent, connection, routine, routineTrigger } from "../../database/schema.ts";
+import { agent, connection, routine, routineTrigger, thread } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
 import type { RepositoryActivity } from "../../providers/connections/github/github-events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
@@ -35,6 +36,7 @@ import { RoutineRepository } from "./repository.ts";
 import {
 	inScope,
 	type OnAgent,
+	RoutineChatNotFound,
 	type RoutineDeliveryIdTooLong,
 	RoutineNotFound,
 	RoutineRepositoryNotInPod,
@@ -77,6 +79,7 @@ export interface Interface {
 		Defined,
 		| AuthorizationDenied
 		| RoutineRepository.RoutineNameTaken
+		| RoutineChatNotFound
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| RoutineRepositoryNotInPod,
@@ -94,6 +97,7 @@ export interface Interface {
 		| AuthorizationDenied
 		| RoutineNotFound
 		| RoutineRepository.RoutineNameTaken
+		| RoutineChatNotFound
 		| InvalidRoutineSchedule,
 		CurrentActor.Service
 	>;
@@ -372,6 +376,7 @@ export const make = Effect.gen(function* () {
 							instructions: input.instructions,
 							state,
 							results: input.results ?? "keep_in_run",
+							chatId: yield* chatOfAgentsPod(input.chatId ?? null, owner.id),
 						});
 						const scope = { workspaceId: owner.workspaceId, agentId: owner.id, routineId: row.id };
 						const triggers = yield* repository.addTriggers(
@@ -402,6 +407,10 @@ export const make = Effect.gen(function* () {
 							// Turned on or off by hand, it is no longer one that paused itself.
 							...(input.state && { pausedAfterFailuresAt: null }),
 							results: input.results ?? current.results,
+							chatId:
+								input.chatId === undefined
+									? current.chatId
+									: yield* chatOfAgentsPod(input.chatId, current.agentId),
 						});
 						if (!row) return yield* new RoutineNotFound();
 						if (state !== current.state) yield* reschedule(scope.routineId, state);
@@ -753,3 +762,32 @@ function webhookCheck(
 		secret,
 	});
 }
+
+/**
+ * `chatId`, when it names a chat not archived in the pod of the agent
+ * `agentId`; null stays null, for the pod's first chat.
+ */
+const chatOfAgentsPod = (chatId: string | null, agentId: string) =>
+	Effect.gen(function* () {
+		if (chatId === null) return null;
+		// The id comes from the caller, and Postgres rejects a uuid comparison against anything that is not one.
+		const [found] = isUuid(chatId)
+			? yield* query((db) =>
+					db
+						.select({ id: thread.id })
+						.from(thread)
+						.innerJoin(agent, eq(agent.podId, thread.podId))
+						.where(
+							and(
+								eq(thread.id, chatId),
+								eq(agent.id, agentId),
+								eq(thread.type, "pod_chat"),
+								isNull(thread.archivedAt),
+							),
+						)
+						.limit(1),
+				)
+			: [];
+		if (!found) return yield* new RoutineChatNotFound();
+		return found.id;
+	});

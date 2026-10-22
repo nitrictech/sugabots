@@ -2,7 +2,7 @@ export * as RoutineSettlement from "./settlement.ts";
 
 import { textWithoutNarration } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	afterCommit,
@@ -18,6 +18,7 @@ import {
 	collaboration,
 	message,
 	pod,
+	routine,
 	routineExecution,
 	thread,
 	turn,
@@ -49,9 +50,9 @@ import { RoutineRuns } from "./runs.ts";
  * `handler` reacts to the conversation events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
  * without locking the run; the run settles once that transaction commits, in
- * its own. A turn that failed for good, or a turn that was
- * cancelled, starts ending its run early: the rest of its work is cancelled, and it ends that way once what is still running
- * stops. Every later settlement of an ending run cancels whatever work is
+ * its own. A turn that failed for good, or a turn that was cancelled, starts
+ * ending its run early: the rest of its work is cancelled, and it ends that
+ * way once what is still running stops. Every later settlement of an ending run cancels whatever work is
  * left, since some may have been held by another transaction. A settlement
  * lost to a crash after commit is made by the run's workflow's next check.
  */
@@ -85,8 +86,9 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Posts the agent's last reply in the run's own thread into the routine's
-	 * thread, and into its pod's chat as well when `resultGoesToPodChat`. A run
-	 * whose agent wrote nothing to show posts nothing.
+	 * thread, and into the pod's chat as well when `resultGoesToPodChat`: the
+	 * chat chosen while it is not archived, or else the pod's first. A run whose
+	 * agent wrote nothing to show posts nothing.
 	 */
 	const postResult = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
@@ -95,8 +97,10 @@ export const make = Effect.gen(function* () {
 			yield* threads.postRunResult({ run, content });
 			const placement = yield* placementOf(run.threadId);
 			if (!resultGoesToPodChat(run.results, placement.podKind)) return;
-			const podChat = yield* threads.openPodChat({ ...placement, initiatorUserId: null });
-			yield* threads.postRunResultToChat({ chatId: podChat.id, run, content });
+			const chatId =
+				(yield* chosenChatOf(run.routineId)) ??
+				(yield* threads.openPodChat({ ...placement, initiatorUserId: null })).id;
+			yield* threads.postRunResultToChat({ chatId, run, content });
 		});
 
 	/**
@@ -299,6 +303,20 @@ const placementOf = (threadId: string) =>
 		),
 		([row]) =>
 			row ? Effect.succeed(row) : Effect.die(new Error("A routine run's thread is gone")),
+	);
+
+/** The chat the routine `routineId` posts its results to, while it is not archived. */
+const chosenChatOf = (routineId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ id: thread.id })
+				.from(routine)
+				.innerJoin(thread, eq(thread.id, routine.chatId))
+				.where(and(eq(routine.id, routineId), isNull(thread.archivedAt)))
+				.limit(1),
+		),
+		([row]) => row?.id,
 	);
 
 /**

@@ -1,8 +1,7 @@
 import type { AgentParticipant, Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
-import { useOpenPodChat, useStartThread } from "@/lib/chats.ts";
+import { THREAD_NOT_STARTED, useOpenPodChat, useThreadStarter } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { useThread } from "@/lib/threads.ts";
@@ -20,19 +19,13 @@ import { firstBotNamed, mentionableIn } from "./mentions.tsx";
 export function NewThread({ pod, userId }: { pod: Pod; userId: string }) {
 	const podChat = useOpenPodChat(pod);
 	const details = useThread(podChat.data?.id).data;
-	const startThread = useStartThread(podChat.data?.id ?? "");
 	// Files are uploaded to the pod's chat, and move to the thread when it starts.
 	const attachments = useComposerAttachments(podChat.data?.id);
+	const threads = useThreadStarter(podChat.data?.id, attachments);
 	const navigate = useNavigate();
 	const [draft, setDraft] = useState("");
 	const [failed, setFailed] = useState(false);
-	const header = (
-		<PeopleChatHeader
-			title={`New thread in ${pod.name}`}
-			pod={pod}
-			place={{ kind: "own", detailsOpen: false, onDetailsChange: () => {} }}
-		/>
-	);
+	const header = <PeopleChatHeader title={`New thread in ${pod.name}`} back={{ to: "pod", pod }} />;
 
 	if (podChat.isError) {
 		return (
@@ -54,23 +47,11 @@ export function NewThread({ pod, userId }: { pod: Pod; userId: string }) {
 	const threadWith = details ? firstBotNamed(draft, details.crew) : undefined;
 
 	async function submit() {
-		// A thread is titled from its first message, so it needs words.
-		if (!podChat.data || startThread.isPending || draft.trim() === "") return;
-		const files = attachments.takeForSending(draft);
-		if (!files) return;
 		setFailed(false);
-		try {
-			const started = await startThread.mutateAsync({
-				id: uuidv4(),
-				message: draft.trim(),
-				...(threadWith && { hostAgentId: threadWith.id }),
-				files: files.parts,
-			});
-			await navigate(conversationLink({ pod, conversationId: started.conversation.id }));
-		} catch (failure) {
-			files.putBack(failure);
-			setFailed(true);
-		}
+		const started = await threads.start(draft, { hostAgentId: threadWith?.id });
+		if (started.outcome === "refused") setFailed(true);
+		if (started.outcome !== "started") return;
+		await navigate(conversationLink({ pod, conversationId: started.thread.conversation.id }));
 	}
 
 	return (
@@ -109,12 +90,11 @@ export function NewThread({ pod, userId }: { pod: Pod; userId: string }) {
 					onValueChange={setDraft}
 					onSubmit={submit}
 					submitLabel="Start thread"
-					sending={startThread.isPending}
+					sending={threads.isPending}
 					needsText
-					error={failed ? "The thread was not started. Your draft is still here." : undefined}
+					error={failed ? THREAD_NOT_STARTED : undefined}
 					className="w-full"
 					mentionable={mentionable}
-					threadWith={threadWith}
 					attachments={attachments}
 				/>
 				<div className="flex h-[26px] items-center">

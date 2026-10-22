@@ -1,6 +1,7 @@
 export * as ThreadRepository from "./repository.ts";
 
 import {
+	FIRST_CHAT_NAME,
 	MAX_REACTION_EMOJI_PER_MESSAGE,
 	type Message,
 	type MessageReaction,
@@ -8,7 +9,7 @@ import {
 	type SystemAgentKey,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
@@ -52,9 +53,10 @@ import {
  */
 export interface Interface {
 	/**
-	 * The newest conversation with the pod's crew agent `hostAgentId`, created
-	 * on first use. The agent is in it, and so is `initiatorUserId` when a
-	 * person opened it.
+	 * The newest thread with the pod's crew agent `hostAgentId`, whether or not
+	 * it was started from one of the pod's chats, created on first use. The
+	 * agent is in a created one, and so is `initiatorUserId` when a person
+	 * opened it.
 	 */
 	readonly openConversation: (placement: {
 		workspaceId: string;
@@ -84,12 +86,28 @@ export interface Interface {
 		thread: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">,
 		done: boolean,
 	) => Effect.Effect<void>;
-	/** The pod's first chat, created on first use, with `initiatorUserId` in it when a person opened it. */
+	/** The pod's first chat, created on first use, as opened by `initiatorUserId`. */
 	readonly openPodChat: (placement: {
 		workspaceId: string;
 		podId: string;
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
+	/** Starts another chat in the pod, called `title`, with `initiatorUserId` in it, and announces it. */
+	readonly startChat: (placement: {
+		workspaceId: string;
+		podId: string;
+		initiatorUserId: string;
+		title: string;
+	}) => Effect.Effect<schema.ThreadRow>;
+	/**
+	 * Renames the pod's chat `chat`, or archives it when `change` says so, and
+	 * announces it. An archived chat, and archiving the pod's first, are left
+	 * as they are: the caller refuses those.
+	 */
+	readonly changeChat: (
+		chat: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">,
+		change: { title: string } | { archived: true },
+	) => Effect.Effect<void>;
 	/** The routine's own thread, where each of its runs posts, with its agent in it, created on first use. */
 	readonly openRoutineFeed: (
 		owned: Pick<schema.RoutineRow, "id" | "workspaceId" | "agentId" | "name"> & { podId: string },
@@ -204,11 +222,8 @@ export interface Interface {
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
 }
 
-/** What a pod's chat is called. */
-export const POD_CHAT_TITLE = "Pod chat";
-
 /** What a conversation is called until its first summary gives it a title of its own. */
-export const conversationTitle = (botName: string) => `Conversation with ${botName}`;
+const conversationTitle = (botName: string) => `Conversation with ${botName}`;
 
 /** One person's emoji on a message in a thread. */
 export interface Reaction {
@@ -483,23 +498,90 @@ export const make = Effect.gen(function* () {
 									hostAgentId: null,
 									conversationId: id,
 									type: "pod_chat",
-									title: POD_CHAT_TITLE,
+									main: true,
+									title: FIRST_CHAT_NAME,
 									initiatorUserId: placement.initiatorUserId,
 								})
-								.onConflictDoNothing({
-									target: thread.podId,
-									where: sql`${thread.type} = 'pod_chat'`,
-								}),
+								.onConflictDoNothing({ target: thread.podId, where: sql`${thread.main}` }),
 						);
 						const [podChat] = yield* query((db) =>
 							db
 								.select()
 								.from(thread)
-								.where(and(eq(thread.type, "pod_chat"), eq(thread.podId, placement.podId)))
+								.where(and(eq(thread.main, true), eq(thread.podId, placement.podId)))
 								.limit(1),
 						);
 						if (!podChat) return yield* Effect.die(new Error("The pod's chat was not opened"));
 						return podChat;
+					}),
+				),
+			),
+
+		startChat: (placement) =>
+			operation(
+				"startChat",
+				transaction(
+					Effect.gen(function* () {
+						const id = yield* ids.next;
+						const started = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: placement.workspaceId,
+									podId: placement.podId,
+									hostAgentId: null,
+									conversationId: id,
+									type: "pod_chat",
+									title: placement.title,
+									initiatorUserId: placement.initiatorUserId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						yield* query((db) =>
+							db
+								.insert(threadParticipant)
+								.values({ threadId: id, userId: placement.initiatorUserId }),
+						);
+						yield* emit([
+							ConversationEvent.PodChatChanged({
+								workspaceId: started.workspaceId,
+								podId: started.podId,
+								threadId: started.id,
+							}),
+						]);
+						return started;
+					}),
+				),
+			),
+
+		changeChat: (chat, change) =>
+			operation(
+				"changeChat",
+				transaction(
+					Effect.gen(function* () {
+						const changed = yield* query((db) =>
+							db
+								.update(thread)
+								.set("title" in change ? { title: change.title } : { archivedAt: sql`now()` })
+								.where(
+									and(
+										eq(thread.id, chat.id),
+										eq(thread.type, "pod_chat"),
+										"title" in change ? undefined : eq(thread.main, false),
+										isNull(thread.archivedAt),
+									),
+								)
+								.returning({ id: thread.id }),
+						);
+						if (changed.length === 0) return;
+						yield* emit([
+							ConversationEvent.PodChatChanged({
+								workspaceId: chat.workspaceId,
+								podId: chat.podId,
+								threadId: chat.id,
+							}),
+						]);
 					}),
 				),
 			),

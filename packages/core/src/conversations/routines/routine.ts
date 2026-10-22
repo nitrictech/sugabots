@@ -76,6 +76,7 @@ export function toRoutine(
 		triggers: triggers.map(toTrigger),
 		state: row.state,
 		results: row.results,
+		chatId: row.chatId,
 		createdById: row.createdById,
 		createdByAgentId: row.createdByAgentId,
 		createdAt: row.createdAt.toISOString(),
@@ -112,6 +113,16 @@ export const routineWithTriggers = (row: schema.RoutineRow) =>
 export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {
 	get userMessage() {
 		return userText`No such Routine`;
+	}
+}
+
+/** The chat a routine's results were to go to is not one of its pod's chats. */
+export class RoutineChatNotFound
+	extends Data.TaggedError("RoutineChatNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`No such chat in the routine's pod`;
 	}
 }
 

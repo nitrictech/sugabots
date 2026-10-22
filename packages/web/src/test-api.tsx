@@ -1,7 +1,7 @@
 import {
 	type Agent,
 	administersWorkspace,
-	type Conversation,
+	type ConversationThread,
 	type ModelProvider,
 	type Pod,
 	type PodPermissions,
@@ -333,8 +333,9 @@ export const scribe = builtInAgents[0] as SystemAgent;
 export const compaction = builtInAgents[1] as SystemAgent;
 
 /** The conversation with `agent`, one per bot, by the bot's id. */
-export function conversationWith(agent: Agent): Conversation {
+export function conversationWith(agent: Agent): ConversationThread {
 	return {
+		kind: "thread",
 		id: `${agent.id.slice(0, -4)}c${agent.id.slice(-3)}`,
 		workspaceId: agent.workspaceId,
 		podId: agent.podId,
@@ -358,9 +359,10 @@ export function conversationDetails(agent: Agent): ThreadDetails {
 		face: agent.face,
 		shape: agent.shape,
 	};
+	const { kind: _kind, ...thread } = conversation;
 	return {
 		thread: {
-			...conversation,
+			...thread,
 			conversationId: conversation.id,
 			type: "conversation",
 			status: "done",
@@ -447,9 +449,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);
 		return Effect.succeed({
-			podChat: null,
+			chats: [],
 			routines: [],
-			items: agents
+			threads: agents
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({
 					agent,

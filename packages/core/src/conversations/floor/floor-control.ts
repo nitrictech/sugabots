@@ -37,11 +37,7 @@ export const make = Effect.gen(function* () {
 			transaction(
 				Effect.gen(function* () {
 					const scope = yield* query((db) => loadFloorScope(db, committed));
-					const decision = decideFloor({
-						...scope,
-						content: committed.content,
-						peopleOnly: committed.peopleOnly,
-					});
+					const decision = decideFloor({ ...scope, content: committed.content });
 					if (decision.kind !== "turns") return;
 					yield* threads.addAgents(
 						committed.threadId,

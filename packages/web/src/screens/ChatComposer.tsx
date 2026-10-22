@@ -1,5 +1,4 @@
 import {
-	type AgentParticipant,
 	canStartMention,
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	type MessageReplyTo,
@@ -7,7 +6,7 @@ import {
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { AtSign, Paperclip, Send, UsersRound, X } from "lucide-react";
+import { AtSign, Paperclip, Send, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
 	type ComposerAttachment,
@@ -20,6 +19,7 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
+import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip and the @. */
 const toolButtonClassName =
@@ -33,9 +33,8 @@ const toolButtonClassName =
  * until there is text or a file and every file has uploaded, and while
  * `sending`. Typing `@`, or pressing the @, offers everyone in `mentionable`
  * whose name or handle matches what follows it; choosing one writes their
- * handle into the draft. With `peopleOnly`, a button beside the @ says whether
- * the bot will answer, and it or Tab moves between writing to the bot, the
- * default, and writing to the other people only. With `replyingTo`, a strip
+ * handle into the draft, where it shows as a chip of their face and name.
+ * With `replyingTo`, a strip
  * over the draft names the message it answers; its × or Escape stops replying.
  */
 export function ChatComposer({
@@ -48,8 +47,6 @@ export function ChatComposer({
 	error,
 	className,
 	mentionable,
-	peopleOnly,
-	threadWith,
 	replyingTo,
 	attachments,
 	needsText = false,
@@ -66,15 +63,6 @@ export function ChatComposer({
 	className?: string;
 	/** Who the draft can mention. */
 	mentionable: ThreadParticipant[];
-	/** Offered when other people are in the thread, to write to them without the bot replying. */
-	peopleOnly?: {
-		on: boolean;
-		onChange: (on: boolean) => void;
-		/** The bot that replies unless the message is for people only. */
-		agent: Pick<AgentParticipant, "name">;
-	};
-	/** In a pod's chat: the bot the draft names, which sending starts a thread with. */
-	threadWith?: AgentParticipant;
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 	/** The files attached to the message, and what attaches, removes and retries them. */
@@ -84,9 +72,9 @@ export function ChatComposer({
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
-	const textarea = useRef<HTMLTextAreaElement>(null);
-	const [cursor, setCursor] = useState(0);
-	const [focused, setFocused] = useState(false);
+	const editor = useRef<MentionEditorHandle>(null);
+	const form = useRef<HTMLFormElement>(null);
+	const [cursor, setCursor] = useState(value.length);
 	const [activeMention, setActiveMention] = useState(0);
 	/** Where the `@` of the mention whose menu was closed is, so only that one stays closed. */
 	const [dismissedMentionAt, setDismissedMentionAt] = useState<number>();
@@ -96,21 +84,14 @@ export function ChatComposer({
 		: [];
 	const mentionMenuOpen = typing?.start !== dismissedMentionAt && matches.length > 0;
 	const selectedMention = Math.min(activeMention, matches.length - 1);
-	const toPeople = peopleOnly?.on === true;
-
-	// A draft kept from an earlier visit is picked up at its end, not before its first word.
-	useEffect(() => {
-		const end = textarea.current?.value.length ?? 0;
-		textarea.current?.setSelectionRange(end, end);
-	}, []);
 
 	// Choosing Reply on a message goes straight on to writing the reply.
 	const replyingToId = replyingTo?.message.id;
 	useEffect(() => {
-		if (replyingToId) textarea.current?.focus();
+		if (replyingToId) editor.current?.focus();
 	}, [replyingToId]);
 
-	function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		if (mentionMenuOpen && !event.nativeEvent.isComposing) {
 			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
 				event.preventDefault();
@@ -136,46 +117,32 @@ export function ChatComposer({
 			replyingTo.onCancel();
 			return;
 		}
-		// Shift+Tab still moves the focus back.
-		if (peopleOnly && event.key === "Tab" && !event.shiftKey && !event.nativeEvent.isComposing) {
-			event.preventDefault();
-			peopleOnly.onChange(!peopleOnly.on);
-			return;
-		}
 		if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
 		event.preventDefault();
-		event.currentTarget.form?.requestSubmit();
+		form.current?.requestSubmit();
 	}
 
 	function insertMention(participant: ThreadParticipant | undefined): void {
 		if (!participant || !typing) return;
-		const after = value.slice(typing.end);
 		// One space after the handle: the one already there, or a new one.
-		const mention = /^\s/.test(after) ? `@${participant.handle}` : `@${participant.handle} `;
-		const nextCursor = typing.start + `@${participant.handle} `.length;
-		onValueChange(`${value.slice(0, typing.start)}${mention}${after}`);
-		setCursor(nextCursor);
-		requestAnimationFrame(() => textarea.current?.setSelectionRange(nextCursor, nextCursor));
+		const spaceAfter = value[typing.end] === " " ? 1 : 0;
+		editor.current?.replace(
+			{ start: typing.start, end: typing.end + spaceAfter },
+			`@${participant.handle} `,
+		);
 	}
 
 	/** Starts a mention at the cursor, as typing `@` would, so the same menu opens. */
 	function startMention(): void {
-		const draft = textarea.current;
-		const at = draft?.selectionStart ?? value.length;
+		const at = Math.min(cursor, value.length);
 		// After a word, a space first: an `@` straight after a letter is an email address.
 		const lead = at > 0 && !/\s/.test(value[at - 1] ?? "") ? " @" : "@";
-		const nextCursor = at + lead.length;
-		onValueChange(`${value.slice(0, at)}${lead}${value.slice(at)}`);
-		setCursor(nextCursor);
-		setDismissedMentionAt(undefined);
-		requestAnimationFrame(() => {
-			draft?.focus();
-			draft?.setSelectionRange(nextCursor, nextCursor);
-		});
+		editor.current?.replace({ start: at, end: at }, lead);
 	}
 
 	return (
 		<form
+			ref={form}
 			onSubmit={(event) => {
 				event.preventDefault();
 				void onSubmit();
@@ -191,12 +158,7 @@ export function ChatComposer({
 					onChoose={insertMention}
 				/>
 			)}
-			<div
-				className={cn(
-					"focus-ring-within flex flex-col rounded-xl border bg-panel transition-colors",
-					toPeople ? "border-people-only" : "border-border-strong",
-				)}
-			>
+			<div className="focus-ring-within flex flex-col rounded-xl border border-border-strong bg-panel transition-colors">
 				{replyingTo && (
 					<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
 				)}
@@ -204,32 +166,26 @@ export function ChatComposer({
 					items={attachments.items}
 					onRemove={attachments.remove}
 					onRetry={attachments.retry}
-					focusDraft={() => textarea.current?.focus()}
+					focusDraft={() => editor.current?.focus()}
 				/>
 				<LeftOutNote count={attachments.leftOut} />
 				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3">
-					<label htmlFor={id} className="sr-only">
-						{label}
-					</label>
-					<textarea
-						ref={textarea}
+					<MentionEditor
+						ref={editor}
 						id={id}
+						label={label}
 						value={value}
-						onChange={(event) => {
-							onValueChange(event.target.value);
-							setCursor(event.target.selectionStart);
+						mentionable={mentionable}
+						maxLength={20_000}
+						onValueChange={(next, caret) => {
+							onValueChange(next);
+							setCursor(caret);
 							setActiveMention(0);
 							setDismissedMentionAt(undefined);
 						}}
-						onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
-						onFocus={() => {
-							setFocused(true);
-							setDismissedMentionAt(undefined);
-						}}
-						onBlur={() => {
-							setFocused(false);
-							setDismissedMentionAt(typing?.start);
-						}}
+						onCaretChange={setCursor}
+						onFocus={() => setDismissedMentionAt(undefined)}
+						onBlur={() => setDismissedMentionAt(typing?.start)}
 						onKeyDown={handleKeyDown}
 						onPaste={(event) => {
 							const { files, types } = event.clipboardData;
@@ -238,27 +194,11 @@ export function ChatComposer({
 							event.preventDefault();
 							attachments.attach([...files]);
 						}}
-						aria-autocomplete="list"
 						aria-controls={mentionMenuOpen ? mentionListId : undefined}
 						aria-activedescendant={
 							mentionMenuOpen ? `${mentionListId}-${selectedMention}` : undefined
 						}
-						placeholder={label}
-						maxLength={20_000}
-						rows={1}
-						className="field-sizing-content block max-h-40 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-[3px] text-[15px] text-foreground leading-[22px] outline-none placeholder:text-subtle-foreground"
 					/>
-					{peopleOnly && focused && !value && (
-						<span
-							aria-hidden
-							className="flex h-7 shrink-0 items-center gap-1.5 text-subtle-foreground text-xs [@media(hover:none)]:hidden"
-						>
-							<kbd className="rounded-[4px] border border-border-dashed px-[5px] py-px font-medium font-mono text-[11px] text-soft-foreground">
-								Tab
-							</kbd>
-							{peopleOnly.on ? "back to bots" : "people only"}
-						</span>
-					)}
 				</div>
 				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5">
 					<AttachButton
@@ -275,25 +215,6 @@ export function ChatComposer({
 							<AtSign size={16} strokeWidth={2} />
 						</button>
 					</Tooltip>
-					{threadWith && (
-						<span className="ml-1 flex h-7 min-w-0 items-center gap-[7px] rounded-[8px] bg-hover pr-2.5 pl-[7px] font-medium text-[13px] text-foreground">
-							<AgentAvatar
-								color={threadWith.color}
-								face={threadWith.face}
-								shape={threadWith.shape}
-								size={18}
-								className="shrink-0"
-							/>
-							<span className="truncate">Thread with {threadWith.name}</span>
-						</span>
-					)}
-					{peopleOnly && (
-						<AudienceChip
-							agent={peopleOnly.agent}
-							on={peopleOnly.on}
-							onToggle={() => peopleOnly.onChange(!peopleOnly.on)}
-						/>
-					)}
 					<span className="flex-1" />
 					<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
 						{sendHint(attachments.items)}
@@ -304,10 +225,7 @@ export function ChatComposer({
 						disabled={
 							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
 						}
-						className={cn(
-							"focus-ring grid size-[30px] place-items-center rounded-[8px] text-primary-foreground transition-colors disabled:bg-chip-strong",
-							toPeople ? "bg-people-only-send" : "bg-primary hover:bg-primary-hover",
-						)}
+						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong"
 					>
 						<Send size={15} strokeWidth={2.2} />
 					</button>
@@ -336,41 +254,6 @@ function ReplyingToStrip({ message, onCancel }: { message: MessageReplyTo; onCan
 				<X aria-hidden />
 			</IconButton>
 		</div>
-	);
-}
-
-/**
- * Beside the @, the switch to writing to the people only: a quiet people icon
- * while the bot answers, and a "People only" chip while it won't. A click
- * switches, as Tab does from the draft.
- */
-function AudienceChip({
-	agent,
-	on,
-	onToggle,
-}: {
-	agent: Pick<AgentParticipant, "name">;
-	on: boolean;
-	onToggle: () => void;
-}) {
-	return (
-		<Tooltip label={on ? `Message ${agent.name}` : "Message people only"} side="top">
-			<button
-				type="button"
-				aria-pressed={on}
-				aria-label="People only"
-				onClick={onToggle}
-				className={cn(
-					"focus-ring flex shrink-0 items-center transition-colors",
-					on
-						? "ml-1 h-7 gap-[7px] rounded-[8px] bg-hover pr-2.5 pl-[9px] font-medium text-[13px] text-foreground"
-						: "size-[30px] justify-center rounded-tail text-muted-foreground hover:bg-chip",
-				)}
-			>
-				<UsersRound aria-hidden size={on ? 15 : 16} strokeWidth={2} className="shrink-0" />
-				{on && <span>People only</span>}
-			</button>
-		</Tooltip>
 	);
 }
 
@@ -449,7 +332,7 @@ function sendHint(items: readonly ComposerAttachment[]): string {
 /**
  * The people and bots matching the mention being typed, floating over the
  * messages above the composer. The focus stays in the draft: arrow keys move
- * the highlight, which the textarea points to as its active descendant.
+ * the highlight, which the draft points to as its active descendant.
  */
 function MentionMenu({
 	id,

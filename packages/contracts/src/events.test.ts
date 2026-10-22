@@ -177,35 +177,16 @@ describe("envelope", () => {
 		}
 	});
 
-	it.each(["collaboration", "routine", "conversation"])(
-		"accepts conversation thread changes for %s",
-		(threadType) => {
-			const event = {
-				v: EVENT_VERSION,
-				type: "conversation.thread_changed",
-				conversationId: "00000000-0000-4000-8000-000000000001",
-				threadId: "00000000-0000-4000-8000-000000000002",
-				threadType,
-			};
-			expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
-			expect(Schema.decodeUnknownResult(threadUpdateEventSchema)(event)._tag).toBe("Success");
-		},
-	);
-
-	it.each(["pod_chat", "system_agent"])(
-		"rejects conversation thread changes for %s",
-		(threadType) => {
-			expect(
-				Schema.decodeUnknownResult(workspaceUpdateEventSchema)({
-					v: EVENT_VERSION,
-					type: "conversation.thread_changed",
-					conversationId: "00000000-0000-4000-8000-000000000001",
-					threadId: "00000000-0000-4000-8000-000000000002",
-					threadType,
-				})._tag,
-			).toBe("Failure");
-		},
-	);
+	it("accepts conversation thread changes", () => {
+		const event = {
+			v: EVENT_VERSION,
+			type: "conversation.thread_changed",
+			conversationId: "00000000-0000-4000-8000-000000000001",
+			threadId: "00000000-0000-4000-8000-000000000002",
+		};
+		expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
+		expect(Schema.decodeUnknownResult(threadUpdateEventSchema)(event)._tag).toBe("Success");
+	});
 });
 
 function toolCall(status: "running" | "completed") {

@@ -134,15 +134,13 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				channel: workspaceChannel(workspaceId),
 				event: PodAudience.forPod(
 					podId,
-					streamEvent("conversation.thread_changed", {
-						conversationId: podChatId,
-						threadId,
-						threadType: "conversation",
-					}),
+					streamEvent("conversation.thread_changed", { conversationId: podChatId, threadId }),
 				),
 			},
 		],
 		ConversationDoneChanged: ({ workspaceId, podId, threadId }) =>
+			threadChanged(workspaceId, podId, threadId),
+		PodChatChanged: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
 		ThreadSummarised: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
@@ -193,11 +191,7 @@ function routineThreadChanged(
 		channel: workspaceChannel(workspaceId),
 		event: PodAudience.forPod(
 			podId,
-			streamEvent("conversation.thread_changed", {
-				conversationId,
-				threadId,
-				threadType: "routine",
-			}),
+			streamEvent("conversation.thread_changed", { conversationId, threadId }),
 		),
 	};
 }

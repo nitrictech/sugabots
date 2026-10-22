@@ -1,6 +1,6 @@
 import {
 	type ChatHistoryEntry,
-	type Conversation,
+	type ConversationThread,
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	type Message,
 	type RoutineExecution,
@@ -36,7 +36,8 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const chat: Conversation = {
+const chat: ConversationThread = {
+	kind: "thread",
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
 	podId: linear.podId,
@@ -266,9 +267,9 @@ function details(
 /** The pod's conversation list, with Linear Handler's chat in it when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
-		podChat: null,
+		chats: [],
 		routines: [],
-		items: listed
+		threads: listed
 			? [
 					{
 						agent: linear,
@@ -359,11 +360,17 @@ function chatAnswers() {
 }
 
 /** Goes to the Chat's bot's settings, which unmounts the Chat, and back to its composer. */
-async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLTextAreaElement> {
+async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLElement> {
 	await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
 	await waitFor(() => expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull());
 	await router.navigate({ to: `/suga/pods/suga-team/agents/${linear.handle}` });
-	return (await screen.findByLabelText(`Message ${linear.name}`)) as HTMLTextAreaElement;
+	return await screen.findByLabelText(`Message ${linear.name}`);
+}
+
+/** Writes `text` into the message box, as typing it would. */
+function writeDraft(box: HTMLElement, text: string) {
+	box.textContent = text;
+	fireEvent.input(box);
 }
 
 /**
@@ -495,50 +502,39 @@ describe("ongoing agent Chat", () => {
 		Object.defineProperty(messages, "scrollHeight", { configurable: true, value: 1_200 });
 		messages.scrollTop = 100;
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		fireEvent.change(composer, { target: { value: "  Send the update  " } });
+		writeDraft(composer, "  Send the update  ");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await waitFor(() =>
 			expect(client.api.chats.send).toHaveBeenCalledWith({
 				params: { conversationId: chat.id },
-				payload: { id: expect.any(String), message: "Send the update", peopleOnly: false },
+				payload: { id: expect.any(String), message: "Send the update" },
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
-	it("keeps writing to people only after a message is sent", async () => {
-		client.api.chats.send.mockReturnValue(
-			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
+	it("with other people in the thread, says the bot replies only once the draft mentions it", async () => {
+		const shared = details(chat.id, "Chat", "conversation", [mainMessage]);
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
 		const composer = await screen.findByLabelText(`Message ${podmate.name}`);
-		fireEvent.change(composer, { target: { value: "Just between us" } });
-		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+		expect(screen.getByText(`Mention ${linear.name} to have it reply.`)).toBeTruthy();
 
-		await waitFor(() =>
-			expect(client.api.chats.send).toHaveBeenCalledWith({
-				params: { conversationId: chat.id },
-				payload: { id: expect.any(String), message: "Just between us", peopleOnly: true },
-			}),
-		);
-		expect(screen.getByRole("button", { name: "People only" }).getAttribute("aria-pressed")).toBe(
-			"true",
-		);
-	});
+		writeDraft(composer, `@${linear.handle} can you check?`);
 
-	it("offers writing to people only before anyone else has written in the chat", async () => {
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
-
-		expect(await screen.findByLabelText(`Message ${podmate.name}`)).toBeTruthy();
+		expect(await screen.findByText(`${linear.name} will reply.`)).toBeTruthy();
+		const box = screen.getByLabelText(`Message ${linear.name}`);
+		// The finished mention is drawn in the box as the bot's name.
+		expect(within(box).getByText(linear.name)).toBeTruthy();
 	});
 
 	it("offers the pod's people and the chat's own bot to mention, not the pod's other bots or you", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		fireEvent.change(composer, { target: { value: "@" } });
+		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));
 		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
@@ -565,13 +561,11 @@ describe("ongoing agent Chat", () => {
 		const posting = pendingAnswer();
 		client.api.chats.send.mockReturnValue(posting.effect);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		const composer = (await screen.findByLabelText(
-			`Message ${linear.name}`,
-		)) as HTMLTextAreaElement;
-		fireEvent.change(composer, { target: { value: "Send the update" } });
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		writeDraft(composer, "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-		await waitFor(() => expect(composer.value).toBe(""));
+		await waitFor(() => expect(composer.textContent).toBe(""));
 		posting.answer(Effect.succeed({ message: mainMessage, routing: { status: "routed" } }));
 	});
 
@@ -586,25 +580,22 @@ describe("ongoing agent Chat", () => {
 			Effect.fail(new InternalServerError({ message: userText`Nope` })),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		const composer = (await screen.findByLabelText(
-			`Message ${linear.name}`,
-		)) as HTMLTextAreaElement;
-		fireEvent.change(composer, { target: { value: "Send the update" } });
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		writeDraft(composer, "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await screen.findByText("Message not sent. Your draft is still here.");
-		expect(composer.value).toBe("Send the update");
+		expect(composer.textContent).toBe("Send the update");
 	});
 
 	it("keeps an unsent draft while you are elsewhere, with the cursor at its end", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
-			target: { value: "Half a thought" },
-		});
+		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Half a thought");
 
 		const composer = await leaveAndReturn(router);
-		expect(composer.value).toBe("Half a thought");
-		expect(composer.selectionStart).toBe("Half a thought".length);
+		expect(composer.textContent).toBe("Half a thought");
+		composer.focus();
+		expect(document.getSelection()?.focusOffset).toBe("Half a thought".length);
 	});
 
 	it("forgets the draft once it is sent", async () => {
@@ -612,14 +603,12 @@ describe("ongoing agent Chat", () => {
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
-			target: { value: "Send the update" },
-		});
+		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalled());
 
 		const composer = await leaveAndReturn(router);
-		expect(composer.value).toBe("");
+		expect(composer.textContent).toBe("");
 	});
 
 	it("keeps following the latest message while the agent works, and when it answers", async () => {
@@ -1282,9 +1271,7 @@ describe("people typing in the Chat", () => {
 
 	it("does not say you are typing just because a draft was kept from before", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
-			target: { value: "Half a thought" },
-		});
+		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Half a thought");
 		await waitFor(() => expect(client.api.events.typing).toHaveBeenCalledTimes(1));
 		client.api.events.typing.mockClear();
 		client.events.thread.mockClear();
@@ -1298,9 +1285,9 @@ describe("people typing in the Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 
-		fireEvent.change(composer, { target: { value: "S" } });
-		fireEvent.change(composer, { target: { value: "Se" } });
-		fireEvent.change(composer, { target: { value: "Sen" } });
+		writeDraft(composer, "S");
+		writeDraft(composer, "Se");
+		writeDraft(composer, "Sen");
 
 		await waitFor(() =>
 			expect(client.api.events.typing).toHaveBeenCalledWith({

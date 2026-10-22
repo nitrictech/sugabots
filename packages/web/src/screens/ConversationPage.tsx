@@ -1,17 +1,16 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
+import type { Pod, SessionUser } from "@sugabots/contracts";
 import type { ReactNode } from "react";
+import type { ConversationKind } from "@/lib/chats.ts";
 import { useDetailsOpen } from "@/lib/details-open.ts";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ConversationChat, type Staged } from "./ConversationChat.tsx";
 
 interface ConversationPageProps {
-	/** The bot the conversation is with; null in the pod's chat. */
-	agent: Agent | null;
-	/** Whether it is the pod's chat, rather than a thread. */
-	isPodChat: boolean;
+	/** Which kind of conversation it is, and its bot when it has one. */
+	conversation: ConversationKind;
 	pod: Pod;
-	/** The conversation shown, which is with `agent`. */
+	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
 	threadId?: string;
@@ -32,10 +31,14 @@ export function ConversationPage({ away, ...chat }: ConversationPageProps) {
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"
-			style={chat.agent ? botColorVariables(chat.agent.color) : undefined}
+			style={
+				chat.conversation.kind === "botThread"
+					? botColorVariables(chat.conversation.agent.color)
+					: undefined
+			}
 		>
 			{away ? (
-				<ConversationChat key={chatKey(chat)} {...chat} place={{ kind: "away", ...away }} />
+				<ConversationChat key={chat.conversationId} {...chat} place={{ kind: "away", ...away }} />
 			) : (
 				<OwnPageChat {...chat} />
 			)}
@@ -51,14 +54,9 @@ function OwnPageChat(chat: Omit<ConversationPageProps, "away">) {
 	const [detailsOpen, setDetailsOpen] = useDetailsOpen();
 	return (
 		<ConversationChat
-			key={chatKey(chat)}
+			key={chat.conversationId}
 			{...chat}
 			place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen }}
 		/>
 	);
-}
-
-/** Another conversation starts fresh: its scroll, its draft's audience, and what it jumped to. */
-function chatKey({ conversationId }: { conversationId: string }): string {
-	return conversationId;
 }

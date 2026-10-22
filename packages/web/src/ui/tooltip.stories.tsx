@@ -38,7 +38,7 @@ export const Right = meta.story({
 
 /**
  * A title and how to change it, lined up with the start of its control, as
- * the composer's people-only toggle explains itself.
+ * a toggle explains itself.
  */
 export const Detail = meta.story({
 	render: () => (

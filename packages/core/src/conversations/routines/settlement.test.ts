@@ -24,6 +24,7 @@ import {
 } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
+import { Chats } from "../chats/chats.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -95,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	});
 
 	/** A routine with one accepted manual trigger, whose run has started and asked for its turn. */
-	async function aRunningRun(results?: RoutineResults) {
+	async function aRunningRun(results?: RoutineResults, chatId?: string) {
 		const created = await routines.create(
 			{ agentId },
 			{
@@ -103,6 +104,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				instructions: "Complete the delegated work.",
 				triggers: [{ kind: "webhook" }],
 				results,
+				chatId,
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -211,7 +213,11 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	const podChatPosts = (content: string) =>
 		onDatabase((db) =>
 			db
-				.select({ id: message.id, routineExecutionId: message.routineExecutionId })
+				.select({
+					id: message.id,
+					routineExecutionId: message.routineExecutionId,
+					chatId: message.threadId,
+				})
 				.from(message)
 				.innerJoin(thread, eq(thread.id, message.threadId))
 				.where(and(eq(thread.type, "pod_chat"), eq(message.content, content))),
@@ -650,8 +656,8 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const settled = delivered.findIndex(
 			({ event }) =>
 				event.type === "conversation.thread_changed" &&
-				"threadType" in event &&
-				event.threadType === "routine",
+				"threadId" in event &&
+				event.threadId === accepted.threadId,
 		);
 		expect(completed).toBeGreaterThanOrEqual(0);
 		expect(settled).toBeGreaterThan(completed);
@@ -684,7 +690,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			}),
 		});
 		expect(await podChatPosts("Morning! Two PRs merged overnight.")).toEqual([
-			{ id: expect.any(String), routineExecutionId: null },
+			{ id: expect.any(String), routineExecutionId: null, chatId: expect.any(String) },
 		]);
 		expect(posted[0]).toMatchObject({
 			threadType: "routine_feed",
@@ -708,6 +714,30 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				}),
 			}),
 		);
+	});
+
+	it("posts a run's result in the pod's chat the routine chose, and in its first once that one is archived", async () => {
+		const chats = Context.get(conversations, Chats.Service);
+		const pricing = await onPostgresAs(userId)(chats).startChat({ podId, name: "Pricing" });
+		const first = await onPostgresAs(userId)(chats).openPodChat({ workspace: workspaceId, podId });
+
+		const chosen = await aRunningRun("post_to_chat", pricing.id);
+		await replyAndFinish(chosen.accepted.threadId, "Prices checked.");
+		expect(await podChatPosts("Prices checked.")).toEqual([
+			expect.objectContaining({ chatId: pricing.id }),
+		]);
+
+		await onDatabase((db) =>
+			db.update(thread).set({ archivedAt: new Date() }).where(eq(thread.id, pricing.id)),
+		);
+		const routineId = chosen.run.routineId;
+		await runOnPostgres(releaseRun(chosen.run));
+		const again = await routines.run({ agentId, routineId, requestId: crypto.randomUUID() });
+		await startRunning(runner, routineId);
+		await replyAndFinish(again.threadId, "Prices checked again.");
+		expect(await podChatPosts("Prices checked again.")).toEqual([
+			expect.objectContaining({ chatId: first.id }),
+		]);
 	});
 
 	it("tells the agent its last reply goes to the chat", async () => {

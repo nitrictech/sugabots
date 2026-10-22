@@ -117,6 +117,7 @@ const routineErrors = {
 	InvalidRoutineExecutionCursor: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
 	RoutineDeliveryIdTooLong: BadRequest,
+	RoutineChatNotFound: BadRequest,
 	RoutineNameTaken: Conflict,
 	RoutineNotFound: NotFound,
 	RoutineRepositoryNotInPod: BadRequest,

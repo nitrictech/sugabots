@@ -1,7 +1,7 @@
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useChatHistory } from "@/lib/chats.ts";
+import { type ConversationKind, useChatHistory } from "@/lib/chats.ts";
 import { conversationLink } from "@/lib/links.ts";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
@@ -18,9 +18,8 @@ const BACK_TO_ACTIVITY: BackTo = { to: "activity" };
  */
 export function ActivityPane({
 	pod,
-	agent,
+	conversation,
 	conversationId,
-	isPodChat,
 	user,
 	threadPageId,
 	focusMessageId,
@@ -31,12 +30,10 @@ export function ActivityPane({
 	onStagedChange,
 }: {
 	pod: Pod;
-	/** The bot the conversation is with; null in the pod's chat. */
-	agent: Agent | null;
-	/** The conversation the item is in, which is with `agent`. */
+	/** Which kind of conversation the item is in, and its bot when it has one. */
+	conversation: ConversationKind;
+	/** The conversation the item is in. */
 	conversationId: string;
-	/** Whether the conversation is the pod's chat, rather than a thread. */
-	isPodChat: boolean;
 	user: SessionUser;
 	/** A run or collaboration shown as the page, in place of the chat. */
 	threadPageId?: string;
@@ -57,10 +54,11 @@ export function ActivityPane({
 			Open chat
 		</Link>
 	);
-	if (threadPageId && agent) {
+	// Runs and collaborations are a bot's, so only a thread with a bot has them.
+	if (threadPageId && conversation.kind === "botThread") {
 		return (
 			<ActivityThread
-				agent={agent}
+				agent={conversation.agent}
 				conversationId={conversationId}
 				threadId={threadPageId}
 				trailing={openChat}
@@ -70,8 +68,7 @@ export function ActivityPane({
 	}
 	return (
 		<ConversationPage
-			agent={agent}
-			isPodChat={isPodChat}
+			conversation={conversation}
 			pod={pod}
 			conversationId={conversationId}
 			user={user}

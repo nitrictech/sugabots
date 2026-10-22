@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { customerThreadTypeSchema } from "./chats.ts";
 import {
 	collaborationPartSchema,
 	filePartSchema,
@@ -118,11 +117,7 @@ export const eventPayloadSchemas = {
 	 * routine run or collaboration in it, or, in a pod's chat, a thread
 	 * somebody started from it.
 	 */
-	"conversation.thread_changed": Schema.Struct({
-		conversationId: uuidSchema,
-		threadId,
-		threadType: Schema.Union([customerThreadTypeSchema, Schema.Literal("conversation")]),
-	}),
+	"conversation.thread_changed": Schema.Struct({ conversationId: uuidSchema, threadId }),
 	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
 	"collaboration.updated": Schema.Struct({
 		threadId,

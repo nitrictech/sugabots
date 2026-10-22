@@ -168,6 +168,12 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly podChatId: string;
 		readonly threadId: string;
 	};
+	/** Somebody started, renamed or archived the pod's chat `threadId`. */
+	PodChatChanged: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadId: string;
+	};
 	/** Somebody marked the conversation done, or reopened it. */
 	ConversationDoneChanged: {
 		readonly workspaceId: string;

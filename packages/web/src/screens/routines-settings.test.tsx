@@ -31,6 +31,7 @@ function routine(id: string, name: string, agentId: string, expression: string):
 		}),
 		state: "enabled",
 		results: "keep_in_run",
+		chatId: null,
 		createdById: null,
 		createdByAgentId: null,
 		createdAt: "2026-09-18T00:00:00.000Z",

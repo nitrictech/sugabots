@@ -1,7 +1,7 @@
 import type { ChatListItem } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
-import { storyConversationFor } from "@/story-app.tsx";
+import { storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
 import { accountManager, design, growthDesk, leadResearcher, revenue } from "./story-fixtures.ts";
 
@@ -58,9 +58,13 @@ const meta = preview.meta({
 	args: {
 		pod: revenue,
 		rows: revenueRows,
+		routines: [],
 		status: "ready" as const,
 		hasBots: true,
-		selected: { kind: "thread" as const, conversationId: storyConversationFor(growthDesk).id },
+		selected: {
+			kind: "conversation" as const,
+			conversationId: storyConversationFor(growthDesk).id,
+		},
 		onNewBot: fn(),
 		emptyState: { title: "No bots in Revenue yet" },
 	},
@@ -89,7 +93,9 @@ export const Default = meta.story({
  * when both apply.
  */
 export const UnreadAndWaiting = meta.story({
-	args: { selected: { kind: "thread", conversationId: storyConversationFor(leadResearcher).id } },
+	args: {
+		selected: { kind: "conversation", conversationId: storyConversationFor(leadResearcher).id },
+	},
 	play: async ({ canvas }) => {
 		const growth = canvas.getByRole("link", { name: /Growth Desk/ });
 		await expect(growth).toHaveTextContent("Needs you");
@@ -138,14 +144,18 @@ export const EmptyPodForAMember = meta.story({
 });
 
 const revenueChat = {
-	conversation: {
-		...storyConversationFor(growthDesk),
-		id: "0199a3a0-0000-7000-8000-00000000c900",
-		hostAgentId: null,
-		title: "Pod chat",
-		doneAt: null,
-	},
+	conversation: { ...storyPodChatFor(revenue), id: "0199a3a0-0000-7000-8000-00000000c900" },
 	unreadMessages: 2,
+};
+
+const pricingChat = {
+	conversation: {
+		...revenueChat.conversation,
+		id: "0199a3a0-0000-7000-8000-00000000c901",
+		title: "Pricing",
+		main: false,
+	},
+	unreadMessages: 0,
 };
 
 /**
@@ -153,9 +163,9 @@ const revenueChat = {
  * new in it when it is not.
  */
 export const PodChat = meta.story({
-	args: { podChat: revenueChat, selected: { kind: "podChat" } },
+	args: { chats: { list: [revenueChat], onNew: fn() }, selected: { kind: "podChat" } },
 	play: async ({ canvas }) => {
-		const chat = canvas.getByRole("link", { name: /Pod chat/ });
+		const chat = canvas.getByRole("link", { name: /^General/ });
 		await expect(chat).toHaveAttribute("aria-current", "page");
 		await expect(chat).toHaveTextContent("2 unread messages");
 		await expect(canvas.getByText("Threads")).toBeVisible();
@@ -164,9 +174,9 @@ export const PodChat = meta.story({
 
 /** A pod whose chat nobody has opened yet still offers it, and opens it from its own address. */
 export const PodChatUnopened = meta.story({
-	args: { podChat: "unopened", rows: [] },
+	args: { chats: { list: [], onNew: fn() }, rows: [] },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("link", { name: /Pod chat/ })).toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: /^General/ })).toHaveAttribute(
 			"href",
 			expect.stringMatching(/\/pods\/revenue\/chat$/),
 		);
@@ -174,10 +184,32 @@ export const PodChatUnopened = meta.story({
 	},
 });
 
+const newChat = fn();
+
+/**
+ * A pod with more than one chat lists them under Chats, its first named for
+ * the pod, with + to start another; the one open is marked.
+ */
+export const SeveralChats = meta.story({
+	args: {
+		chats: { list: [revenueChat, pricingChat], onNew: newChat },
+		selected: { kind: "conversation", conversationId: pricingChat.conversation.id },
+	},
+	play: async ({ canvas, userEvent }) => {
+		const pricing = canvas.getByRole("link", { name: /^Pricing/ });
+		await expect(pricing).toHaveAttribute("aria-current", "page");
+		await expect(canvas.getByRole("link", { name: /^General/ })).not.toHaveAttribute(
+			"aria-current",
+		);
+		await userEvent.click(canvas.getByRole("button", { name: `New chat in ${revenue.name}` }));
+		await expect(newChat).toHaveBeenCalledOnce();
+	},
+});
+
 /** A thread between people has no bot's face, and is called what it was started with. */
 export const PeopleThread = meta.story({
 	args: {
-		podChat: revenueChat,
+		chats: { list: [revenueChat], onNew: fn() },
 		rows: [
 			{
 				agent: null,
@@ -209,7 +241,7 @@ export const PeopleThread = meta.story({
  */
 export const DoneAndMentioned = meta.story({
 	args: {
-		podChat: revenueChat,
+		chats: { list: [revenueChat], onNew: fn() },
 		rows: [
 			{ ...(revenueRows[0] as ChatListItem), needsApproval: false, mentionsYou: true },
 			{
@@ -232,7 +264,7 @@ export const DoneAndMentioned = meta.story({
 /** A pod's routines fold away under their own heading; one paused says so when it is opened. */
 export const Routines = meta.story({
 	args: {
-		podChat: revenueChat,
+		chats: { list: [revenueChat], onNew: fn() },
 		routines: [
 			{
 				routine: {
@@ -272,7 +304,7 @@ export const Routines = meta.story({
 /** A routine whose latest run failed opens the Routines section by itself, with a red dot. */
 export const FailedRoutine = meta.story({
 	args: {
-		podChat: revenueChat,
+		chats: { list: [revenueChat], onNew: fn() },
 		routines: [
 			{
 				routine: {
