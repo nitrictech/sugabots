@@ -57,7 +57,12 @@ export const fromE2b = (
 			: unavailable(cause);
 
 	return {
-		capabilities: { pauseKeeps: "memory" },
+		capabilities: {
+			pauseKeeps: "memory",
+			// E2B Cloud adds headers by host. E2B Embed, at its own endpoints,
+			// leaves resolving them to E2B's enterprise orchestrator.
+			credentials: connection.endpoints ? "none" : "host",
+		},
 		templates: {
 			build: (image) =>
 				Effect.tryPromise({
@@ -195,9 +200,21 @@ export const fromE2b = (
 							}
 						: { url: `https://${sandbox.getHost(port)}`, headers: traffic };
 				}),
-			setAllowedHosts: (hosts) =>
+			setNetwork: (network) =>
 				Effect.tryPromise({
-					try: () => sandbox.updateNetwork(allowOnly(hosts)),
+					try: async () => {
+						// One update replaces both the hosts and the rules, so they are
+						// always set together.
+						await sandbox.updateNetwork({
+							...allowOnly(network.allowedHosts),
+							rules: credentialRules(network.credentials),
+						});
+						await sandbox.files.write(
+							Sandboxes.NETWORK_ENVIRONMENT_FILE,
+							Sandboxes.environmentScript(network.environment),
+							{ user: "root" },
+						);
+					},
 					catch: unavailable,
 				}),
 		};
@@ -235,6 +252,20 @@ async function run(
 		if (cause instanceof TimeoutError) return finished(null);
 		throw cause;
 	}
+}
+
+/**
+ * E2B's header rules for `credentials`, by host. E2B matches hosts only, so
+ * credentials have no `pathPrefix` by the time they get here.
+ */
+function credentialRules(credentials: readonly Sandboxes.Credential[]) {
+	const headersByHost = new Map<string, Record<string, string>>();
+	for (const { host, header, value } of credentials) {
+		headersByHost.set(host, { ...headersByHost.get(host), [header]: Redacted.value(value) });
+	}
+	return Object.fromEntries(
+		[...headersByHost].map(([host, headers]) => [host, [{ transform: { headers } }]]),
+	);
 }
 
 /** E2B's rules for refusing every connection but those to `hosts`: what's allowed wins over what's denied. */

@@ -102,6 +102,12 @@ export interface Capabilities {
 	 * only files, so programs have stopped by the time a sandbox is opened.
 	 */
 	readonly pauseKeeps: "memory" | "disk";
+	/**
+	 * How it can add credentials to the sandbox's requests outside the
+	 * sandbox, so nothing in it ever holds them: `none`, by `host` alone, or
+	 * by `host-and-path`. See {@link Network.credentials}.
+	 */
+	readonly credentials: "none" | "host" | "host-and-path";
 }
 
 /** What a workspace's settings say about reaching its provider. */
@@ -137,7 +143,7 @@ export const SandboxId = (id: string) => id as SandboxId;
 export interface Spec {
 	/** Written on the provider's record of the sandbox, so it can be found from the provider's side. */
 	readonly labels: Readonly<Record<string, string>>;
-	/** The hosts it may connect to; it is refused everything else. See {@link Sandbox.setAllowedHosts}. */
+	/** The hosts it may connect to; it is refused everything else. See {@link Network.allowedHosts}. */
 	readonly allowedHosts: readonly string[];
 	/**
 	 * Names the work in its {@link WORKSPACE_DIRECTORY}: lowercase letters,
@@ -192,12 +198,58 @@ export interface Sandbox {
 	 */
 	readonly endpoint: (port: number) => Effect.Effect<Endpoint, Unavailable>;
 	/**
-	 * Lets it connect to `hosts` and nothing else, in place of what it was
-	 * allowed before, while it runs and after a pause. A host is a domain name
-	 * or a leading wildcard such as `*.example.com`, which leaves the domain
-	 * itself out. Connections Sugabots makes to it are not affected.
+	 * Replaces what it may connect to and the credentials added to its
+	 * requests, while it runs and after a pause. Connections Sugabots makes to
+	 * it are not affected.
 	 */
-	readonly setAllowedHosts: (hosts: readonly string[]) => Effect.Effect<void, Unavailable>;
+	readonly setNetwork: (network: Network) => Effect.Effect<void, Unavailable>;
+}
+
+/** What a sandbox may connect to, and what is added to its requests on the way. */
+export interface Network {
+	/**
+	 * The hosts it may connect to; it is refused everything else. A host is a
+	 * domain name or a leading wildcard such as `*.example.com`, which leaves
+	 * the domain itself out.
+	 */
+	readonly allowedHosts: readonly string[];
+	/**
+	 * Added to its HTTPS requests by the provider, outside the sandbox, as far
+	 * as its {@link Capabilities.credentials} allow; empty for a provider that
+	 * can't.
+	 */
+	readonly credentials: readonly Credential[];
+	/**
+	 * Set for its login shells, such as a placeholder token that tells a
+	 * command-line tool it is signed in while the real one is added outside.
+	 */
+	readonly environment: Readonly<Record<string, string>>;
+}
+
+/**
+ * A header the provider sets on the sandbox's HTTPS requests to `host`, in
+ * place of any the sandbox sent: on every path, or only those under
+ * `pathPrefix` where the provider matches paths. Never on plain HTTP, and
+ * never put in a body, query or path, where the sandbox could have it sent
+ * on or stored.
+ */
+export interface Credential {
+	/** An exact host name: a wildcard could match a host someone else serves. */
+	readonly host: string;
+	/** Such as `/acme/`; undefined for every path. */
+	readonly pathPrefix: string | undefined;
+	readonly header: string;
+	readonly value: Redacted.Redacted;
+}
+
+/** Where a sandbox's {@link Network.environment} is written, for login shells to read. */
+export const NETWORK_ENVIRONMENT_FILE = "/etc/profile.d/sugabots-network.sh";
+
+/** {@link Network.environment} as a script for {@link NETWORK_ENVIRONMENT_FILE}. */
+export function environmentScript(environment: Readonly<Record<string, string>>) {
+	return Object.entries(environment)
+		.map(([name, value]) => `export ${name}=${shellQuoted(value)}\n`)
+		.join("");
 }
 
 export interface Endpoint {

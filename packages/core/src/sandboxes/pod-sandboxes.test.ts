@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { eq } from "drizzle-orm";
-import { Effect, Fiber, Layer, Redacted } from "effect";
+import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	pod,
@@ -13,6 +13,7 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
+import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 
@@ -36,6 +37,9 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		image: IMAGE,
 	};
 	let podSandboxes: PodSandboxes.Interface;
+	// What the pod's sandbox is signed in with, and how often it was asked.
+	let signedIn: SandboxCredentials.SignedIn = SandboxCredentials.NOT_SIGNED_IN;
+	let signIns = 0;
 	let providers: SandboxProviderRepository.Interface;
 	let direct: Sandboxes.Provider;
 	let thePod: PodSandboxes.Pod;
@@ -46,6 +50,15 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		[podSandboxes, providers] = await runOnPostgres(
 			Effect.all([PodSandboxes.Service, SandboxProviderRepository.Service]).pipe(
 				Effect.provide(Layer.merge(PodSandboxes.layer, SandboxProviderRepository.layer)),
+				Effect.provide(
+					Layer.succeed(SandboxCredentials.Service, {
+						forPod: () =>
+							Effect.sync(() => {
+								signIns += 1;
+								return signedIn;
+							}),
+					}),
+				),
 			),
 		);
 		direct = await Effect.runPromise(
@@ -94,6 +107,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		);
 		if (!shared) throw new Error("fixture");
 		thePod = { workspaceId: space.id, podId: shared.id };
+		signedIn = SandboxCredentials.NOT_SIGNED_IN;
 		await addProvider();
 	});
 
@@ -141,6 +155,40 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		);
 		return listed.stdout.text;
 	};
+
+	it(
+		"signs the pod's sandbox in when it opens, and again when a renewal finds that near expiry",
+		async () => {
+			const signedInUntil = (expiresIn: Duration.Input, version: string) => ({
+				credentials: [
+					{
+						host: "github.com",
+						pathPrefix: "/acme/",
+						header: "Authorization",
+						value: Redacted.make(`Bearer ${version}`),
+					},
+				],
+				environment: { SIGNED_IN_AS: version },
+				expiresAt: DateTime.addDuration(DateTime.nowUnsafe(), expiresIn),
+			});
+			const signedInAs = async (sandbox: Sandboxes.Sandbox) =>
+				(await exec(sandbox, "bash -lc 'echo $SIGNED_IN_AS'")).stdout.text.trim();
+			signedIn = signedInUntil("2 hours", "first");
+
+			const { sandbox: opened } = await open();
+			const asked = signIns;
+			await runOnPostgres(podSandboxes.renew(HOLDER));
+			const notYetDue = signIns - asked;
+			signedIn = signedInUntil("5 minutes", "second");
+			await open();
+			signedIn = signedInUntil("2 hours", "third");
+			await runOnPostgres(podSandboxes.renew(HOLDER));
+
+			expect(notYetDue).toBe(0);
+			expect(await signedInAs(opened)).toBe("third");
+		},
+		SLOW,
+	);
 
 	it(
 		"makes the pod's sandbox on first use, and opens the same one after",

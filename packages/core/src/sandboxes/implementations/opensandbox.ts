@@ -61,7 +61,7 @@ export const fromOpenSandbox = (
 	return {
 		// Docker keeps memory across a pause, but Kubernetes keeps only the
 		// root filesystem, and the server doesn't say which it runs on.
-		capabilities: { pauseKeeps: "disk" },
+		capabilities: { pauseKeeps: "disk", credentials: "host-and-path" },
 		check: Effect.tryPromise({
 			try: () => manager().listSandboxInfos({ pageSize: 1 }),
 			catch: unavailable,
@@ -76,6 +76,9 @@ export const fromOpenSandbox = (
 						timeoutSeconds: null,
 						metadata: { ...spec.labels, [WORK_VOLUME_KEY]: workVolume(spec.workName) },
 						networkPolicy: { defaultAction: "deny", egress: allowRules(spec.allowedHosts) },
+						// What lets the egress sidecar add credentials: it intercepts the
+						// sandbox's HTTPS, with a CA the sandbox trusts.
+						credentialProxy: { enabled: true },
 						// The work outlives the container, which a host shutting down
 						// stops for good. The server has no call to remove a volume, so
 						// the volume stays after its last sandbox is destroyed.
@@ -207,13 +210,22 @@ export const fromOpenSandbox = (
 					},
 					catch: unavailable,
 				}),
-			setAllowedHosts: (hosts) =>
+			setNetwork: (network) =>
 				Effect.tryPromise({
 					try: async () => {
+						const hosts = network.allowedHosts;
 						const { egress = [] } = await sandbox.getEgressPolicy();
 						const stale = egress.filter((rule) => !hosts.includes(rule.target));
-						if (stale.length > 0) await sandbox.deleteEgressRules(stale.map((rule) => rule.target));
+						// The vault refuses a credential for a host the sandbox may not
+						// reach, so hosts are added before it changes, and removed after.
 						if (hosts.length > 0) await sandbox.patchEgressRules(allowRules(hosts));
+						await setCredentials(sandbox, network.credentials);
+						if (stale.length > 0) await sandbox.deleteEgressRules(stale.map((rule) => rule.target));
+						await writeAsRoot(
+							sandbox,
+							Sandboxes.NETWORK_ENVIRONMENT_FILE,
+							Sandboxes.environmentScript(network.environment),
+						);
 					},
 					catch: (cause) =>
 						new Sandboxes.Unavailable({
@@ -223,6 +235,9 @@ export const fromOpenSandbox = (
 							// which has no egress sidecar to set one in.
 							...(cause instanceof SandboxApiException && cause.statusCode === 502
 								? { reason: MADE_WITHOUT_NETWORK_RULES }
+								: {}),
+							...(cause instanceof SandboxApiException && cause.statusCode === 412
+								? { reason: MADE_WITHOUT_CREDENTIAL_PROXY }
 								: {}),
 						}),
 				}),
@@ -239,10 +254,78 @@ function keepsWorkApart(info: SandboxInfo) {
 	return info.metadata?.[WORK_VOLUME_KEY] !== undefined;
 }
 
+/**
+ * Replaces the sandbox's Credential Vault with `credentials`, one binding
+ * each, named by position so a refresh replaces them in place. A sandbox
+ * with nothing to add has its vault removed.
+ */
+async function setCredentials(sandbox: OpenSandbox, credentials: readonly Sandboxes.Credential[]) {
+	const vault = sandbox.credentialVault;
+	const current = await vault.get().catch((cause: unknown) => {
+		if (isNotFound(cause)) return undefined;
+		throw cause;
+	});
+	if (credentials.length === 0) {
+		if (current) await vault.delete();
+		return;
+	}
+	const named = credentials.map((credential, index) => ({
+		name: `credential-${index}`,
+		credential,
+	}));
+	const entries = named.map(({ name, credential }) => ({
+		name,
+		source: { value: Redacted.value(credential.value) },
+	}));
+	const bindings = named.map(({ name, credential }) => ({
+		name,
+		match: {
+			schemes: ["https" as const],
+			hosts: [credential.host],
+			// A trailing * matches the path and everything under it; without
+			// one, a path matches only itself.
+			...(credential.pathPrefix ? { paths: [`${credential.pathPrefix}*`] } : {}),
+		},
+		auth: {
+			type: "customHeaders" as const,
+			headers: [{ name: credential.header, credential: name }],
+		},
+	}));
+	if (!current) {
+		await vault.create({ credentials: entries, bindings });
+		return;
+	}
+	const wanted = new Set(named.map(({ name }) => name));
+	const has = (names: readonly { name: string }[]) => new Set(names.map(({ name }) => name));
+	const [hadCredentials, hadBindings] = [has(current.credentials), has(current.bindings)];
+	await vault.patch({
+		expectedRevision: current.revision,
+		credentials: {
+			add: entries.filter(({ name }) => !hadCredentials.has(name)),
+			replace: entries.filter(({ name }) => hadCredentials.has(name)),
+			delete: [...hadCredentials].filter((name) => !wanted.has(name)),
+		},
+		bindings: {
+			add: bindings.filter(({ name }) => !hadBindings.has(name)),
+			replace: bindings.filter(({ name }) => hadBindings.has(name)),
+			delete: [...hadBindings].filter((name) => !wanted.has(name)),
+		},
+	});
+}
+
+/** Writes a file only root may change, readable by everyone, such as one under /etc. */
+async function writeAsRoot(sandbox: OpenSandbox, path: string, content: string) {
+	await sandbox.files.writeFiles([
+		// Octal digits written as a decimal number, as the API reads them.
+		{ path, data: content, mode: 644, owner: "root", group: "root" },
+	]);
+}
+
 function allowRules(hosts: readonly string[]) {
 	return hosts.map((host) => ({ action: "allow" as const, target: host }));
 }
 
+const MADE_WITHOUT_CREDENTIAL_PROXY = userText`The pod's sandbox was made before sandboxes could be signed in to the services the pod uses, such as its repositories. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
 const MADE_WITHOUT_NETWORK_RULES = userText`The pod's sandbox was made before sandboxes had network rules, so it can't be kept to them. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
 
 async function run(

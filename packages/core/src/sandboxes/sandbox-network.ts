@@ -161,9 +161,7 @@ export const make = Effect.gen(function* () {
 
 	const addToPod = (row: typeof sandboxPodAllowedHost.$inferInsert) =>
 		query((db) => db.insert(sandboxPodAllowedHost).values(row).onConflictDoNothing()).pipe(
-			Effect.andThen(
-				podSandboxes.applyAllowedHosts({ workspaceId: row.workspaceId, podId: row.podId }),
-			),
+			Effect.andThen(podSandboxes.applyNetwork({ workspaceId: row.workspaceId, podId: row.podId })),
 		);
 
 	const podOf = (standing: { pod: { id: string; workspaceId: string } }): Pod => ({
@@ -190,7 +188,7 @@ export const make = Effect.gen(function* () {
 								.values({ workspaceId, host, addedById: actor.userId })
 								.onConflictDoNothing(),
 						);
-						yield* podSandboxes.applyAllowedHosts({ workspaceId });
+						yield* podSandboxes.applyNetwork({ workspaceId });
 					}
 					return yield* settingsOf(workspaceId);
 				}),
@@ -212,7 +210,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ host: sandboxAllowedHost.host }),
 					);
-					if (removed.length > 0) yield* podSandboxes.applyAllowedHosts({ workspaceId });
+					if (removed.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -229,7 +227,7 @@ export const make = Effect.gen(function* () {
 							.onConflictDoNothing()
 							.returning({ host: sandboxBlockedHost.host }),
 					);
-					if (blocked.length > 0) yield* podSandboxes.applyAllowedHosts({ workspaceId });
+					if (blocked.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -250,7 +248,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ host: sandboxBlockedHost.host }),
 					);
-					if (unblocked.length > 0) yield* podSandboxes.applyAllowedHosts({ workspaceId });
+					if (unblocked.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -294,7 +292,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ host: sandboxPodAllowedHost.host }),
 					);
-					if (removed.length > 0) yield* podSandboxes.applyAllowedHosts(pod);
+					if (removed.length > 0) yield* podSandboxes.applyNetwork(pod);
 					return yield* podSettingsOf(pod);
 				}),
 			),
