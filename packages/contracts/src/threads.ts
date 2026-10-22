@@ -22,6 +22,7 @@ export const MAX_THREAD_HISTORY_LIMIT = 100;
 
 export const threadTypeSchema = Schema.Literals([
 	"conversation",
+	"pod_chat",
 	"collaboration",
 	"routine",
 	"system_agent",
@@ -47,7 +48,8 @@ export const threadSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
-	hostAgentId: uuidSchema,
+	/** The bot the thread is with; null on a pod's chat. */
+	hostAgentId: Schema.NullOr(uuidSchema),
 	/** The conversation it is in; its own id on a conversation. Null on a system agent's thread. */
 	conversationId: Schema.NullOr(uuidSchema),
 	type: threadTypeSchema,

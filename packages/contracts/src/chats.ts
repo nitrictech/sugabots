@@ -38,8 +38,8 @@ export const conversationSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
-	/** The bot it is with. */
-	hostAgentId: uuidSchema,
+	/** The bot it is with; null on the pod's chat, which is the pod's people's. */
+	hostAgentId: Schema.NullOr(uuidSchema),
 	title: Schema.String,
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
@@ -211,8 +211,18 @@ export const activityFeedSchema = Schema.Struct({
 
 export type ActivityFeed = typeof activityFeedSchema.Type;
 
-/** Most recent message first; bots nobody has messaged come last, by name. */
+/**
+ * A pod's conversation list: its chat, null until somebody first opens it,
+ * with how many of its messages the person has not read; and its bots, most
+ * recent message first, those nobody has messaged last, by name.
+ */
 export const chatListSchema = Schema.Struct({
+	podChat: Schema.NullOr(
+		Schema.Struct({
+			conversation: conversationSchema,
+			unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		}),
+	),
 	items: Schema.mutable(Schema.Array(chatListItemSchema)),
 });
 

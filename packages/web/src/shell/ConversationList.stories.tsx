@@ -56,7 +56,7 @@ const meta = preview.meta({
 		pod: revenue,
 		rows: revenueRows,
 		status: "ready" as const,
-		selectedAgentId: growthDesk.id,
+		selected: { kind: "bot" as const, agentId: growthDesk.id },
 		onNewBot: fn(),
 		emptyState: { title: "No bots in Revenue yet" },
 	},
@@ -85,7 +85,7 @@ export const Default = meta.story({
  * when both apply.
  */
 export const UnreadAndWaiting = meta.story({
-	args: { selectedAgentId: leadResearcher.id },
+	args: { selected: { kind: "bot", agentId: leadResearcher.id } },
 	play: async ({ canvas }) => {
 		const growth = canvas.getByRole("link", { name: /Growth Desk/ });
 		await expect(growth).toHaveTextContent("Needs you");
@@ -106,7 +106,7 @@ export const EmptyPod = meta.story({
 	args: {
 		pod: design,
 		rows: [],
-		selectedAgentId: undefined,
+		selected: undefined,
 		emptyState: { title: "No bots in Design yet", action: { label: "New bot", onClick: newBot } },
 	},
 	play: async ({ canvas, userEvent }) => {
@@ -121,13 +121,49 @@ export const EmptyPodForAMember = meta.story({
 	args: {
 		pod: design,
 		rows: [],
-		selectedAgentId: undefined,
+		selected: undefined,
 		onNewBot: undefined,
 		emptyState: { title: "No bots in Design yet", hint: "Someone who runs this pod can add one." },
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Someone who runs this pod can add one.")).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
+	},
+});
+
+const revenueChat = {
+	conversation: {
+		...storyConversationFor(growthDesk),
+		id: "0199a3a0-0000-7000-8000-00000000c900",
+		hostAgentId: null,
+		title: "Pod chat",
+	},
+	unreadMessages: 2,
+};
+
+/**
+ * A shared pod's chat sits above its threads: open here, and counting what is
+ * new in it when it is not.
+ */
+export const PodChat = meta.story({
+	args: { podChat: revenueChat, selected: { kind: "podChat" } },
+	play: async ({ canvas }) => {
+		const chat = canvas.getByRole("link", { name: /Pod chat/ });
+		await expect(chat).toHaveAttribute("aria-current", "page");
+		await expect(chat).toHaveTextContent("2 unread messages");
+		await expect(canvas.getByText("Threads")).toBeVisible();
+	},
+});
+
+/** A pod whose chat nobody has opened yet still offers it, and opens it from its own address. */
+export const PodChatUnopened = meta.story({
+	args: { podChat: "unopened", rows: [] },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: /Pod chat/ })).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/pods\/revenue\/chat$/),
+		);
+		await expect(canvas.queryByText("Threads")).toBeNull();
 	},
 });
 

@@ -25,13 +25,15 @@ import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState
 import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
 import {
+	type ConversationPlace,
 	prefetchConversation,
 	useChatList,
 	useConversationPlace,
 	useOpenConversation,
+	useOpenPodChat,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
+import { agentChatLink, conversationLink, podChatLink, podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -44,19 +46,22 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
-import type { Staged } from "@/screens/AgentChat.tsx";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { ArtifactPage, ArtifactsPage } from "@/screens/Artifacts.tsx";
+import type { Staged } from "@/screens/ConversationChat.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { ActivityList } from "@/shell/ActivityList.tsx";
 import { ApprovalList } from "@/shell/ApprovalList.tsx";
-import { ConversationList } from "@/shell/ConversationList.tsx";
+import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { ListAndPane, Panes, Shell } from "@/shell/Shell.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
-const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
+const ConversationPage = lazyNamed(
+	() => import("@/screens/ConversationPage.tsx"),
+	"ConversationPage",
+);
 const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
@@ -141,6 +146,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
+ *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
  *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
  *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
  *   /$workspace/settings/members/$member   one person, by membership id
@@ -943,7 +949,7 @@ const activityChatRoute = createRoute({
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
 		prefetchConversation(context.queries, params.conversation);
-		return AgentPage.preload();
+		return ConversationPage.preload();
 	},
 	component: () => {
 		const { pod, conversation } = activityChatRoute.useParams();
@@ -1047,24 +1053,24 @@ function AgentsRoute() {
  */
 function ConversationLayout({
 	pod,
-	selectedAgentId,
+	selected,
 	artifactsOpen,
 	listTuckedAway,
 	children,
 }: {
 	pod: Pod;
-	selectedAgentId: string | undefined;
+	selected: ListSelection | undefined;
 	artifactsOpen: boolean;
 	listTuckedAway: boolean;
 	children: React.ReactNode;
 }) {
 	return (
 		<ListAndPane
-			open={selectedAgentId !== undefined || artifactsOpen}
+			open={selected !== undefined || artifactsOpen}
 			list={(className) => (
 				<ConversationList
 					pod={pod}
-					selectedAgentId={selectedAgentId}
+					selected={selected}
 					className={listTuckedAway ? "hidden" : className}
 				/>
 			)}
@@ -1087,6 +1093,7 @@ function PodRoute() {
 	const { artifact: stagedArtifact, desktop: stagedDesktop } = useSearch({ strict: false });
 	const matchRoute = useMatchRoute();
 	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
+	const openingPodChat = Boolean(matchRoute({ to: podChatRoute.fullPath }));
 	const { data: pods, isPending, error } = usePods();
 	const { found } = usePodAgent(podSlug, handle ?? "");
 	const { found: inConversation } = useConversationPlace(podSlug, conversation ?? "");
@@ -1106,13 +1113,23 @@ function PodRoute() {
 	return (
 		<ConversationLayout
 			pod={pod}
-			selectedAgentId={(inConversation ?? found)?.agent.id}
+			selected={selectionOf(inConversation ?? found, openingPodChat)}
 			artifactsOpen={artifactsOpen}
 			listTuckedAway={stagedArtifact !== undefined || stagedDesktop !== undefined}
 		>
 			<Outlet />
 		</ConversationLayout>
 	);
+}
+
+/** The row of the list a pod's page has open: a bot's, or the pod's chat. */
+function selectionOf(
+	open: { agent: Agent | null } | undefined,
+	openingPodChat: boolean,
+): ListSelection | undefined {
+	if (open?.agent) return { kind: "bot", agentId: open.agent.id };
+	if (open || openingPodChat) return { kind: "podChat" };
+	return undefined;
 }
 
 const podIndexRoute = createRoute({
@@ -1128,14 +1145,24 @@ function PodIndexRoute() {
 }
 
 /**
- * A pod opened without a chat chosen opens the list's top one, where
- * the list and the chat sit side by side. On a phone the list is the page, so
- * it stays.
+ * A pod opened without a chat chosen opens its chat, or, in a Personal pod,
+ * which has none, the list's top one, where the list and the chat sit side by
+ * side. On a phone the list is the page, so it stays.
  */
 function OpenTopChat({ pod }: { pod: Pod }) {
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
 	const { data: list } = useChatList(pod.slug);
 	if (!sideBySide) return null;
+	if (pod.kind === "shared" && list) {
+		return (
+			<Navigate
+				{...(list.podChat
+					? conversationLink({ pod, conversationId: list.podChat.conversation.id })
+					: podChatLink(pod))}
+				replace
+			/>
+		);
+	}
 	const top = list?.items[0];
 	if (!top) return null;
 	return (
@@ -1153,7 +1180,7 @@ function OpenTopChat({ pod }: { pod: Pod }) {
  * link preloads it instead, through `agentRoute`'s loader.
  */
 function preloadChatScreenForWideLayout() {
-	if (matchesMedia(SIDE_BY_SIDE)) AgentPage.preload();
+	if (matchesMedia(SIDE_BY_SIDE)) ConversationPage.preload();
 }
 
 const artifactsRoute = createRoute({
@@ -1239,12 +1266,37 @@ function idParam<Name extends string>(
 	};
 }
 
+/** The pod's chat, opened first if nobody has, then shown at its own address. */
+const podChatRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/chat",
+	loader: () => ConversationPage.preload(),
+	component: () => {
+		const { pod: podSlug } = podChatRoute.useParams();
+		const pod = findPod(usePods().data, podSlug);
+		return pod ? <OpenPodChat pod={pod} /> : null;
+	},
+});
+
+function OpenPodChat({ pod }: { pod: Pod }) {
+	const opened = useOpenPodChat(pod);
+	if (opened.isError) {
+		return (
+			<EmptyState title="Could not open this pod's chat">
+				The API did not answer. Reload this page to try again.
+			</EmptyState>
+		);
+	}
+	if (!opened.data) return null;
+	return <Navigate {...conversationLink({ pod, conversationId: opened.data.id })} replace />;
+}
+
 /** A bot's newest conversation, opened first if it has none, then shown at its own address. */
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
 	validateSearch: validateAgentSearch,
-	loader: () => AgentPage.preload(),
+	loader: () => ConversationPage.preload(),
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
 		const search = agentRoute.useSearch();
@@ -1286,7 +1338,7 @@ const conversationRoute = createRoute({
 	// Also run while the pointer is on a link here, so it is loading before the click.
 	loader: ({ context, params }) => {
 		prefetchConversation(context.queries, params.conversation);
-		return AgentPage.preload();
+		return ConversationPage.preload();
 	},
 	component: () => {
 		const { pod, conversation } = conversationRoute.useParams();
@@ -1295,7 +1347,7 @@ const conversationRoute = createRoute({
 		return (
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
 				{(found, user) => (
-					<AgentPage
+					<ConversationPage
 						agent={found.agent}
 						pod={found.pod}
 						conversationId={conversation}
@@ -1329,7 +1381,7 @@ function PodConversationScreen({
 }: {
 	podSlug: string;
 	conversationId: string;
-	children: (found: { pod: Pod; agent: Agent }, user: SessionUser) => ReactNode;
+	children: (found: ConversationPlace, user: SessionUser) => ReactNode;
 }) {
 	const { user } = useSession();
 	const { found, isPending, error } = useConversationPlace(podSlug, conversationId);
@@ -1433,6 +1485,7 @@ const routeTree = rootRoute.addChildren([
 		podRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
+			podChatRoute,
 			conversationRoute,
 			artifactsRoute,
 			artifactRoute,

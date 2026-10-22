@@ -110,6 +110,7 @@ export const client = {
 			activity: vi.fn(),
 			markRead: vi.fn(),
 			open: vi.fn(),
+			openPodChat: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
 			send: vi.fn(),

@@ -171,6 +171,58 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 	};
 }
 
+/** A shared pod's chat, by the pod's id. */
+export function storyPodChatFor(pod: Pod): Conversation {
+	return {
+		id: `0199a3a0-0000-7000-8000-00000000c9${pod.id.slice(-2)}`,
+		workspaceId: pod.workspaceId,
+		podId: pod.id,
+		hostAgentId: null,
+		title: "Pod chat",
+		createdAt: "2026-09-18T06:00:00.000Z",
+		updatedAt: "2026-09-18T06:10:00.000Z",
+	};
+}
+
+/** What a pod's chat holds: its messages, and the pod's people and bots to mention. */
+export function storyPodChatDetails(
+	pod: Pod,
+	bots: Agent[],
+	messages: Message[] = [],
+): ThreadDetails {
+	const chat = storyPodChatFor(pod);
+	const person = testPerson({ id: storyUser.id, name: storyUser.name });
+	return {
+		thread: {
+			...chat,
+			conversationId: chat.id,
+			type: "pod_chat",
+			status: "done",
+			parentThreadId: null,
+			initiatorUserId: storyUser.id,
+		},
+		capabilities: { approveToolCalls: true },
+		routineExecution: null,
+		participants: [person],
+		crew: bots
+			.filter((bot) => bot.podId === pod.id)
+			.map((bot) => ({
+				kind: "agent" as const,
+				id: bot.id,
+				name: bot.name,
+				handle: bot.handle,
+				color: bot.color,
+				face: bot.face,
+				shape: bot.shape,
+			})),
+		members: [person],
+		olderMessagesCursor: null,
+		queuedSince: null,
+		reads: [],
+		messages,
+	};
+}
+
 /** What a chat's sidebar shows: a summary, and who has written lately. */
 export function storyChatActivity(agent: Agent, messages: Message[] = []): ThreadActivity {
 	const chat = storyConversationFor(agent);
@@ -199,6 +251,8 @@ export interface StoryAppData {
 	bots?: Agent[];
 	/** Messages in each bot's chat, by the bot's id. */
 	messages?: Record<string, Message[]>;
+	/** Messages in each shared pod's chat, by the pod's id. */
+	podChatMessages?: Record<string, Message[]>;
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
@@ -217,6 +271,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
 	const botForThread = (threadId: string) =>
 		bots.find((bot) => storyConversationFor(bot).id === threadId);
+	const podForChat = (threadId: string) =>
+		pods.find((pod) => pod.kind === "shared" && storyPodChatFor(pod).id === threadId);
 
 	return [
 		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
@@ -285,7 +341,17 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 						needsApproval: false,
 					};
 				});
-			return HttpResponse.json({ items });
+			return HttpResponse.json({
+				podChat:
+					pod?.kind === "shared" ? { conversation: storyPodChatFor(pod), unreadMessages: 0 } : null,
+				items,
+			});
+		}),
+		http.post(api("/workspaces/:workspace/pods/:podId/chat"), ({ params }) => {
+			const pod = pods.find((one) => one.id === params.podId);
+			return pod
+				? HttpResponse.json(storyPodChatFor(pod))
+				: new HttpResponse(null, { status: 404 });
 		}),
 		http.post(api("/workspaces/:workspace/conversations"), async ({ request }) => {
 			const body = (await request.json()) as { hostAgentId: string };
@@ -296,8 +362,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
 			const bot = botForThread(String(params.conversationId));
+			const pod = podForChat(String(params.conversationId));
+			const said = bot ? messages[bot.id] : pod ? data.podChatMessages?.[pod.id] : undefined;
 			return HttpResponse.json({
-				items: (bot ? (messages[bot.id] ?? []) : []).map((message) => ({
+				items: (said ?? []).map((message) => ({
 					kind: "message",
 					message,
 				})),
@@ -316,6 +384,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/threads/:threadId"), ({ params }) => {
+			const pod = podForChat(String(params.threadId));
+			if (pod) {
+				return HttpResponse.json(storyPodChatDetails(pod, bots, data.podChatMessages?.[pod.id]));
+			}
 			const bot = botForThread(String(params.threadId));
 			return bot
 				? HttpResponse.json(storyChatDetails(bot, messages[bot.id]))

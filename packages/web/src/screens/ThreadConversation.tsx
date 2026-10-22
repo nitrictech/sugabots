@@ -87,7 +87,8 @@ export function ThreadConversation({
 	fileUrlOf,
 }: {
 	messages: Message[];
-	host: AgentParticipant;
+	/** The bot the thread is with; none in a pod's chat. */
+	host?: AgentParticipant;
 	isRunning: boolean;
 	/**
 	 * Everyone in the thread and the pod's bots and people: how a
@@ -225,7 +226,7 @@ export function ThreadConversation({
 				);
 			})}
 			{showsTyping &&
-				(replyPending ? (
+				(replyPending && host ? (
 					<TypingIndicator typers={[host, ...peopleTyping]} />
 				) : (
 					!lastReplyTyping &&

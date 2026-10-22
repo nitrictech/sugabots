@@ -48,6 +48,12 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: conversationSchema,
 			error: refused,
 		}),
+		/** The pod's chat, opened on first use. */
+		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
+			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },
+			success: conversationSchema,
+			error: refused,
+		}),
 		HttpApiEndpoint.get("messages", "/conversations/:conversationId/messages", {
 			params: { conversationId: Schema.String },
 			query: chatPageQuerySchema,

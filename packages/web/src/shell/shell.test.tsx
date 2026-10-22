@@ -480,25 +480,18 @@ describe("the conversation list", () => {
 	it("lists a pod's bots newest first, marking the open chat", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
+				podChat: null,
 				items: [
 					{
 						agent: linear,
-						chat: {
-							id: "0199a3a0-0000-7000-8000-0000000000c1",
-							workspaceId: workspace.id,
-							podId: linear.podId,
-							hostAgentId: linear.id,
-							mainThreadId: "0199a3a0-0000-7000-8000-0000000000c2",
-							createdAt: "2026-09-18T08:00:00.000Z",
-							updatedAt: "2026-09-18T08:00:00.000Z",
-						},
+						conversation: conversationWith(linear),
 						lastMessage: {
 							preview: "File the timeout as a bug",
 							authorUserId: sam.id,
 							at: new Date().toISOString(),
 						},
 					},
-					{ agent: triager, chat: null, lastMessage: null },
+					{ agent: triager, conversation: null, lastMessage: null },
 				],
 			}),
 		);
@@ -507,10 +500,11 @@ describe("the conversation list", () => {
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
 		const rows = await within(await within(list).findByRole("list")).findAllByRole("link");
 		expect(rows.map((row) => row.textContent)).toEqual([
+			expect.stringContaining("Pod chat"),
 			expect.stringContaining("Linear Handler"),
 			expect.stringContaining("Issue Triager"),
 		]);
-		expect(rows[0]?.getAttribute("aria-current")).toBe("page");
+		expect(rows[1]?.getAttribute("aria-current")).toBe("page");
 		expect(client.api.chats.list).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 			query: { pod: pods[0]?.slug },
@@ -568,7 +562,7 @@ describe("the conversation list", () => {
 	});
 
 	it("says a pod has no bots yet, and offers the first", async () => {
-		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
+		client.api.chats.list.mockReturnValue(Effect.succeed({ podChat: null, items: [] }));
 		mount("/suga/pods/sales");
 
 		expect(await screen.findByText("No bots in Sales yet")).toBeDefined();
