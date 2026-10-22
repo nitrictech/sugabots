@@ -1,7 +1,7 @@
 import { Effect, Schema, SchemaGetter } from "effect";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toString as mdastToString } from "mdast-util-to-string";
-import { agentColorSchema, agentFaceSchema } from "./agents.ts";
+import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "./agents.ts";
 import {
 	attachmentNameSchema,
 	MAX_ATTACHMENTS_PER_MESSAGE,
@@ -81,6 +81,7 @@ export const agentParticipantSchema = Schema.Struct({
 	handle: Schema.String,
 	color: agentColorSchema,
 	face: agentFaceSchema,
+	shape: agentShapeSchema,
 });
 
 export type AgentParticipant = typeof agentParticipantSchema.Type;

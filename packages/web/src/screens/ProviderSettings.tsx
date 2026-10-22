@@ -116,8 +116,10 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 					key={bot.id}
 					color={bot.color}
 					face={bot.face}
+					shape={bot.shape}
 					size={22}
-					className={`rounded-full shadow-[0_0_0_2px_var(--list)] ${index > 0 ? "-ml-1.5" : ""}`}
+					ringed={{ color: "var(--list)", width: 2 }}
+					className={index > 0 ? "-ml-1.5" : undefined}
 				/>
 			))}
 			{more > 0 && (

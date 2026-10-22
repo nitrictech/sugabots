@@ -35,7 +35,7 @@ import { awaitsApproval } from "./tool-activity.ts";
  */
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
-type Asker = Pick<AgentParticipant, "name" | "color" | "face">;
+type Asker = Pick<AgentParticipant, "name" | "color" | "face" | "shape">;
 type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
@@ -374,7 +374,7 @@ function ReviewHeading({
 	return (
 		<div className="flex flex-col items-center gap-1 pb-2 text-center">
 			<span aria-hidden className="relative mb-2.5 inline-flex">
-				<AgentAvatar color={agent.color} face={agent.face} size={64} />
+				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
 				<span className="absolute -right-2 -bottom-1 rounded-[10px] ring-[3px] ring-panel">
 					<StepMark step={step} size="sm" />
 				</span>

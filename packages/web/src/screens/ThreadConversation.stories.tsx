@@ -21,6 +21,7 @@ const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	handle: "issue-triager",
 	color: "green",
 	face: "arc",
+	shape: "circle",
 };
 
 const person = testPerson({
@@ -409,6 +410,7 @@ const other: Extract<ThreadParticipant, { kind: "agent" }> = {
 	handle: "linear-handler",
 	color: "orange",
 	face: "dot",
+	shape: "circle",
 };
 
 /** InTheSidebar is a collaboration as its sidebar shows it: the same rows, a little smaller. */

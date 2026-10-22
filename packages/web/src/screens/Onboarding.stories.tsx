@@ -39,6 +39,7 @@ const placeholder = {
 	description: "Your private assistant.",
 	color: "sky",
 	face: "pill",
+	shape: "circle",
 	model: "claude-sonnet",
 	prompt: "",
 	disabledTools: [],

@@ -65,14 +65,17 @@ export function ChatActivityRow(
 						<AgentAvatar
 							color={props.initiator.color}
 							face={props.initiator.face}
+							shape={props.initiator.shape}
 							size={18}
 							className="absolute top-0 left-0"
 						/>
 						<AgentAvatar
 							color={props.recipient.color}
 							face={props.recipient.face}
+							shape={props.recipient.shape}
 							size={18}
-							className="absolute top-0 left-3 rounded-full shadow-[0_0_0_2px_var(--background)]"
+							ringed={{ color: "var(--background)", width: 2 }}
+							className="absolute top-0 left-3"
 						/>
 					</span>
 				) : state === "failed" ? (

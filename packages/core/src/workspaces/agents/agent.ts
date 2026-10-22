@@ -27,6 +27,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		description: row.description,
 		color: row.color,
 		face: row.face,
+		shape: row.shape,
 		model: row.model,
 		prompt: row.prompt,
 		disabledTools: row.disabledTools,

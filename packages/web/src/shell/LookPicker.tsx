@@ -1,9 +1,11 @@
-import { botColors, faceMarks } from "@sugabots/avatars";
+import { botColors, faceMarks, headShape } from "@sugabots/avatars";
 import {
 	type AgentColor,
 	type AgentFace,
+	type AgentShape,
 	agentColors,
 	agentFaces,
+	agentShapes,
 	type PodColor,
 	podColors,
 } from "@sugabots/contracts";
@@ -12,23 +14,28 @@ import { podPalettes } from "@/shell/PodTile.tsx";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /*
- * Choosing how a bot looks: one of the eight colours, and one of the eye
- * styles; and a pod's colour, from its own eight. Each is a set of native
- * radio buttons, so arrow keys move the choice. The eyes are drawn alone on
- * neutral chips, since the face shown above the picker already carries the
- * colour. Both of a bot's sets span the full row so their edges line up.
+ * Choosing how a bot looks: one of the eight colours, one of the head shapes
+ * and one of the eye styles; and a pod's colour, from its own eight. Each is a
+ * set of native radio buttons, so arrow keys move the choice. The shapes and
+ * eyes are drawn alone on neutral chips, since the face shown above the picker
+ * already carries the colour. All of a bot's sets span the full row so their
+ * edges line up.
  */
 
-/** LookPicker renders a bot's Colour and Eyes rows, for a `SettingsGroup` under a preview of the face. */
+/** LookPicker renders a bot's Colour, Shape and Eyes rows, for a `SettingsGroup` under a preview of the face. */
 export function LookPicker({
 	color,
+	shape,
 	face,
 	onColorChange,
+	onShapeChange,
 	onFaceChange,
 }: {
 	color: AgentColor;
+	shape: AgentShape;
 	face: AgentFace;
 	onColorChange: (color: AgentColor) => void;
+	onShapeChange: (shape: AgentShape) => void;
 	onFaceChange: (face: AgentFace) => void;
 }) {
 	return (
@@ -40,6 +47,9 @@ export function LookPicker({
 					value={color}
 					onChange={onColorChange}
 				/>
+			</SettingsControlRow>
+			<SettingsControlRow label="Shape">
+				<ShapePicker value={shape} onChange={onShapeChange} />
 			</SettingsControlRow>
 			<SettingsControlRow label="Eyes">
 				<EyesPicker value={face} onChange={onFaceChange} />
@@ -109,6 +119,53 @@ function Swatches<Color extends string>({
 				</label>
 			))}
 		</fieldset>
+	);
+}
+
+function ShapePicker({
+	value,
+	onChange,
+}: {
+	value: AgentShape;
+	onChange: (shape: AgentShape) => void;
+}) {
+	const name = useId();
+	return (
+		<fieldset className="m-0 grid flex-1 grid-cols-7 gap-1.5 border-0 p-0">
+			<legend className="sr-only">Shape</legend>
+			{agentShapes.map((shape) => (
+				<label
+					key={shape}
+					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+				>
+					<input
+						type="radio"
+						name={name}
+						value={shape}
+						aria-label={shape}
+						checked={value === shape}
+						onChange={() => onChange(shape)}
+						className="sr-only"
+					/>
+					<ShapeGlyph shape={shape} />
+				</label>
+			))}
+		</fieldset>
+	);
+}
+
+/** A head's outline without its eyes, in the text colour. */
+function ShapeGlyph({ shape }: { shape: AgentShape }) {
+	return (
+		<svg aria-hidden viewBox="0 0 40 40" width={20} height={20} fill="currentColor">
+			{headShape(shape).parts.map((part) =>
+				part.kind === "circle" ? (
+					<circle key={`${part.cx}-${part.cy}`} cx={part.cx} cy={part.cy} r={part.r} />
+				) : (
+					<path key={part.d} d={part.d} />
+				),
+			)}
+		</svg>
 	);
 }
 

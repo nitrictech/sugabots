@@ -59,6 +59,7 @@ const details: ThreadDetails = {
 			handle: "release-agent",
 			color: "green",
 			face: "pill",
+			shape: "circle",
 		},
 	],
 	olderMessagesCursor: null,

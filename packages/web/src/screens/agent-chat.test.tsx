@@ -78,6 +78,7 @@ const host = {
 	handle: linear.handle,
 	color: linear.color,
 	face: linear.face,
+	shape: linear.shape,
 };
 const collaborator = {
 	kind: "agent" as const,
@@ -86,6 +87,7 @@ const collaborator = {
 	handle: triager.handle,
 	color: triager.color,
 	face: triager.face,
+	shape: triager.shape,
 };
 const mainMessage: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",

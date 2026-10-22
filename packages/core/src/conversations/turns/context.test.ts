@@ -488,6 +488,7 @@ function context(): TurnContext {
 				handle: "host-agent",
 				color: "green",
 				face: "pill",
+				shape: "circle",
 			},
 			{
 				kind: "agent",
@@ -496,6 +497,7 @@ function context(): TurnContext {
 				handle: "reviewer",
 				color: "orange",
 				face: "dot",
+				shape: "circle",
 			},
 		],
 		messages: [
@@ -519,6 +521,7 @@ function context(): TurnContext {
 					handle: "host-agent",
 					color: "green",
 					face: "pill",
+					shape: "circle",
 				},
 				kind: "text",
 				status: "complete",
@@ -536,6 +539,7 @@ function context(): TurnContext {
 					handle: "reviewer",
 					color: "orange",
 					face: "dot",
+					shape: "circle",
 				},
 				kind: "text",
 				status: "complete",

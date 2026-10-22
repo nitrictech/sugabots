@@ -814,6 +814,7 @@ describe("routes", () => {
 				payload: {
 					name: "Chief",
 					color: "purple",
+					shape: "circle",
 					face: "pill",
 				},
 			}),
@@ -1323,6 +1324,7 @@ describe("creating an agent", () => {
 					name: made.name,
 					model: made.model,
 					color: "orange",
+					shape: "circle",
 					face: "arc",
 				},
 			});
@@ -2262,6 +2264,7 @@ describe("the app's badge", () => {
 			handle: linear.handle,
 			color: linear.color,
 			face: linear.face,
+			shape: "circle",
 		},
 		podId: pod.id,
 		threadId: "0199a3a0-0000-7000-8000-0000000004b1",

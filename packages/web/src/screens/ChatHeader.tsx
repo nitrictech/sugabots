@@ -42,7 +42,13 @@ export function ChatHeader({
 }) {
 	const name = (
 		<>
-			<AgentAvatar color={agent.color} face={agent.face} size={24} className="shrink-0" />
+			<AgentAvatar
+				color={agent.color}
+				face={agent.face}
+				shape={agent.shape}
+				size={24}
+				className="shrink-0"
+			/>
 			<span className="truncate">{agent.name}</span>
 		</>
 	);

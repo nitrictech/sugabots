@@ -597,7 +597,12 @@ function BotRow({
 	const pods = [...new Map(choices?.map((choice) => [choice.pod.id, choice.pod])).values()];
 	const summary = chosen ? (
 		<span className="flex min-w-0 flex-1 items-center gap-2.5">
-			<AgentAvatar color={chosen.agent.color} face={chosen.agent.face} size={24} />
+			<AgentAvatar
+				color={chosen.agent.color}
+				face={chosen.agent.face}
+				shape={chosen.agent.shape}
+				size={24}
+			/>
 			<span className="truncate text-[14.5px] text-foreground">{chosen.agent.name}</span>
 			<span className="truncate text-muted-foreground text-sm">{chosen.pod.name}</span>
 		</span>
@@ -648,7 +653,12 @@ function BotRow({
 											}}
 											className="focus-ring flex w-full items-center gap-2.5 rounded-xl px-1 py-1.5 text-left transition-colors hover:bg-row-hover"
 										>
-											<AgentAvatar color={agent.color} face={agent.face} size={24} />
+											<AgentAvatar
+												color={agent.color}
+												face={agent.face}
+												shape={agent.shape}
+												size={24}
+											/>
 											<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
 												{agent.name}
 											</span>

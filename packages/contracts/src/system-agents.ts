@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import {
 	agentColorSchema,
 	agentFaceSchema,
+	agentShapeSchema,
 	modelIdSchema,
 	systemAgentKeySchema,
 } from "./agents.ts";
@@ -24,6 +25,7 @@ export const systemAgentSchema = Schema.Struct({
 	description: Schema.NullOr(Schema.String),
 	color: agentColorSchema,
 	face: agentFaceSchema,
+	shape: agentShapeSchema,
 	/**
 	 * The model it runs on. `null` only while the workspace offers no model at
 	 * all, and until then the agent does not run: no summaries are written, and

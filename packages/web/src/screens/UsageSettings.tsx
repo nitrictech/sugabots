@@ -2,6 +2,7 @@ import { botColors } from "@sugabots/avatars";
 import {
 	type AgentColor,
 	type AgentFace,
+	type AgentShape,
 	providerPreset,
 	type UsageMonth,
 	type WorkspaceUsage,
@@ -311,7 +312,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 			return withSystemAgents(
 				usage.bots.map((bot) => ({
 					key: bot.agentId,
-					icon: <BotIcon color={bot.color} face={bot.face} name={bot.name} />,
+					icon: <BotIcon color={bot.color} face={bot.face} shape={bot.shape} name={bot.name} />,
 					label: bot.name ?? "Deleted bot",
 					sub: bot.podName ?? "No pod",
 					color: bot.color ? botColors[bot.color].face : NEUTRAL_BAR,
@@ -355,14 +356,16 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 function BotIcon({
 	color,
 	face,
+	shape,
 	name,
 }: {
 	color: AgentColor | null;
 	face: AgentFace | null;
+	shape: AgentShape | null;
 	name: string | null;
 }) {
 	return color ? (
-		<AgentAvatar color={color} face={face ?? undefined} size={24} />
+		<AgentAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
 	) : (
 		<LetterTile name={name ?? "Deleted bot"} />
 	);

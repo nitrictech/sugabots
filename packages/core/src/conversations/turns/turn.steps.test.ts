@@ -69,6 +69,7 @@ const prepared: PreparedTurn = {
 			handle: "host-agent",
 			color: "green",
 			face: "pill",
+			shape: "circle",
 		},
 		kind: "text",
 		status: "streaming",

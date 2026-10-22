@@ -159,6 +159,7 @@ const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((
 	description: null,
 	color: "ice",
 	face: "pill",
+	shape: "circle",
 	model: "claude-haiku",
 }));
 

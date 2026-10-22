@@ -507,7 +507,12 @@ function MessageRow({
 				{startsGroup ? (
 					<span aria-hidden className="mt-0.5 flex">
 						{author.kind === "agent" ? (
-							<AgentAvatar color={author.color} face={author.face} size={size.face} />
+							<AgentAvatar
+								color={author.color}
+								face={author.face}
+								shape={author.shape}
+								size={size.face}
+							/>
 						) : (
 							<PersonAvatar person={author} size={size.face} />
 						)}
@@ -804,8 +809,10 @@ function CollaborationLine({
 						key={bot.id}
 						color={bot.color}
 						face={bot.face}
+						shape={bot.shape}
 						size={20}
-						className="-mr-[7px] rounded-full shadow-[0_0_0_2px_var(--background)]"
+						ringed={{ color: "var(--background)", width: 2 }}
+						className="-mr-[7px]"
 					/>
 				))}
 			</span>

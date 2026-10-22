@@ -1,6 +1,5 @@
 import { BotFace } from "@sugabots/avatars";
-import type { AgentColor, AgentFace } from "@sugabots/contracts";
-import { cn } from "cn";
+import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
 
 /*
  * An agent's face.
@@ -15,18 +14,24 @@ import { cn } from "cn";
 interface AgentAvatarProps {
 	color: AgentColor;
 	face?: AgentFace;
+	shape: AgentShape;
 	size?: number;
 	/**
 	 * A ring in the surface colour, for a face that overlaps something — the
-	 * corner of its own message bubble, or the next face in a stack.
+	 * corner of its own message bubble, or the next face in a stack. `true` is
+	 * the panel's colour; a face on another surface names that surface's.
 	 */
-	ringed?: boolean;
+	ringed?: boolean | { color: string; width: number };
 	className?: string;
 }
+
+/** The surface colour round a face that overlaps something, following the head's shape. */
+const RING = { color: "var(--panel)", width: 3 };
 
 export function AgentAvatar({
 	color,
 	face = "pill",
+	shape,
 	size = 32,
 	ringed = false,
 	className,
@@ -35,9 +40,11 @@ export function AgentAvatar({
 		<BotFace
 			color={color}
 			face={face}
+			shape={shape}
 			width={size}
 			height={size}
-			className={cn(ringed && "rounded-full shadow-[0_0_0_3px_var(--panel)]", className)}
+			ring={ringed === true ? RING : ringed || undefined}
+			className={className}
 		/>
 	);
 }

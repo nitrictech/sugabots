@@ -10,6 +10,7 @@ const growthDesk = {
 	handle: "growth-desk",
 	color: "green" as const,
 	face: "pill" as const,
+	shape: "circle" as const,
 };
 
 const linearHandler = {
@@ -19,6 +20,7 @@ const linearHandler = {
 	handle: "linear-handler",
 	color: "orange" as const,
 	face: "dot" as const,
+	shape: "circle" as const,
 };
 
 const meta = preview.meta({

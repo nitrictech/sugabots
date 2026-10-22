@@ -1,4 +1,4 @@
-import type { AgentColor, AgentFace, SystemAgentKey } from "@sugabots/contracts";
+import type { AgentColor, AgentFace, AgentShape, SystemAgentKey } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
@@ -35,6 +35,7 @@ export interface SystemAgentDefinition {
 	description: string;
 	color: AgentColor;
 	face: AgentFace;
+	shape: AgentShape;
 	prompt: string;
 }
 
@@ -45,6 +46,7 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		description: "Keeps concise summaries of ongoing conversations.",
 		color: "orange",
 		face: "arc",
+		shape: "circle",
 		prompt: "Summarize conversations accurately and concisely. Do not invent details.",
 	},
 	{
@@ -53,6 +55,7 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		description: "Decides who speaks next when nobody was addressed.",
 		color: "teal",
 		face: "pill",
+		shape: "circle",
 		prompt:
 			"Keep the conversation on track: bring in the agent who can answer, and let it rest when the question has been answered.",
 	},
@@ -62,6 +65,7 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		description: "Compacts long conversations so bots can keep reading them.",
 		color: "purple",
 		face: "square",
+		shape: "circle",
 		prompt: "Summarize what a bot needs to carry on the conversation. Do not invent details.",
 	},
 ];

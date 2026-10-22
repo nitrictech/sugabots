@@ -93,6 +93,25 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		expect(made.prompt).toBe(INTERVIEW_PROMPT);
 	});
 
+	it("makes a bot nobody gave a shape a circle, and keeps the shape it's given", async () => {
+		const plain = await create(adminId, { podId, name: "Plain", model: "model" });
+		const starred = await create(adminId, {
+			podId,
+			name: "Starred",
+			model: "model",
+			shape: "star",
+		});
+		expect(plain.shape).toBe("circle");
+		expect(starred.shape).toBe("star");
+
+		const reshaped = await administrationAs(adminId).update({
+			agentId: plain.id,
+			changes: { shape: "bear" },
+		});
+		expect(reshaped.shape).toBe("bear");
+		expect((await visibleTo(adminId)).find((one) => one.id === plain.id)?.shape).toBe("bear");
+	});
+
 	it("rejects a pod from another workspace", async () => {
 		const [other] = await onDatabase((db) =>
 			db

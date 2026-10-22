@@ -474,7 +474,12 @@ function MentionMenu({
 						className="flex w-full items-center gap-2.5 rounded-tail px-2 py-[7px] text-left aria-selected:bg-chip"
 					>
 						{participant.kind === "agent" ? (
-							<AgentAvatar color={participant.color} face={participant.face} size={26} />
+							<AgentAvatar
+								color={participant.color}
+								face={participant.face}
+								shape={participant.shape}
+								size={26}
+							/>
 						) : (
 							<PersonAvatar person={participant} size={26} />
 						)}

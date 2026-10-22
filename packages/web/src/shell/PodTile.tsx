@@ -91,6 +91,7 @@ export function PodTile({
 						key={slot}
 						color={bot.color}
 						face={bot.face}
+						shape={bot.shape}
 						overflow="visible"
 						className="size-full min-h-0 min-w-0"
 					/>

@@ -377,6 +377,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							handle: true,
 							color: true,
 							face: true,
+							shape: true,
 							description: true,
 							model: true,
 							prompt: true,

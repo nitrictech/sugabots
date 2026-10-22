@@ -28,6 +28,7 @@ const mentionable: ThreadParticipant[] = [
 		handle: "issue-triager",
 		color: "green",
 		face: "arc",
+		shape: "circle",
 	},
 	{
 		kind: "agent",
@@ -36,6 +37,7 @@ const mentionable: ThreadParticipant[] = [
 		handle: "linear-handler",
 		color: "orange",
 		face: "dot",
+		shape: "circle",
 	},
 	testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" }),
 ];

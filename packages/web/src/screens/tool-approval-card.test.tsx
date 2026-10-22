@@ -11,7 +11,12 @@ import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const agent = { name: "Linear Handler", color: "green" as const, face: "pill" as const };
+const agent = {
+	name: "Linear Handler",
+	color: "green" as const,
+	face: "pill" as const,
+	shape: "circle" as const,
+};
 
 function asking(
 	input: ToolCallPart["input"],

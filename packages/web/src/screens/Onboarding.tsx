@@ -3,6 +3,7 @@ import {
 	type Agent,
 	type AgentColor,
 	type AgentFace,
+	type AgentShape,
 	effectiveCapabilities,
 	type ModelProvider,
 	type Pod,
@@ -563,6 +564,7 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 	// The Personal pod's bot starts as a placeholder; it becomes yours here.
 	const started = bot && bot.name !== "Personal Assistant";
 	const [color, setColor] = useState<AgentColor>(started ? bot.color : "green");
+	const [shape, setShape] = useState<AgentShape>(started ? bot.shape : "circle");
 	const [face, setFace] = useState<AgentFace>(started ? bot.face : "pill");
 	const [name, setName] = useState(started ? bot.name : "");
 	const trimmed = name.trim();
@@ -574,6 +576,7 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 			await update.mutateAsync({
 				name: trimmed,
 				color,
+				shape,
 				face,
 			});
 		} catch {
@@ -586,10 +589,17 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 		<form onSubmit={submit} className="flex flex-col gap-[22px]">
 			<StepHeading title="Make your first bot" />
 			<div className="flex justify-center">
-				<AgentAvatar color={color} face={face} size={96} />
+				<AgentAvatar color={color} face={face} shape={shape} size={96} />
 			</div>
 			<div className="overflow-hidden rounded-panel bg-list">
-				<LookPicker color={color} face={face} onColorChange={setColor} onFaceChange={setFace} />
+				<LookPicker
+					color={color}
+					shape={shape}
+					face={face}
+					onColorChange={setColor}
+					onShapeChange={setShape}
+					onFaceChange={setFace}
+				/>
 			</div>
 			<input
 				aria-label="Name"
@@ -769,7 +779,7 @@ function ReadyStep({
 					{bot.name}
 				</span>
 				<div className="flex items-end gap-2">
-					<AgentAvatar color={bot.color} face={bot.face} size={34} />
+					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={34} />
 					<div className="flex min-w-0 flex-col gap-[3px]">
 						{[
 							`Hi, I'm ${bot.name}.`,

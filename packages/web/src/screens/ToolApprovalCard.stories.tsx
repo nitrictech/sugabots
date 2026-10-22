@@ -11,8 +11,18 @@ const PHONE = { viewport: { value: "galaxys9", isRotated: false } };
 const calendar: ConnectionLook = { name: "Google Calendar" };
 const linear: ConnectionLook = { name: "Linear", presetId: "linear" };
 
-const tripPlanner = { name: "Trip Planner", color: "sky" as const, face: "dot" as const };
-const growthDesk = { name: "Growth Desk", color: "green" as const, face: "pill" as const };
+const tripPlanner = {
+	name: "Trip Planner",
+	color: "sky" as const,
+	face: "dot" as const,
+	shape: "circle" as const,
+};
+const growthDesk = {
+	name: "Growth Desk",
+	color: "green" as const,
+	face: "pill" as const,
+	shape: "circle" as const,
+};
 
 function asking(over: Partial<ToolCallPart> = {}): ToolCallPart {
 	return {

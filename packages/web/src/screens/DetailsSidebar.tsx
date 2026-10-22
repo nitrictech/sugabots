@@ -59,7 +59,13 @@ export function DetailsSidebar({
 		<ChatSidebar label="Details" onClose={onClose}>
 			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
 				<div className="flex items-center gap-3.5" style={botColorVariables(agent.color)}>
-					<AgentAvatar color={agent.color} face={agent.face} size={56} className="shrink-0" />
+					<AgentAvatar
+						color={agent.color}
+						face={agent.face}
+						shape={agent.shape}
+						size={56}
+						className="shrink-0"
+					/>
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<h3 className="m-0 truncate font-bold text-[18px] text-foreground">{agent.name}</h3>
 						<p className="m-0 truncate text-md text-muted-foreground">{pod.name} pod</p>
@@ -142,7 +148,12 @@ function ParticipantRow({
 		<li className="flex items-center gap-2.5 border-border border-b px-3.5 py-[9px] last:border-b-0">
 			<span aria-hidden className="contents">
 				{participant.kind === "agent" ? (
-					<AgentAvatar color={participant.color} face={participant.face} size={26} />
+					<AgentAvatar
+						color={participant.color}
+						face={participant.face}
+						shape={participant.shape}
+						size={26}
+					/>
 				) : (
 					<PersonAvatar person={participant} size={26} />
 				)}

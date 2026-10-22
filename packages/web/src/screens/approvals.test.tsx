@@ -15,6 +15,7 @@ const host = {
 	handle: linear.handle,
 	color: linear.color,
 	face: linear.face,
+	shape: linear.shape,
 };
 
 function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {

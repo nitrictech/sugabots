@@ -311,7 +311,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 			{bots.map((agent) => (
 				<SettingsRow
 					key={agent.id}
-					icon={<AgentAvatar color={agent.color} face={agent.face} size={30} />}
+					icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={30} />}
 					label={agent.name}
 					chevron
 					render={<Link {...agentSettingsLink({ pod, agent })} state={backToPod} />}

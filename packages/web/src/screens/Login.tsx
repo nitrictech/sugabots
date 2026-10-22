@@ -235,7 +235,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
 				<div aria-hidden className="flex justify-center gap-3 pb-2">
 					{crowd.map(({ color, face, drop }) => (
 						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>
-							<AgentAvatar color={color} face={face} size={52} />
+							<AgentAvatar color={color} face={face} shape="circle" size={52} />
 						</span>
 					))}
 				</div>

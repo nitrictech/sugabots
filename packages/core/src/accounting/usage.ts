@@ -122,6 +122,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 				name: agent.name,
 				color: agent.color,
 				face: agent.face,
+				shape: agent.shape,
 				podName: pod.name,
 				...spend,
 			})
@@ -129,7 +130,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 			.leftJoin(agent, eq(agent.id, modelRequest.agentId))
 			.leftJoin(pod, eq(pod.id, agent.podId))
 			.where(and(inMonth, byBots))
-			.groupBy(modelRequest.agentId, agent.name, agent.color, agent.face, pod.name),
+			.groupBy(modelRequest.agentId, agent.name, agent.color, agent.face, agent.shape, pod.name),
 	);
 	const models = yield* query((db) =>
 		db
