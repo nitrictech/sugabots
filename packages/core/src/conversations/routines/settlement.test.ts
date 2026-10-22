@@ -10,6 +10,7 @@ import {
 	lane,
 	laneRequest,
 	message,
+	routine,
 	routineExecution,
 	thread,
 	turn,
@@ -740,6 +741,44 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
 		expect(await resultsOf(run.executionId)).toEqual([]);
+	});
+
+	it("pauses a routine after two failed runs in a row, and running it again turns it back on", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: `Failing ${crypto.randomUUID()}`,
+				instructions: "Try it.",
+				triggers: [{ kind: "webhook" }],
+			},
+		);
+		const routineId = created.routine.id;
+		const failOnce = async () => {
+			const accepted = await routines.run({ agentId, routineId, requestId: crypto.randomUUID() });
+			const started = await startRunning(runner, routineId);
+			await announce(ended(accepted.threadId, failed(userText`Model failed`)));
+			await finishTurnsIn(accepted.threadId);
+			await settlement.settleRun(started.run);
+			// As the run's workflow does once it ends, so the next run can start.
+			await runOnPostgres(releaseRun(started.run));
+		};
+		const standing = async () => {
+			const [row] = await onDatabase((db) =>
+				db
+					.select({ state: routine.state, pausedAfterFailuresAt: routine.pausedAfterFailuresAt })
+					.from(routine)
+					.where(eq(routine.id, routineId)),
+			);
+			return row;
+		};
+
+		await failOnce();
+		expect(await standing()).toEqual({ state: "enabled", pausedAfterFailuresAt: null });
+		await failOnce();
+		expect(await standing()).toEqual({ state: "paused", pausedAfterFailuresAt: expect.any(Date) });
+
+		await routines.run({ agentId, routineId, requestId: crypto.randomUUID() });
+		expect(await standing()).toEqual({ state: "enabled", pausedAfterFailuresAt: null });
 	});
 
 	it("posts nothing for a run that failed", async () => {

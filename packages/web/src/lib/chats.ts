@@ -25,6 +25,7 @@ import { useEffect } from "react";
 import { client } from "@/api.ts";
 import { useAgents } from "@/lib/agents.ts";
 import { findPod, usePods } from "@/lib/pods.ts";
+import { useRoutineActions } from "@/lib/routines.ts";
 import { threadQuery } from "@/lib/threads.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
@@ -541,6 +542,35 @@ export function useSetDone(conversationId: string) {
 				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 			]),
 	});
+}
+
+/**
+ * What a routine's own thread does with its routine: run it again, which
+ * turns on one that paused itself after failing, and pause or resume it.
+ * The thread, its page and the pod's list are fetched again after each.
+ */
+export function useRoutineControls(
+	conversationId: string,
+	routine: { id: string; agentId: string },
+) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	const actions = useRoutineActions();
+	const refresh = () =>
+		Promise.all([
+			queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
+			queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
+			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+		]);
+	const scope = { agentId: routine.agentId, routineId: routine.id };
+	return {
+		runAgain: () => actions.run.mutateAsync(scope).then(refresh),
+		setPaused: (paused: boolean) =>
+			actions.update
+				.mutateAsync({ ...scope, json: { state: paused ? "paused" : "enabled" } })
+				.then(refresh),
+		pending: actions.run.isPending || actions.update.isPending,
+	};
 }
 
 /** Fetches again what shows the threads started from a pod's chat: the chat and the pod's list. */

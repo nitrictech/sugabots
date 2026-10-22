@@ -43,7 +43,8 @@ import { RoutineRuns } from "./runs.ts";
  * Settles routine runs: records how a run ended once nothing in its threads
  * is running, waiting or about to start. A completed run has its agent's
  * last reply posted in the routine's thread, and in the pod's chat too when
- * the routine's results go there.
+ * the routine's results go there. A routine that fails twice in a row pauses
+ * itself (see `RoutineRepository.settle`).
  *
  * `handler` reacts to the conversation events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,

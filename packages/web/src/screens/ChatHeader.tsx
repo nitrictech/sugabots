@@ -1,6 +1,6 @@
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ChevronLeft, CircleCheck, Info, RotateCcw } from "lucide-react";
+import { ChevronLeft, CircleCheck, Info, Pause, Play, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -31,6 +31,7 @@ export function ChatHeader({
 	agent,
 	title,
 	done,
+	routine,
 	pod,
 	conversationId,
 	place,
@@ -42,6 +43,8 @@ export function ChatHeader({
 	title?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it. */
 	done?: DoneToggle;
+	/** On a routine's own thread: whether the routine is paused, and how to pause or resume it. */
+	routine?: { paused: boolean; pending: boolean; onPausedChange: (paused: boolean) => void };
 	pod: Pod;
 	conversationId: string;
 	place: ChatPlace;
@@ -89,6 +92,21 @@ export function ChatHeader({
 			)}
 			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
 			{done && <DoneButton {...done} />}
+			{routine && (
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={routine.pending}
+					onClick={() => routine.onPausedChange(!routine.paused)}
+				>
+					{routine.paused ? (
+						<Play aria-hidden size={14} strokeWidth={2} />
+					) : (
+						<Pause aria-hidden size={14} strokeWidth={2} />
+					)}
+					{routine.paused ? "Resume" : "Pause"}
+				</Button>
+			)}
 			{place.kind === "away" ? (
 				place.trailing
 			) : staged ? null : (

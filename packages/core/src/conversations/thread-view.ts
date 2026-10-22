@@ -24,12 +24,12 @@ import type { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
+import { routine, thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
-import { routineExecutionIdOf, toRoutineExecution } from "./routines/routines.ts";
+import { latestRunFailed, routineExecutionIdOf, toRoutineExecution } from "./routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -111,7 +111,28 @@ export const make = Effect.gen(function* () {
 					const standing = yield* visibility.thread(threadId);
 					const row = yield* query((db) => loadConversation(db, threadId, history.limit, before));
 					if (!row) return yield* new ResourceHidden({ resource: "thread" });
-					return toThreadDetails(row, standing, history.limit);
+					const details = toThreadDetails(row, standing, history.limit);
+					const { routineId } = row;
+					if (!routineId) return details;
+					const [owned] = yield* query((db) =>
+						db
+							.select({
+								id: routine.id,
+								agentId: routine.agentId,
+								state: routine.state,
+								failed: latestRunFailed(routine.id),
+								pausedAfterFailuresAt: routine.pausedAfterFailuresAt,
+							})
+							.from(routine)
+							.where(eq(routine.id, routineId))
+							.limit(1),
+					);
+					if (!owned) return details;
+					const { pausedAfterFailuresAt, ...stands } = owned;
+					return {
+						...details,
+						routine: { ...stands, pausedAfterFailures: pausedAfterFailuresAt !== null },
+					};
 				}),
 			),
 

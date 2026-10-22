@@ -108,6 +108,8 @@ export const podChatMarkersSchema = Schema.Struct({
 		Schema.Struct({
 			unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 			needsApproval: Schema.Boolean,
+			/** How many of its routines' latest runs failed. */
+			failedRoutines: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		}),
 	),
 });
@@ -222,7 +224,13 @@ export type ActivityFeed = typeof activityFeedSchema.Type;
  * post in: null until it first runs or somebody opens it.
  */
 export const listedRoutineSchema = Schema.Struct({
-	routine: Schema.Struct({ id: uuidSchema, name: Schema.String, state: routineStateSchema }),
+	routine: Schema.Struct({
+		id: uuidSchema,
+		name: Schema.String,
+		state: routineStateSchema,
+		/** Its latest run failed, and nothing has run it since. */
+		failed: Schema.Boolean,
+	}),
 	/** The bot that runs it. */
 	agent: agentSchema,
 	conversation: Schema.NullOr(conversationSchema),
@@ -296,6 +304,15 @@ export const chatMessageItemSchema = Schema.Union([
 		threadId: uuidSchema,
 		routineName: Schema.String,
 		triggerKind: routineExecutionTriggerKindSchema,
+		/** How far the run has got, and, once it failed, why, in words fit for people. */
+		state: routineExecutionStateSchema,
+		error: Schema.NullOr(Schema.String),
+		createdAt: isoTimestampSchema,
+	}),
+	/** In a routine's thread: the routine, by its id, paused itself after failing twice in a row. */
+	Schema.Struct({
+		kind: Schema.Literal("routine_paused"),
+		id: uuidSchema,
 		createdAt: isoTimestampSchema,
 	}),
 	/** In a pod's chat: a thread somebody started from one of its messages, which it links to. */

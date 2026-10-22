@@ -15,6 +15,7 @@ import {
 	chatPath,
 	StoryApp,
 	storyBots,
+	storyChatDetails,
 	storyConversationFor,
 	storyPodChatFor,
 	storyUser,
@@ -226,6 +227,86 @@ export const NewThread = meta.story({
 		);
 		await userEvent.click(await canvas.findByRole("button", { name: growthDesk.name }));
 		await expect(canvas.getByText(`Thread with ${growthDesk.name}`)).toBeInTheDocument();
+	},
+});
+
+const failingRoutine = {
+	id: "0199a3a0-0000-7000-8000-0000000003b1",
+	feed: "0199a3a0-0000-7000-8000-0000000003b2",
+	runs: ["0199a3a0-0000-7000-8000-0000000003b3", "0199a3a0-0000-7000-8000-0000000003b4"],
+};
+
+/**
+ * A routine whose last two runs failed: each says why, the latest offers
+ * Retry and the way to fix its connection, and a line says it paused itself.
+ */
+export const FailingRoutine = meta.story({
+	beforeEach({ msw }) {
+		const feed = {
+			...storyChatDetails(growthDesk),
+			thread: {
+				...storyChatDetails(growthDesk).thread,
+				id: failingRoutine.feed,
+				conversationId: failingRoutine.feed,
+				type: "routine_feed" as const,
+				title: "Overnight outbound",
+			},
+			routine: {
+				id: failingRoutine.id,
+				agentId: growthDesk.id,
+				state: "paused" as const,
+				failed: true,
+				pausedAfterFailures: true,
+			},
+		};
+		const run = (id: string, at: string) => ({
+			kind: "routine",
+			id,
+			threadId: id,
+			routineName: "Overnight outbound",
+			triggerKind: "cron",
+			state: "failed",
+			error: "Gmail refused the connection: the token has expired.",
+			createdAt: at,
+		});
+		msw.use(
+			http.get(`${API}/threads/${failingRoutine.feed}`, () => HttpResponse.json(feed)),
+			http.get(`${API}/conversations/${failingRoutine.feed}/messages`, () =>
+				HttpResponse.json({
+					items: [
+						run(failingRoutine.runs[0] as string, "2026-09-17T06:00:00.000Z"),
+						run(failingRoutine.runs[1] as string, "2026-09-18T06:00:00.000Z"),
+						{
+							kind: "routine_paused",
+							id: failingRoutine.id,
+							createdAt: "2026-09-18T06:01:00.000Z",
+						},
+					],
+					nextCursor: null,
+				}),
+			),
+			...appHandlers(),
+		);
+	},
+	render: () => (
+		<StoryApp
+			path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/${failingRoutine.feed}`}
+		/>
+	),
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const failures = await within(log).findAllByRole("article", { name: /Run failed/ });
+		await expect(failures).toHaveLength(2);
+		await expect(
+			within(failures[0] as HTMLElement).queryByRole("button", { name: "Retry" }),
+		).toBeNull();
+		await expect(
+			within(failures[1] as HTMLElement).getByRole("button", { name: "Retry" }),
+		).toBeVisible();
+		await expect(
+			within(log).getByText("Paused after two failed runs in a row."),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Resume" })).toBeVisible();
 	},
 });
 
