@@ -15,7 +15,7 @@ import { podPalettes } from "@/shell/PodTile.tsx";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /*
- * Choosing how a bot looks: one of the eight colours, one of the head shapes
+ * Choosing how a bot looks: one of the bot colours, one of the head shapes
  * and one of the eye styles; and a pod's colour, from its own eight. Each is a
  * set of native radio buttons, so arrow keys move the choice. The shapes and
  * eyes are drawn alone on neutral chips, since the face shown above the picker
@@ -41,18 +41,19 @@ export function LookPicker({
 }) {
 	return (
 		<>
-			<SettingsControlRow label="Colour">
+			<SettingsControlRow label="Colour" stackOnPhone>
 				<Swatches
 					colors={agentColors}
 					swatch={(one) => botColors[one].face}
 					value={color}
 					onChange={onColorChange}
+					columns={8}
 				/>
 			</SettingsControlRow>
-			<SettingsControlRow label="Shape">
+			<SettingsControlRow label="Shape" stackOnPhone>
 				<ShapePicker value={shape} onChange={onShapeChange} />
 			</SettingsControlRow>
-			<SettingsControlRow label="Eyes">
+			<SettingsControlRow label="Eyes" stackOnPhone>
 				<EyesPicker value={face} onChange={onFaceChange} />
 			</SettingsControlRow>
 		</>
@@ -87,6 +88,7 @@ export function LookSections({
 					swatch={(one) => botColors[one].face}
 					value={color}
 					onChange={onColorChange}
+					columns={8}
 				/>
 			</LookSection>
 			<LookSection label="Shape">
@@ -191,22 +193,38 @@ function Swatches<Color extends string>({
 	swatch,
 	value,
 	onChange,
+	columns,
 }: {
 	colors: readonly Color[];
 	/** How a colour is drawn as its round swatch. */
 	swatch: (color: Color) => string;
 	value: Color;
 	onChange: (color: Color) => void;
+	/**
+	 * How many swatches go in each row: up to 32px each, shrinking to fit a
+	 * narrow row, with the same gap down as across. Without it, as many 28px
+	 * swatches as fit are spread across the row; on a row too narrow for them
+	 * all, the rest wrap into the same columns.
+	 */
+	columns?: number;
 }) {
 	const name = useId();
 	return (
-		// As many 28px columns as fit, spread across the row; on a row too narrow for all eight, the rest wrap into the same columns.
-		<fieldset className="m-0 grid flex-1 grid-cols-[repeat(auto-fit,1.75rem)] justify-between gap-1.5 border-0 p-0">
+		<fieldset
+			className={cn(
+				"m-0 grid flex-1 border-0 p-0",
+				columns ? "gap-2.5" : "grid-cols-[repeat(auto-fit,1.75rem)] justify-between gap-1.5",
+			)}
+			style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 2rem))` } : undefined}
+		>
 			<legend className="sr-only">Colour</legend>
 			{colors.map((color) => (
 				<label
 					key={color}
-					className="size-7 cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className={cn(
+						"aspect-square cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4",
+						columns ? "w-full" : "size-7",
+					)}
 					style={{
 						background: swatch(color),
 						boxShadow: value === color ? ring(swatch(color)) : undefined,
@@ -241,7 +259,7 @@ function ShapePicker({
 			{agentShapes.map((shape) => (
 				<label
 					key={shape}
-					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
@@ -288,7 +306,7 @@ function EyesPicker({
 			{agentFaces.map((face) => (
 				<label
 					key={face}
-					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"

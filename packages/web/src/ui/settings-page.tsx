@@ -299,15 +299,27 @@ export function SettingsNameRow({
 export function SettingsControlRow({
 	label,
 	htmlFor,
+	stackOnPhone = false,
 	children,
 }: {
 	label: string;
 	/** The control's id, when it is one a label can name. */
 	htmlFor?: string;
+	/**
+	 * Whether, on a phone, the control goes on a line of its own under the
+	 * label, across the row's width: for a grid of choices that beside the
+	 * label would be too small to tap.
+	 */
+	stackOnPhone?: boolean;
 	children: ReactNode;
 }) {
 	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
+		<div
+			className={cn(
+				"flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0",
+				stackOnPhone && "max-sm:flex-col max-sm:items-stretch max-sm:gap-2",
+			)}
+		>
 			<SettingsFieldLabel htmlFor={htmlFor}>{label}</SettingsFieldLabel>
 			{children}
 		</div>
