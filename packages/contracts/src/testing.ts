@@ -5,6 +5,7 @@ import {
 	type ConnectionWithTools,
 	toolAccessCountsOf,
 } from "./connections.ts";
+import type { RoutineTrigger } from "./routines.ts";
 import type { PersonParticipant } from "./threads.ts";
 
 /**
@@ -41,4 +42,28 @@ export function connectionWithTools(connection: TestConnection): ConnectionWithT
 		...listedConnection(connection),
 		tools: connection.tools.map(({ description: _, ...tool }) => tool),
 	};
+}
+
+/** A routine's trigger as a fixture writes it, before it is given an id. */
+export type TestRoutineTrigger = RoutineTrigger extends infer T
+	? T extends RoutineTrigger
+		? Omit<T, "id">
+		: never
+	: never;
+
+/**
+ * A routine's triggers, numbered by `routineId`: the first has the routine's
+ * own id, as a trigger moved from when routines had one does.
+ */
+export function routineTriggers(
+	routineId: string,
+	...triggers: TestRoutineTrigger[]
+): RoutineTrigger[] {
+	return triggers.map(
+		(trigger, index) =>
+			({
+				...trigger,
+				id: index === 0 ? routineId : `${routineId.slice(0, -2)}${String(index).padStart(2, "0")}`,
+			}) as RoutineTrigger,
+	);
 }

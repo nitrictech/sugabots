@@ -3,6 +3,7 @@ import {
 	MAX_ROUTINE_SCHEDULE_TIMES,
 	type Routine,
 	type RoutineSchedule,
+	type RoutineTriggerInput,
 	type Weekday,
 } from "@sugabots/contracts";
 
@@ -163,12 +164,26 @@ export function scheduleSummary(schedule: CalendarSchedule): string {
 }
 
 /**
- * How a routine starts, short enough for a list's line: "Daily at 22:00",
- * "Mon Wed Fri, 3 times", "Every 3 months at 10:00", "Webhook".
+ * How a routine starts, short enough for a list's line: its first trigger,
+ * and how many more it has: "Daily at 22:00", "Webhook +2", "Run by hand".
  */
 export function scheduleLabel(routine: Routine): string {
-	if (routine.trigger.kind === "webhook") return "Webhook";
-	return readingLabel(readSchedule(routine.trigger.schedule));
+	const [first, ...more] = routine.triggers;
+	if (!first) return "Run by hand";
+	return more.length > 0 ? `${triggerLabel(first)} +${more.length}` : triggerLabel(first);
+}
+
+/**
+ * One trigger, short enough for a row: "Daily at 22:00", "Mon Wed Fri, 3
+ * times", "Every 3 months at 10:00", "Webhook".
+ */
+export function triggerLabel(trigger: RoutineTriggerInput): string {
+	switch (trigger.kind) {
+		case "webhook":
+			return "Webhook";
+		case "cron":
+			return readingLabel(readSchedule(trigger.schedule));
+	}
 }
 
 /** A schedule, short enough for a row's value: "Daily at 22:00", "Mon Wed Fri, 3 times". */

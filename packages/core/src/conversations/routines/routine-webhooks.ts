@@ -5,7 +5,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { routine } from "../../database/schema.ts";
+import { routine, routineTrigger } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineDeliveryIdTooLong } from "./routine.ts";
@@ -18,7 +18,7 @@ import {
 	slackChallengeOf,
 } from "./webhook-auth.ts";
 
-/** Runs a webhook routine's caller asks for: `Routines.Webhooks`. */
+/** Runs a webhook trigger's caller asks for: `Routines.Webhooks`. */
 export const makeWebhooks = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Routines.WebhooksInterface>("Routines.Webhooks");
 	const acceptTrigger = yield* makeAcceptTrigger;
@@ -38,14 +38,14 @@ export const makeWebhooks = Effect.gen(function* () {
 	};
 
 	return {
-		accept: ({ routineId, delivery }) =>
+		accept: ({ triggerId, delivery }) =>
 			operation(
 				"accept",
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					// Checked before the routine's trigger lock is taken, so a caller
 					// without the secret cannot hold up its other triggers.
-					const found = isUuid(routineId) ? yield* enabledWebhook(routineId) : undefined;
+					const found = isUuid(triggerId) ? yield* enabledWebhook(triggerId) : undefined;
 					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
 					const challenge = slackChallengeOf(found.auth, delivery.payload);
 					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
@@ -55,14 +55,15 @@ export const makeWebhooks = Effect.gen(function* () {
 					}
 					return yield* transaction(
 						Effect.gen(function* () {
-							yield* lockTriggers(routineId);
+							yield* lockTriggers(found.routineId);
 							// How callers are checked may have changed while this one was.
-							const current = yield* enabledWebhook(routineId);
+							const current = yield* enabledWebhook(triggerId);
 							if (!current || !sameCheck(current, found)) return undefined;
 							const execution = yield* acceptTrigger({
 								workspaceId: found.workspaceId,
 								agentId: found.agentId,
-								routineId,
+								routineId: found.routineId,
+								triggerId,
 								triggerIdentity: idempotencyKey,
 								trigger: {
 									kind: "webhook",
@@ -79,10 +80,11 @@ export const makeWebhooks = Effect.gen(function* () {
 	} satisfies Routines.WebhooksInterface;
 });
 
-/** What an enabled webhook routine checks its callers with. */
+/** What a webhook trigger of an enabled routine checks its callers with. */
 interface EnabledWebhook {
 	workspaceId: string;
 	agentId: string;
+	routineId: string;
 	auth: WebhookAuth;
 	/** Sealed with `Credentials`. */
 	secret: string | null;
@@ -90,32 +92,38 @@ interface EnabledWebhook {
 	digest: string | null;
 }
 
-const enabledWebhook = (routineId: string) =>
+const enabledWebhook = (triggerId: string) =>
 	Effect.map(
 		query((db) =>
 			db
 				.select({
 					workspaceId: routine.workspaceId,
 					agentId: routine.agentId,
-					auth: routine.webhookAuth,
-					secret: routine.webhookSecret,
-					digest: routine.webhookSecretDigest,
+					routineId: routine.id,
+					settings: routineTrigger.settings,
+					secret: routineTrigger.secretEncrypted,
+					digest: routineTrigger.secretDigest,
 				})
-				.from(routine)
+				.from(routineTrigger)
+				.innerJoin(routine, eq(routine.id, routineTrigger.routineId))
 				.where(
 					and(
-						eq(routine.id, routineId),
-						eq(routine.triggerKind, "webhook"),
+						eq(routineTrigger.id, triggerId),
+						eq(routineTrigger.kind, "webhook"),
 						eq(routine.state, "enabled"),
 						isNull(routine.deletedAt),
 					),
 				)
 				.limit(1),
 		),
-		([row]): EnabledWebhook | undefined => (row?.auth ? { ...row, auth: row.auth } : undefined),
+		([row]): EnabledWebhook | undefined => {
+			if (row?.settings.kind !== "webhook") return undefined;
+			const { settings, ...rest } = row;
+			return { ...rest, auth: settings.auth };
+		},
 	);
 
-/** Whether two reads of a routine check callers the same way, with the same secret. */
+/** Whether two reads of a trigger check callers the same way, with the same secret. */
 function sameCheck(a: EnabledWebhook, b: EnabledWebhook): boolean {
 	return (
 		a.secret === b.secret &&

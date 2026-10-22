@@ -12,7 +12,7 @@ import {
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
-import { routine, routineExecution, thread } from "../../database/schema.ts";
+import { routine, routineExecution, routineTrigger, thread } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -21,8 +21,8 @@ import { inScope, type Scope } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
 
 /**
- * The only writer of `routine` and `routine_execution`: what a crew agent
- * does on a schedule or a webhook, and each run of it.
+ * The only writer of `routine`, `routine_trigger` and `routine_execution`:
+ * what a crew agent does, what starts it, and each run of it.
  *
  * A removed routine keeps its row, so its runs keep their history, and is
  * invisible to every command. A run is `queued` until its workflow starts
@@ -46,18 +46,41 @@ export interface Interface {
 	 * routine.
 	 */
 	readonly remove: (scope: Scope) => Effect.Effect<boolean>;
+	/** Adds `triggers` to the routine `scope` names, in order. */
+	readonly addTriggers: (
+		scope: Scope,
+		triggers: readonly TriggerValues[],
+	) => Effect.Effect<schema.RoutineTriggerRow[]>;
+	/** Rewrites one of the routine's triggers. `undefined` when it has no such trigger. */
+	readonly updateTrigger: (
+		scope: Scope,
+		triggerId: string,
+		values: TriggerValues,
+	) => Effect.Effect<schema.RoutineTriggerRow | undefined>;
+	/** `false` when the routine has no such trigger. */
+	readonly removeTrigger: (scope: Scope, triggerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Replaces a webhook routine's secret with `sealed`, a secret sealed with
+	 * Replaces a webhook trigger's secret with `sealed`, a secret sealed with
 	 * `Credentials`, or null for none. `false` when there is no such webhook
-	 * routine.
+	 * trigger on the routine.
 	 */
-	readonly replaceWebhookSecret: (scope: Scope, sealed: string | null) => Effect.Effect<boolean>;
+	readonly replaceWebhookSecret: (
+		scope: Scope,
+		triggerId: string,
+		sealed: string | null,
+	) => Effect.Effect<boolean>;
 	/**
-	 * The enabled cron routine due soonest at `now`, locked until the
-	 * transaction ends. One another transaction holds is skipped.
+	 * The schedule due soonest at `now`, of an enabled routine, with its
+	 * routine, locked until the transaction ends. One another transaction
+	 * holds is skipped.
 	 */
-	readonly lockNextDue: (now: Date) => Effect.Effect<schema.RoutineRow | undefined>;
-	readonly scheduleNext: (routineId: string, next: Date) => Effect.Effect<void>;
+	readonly lockNextDue: (
+		now: Date,
+	) => Effect.Effect<{ trigger: schema.RoutineTriggerRow; routine: schema.RoutineRow } | undefined>;
+	/** Sets when each schedule next runs its routine; null while the routine is paused. */
+	readonly scheduleNext: (
+		next: ReadonlyArray<{ triggerId: string; at: Date | null }>,
+	) => Effect.Effect<void>;
 	/** Records a queued run whose thread is open in the agent's chat, and announces it. */
 	readonly accept: (
 		run: Pick<
@@ -66,6 +89,7 @@ export interface Interface {
 			| "workspaceId"
 			| "agentId"
 			| "threadId"
+			| "triggerId"
 			| "triggerKind"
 			| "triggerIdentity"
 			| "trigger"
@@ -167,11 +191,17 @@ export const make = Effect.gen(function* () {
 						const [removed] = yield* query((db) =>
 							db
 								.update(routine)
-								.set({ deletedAt: now, state: "paused", nextScheduledAt: null })
+								.set({ deletedAt: now, state: "paused" })
 								.where(inScope(scope))
 								.returning({ id: routine.id }),
 						);
 						if (!removed) return false;
+						yield* query((db) =>
+							db
+								.update(routineTrigger)
+								.set({ nextScheduledAt: null })
+								.where(eq(routineTrigger.routineId, removed.id)),
+						);
 						const cancelled = yield* query((db) =>
 							db
 								.update(routineExecution)
@@ -193,16 +223,60 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		replaceWebhookSecret: (scope, sealed) =>
+		addTriggers: (scope, triggers) =>
+			operation(
+				"addTriggers",
+				triggers.length === 0
+					? Effect.succeed([])
+					: query((db) =>
+							db
+								.insert(routineTrigger)
+								.values(
+									triggers.map((values) => ({
+										...values,
+										workspaceId: scope.workspaceId,
+										routineId: scope.routineId,
+									})),
+								)
+								.returning(),
+						),
+			),
+
+		updateTrigger: (scope, triggerId, values) =>
+			operation(
+				"updateTrigger",
+				Effect.map(
+					query((db) =>
+						db.update(routineTrigger).set(values).where(ofRoutine(scope, triggerId)).returning(),
+					),
+					([row]) => row,
+				),
+			),
+
+		removeTrigger: (scope, triggerId) =>
+			operation(
+				"removeTrigger",
+				Effect.map(
+					query((db) =>
+						db
+							.delete(routineTrigger)
+							.where(ofRoutine(scope, triggerId))
+							.returning({ id: routineTrigger.id }),
+					),
+					(rows) => rows.length > 0,
+				),
+			),
+
+		replaceWebhookSecret: (scope, triggerId, sealed) =>
 			operation(
 				"replaceWebhookSecret",
 				Effect.map(
 					query((db) =>
 						db
-							.update(routine)
-							.set({ webhookSecret: sealed, webhookSecretDigest: null })
-							.where(and(inScope(scope), eq(routine.triggerKind, "webhook")))
-							.returning({ id: routine.id }),
+							.update(routineTrigger)
+							.set({ secretEncrypted: sealed, secretDigest: null })
+							.where(and(ofRoutine(scope, triggerId), eq(routineTrigger.kind, "webhook")))
+							.returning({ id: routineTrigger.id }),
 					),
 					(rows) => rows.length > 0,
 				),
@@ -214,30 +288,38 @@ export const make = Effect.gen(function* () {
 				Effect.map(
 					query((db) =>
 						db
-							.select()
-							.from(routine)
+							.select({ trigger: routineTrigger, routine })
+							.from(routineTrigger)
+							.innerJoin(routine, eq(routine.id, routineTrigger.routineId))
 							.where(
 								and(
-									eq(routine.triggerKind, "cron"),
 									eq(routine.state, "enabled"),
 									isNull(routine.deletedAt),
-									sql`${routine.nextScheduledAt} <= ${now}`,
+									sql`${routineTrigger.nextScheduledAt} <= ${now}`,
 								),
 							)
-							.orderBy(asc(routine.nextScheduledAt), asc(routine.id))
+							.orderBy(asc(routineTrigger.nextScheduledAt), asc(routineTrigger.id))
 							.limit(1)
-							.for("update", { skipLocked: true }),
+							.for("update", { of: routineTrigger, skipLocked: true }),
 					),
 					([due]) => due,
 				),
 			),
 
-		scheduleNext: (routineId, next) =>
+		scheduleNext: (next) =>
 			operation(
 				"scheduleNext",
-				query((db) =>
-					db.update(routine).set({ nextScheduledAt: next }).where(eq(routine.id, routineId)),
-				).pipe(Effect.asVoid),
+				Effect.forEach(
+					next,
+					({ triggerId, at }) =>
+						query((db) =>
+							db
+								.update(routineTrigger)
+								.set({ nextScheduledAt: at })
+								.where(eq(routineTrigger.id, triggerId)),
+						),
+					{ discard: true },
+				),
 			),
 
 		accept: (run) =>
@@ -376,22 +458,23 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** What a routine is: its name, what it tells the agent, what starts it, and where its result goes. */
-export type Definition = Pick<
-	schema.RoutineRow,
-	| "name"
-	| "instructions"
-	| "results"
-	| "triggerKind"
-	| "cronExpression"
-	| "schedule"
-	| "cronTimezone"
-	| "nextScheduledAt"
-	| "webhookAuth"
-	| "webhookSecret"
-	| "webhookSecretDigest"
-	| "state"
+/** What a routine is: its name, what it tells the agent, where its result goes, and whether it runs. */
+export type Definition = Pick<schema.RoutineRow, "name" | "instructions" | "results" | "state">;
+
+/** What one of a routine's triggers is, and what it keeps beside that: a webhook's secret, a schedule's next time. */
+export type TriggerValues = Pick<
+	schema.RoutineTriggerRow,
+	"settings" | "secretEncrypted" | "secretDigest" | "nextScheduledAt"
 >;
+
+/** The trigger `triggerId`, when it is one of the routine `scope` names, which hasn't been removed. */
+const ofRoutine = (scope: Scope, triggerId: string) =>
+	and(
+		eq(routineTrigger.id, triggerId),
+		eq(routineTrigger.routineId, scope.routineId),
+		eq(routineTrigger.workspaceId, scope.workspaceId),
+		sql`exists (select 1 from ${routine} where ${inScope(scope)})`,
+	);
 
 /** How a run's work ended. */
 export type Settled = Turns.Ended | { readonly state: "completed" };

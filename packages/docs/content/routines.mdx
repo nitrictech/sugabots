@@ -16,7 +16,9 @@ Choose **New routine**, then pick:
 
 - **Bot**: who does the job.
 - **Instructions**: what to do each time, written like you'd ask in the chat.
-- **When**: a **Schedule** or a **Webhook**.
+- **Triggers**: what starts it. Choose **Add trigger** for each one: a
+  **Schedule** or a **Webhook**. A routine can have several, such as two schedules and a webhook, and
+  one with none runs only when someone chooses **Run now**.
 - **Post result to chat**: whether the bot's answer goes in its chat for people
   to read, or stays inside the run.
 
@@ -30,7 +32,7 @@ told its last reply goes there, so it writes that reply for you.
 With it off, the result stays inside the run, for work handled out of sight,
 such as drafting a thank-you for each new order. You can still open the run to see it.
 
-New schedules start with it on, and new webhooks with it off.
+It starts on for a routine whose first trigger is a schedule, and off otherwise.
 
 ## On a schedule
 
@@ -48,7 +50,8 @@ the same time.
 
 Admins can also ask a bot in its chat: "check in with me every morning at 9" or
 "move the inbox sweep to 10". It sets up, changes or pauses its own schedules, in
-the workspace's timezone, and links to the routine in its reply. Anyone in the
+the workspace's timezone, and links to the routine in its reply. Once a routine
+has more than one trigger, its schedule is changed in settings. Anyone in the
 pod can ask a bot what routines it has. Webhooks, and deleting a routine, stay
 in **Settings → Routines**.
 
@@ -56,13 +59,14 @@ Turn **Manage its routines** off in a bot's settings to stop it.
 
 ## When something calls it
 
-A **Webhook** routine runs whenever its address is called, so other apps can set
-a bot to work. When you save it, Sugabots shows the address and a secret.
+A **Webhook** trigger runs its routine whenever its address is called, so other apps can set
+a bot to work. Each webhook has an address and a secret of its own; open it from the
+routine's **Triggers** to see them. The secret stays hidden until **Show**.
 
-<Careful title="Copy the secret now">
+<Careful title="Changing the secret">
 
-It isn't shown again. **Reset** makes a new one, and the old one stops working
-straight away.
+The old secret stops working as soon as a new one is saved, so update the app
+that calls the address straight away.
 
 </Careful>
 
@@ -71,7 +75,7 @@ body along with its instructions, marked as data from outside so it isn't taken
 as orders.
 
 ```sh
-curl -X POST "https://sugabots.example.com/api/hooks/routines/<routine id>" \
+curl -X POST "https://sugabots.example.com/api/hooks/triggers/<trigger id>" \
   -H "Authorization: Bearer <secret>" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: order-1042" \

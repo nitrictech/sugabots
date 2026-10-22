@@ -1,5 +1,6 @@
 import type { Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
+import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -22,12 +23,12 @@ function routine(id: string, name: string, agentId: string, expression: string):
 		agentId,
 		name,
 		instructions: `${name}, please.`,
-		trigger: {
+		triggers: routineTriggers(id, {
 			kind: "cron",
 			schedule: { repeat: "cron", expression },
 			timezone: "UTC",
 			nextScheduledAt: null,
-		},
+		}),
 		state: "enabled",
 		results: "keep_in_run",
 		createdById: null,
@@ -75,9 +76,33 @@ afterEach(() => {
 
 const routinePage = (one: WorkspaceRoutine) => `/suga/settings/routines/${one.routine.id}`;
 
-/** Opens the Trigger page from a routine's own page. */
-async function openTrigger() {
-	fireEvent.click(await screen.findByRole("button", { name: /^Trigger/ }));
+/** Opens the dialog of the trigger whose row's name matches `row`. */
+async function openTrigger(row: RegExp) {
+	fireEvent.click(await screen.findByRole("button", { name: row }));
+	return screen.findByRole("dialog");
+}
+
+/** Adds a trigger of the kind named `label`, through the dialog's first step, and gives the dialog. */
+async function addTrigger(label: string) {
+	fireEvent.click(await screen.findByRole("button", { name: "Add trigger" }));
+	const step = await screen.findByRole("dialog", { name: "Add a trigger" });
+	fireEvent.click(within(step).getByRole("button", { name: new RegExp(`^${label}`) }));
+	return screen.findByRole("dialog", { name: label });
+}
+
+/** The trigger of a routine whose triggers are `trigger` alone, as it is addressed. */
+const onlyTrigger = (one: WorkspaceRoutine) => ({
+	agentId: one.routine.agentId,
+	routineId: one.routine.id,
+	triggerId: one.routine.id,
+});
+
+/** `one` with `trigger` as its only trigger. */
+function withTrigger(one: WorkspaceRoutine, trigger: TestRoutineTrigger): WorkspaceRoutine {
+	return {
+		...one,
+		routine: { ...one.routine, triggers: routineTriggers(one.routine.id, trigger) },
+	};
 }
 
 /** Picks the time a schedule's chip, counted from 1, runs at. */
@@ -103,7 +128,7 @@ describe("the workspace's routines", () => {
 	it("makes a routine for the bot chosen, then opens it", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		const router = mount("/suga/settings/routines/new");
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
@@ -116,17 +141,16 @@ describe("the workspace's routines", () => {
 			target: { value: "Sweep the queue." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		await openTrigger();
-		fireEvent.click(screen.getByRole("radio", { name: "Weekly" }));
-		fireEvent.click(screen.getByRole("checkbox", { name: "Thursday" }));
+		expect(screen.getByText("No triggers")).toBeDefined();
+		const schedule = await addTrigger("Schedule");
+		fireEvent.click(within(schedule).getByRole("radio", { name: "Weekly" }));
+		fireEvent.click(within(schedule).getByRole("checkbox", { name: "Thursday" }));
 		pickTime(1, 10 * 60);
 		expect(
-			screen.getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
+			within(schedule).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
 		).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		expect(screen.getByRole("button", { name: /^Trigger/ }).textContent).toBe(
-			"TriggerMon Thu at 10:00",
-		);
+		fireEvent.click(within(schedule).getByRole("button", { name: "Add trigger" }));
+		expect(await screen.findByRole("button", { name: /^Mon Thu at 10:00/ })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
@@ -136,17 +160,19 @@ describe("the workspace's routines", () => {
 					name: "Triage sweep",
 					instructions: "Sweep the queue.",
 					results: "post_to_chat",
-					trigger: {
-						kind: "cron",
-						schedule: {
-							repeat: "weekly",
-							every: 1,
-							days: ["mon", "thu"],
-							times: [10 * 60],
-							startsOn: today(),
+					triggers: [
+						{
+							kind: "cron",
+							schedule: {
+								repeat: "weekly",
+								every: 1,
+								days: ["mon", "thu"],
+								times: [10 * 60],
+								startsOn: today(),
+							},
+							timezone,
 						},
-						timezone,
-					},
+					],
 				},
 			}),
 		);
@@ -155,7 +181,7 @@ describe("the workspace's routines", () => {
 
 	it("makes a routine that runs at several times on the last day of every third month", async () => {
 		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		mount("/suga/settings/routines/new");
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Quarter close" } });
@@ -164,7 +190,7 @@ describe("the workspace's routines", () => {
 			target: { value: "Close the quarter." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		await openTrigger();
+		await addTrigger("Schedule");
 		fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
 		while (screen.getByRole("status", { name: "On the" }).textContent !== "last day") {
 			fireEvent.click(screen.getByRole("button", { name: "A day later" }));
@@ -177,24 +203,26 @@ describe("the workspace's routines", () => {
 		expect(
 			screen.getByText(/^Runs every 3 months on the last day at 9:00 and 13:00, your time/),
 		).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
+		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						trigger: {
-							kind: "cron",
-							schedule: {
-								repeat: "monthly",
-								every: 3,
-								dayOfMonth: "last",
-								times: [9 * 60, 13 * 60],
-								startsOn: today(),
+						triggers: [
+							{
+								kind: "cron",
+								schedule: {
+									repeat: "monthly",
+									every: 3,
+									dayOfMonth: "last",
+									times: [9 * 60, 13 * 60],
+									startsOn: today(),
+								},
+								timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 							},
-							timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-						},
+						],
 					}),
 				}),
 			),
@@ -209,18 +237,12 @@ describe("the workspace's routines", () => {
 	});
 
 	it("makes a webhook with the secret typed for it, which its page shows", async () => {
-		const webhook: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: {
-					kind: "webhook",
-					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-				},
-			},
-		};
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+		});
 		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: webhook.routine, secret: null }),
+			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		mount("/suga/settings/routines/new");
@@ -230,15 +252,15 @@ describe("the workspace's routines", () => {
 			target: { value: "Fix what you can." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		await openTrigger();
-		fireEvent.click(screen.getByRole("radio", { name: "Webhook" }));
+		const adding = await addTrigger("Webhook");
 		expect(
-			screen.getByText(/^With no secret, anyone who has the address can run it\./),
+			within(adding).getByText(/^With no secret, anyone who has the address can run it\./),
 		).toBeDefined();
-		fireEvent.change(screen.getByLabelText("Signing secret"), {
+		fireEvent.change(within(adding).getByLabelText("Signing secret"), {
 			target: { value: "whsec_0123456789abcdefghijklmnop" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		const posted = screen.getByRole("switch", { name: "Post result to chat" });
 		expect(posted.getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
@@ -247,19 +269,21 @@ describe("the workspace's routines", () => {
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						trigger: {
-							kind: "webhook",
-							auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-							secret: "whsec_0123456789abcdefghijklmnop",
-						},
+						triggers: [
+							{
+								kind: "webhook",
+								auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+								secret: "whsec_0123456789abcdefghijklmnop",
+							},
+						],
 						results: "keep_in_run",
 					}),
 				}),
 			),
 		);
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 		expect(
-			await screen.findByText(new RegExp(`/hooks/routines/${webhook.routine.id}$`)),
+			await screen.findByText(new RegExp(`/hooks/triggers/${webhook.routine.id}$`)),
 		).toBeDefined();
 		const secret = await screen.findByLabelText("Signing secret");
 		await waitFor(() =>
@@ -269,7 +293,7 @@ describe("the workspace's routines", () => {
 
 	it("makes a webhook with the secret its sender made, however short", async () => {
 		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		mount("/suga/settings/routines/new");
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Stripe events" } });
@@ -278,8 +302,7 @@ describe("the workspace's routines", () => {
 			target: { value: "Reconcile the payment." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		await openTrigger();
-		fireEvent.click(screen.getByRole("radio", { name: "Webhook" }));
+		await addTrigger("Webhook");
 		fireEvent.click(screen.getByRole("button", { name: "Source: Generic" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Stripe" }));
 		expect(screen.queryByLabelText("Header")).toBeNull();
@@ -288,18 +311,15 @@ describe("the workspace's routines", () => {
 			target: { value: " whsec_short " },
 		});
 		expect(screen.queryByText("A secret needs at least 16 characters.")).toBeNull();
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						trigger: {
-							kind: "webhook",
-							auth: { kind: "stripe" },
-							secret: "whsec_short",
-						},
+						triggers: [{ kind: "webhook", auth: { kind: "stripe" }, secret: "whsec_short" }],
 					}),
 				}),
 			),
@@ -307,58 +327,47 @@ describe("the workspace's routines", () => {
 	});
 
 	it("saves a webhook's auth as it changes, and says what a caller sends", async () => {
-		const webhook: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } },
-			},
-		};
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "api_key", header: "X-API-Key" },
+		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
-		client.api.routines.update.mockReturnValue(
-			Effect.succeed({ routine: webhook.routine, secret: null }),
+		client.api.routines.updateTrigger.mockReturnValue(
+			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
 		mount(routinePage(webhook));
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 
 		expect(await screen.findByText(/Send the key in the X-API-Key header\./)).toBeDefined();
 		const header = screen.getByLabelText("Header");
 		fireEvent.change(header, { target: { value: " X-Signup-Key " } });
 		fireEvent.blur(header);
 		await waitFor(() =>
-			expect(client.api.routines.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: webhook.routine.id },
-				payload: {
-					trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
-				},
+			expect(client.api.routines.updateTrigger).toHaveBeenCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
 			}),
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Auth: API key" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Basic" }));
 		await waitFor(() =>
-			expect(client.api.routines.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: webhook.routine.id },
-				payload: { trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } } },
+			expect(client.api.routines.updateTrigger).toHaveBeenCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
 			}),
 		);
 	});
 
 	it("leaves a webhook without a secret when its secret is cleared", async () => {
-		const webhook: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: {
-					kind: "webhook",
-					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-				},
-			},
-		};
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.routines.rotateSecret.mockReturnValue(Effect.succeed({ secret: null }));
 		mount(routinePage(webhook));
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 
 		const secret = await screen.findByLabelText("Signing secret");
 		await waitFor(() =>
@@ -369,7 +378,7 @@ describe("the workspace's routines", () => {
 
 		await waitFor(() =>
 			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: webhook.routine.id },
+				params: onlyTrigger(webhook),
 				payload: { secret: null },
 			}),
 		);
@@ -379,22 +388,13 @@ describe("the workspace's routines", () => {
 	});
 
 	it("saves Slack's signing secret pasted over the one it had once the field is left", async () => {
-		const slack: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: {
-					kind: "webhook",
-					auth: { kind: "slack" },
-				},
-			},
-		};
+		const slack = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "slack" } });
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [slack] }));
 		client.api.routines.rotateSecret.mockReturnValue(
 			Effect.succeed({ secret: "8f742231b10e8888abcd99yyyzzz85a5" }),
 		);
 		mount(routinePage(slack));
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 
 		expect(await screen.findByText(/Request URL, and paste its Signing Secret\./)).toBeDefined();
 		const secret = await screen.findByLabelText("Signing secret");
@@ -407,7 +407,7 @@ describe("the workspace's routines", () => {
 
 		await waitFor(() =>
 			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: slack.routine.id },
+				params: onlyTrigger(slack),
 				payload: { secret: "8f742231b10e8888abcd99yyyzzz85a5" },
 			}),
 		);
@@ -419,16 +419,13 @@ describe("the workspace's routines", () => {
 	});
 
 	it("asks a generic webhook for a secret long enough to be hard to guess, and says so", async () => {
-		const webhook: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } },
-			},
-		};
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "api_key", header: "X-API-Key" },
+		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		mount(routinePage(webhook));
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 
 		const key = await screen.findByLabelText("Key");
 		fireEvent.change(key, { target: { value: "sk_rt_short" } });
@@ -534,7 +531,7 @@ describe("the workspace's routines", () => {
 		client.api.routines.listInWorkspace.mockImplementation(() => Effect.succeed({ items }));
 		client.api.routines.create.mockImplementation(() => {
 			items = [...items, secondCopy];
-			return Effect.succeed({ routine: secondCopy.routine, secret: null });
+			return Effect.succeed({ routine: secondCopy.routine, secrets: [] });
 		});
 		const router = mount(routinePage(morningBrief));
 
@@ -549,11 +546,13 @@ describe("the workspace's routines", () => {
 					instructions: morningBrief.routine.instructions,
 					results: morningBrief.routine.results,
 					state: "paused",
-					trigger: {
-						kind: "cron",
-						schedule: { repeat: "cron", expression: "0 8 * * 1-5" },
-						timezone: "UTC",
-					},
+					triggers: [
+						{
+							kind: "cron",
+							schedule: { repeat: "cron", expression: "0 8 * * 1-5" },
+							timezone: "UTC",
+						},
+					],
 				},
 			}),
 		);
@@ -562,7 +561,7 @@ describe("the workspace's routines", () => {
 
 	it("turns a routine back on from its page", async () => {
 		client.api.routines.update.mockReturnValue(
-			Effect.succeed({ routine: { ...churnReport.routine, state: "enabled" }, secret: null }),
+			Effect.succeed({ routine: { ...churnReport.routine, state: "enabled" }, secrets: [] }),
 		);
 		mount(routinePage(churnReport));
 
@@ -600,7 +599,7 @@ describe("the workspace's routines", () => {
 
 	it("saves instructions from their own page, then goes back to the routine", async () => {
 		client.api.routines.update.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		mount(routinePage(morningBrief));
 		fireEvent.click(await screen.findByRole("button", { name: /^Instructions/ }));
@@ -619,80 +618,101 @@ describe("the workspace's routines", () => {
 		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
 	});
 
-	it("saves a schedule once it rests", async () => {
-		client.api.routines.update.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+	it("saves a schedule's change once it is saved, then closes", async () => {
+		client.api.routines.updateTrigger.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		mount(routinePage(morningBrief));
-		await openTrigger();
+		const schedule = await openTrigger(/^Weekdays at 8:00/);
 
 		pickTime(1, 8 * 60 + 30);
 		pickTime(1, 9 * 60);
+		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
+		fireEvent.click(within(schedule).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
-			expect(client.api.routines.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+			expect(client.api.routines.updateTrigger).toHaveBeenCalledWith({
+				params: onlyTrigger(morningBrief),
 				payload: {
-					trigger: {
-						kind: "cron",
-						schedule: {
-							repeat: "weekly",
-							every: 1,
-							days: ["mon", "tue", "wed", "thu", "fri"],
-							times: [9 * 60],
-							startsOn: today(),
-						},
-						timezone: "UTC",
+					kind: "cron",
+					schedule: {
+						repeat: "weekly",
+						every: 1,
+						days: ["mon", "tue", "wed", "thu", "fri"],
+						times: [9 * 60],
+						startsOn: today(),
 					},
+					timezone: "UTC",
 				},
 			}),
 		);
-		expect(client.api.routines.update).toHaveBeenCalledTimes(1);
+		expect(client.api.routines.updateTrigger).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("adds a trigger to a routine, and removes one", async () => {
+		client.api.routines.addTrigger.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
+		);
+		client.api.routines.removeTrigger.mockReturnValue(Effect.void);
+		mount(routinePage(morningBrief));
+
+		const adding = await addTrigger("Webhook");
+		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
+		await waitFor(() =>
+			expect(client.api.routines.addTrigger).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+				payload: {
+					kind: "webhook",
+					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+					secret: null,
+				},
+			}),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+		const schedule = await openTrigger(/^Weekdays at 8:00/);
+		fireEvent.click(within(schedule).getByRole("button", { name: "Remove" }));
+		await waitFor(() =>
+			expect(client.api.routines.removeTrigger).toHaveBeenCalledWith({
+				params: onlyTrigger(morningBrief),
+			}),
+		);
 	});
 
 	it("keeps an unfamiliar schedule until a repeat replaces it", async () => {
-		const hourly: WorkspaceRoutine = {
-			...morningBrief,
-			routine: {
-				...morningBrief.routine,
-				trigger: {
-					kind: "cron",
-					schedule: { repeat: "cron", expression: "15 */2 * * *" },
-					timezone: "UTC",
-					nextScheduledAt: null,
-				},
-			},
-		};
+		const hourly = withTrigger(morningBrief, {
+			kind: "cron",
+			schedule: { repeat: "cron", expression: "15 */2 * * *" },
+			timezone: "UTC",
+			nextScheduledAt: null,
+		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [hourly] }));
-		client.api.routines.update.mockReturnValue(
-			Effect.succeed({ routine: hourly.routine, secret: null }),
+		client.api.routines.updateTrigger.mockReturnValue(
+			Effect.succeed({ routine: hourly.routine, secrets: [] }),
 		);
 		mount(routinePage(hourly));
-		await openTrigger();
+		const schedule = await openTrigger(/Schedule$/);
 
-		expect(await screen.findByText("15 */2 * * *")).toBeDefined();
-		expect(screen.getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
-		fireEvent.click(screen.getByRole("radio", { name: "Daily" }));
+		expect(within(schedule).getByText("15 */2 * * *")).toBeDefined();
+		expect(within(schedule).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
+		fireEvent.click(within(schedule).getByRole("radio", { name: "Daily" }));
+		fireEvent.click(within(schedule).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
-			expect(client.api.routines.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: hourly.routine.id },
+			expect(client.api.routines.updateTrigger).toHaveBeenCalledWith({
+				params: onlyTrigger(hourly),
 				payload: {
-					trigger: {
-						kind: "cron",
-						schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
-						timezone: "UTC",
-					},
+					kind: "cron",
+					schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
+					timezone: "UTC",
 				},
 			}),
 		);
 	});
 
 	it("says when a change or a new secret fails to save", async () => {
-		const webhook: WorkspaceRoutine = {
-			...morningBrief,
-			routine: { ...morningBrief.routine, trigger: { kind: "webhook", auth: { kind: "bearer" } } },
-		};
+		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.routines.update.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
@@ -705,7 +725,7 @@ describe("the workspace's routines", () => {
 		fireEvent.click(await screen.findByRole("switch", { name: "On" }));
 		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
 
-		await openTrigger();
+		await openTrigger(/^Webhook/);
 		const token = await screen.findByLabelText("Token");
 		fireEvent.change(token, { target: { value: "rtb_0123456789abcdefghijklmnop" } });
 		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
@@ -753,9 +773,9 @@ describe("the workspace's routines", () => {
 		expect(screen.queryByRole("button", { name: "More" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
 
-		await openTrigger();
-		expect(screen.getByRole("radio", { name: "Weekly" }).matches(":disabled")).toBe(true);
-		fireEvent.click(screen.getByRole("button", { name: "Morning brief" }));
+		expect(screen.getByText("Weekdays at 8:00")).toBeDefined();
+		expect(screen.queryByRole("button", { name: /^Weekdays at 8:00/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Add trigger" })).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(true);

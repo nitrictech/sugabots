@@ -8,12 +8,15 @@ import type {
 	RoutineExecutionPage,
 	RoutineExecutionPageQuery,
 	RoutineSchedule,
+	RoutineState,
+	RoutineTriggerInput,
 	RoutineUpdate,
 	RoutineWebhookChallenge,
 	WebhookAuth,
 	WorkspaceRoutine,
 } from "@sugabots/contracts";
-import { webhookSecretLongEnough } from "@sugabots/contracts";
+import { MAX_ROUTINE_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
+import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -22,7 +25,7 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { routine } from "../../database/schema.ts";
+import { routine, routineTrigger } from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
@@ -32,9 +35,15 @@ import {
 	type RoutineDeliveryIdTooLong,
 	RoutineNotFound,
 	type RoutineTriggerConflict,
+	RoutineTriggerKindChanged,
+	RoutineTriggerNotFound,
 	RoutineTriggerRejected,
+	routineWithTriggers,
+	type Scope,
 	scopeOf,
+	TooManyRoutineTriggers,
 	toRoutine,
+	triggersOf,
 	WebhookSecretTooShort,
 } from "./routine.ts";
 import { type InvalidRoutineExecutionCursor, makeView } from "./routine-view.ts";
@@ -54,8 +63,8 @@ import { type Delivery, generateSecret } from "./webhook-auth.ts";
 export interface Interface {
 	/**
 	 * Defines a routine on a crew agent, as made by the actor or, with
-	 * `madeByAgent`, by the agent at the actor's request, returning a webhook
-	 * routine's secret.
+	 * `madeByAgent`, by the agent at the actor's request, returning the
+	 * secrets made for its webhook triggers.
 	 */
 	readonly create: (
 		owner: { agentId: string; madeByAgent?: boolean },
@@ -69,8 +78,8 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Changes a routine. A webhook routine's secret is kept unless one is
-	 * brought; one made for it is returned.
+	 * Changes a routine's own settings. Pausing it stops its schedules;
+	 * enabling it again schedules each from now.
 	 */
 	readonly update: (
 		routine: OnAgent,
@@ -80,31 +89,71 @@ export interface Interface {
 		| AuthorizationDenied
 		| RoutineNotFound
 		| RoutineRepository.RoutineNameTaken
+		| InvalidRoutineSchedule,
+		CurrentActor.Service
+	>;
+	/** Adds a trigger to a routine, returning a secret made for a webhook. */
+	readonly addTrigger: (
+		routine: OnAgent,
+		input: RoutineTriggerInput,
+	) => Effect.Effect<
+		Defined,
+		| AuthorizationDenied
+		| RoutineNotFound
+		| TooManyRoutineTriggers
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort,
+		CurrentActor.Service
+	>;
+	/**
+	 * Rewrites one of a routine's triggers, which keeps its kind. A webhook's
+	 * secret is kept unless one is brought; one made for it is returned.
+	 */
+	readonly updateTrigger: (
+		trigger: OnTrigger,
+		input: RoutineTriggerInput,
+	) => Effect.Effect<
+		Defined,
+		| AuthorizationDenied
+		| RoutineNotFound
+		| RoutineTriggerNotFound
+		| RoutineTriggerKindChanged
+		| InvalidRoutineSchedule
+		| WebhookSecretTooShort,
+		CurrentActor.Service
+	>;
+	readonly removeTrigger: (
+		trigger: OnTrigger,
+	) => Effect.Effect<
+		Routine,
+		AuthorizationDenied | RoutineNotFound | RoutineTriggerNotFound,
 		CurrentActor.Service
 	>;
 	readonly remove: (
 		routine: OnAgent,
 	) => Effect.Effect<void, AuthorizationDenied | RoutineNotFound, CurrentActor.Service>;
-	/** A webhook routine's current secret, for somebody who manages it. */
+	/** A webhook trigger's current secret, for somebody who manages it. */
 	readonly getSecret: (
-		routine: OnAgent,
+		trigger: OnTrigger,
 	) => Effect.Effect<
 		RoutineCurrentSecret,
-		AuthorizationDenied | RoutineNotFound | RoutineTriggerRejected,
+		AuthorizationDenied | RoutineNotFound | RoutineTriggerNotFound | RoutineTriggerRejected,
 		CurrentActor.Service
 	>;
 	/**
-	 * Replaces a webhook routine's secret with `secret`, with a new one when
+	 * Replaces a webhook trigger's secret with `secret`, with a new one when
 	 * it is absent, or with none when it is null, and returns it.
 	 */
 	readonly rotateSecret: (
-		routine: OnAgent,
+		trigger: OnTrigger,
 		secret?: string | null,
 	) => Effect.Effect<
 		string | null,
-		AuthorizationDenied | RoutineNotFound | RoutineTriggerRejected | WebhookSecretTooShort,
+		| AuthorizationDenied
+		| RoutineNotFound
+		| RoutineTriggerNotFound
+		| RoutineTriggerRejected
+		| WebhookSecretTooShort,
 		CurrentActor.Service
 	>;
 	/**
@@ -159,20 +208,21 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Routines") {}
 
 /**
- * Runs a webhook routine's caller asks for. Nobody signs in to call one:
- * proving it holds the routine's secret, the way the routine's auth says, is
+ * Runs a webhook trigger's caller asks for. Nobody signs in to call one:
+ * proving it holds the trigger's secret, the way the trigger's auth says, is
  * what admits the run, so this asks for no actor, and is the one routine
  * operation a route calls without one.
  */
 export interface WebhooksInterface {
 	/**
-	 * Accepts a delivery's run, if it proves it holds the routine's secret.
-	 * `undefined` when it does not, or there is no such enabled webhook
-	 * routine: the caller is told the same either way. Slack's check that the
-	 * address answers to it is answered with its challenge instead of a run.
+	 * Accepts a delivery's run, if it proves it holds the trigger's secret.
+	 * `undefined` when it does not, or there is no such webhook trigger of an
+	 * enabled routine: the caller is told the same either way. Slack's check
+	 * that the address answers to it is answered with its challenge instead
+	 * of a run.
 	 */
 	readonly accept: (input: {
-		routineId: string;
+		triggerId: string;
 		delivery: Delivery;
 	}) => Effect.Effect<
 		| { kind: "run"; execution: AcceptedRoutineExecution }
@@ -194,42 +244,106 @@ export const make = Effect.gen(function* () {
 	const acceptTrigger = yield* makeAcceptTrigger;
 	const view = yield* makeView;
 
+	/**
+	 * What `input` writes for a trigger, given the trigger it rewrites, if
+	 * any, and whether the routine runs: a schedule's next time while it
+	 * does, and a webhook's secret.
+	 */
+	const triggerValues = (
+		input: RoutineTriggerInput,
+		current: schema.RoutineTriggerRow | undefined,
+		state: RoutineState,
+	): Effect.Effect<Written, InvalidRoutineSchedule | WebhookSecretTooShort> =>
+		Effect.gen(function* () {
+			switch (input.kind) {
+				case "cron": {
+					const settings = {
+						kind: "cron" as const,
+						schedule: input.schedule,
+						timezone: input.timezone,
+					};
+					const next =
+						state === "enabled"
+							? yield* nextOccurrence(
+									settings.schedule,
+									settings.timezone,
+									yield* DateTime.nowAsDate,
+								)
+							: null;
+					return { values: { ...NO_SECRET, settings, nextScheduledAt: next }, secret: null };
+				}
+				case "webhook": {
+					const checked = yield* webhookCheck(
+						credentials,
+						input,
+						current?.settings.kind === "webhook" ? current : undefined,
+					);
+					return {
+						values: {
+							settings: { kind: "webhook", auth: checked.auth },
+							secretEncrypted: checked.secretEncrypted,
+							secretDigest: checked.secretDigest,
+							nextScheduledAt: null,
+						},
+						secret: checked.secret,
+					};
+				}
+			}
+		});
+
+	/** Stops the routine's schedules while it is paused, and schedules each from now once it is enabled. */
+	const reschedule = (routineId: string, state: RoutineState) =>
+		Effect.gen(function* () {
+			const triggers = (yield* triggersOf([routineId])).get(routineId) ?? [];
+			const now = yield* DateTime.nowAsDate;
+			const next = yield* Effect.forEach(
+				triggers.flatMap((trigger) =>
+					trigger.settings.kind === "cron" ? [{ id: trigger.id, settings: trigger.settings }] : [],
+				),
+				({ id, settings }) =>
+					Effect.map(
+						state === "enabled"
+							? nextOccurrence(settings.schedule, settings.timezone, now)
+							: Effect.succeed(null),
+						(at) => ({ triggerId: id, at }),
+					),
+			);
+			yield* repository.scheduleNext(next);
+		});
+
 	return Service.of({
 		...view,
 		create: ({ agentId, madeByAgent = false }, input) =>
 			operation(
 				"create",
-				Effect.gen(function* () {
-					const { agent: owner, actor } = yield* authorization.agent(agentId, "routine.manage");
-					const state = input.state ?? "enabled";
-					const schedule =
-						input.trigger.kind === "cron" && state === "enabled"
-							? yield* nextOccurrence(
-									input.trigger.schedule,
-									input.trigger.timezone,
-									yield* DateTime.nowAsDate,
-								)
-							: null;
-					const webhook =
-						input.trigger.kind === "webhook"
-							? yield* webhookCheck(credentials, input.trigger, undefined)
-							: NO_WEBHOOK;
-					const row = yield* repository.create({
-						workspaceId: owner.workspaceId,
-						agentId: owner.id,
-						createdById: actor.userId,
-						createdByAgentId: madeByAgent ? owner.id : null,
-						name: input.name,
-						instructions: input.instructions,
-						triggerKind: input.trigger.kind,
-						...scheduleColumns(input.trigger.kind === "cron" ? input.trigger : undefined),
-						nextScheduledAt: schedule,
-						...webhook.columns,
-						state,
-						results: input.results ?? "keep_in_run",
-					});
-					return { routine: toRoutine(row), secret: webhook.secret };
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const { agent: owner, actor } = yield* authorization.agent(agentId, "routine.manage");
+						const state = input.state ?? "enabled";
+						const written = yield* Effect.forEach(input.triggers, (trigger) =>
+							triggerValues(trigger, undefined, state),
+						);
+						const row = yield* repository.create({
+							workspaceId: owner.workspaceId,
+							agentId: owner.id,
+							createdById: actor.userId,
+							createdByAgentId: madeByAgent ? owner.id : null,
+							name: input.name,
+							instructions: input.instructions,
+							state,
+							results: input.results ?? "keep_in_run",
+						});
+						const scope = { workspaceId: owner.workspaceId, agentId: owner.id, routineId: row.id };
+						const triggers = yield* repository.addTriggers(
+							scope,
+							written.map(({ values }) => values),
+						);
+						return {
+							routine: toRoutine(row, triggers),
+							secrets: secretsMade(triggers, written),
+						};
+					}),
+				),
 			),
 
 		update: (addressed, input) =>
@@ -238,49 +352,83 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
-						// Held until the change is written, so an edit made meanwhile, or a
-						// secret replaced meanwhile, is read here rather than written over.
 						yield* lockTriggers(scope.routineId);
-						const [current] = yield* query((db) =>
-							db.select().from(routine).where(inScope(scope)).limit(1).for("update"),
-						);
-						if (!current) return yield* new RoutineNotFound();
-						const trigger = input.trigger ?? toRoutine(current).trigger;
+						const current = yield* routineIn(scope);
 						const state = input.state ?? current.state;
-						const scheduleChanged = input.trigger?.kind === "cron";
-						const reenabled = input.state === "enabled" && current.state === "paused";
-						const schedule =
-							trigger.kind !== "cron" || state === "paused"
-								? null
-								: scheduleChanged || reenabled
-									? yield* nextOccurrence(
-											trigger.schedule,
-											trigger.timezone,
-											yield* DateTime.nowAsDate,
-										)
-									: current.nextScheduledAt;
-						const webhook =
-							input.trigger?.kind === "webhook"
-								? yield* webhookCheck(
-										credentials,
-										input.trigger,
-										current.triggerKind === "webhook" ? current : undefined,
-									)
-								: trigger.kind === "webhook"
-									? { columns: webhookColumnsOf(current), secret: null }
-									: NO_WEBHOOK;
 						const row = yield* repository.update(scope, {
 							name: input.name ?? current.name,
 							instructions: input.instructions ?? current.instructions,
 							state,
 							results: input.results ?? current.results,
-							triggerKind: trigger.kind,
-							...scheduleColumns(trigger.kind === "cron" ? trigger : undefined),
-							nextScheduledAt: schedule,
-							...webhook.columns,
 						});
 						if (!row) return yield* new RoutineNotFound();
-						return { routine: toRoutine(row), secret: webhook.secret };
+						if (state !== current.state) yield* reschedule(scope.routineId, state);
+						return { routine: yield* routineWithTriggers(row), secrets: [] };
+					}),
+				),
+			),
+
+		addTrigger: (addressed, input) =>
+			operation(
+				"addTrigger",
+				transaction(
+					Effect.gen(function* () {
+						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
+						yield* lockTriggers(scope.routineId);
+						const current = yield* routineIn(scope);
+						const existing = (yield* triggersOf([scope.routineId])).get(scope.routineId) ?? [];
+						if (existing.length >= MAX_ROUTINE_TRIGGERS) {
+							return yield* new TooManyRoutineTriggers();
+						}
+						const written = yield* triggerValues(input, undefined, current.state);
+						const added = yield* repository.addTriggers(scope, [written.values]);
+						return {
+							routine: yield* routineWithTriggers(current),
+							secrets: secretsMade(added, [written]),
+						};
+					}),
+				),
+			),
+
+		updateTrigger: (addressed, input) =>
+			operation(
+				"updateTrigger",
+				transaction(
+					Effect.gen(function* () {
+						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
+						// Held until the change is written, so an edit made meanwhile, or a
+						// secret replaced meanwhile, is read here rather than written over.
+						yield* lockTriggers(scope.routineId);
+						const current = yield* routineIn(scope);
+						const trigger = yield* triggerIn(scope, addressed.triggerId);
+						if (trigger.kind !== input.kind) return yield* new RoutineTriggerKindChanged();
+						const written = yield* triggerValues(input, trigger, current.state);
+						const updated = yield* repository.updateTrigger(
+							scope,
+							addressed.triggerId,
+							written.values,
+						);
+						if (!updated) return yield* new RoutineTriggerNotFound();
+						return {
+							routine: yield* routineWithTriggers(current),
+							secrets: secretsMade([updated], [written]),
+						};
+					}),
+				),
+			),
+
+		removeTrigger: (addressed) =>
+			operation(
+				"removeTrigger",
+				transaction(
+					Effect.gen(function* () {
+						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
+						yield* lockTriggers(scope.routineId);
+						const current = yield* routineIn(scope);
+						if (!(yield* repository.removeTrigger(scope, addressed.triggerId))) {
+							return yield* new RoutineTriggerNotFound();
+						}
+						return yield* routineWithTriggers(current);
 					}),
 				),
 			),
@@ -302,23 +450,15 @@ export const make = Effect.gen(function* () {
 				"getSecret",
 				Effect.gen(function* () {
 					const scope = yield* scopeOf(authorization, addressed, "routine.manage");
-					const [current] = yield* query((db) =>
-						db
-							.select({
-								auth: routine.webhookAuth,
-								secret: routine.webhookSecret,
-								digest: routine.webhookSecretDigest,
-							})
-							.from(routine)
-							.where(inScope(scope))
-							.limit(1),
-					);
-					if (!current) return yield* new RoutineNotFound();
-					if (!current.auth) return yield* new RoutineTriggerRejected();
-					if (current.secret !== null) {
-						return { kind: "set" as const, secret: credentials.decrypt(current.secret) };
+					yield* routineIn(scope);
+					const trigger = yield* triggerIn(scope, addressed.triggerId);
+					if (trigger.settings.kind !== "webhook") return yield* new RoutineTriggerRejected();
+					if (trigger.secretEncrypted !== null) {
+						return { kind: "set" as const, secret: credentials.decrypt(trigger.secretEncrypted) };
 					}
-					return { kind: current.digest === null ? ("none" as const) : ("hashed" as const) };
+					return {
+						kind: trigger.secretDigest === null ? ("none" as const) : ("hashed" as const),
+					};
 				}),
 			),
 
@@ -329,18 +469,17 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
 						yield* lockTriggers(scope.routineId);
-						const [current] = yield* query((db) =>
-							db.select({ auth: routine.webhookAuth }).from(routine).where(inScope(scope)).limit(1),
-						);
-						if (!current) return yield* new RoutineNotFound();
-						if (!current.auth) return yield* new RoutineTriggerRejected();
-						if (brought != null && !webhookSecretLongEnough(current.auth.kind, brought)) {
+						yield* routineIn(scope);
+						const trigger = yield* triggerIn(scope, addressed.triggerId);
+						if (trigger.settings.kind !== "webhook") return yield* new RoutineTriggerRejected();
+						const { auth } = trigger.settings;
+						if (brought != null && !webhookSecretLongEnough(auth.kind, brought)) {
 							return yield* new WebhookSecretTooShort();
 						}
-						const secret = brought === undefined ? generateSecret(current.auth.kind) : brought;
+						const secret = brought === undefined ? generateSecret(auth.kind) : brought;
 						const sealed = secret === null ? null : credentials.encrypt(secret);
-						if (!(yield* repository.replaceWebhookSecret(scope, sealed))) {
-							return yield* new RoutineNotFound();
+						if (!(yield* repository.replaceWebhookSecret(scope, addressed.triggerId, sealed))) {
+							return yield* new RoutineTriggerNotFound();
 						}
 						return secret;
 					}),
@@ -365,6 +504,7 @@ export const make = Effect.gen(function* () {
 						workspaceId: owner.workspaceId,
 						agentId: owner.id,
 						routineId,
+						triggerId: null,
 						triggerIdentity: requestId,
 						trigger: {
 							kind: "manual",
@@ -400,87 +540,108 @@ export { layer as schedulerLayer } from "./scheduler.ts";
 /** The routine workflow's steps. */
 export { routineStepsLayer as stepsLayer } from "./steps.ts";
 
-/** A routine as defined, with its webhook secret if this made or replaced it. */
+/** A routine as defined, with the secrets made for its webhook triggers by this write. */
 export interface Defined {
 	routine: Routine;
+	secrets: Array<{ triggerId: string; secret: string }>;
+}
+
+/** One of a routine's triggers, by the routine and its own id. */
+export interface OnTrigger extends OnAgent {
+	triggerId: string;
+}
+
+/** What a trigger is written as, and the secret made for it, if this made one. */
+interface Written {
+	values: RoutineRepository.TriggerValues;
 	secret: string | null;
 }
 
-/**
- * Where a scheduled routine's schedule is kept: a written cron expression as
- * it was, a picked one as its parts. A routine with no schedule has neither.
- */
-function scheduleColumns(
-	scheduled: { schedule: RoutineSchedule; timezone: string } | undefined,
-): Pick<schema.RoutineRow, "cronExpression" | "schedule" | "cronTimezone"> {
-	if (!scheduled) return { cronExpression: null, schedule: null, cronTimezone: null };
-	const { schedule, timezone } = scheduled;
-	return schedule.repeat === "cron"
-		? { cronExpression: schedule.expression, schedule: null, cronTimezone: timezone }
-		: { cronExpression: null, schedule, cronTimezone: timezone };
+const NO_SECRET = { secretEncrypted: null, secretDigest: null } as const;
+
+/** The secrets made for `triggers`, written in the same order as `written`. */
+function secretsMade(
+	triggers: readonly schema.RoutineTriggerRow[],
+	written: readonly Written[],
+): Defined["secrets"] {
+	return triggers.flatMap((trigger, index) => {
+		const secret = written[index]?.secret;
+		return secret ? [{ triggerId: trigger.id, secret }] : [];
+	});
 }
 
-/** How a routine that is not a webhook checks its callers: it has none. */
-const NO_WEBHOOK = {
-	columns: { webhookAuth: null, webhookSecret: null, webhookSecretDigest: null },
-	secret: null,
-} as const;
+/** The routine `scope` names, locked until the transaction ends. */
+const routineIn = (scope: Scope) =>
+	Effect.gen(function* () {
+		const [row] = yield* query((db) =>
+			db.select().from(routine).where(inScope(scope)).limit(1).for("update"),
+		);
+		if (!row) return yield* new RoutineNotFound();
+		return row;
+	});
 
-/** What a new webhook routine checks its callers with until somebody chooses. */
+/** One of the routine's triggers. */
+const triggerIn = (scope: Scope, triggerId: string) =>
+	Effect.gen(function* () {
+		const [row] = yield* query((db) =>
+			db
+				.select()
+				.from(routineTrigger)
+				.where(and(eq(routineTrigger.id, triggerId), eq(routineTrigger.routineId, scope.routineId)))
+				.limit(1),
+		);
+		if (!row) return yield* new RoutineTriggerNotFound();
+		return row;
+	});
+
+/** What a new webhook trigger checks its callers with until somebody chooses. */
 const DEFAULT_WEBHOOK_AUTH: WebhookAuth = { kind: "bearer" };
 
-type WebhookColumns = Pick<
-	schema.RoutineRow,
-	"webhookAuth" | "webhookSecret" | "webhookSecretDigest"
->;
-
-function webhookColumnsOf(row: WebhookColumns): WebhookColumns {
-	return {
-		webhookAuth: row.webhookAuth,
-		webhookSecret: row.webhookSecret,
-		webhookSecretDigest: row.webhookSecretDigest,
-	};
-}
-
 /**
- * How a routine whose trigger is written as `trigger` checks its callers,
- * given how it did before (`current`, absent when it was not a webhook). The
- * secret, or the lack of one, is kept whatever the auth becomes, unless one
- * is brought; a null one leaves the routine without. A new webhook without
- * one brought gets one made, which is returned, and so does one leaving
- * bearer auth with only the hash of a token made before secrets were kept.
- * A secret brought for a generic webhook must be long enough to be hard to
- * guess; a source's is whatever its sender made.
+ * How a webhook trigger written as `input` checks its callers, given how it
+ * did before (`current`, absent for a new one). The secret, or the lack of
+ * one, is kept whatever the auth becomes, unless one is brought; a null one
+ * leaves it without. A new webhook without one brought gets one made, which
+ * is returned, and so does one leaving bearer auth with only the hash of a
+ * token made before secrets were kept. A secret brought for a generic
+ * webhook must be long enough to be hard to guess; a source's is whatever its
+ * sender made.
  */
 function webhookCheck(
 	credentials: Credentials.Interface,
-	trigger: Extract<NewRoutine["trigger"], { kind: "webhook" }>,
-	current: WebhookColumns | undefined,
-): Effect.Effect<{ columns: WebhookColumns; secret: string | null }, WebhookSecretTooShort> {
-	const auth = trigger.auth ?? current?.webhookAuth ?? DEFAULT_WEBHOOK_AUTH;
-	if (typeof trigger.secret === "string" && !webhookSecretLongEnough(auth.kind, trigger.secret)) {
+	input: Extract<RoutineTriggerInput, { kind: "webhook" }>,
+	current: schema.RoutineTriggerRow | undefined,
+): Effect.Effect<
+	{
+		auth: WebhookAuth;
+		secretEncrypted: string | null;
+		secretDigest: string | null;
+		secret: string | null;
+	},
+	WebhookSecretTooShort
+> {
+	const currentAuth = current?.settings.kind === "webhook" ? current.settings.auth : undefined;
+	const auth = input.auth ?? currentAuth ?? DEFAULT_WEBHOOK_AUTH;
+	if (typeof input.secret === "string" && !webhookSecretLongEnough(auth.kind, input.secret)) {
 		return Effect.fail(new WebhookSecretTooShort());
 	}
-	const hashOnly = current?.webhookSecretDigest != null && auth.kind !== "bearer";
-	if (current?.webhookAuth && !hashOnly && trigger.secret === undefined) {
+	const hashOnly = current?.secretDigest != null && auth.kind !== "bearer";
+	if (current && !hashOnly && input.secret === undefined) {
 		return Effect.succeed({
-			columns: { ...webhookColumnsOf(current), webhookAuth: auth },
+			auth,
+			secretEncrypted: current.secretEncrypted,
+			secretDigest: current.secretDigest,
 			secret: null,
 		});
 	}
-	if (trigger.secret === null) {
-		return Effect.succeed({
-			columns: { webhookAuth: auth, webhookSecret: null, webhookSecretDigest: null },
-			secret: null,
-		});
+	if (input.secret === null) {
+		return Effect.succeed({ auth, secretEncrypted: null, secretDigest: null, secret: null });
 	}
-	const secret = trigger.secret ?? generateSecret(auth.kind);
+	const secret = input.secret ?? generateSecret(auth.kind);
 	return Effect.succeed({
-		columns: {
-			webhookAuth: auth,
-			webhookSecret: credentials.encrypt(secret),
-			webhookSecretDigest: null,
-		},
+		auth,
+		secretEncrypted: credentials.encrypt(secret),
+		secretDigest: null,
 		secret,
 	});
 }

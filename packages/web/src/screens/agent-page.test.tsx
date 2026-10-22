@@ -1,6 +1,7 @@
 import type { ConnectionAccess, Routine } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
 import type { TestConnection } from "@sugabots/contracts/testing";
+import { routineTriggers } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -29,7 +30,10 @@ const webhookRoutine = {
 	agentId: linear.id,
 	name: "Triage intake",
 	instructions: "Triage the request.",
-	trigger: { kind: "webhook", auth: { kind: "bearer" } },
+	triggers: routineTriggers("0199a3a0-0000-7000-8000-0000000000a1", {
+		kind: "webhook",
+		auth: { kind: "bearer" },
+	}),
 	state: "enabled",
 	results: "keep_in_run",
 	createdById: null,
@@ -40,12 +44,12 @@ const webhookRoutine = {
 const scheduledRoutine = {
 	...webhookRoutine,
 	name: "Morning brief",
-	trigger: {
+	triggers: routineTriggers("0199a3a0-0000-7000-8000-0000000000a1", {
 		kind: "cron",
 		schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
 		timezone: "America/Los_Angeles",
 		nextScheduledAt: "2026-09-21T09:00:00.000Z",
-	},
+	}),
 } satisfies Routine;
 
 beforeEach(apiAnswers);
@@ -253,7 +257,7 @@ describe("an admin", () => {
 		const row = await screen.findByRole("link", { name: /^Morning brief/ });
 		expect(within(row).getByText("Weekdays at 9:00")).toBeDefined();
 		expect(row.getAttribute("href")).toBe(`/suga/settings/routines/${scheduledRoutine.id}`);
-		expect(screen.queryByText(scheduledRoutine.trigger.schedule.expression)).toBeNull();
+		expect(screen.queryByText("0 9 * * 1-5")).toBeNull();
 	});
 
 	it("marks a paused Routine", async () => {

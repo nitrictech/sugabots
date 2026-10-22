@@ -9,12 +9,7 @@ import { ThreadRepository } from "../threads/repository.ts";
 import { Turns } from "../turns/turns.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
-import {
-	type RoutineNotFound,
-	type RoutineTriggerConflict,
-	type RoutineTriggerRejected,
-	scheduleOf,
-} from "./routine.ts";
+import type { RoutineNotFound, RoutineTriggerConflict, RoutineTriggerRejected } from "./routine.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./schedule.ts";
 
@@ -24,7 +19,7 @@ import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./sc
  * this asks for no actor and is never handed to a route.
  */
 export interface Interface {
-	/** Accepts the run of the cron routine due soonest, if one is due, and schedules its next. */
+	/** Accepts the run of the schedule due soonest, if one is due, and schedules its next. */
 	readonly processNextDue: () => Effect.Effect<
 		AcceptedRoutineExecution | undefined,
 		InvalidRoutineSchedule | RoutineNotFound | RoutineTriggerConflict | RoutineTriggerRejected
@@ -52,23 +47,25 @@ export const make = Effect.gen(function* () {
 						const now = yield* DateTime.nowAsDate;
 						const due = yield* repository.lockNextDue(now);
 						if (!due) return undefined;
-						if (!due.cronTimezone) {
-							return yield* Effect.die(new Error("Scheduled Routine has no time zone"));
+						const { settings } = due.trigger;
+						if (settings.kind !== "cron") {
+							return yield* Effect.die(new Error("A trigger that isn't a schedule fell due"));
 						}
 						const occurrence = yield* latestMissedAndNextOccurrence(
-							scheduleOf(due),
-							due.cronTimezone,
+							settings.schedule,
+							settings.timezone,
 							now,
 						);
 						const scheduledAt = occurrence.latest.toISOString();
 						const accepted = yield* acceptTrigger({
-							workspaceId: due.workspaceId,
-							agentId: due.agentId,
-							routineId: due.id,
+							workspaceId: due.routine.workspaceId,
+							agentId: due.routine.agentId,
+							routineId: due.routine.id,
+							triggerId: due.trigger.id,
 							triggerIdentity: scheduledAt,
 							trigger: { kind: "cron", scheduledAt, acceptedAt: now.toISOString() },
 						});
-						yield* repository.scheduleNext(due.id, occurrence.next);
+						yield* repository.scheduleNext([{ triggerId: due.trigger.id, at: occurrence.next }]);
 						return accepted;
 					}),
 				),

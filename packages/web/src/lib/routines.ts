@@ -1,6 +1,7 @@
 import type {
 	NewRoutine,
 	RoutineCurrentSecret,
+	RoutineTriggerInput,
 	RoutineUpdate,
 	RoutineWriteResult,
 } from "@sugabots/contracts";
@@ -59,29 +60,29 @@ export function useRoutines(agentId: string) {
 	});
 }
 
-/** Webhook secrets, by routine, kept out of `ROUTINES_KEY` so refreshing the lists doesn't read them again. */
+/** Webhook secrets, by trigger, kept out of `ROUTINES_KEY` so refreshing the lists doesn't read them again. */
 const SECRET_KEY = "routine-secret";
 
+/** One of a routine's triggers, through the bot the routine belongs to. */
+export interface TriggerAddress {
+	agentId: string;
+	routineId: string;
+	triggerId: string;
+}
+
 /**
- * A webhook routine's current secret, for somebody who manages it. Nothing
+ * A webhook trigger's current secret, for somebody who manages it. Nothing
  * is read for anybody else, since the API would refuse them.
  */
 export function useRoutineSecret({
-	agentId,
-	routineId,
 	canManage,
-}: {
-	agentId: string;
-	routineId: string;
-	canManage: boolean;
-}) {
+	...address
+}: TriggerAddress & { canManage: boolean }) {
 	return useQuery({
-		queryKey: [SECRET_KEY, routineId],
+		queryKey: [SECRET_KEY, address.triggerId],
 		queryFn: canManage
 			? ({ signal }) =>
-					Effect.runPromise(client.api.routines.getSecret({ params: { agentId, routineId } }), {
-						signal,
-					})
+					Effect.runPromise(client.api.routines.getSecret({ params: address }), { signal })
 			: skipToken,
 	});
 }
@@ -90,12 +91,18 @@ export function useRoutineSecret({
 export function useRoutineActions() {
 	const queries = useQueryClient();
 	const refresh = () => queries.invalidateQueries({ queryKey: [ROUTINES_KEY] });
-	const keepSecret = (routineId: string, current: RoutineCurrentSecret) =>
-		queries.setQueryData([SECRET_KEY, routineId], current);
+	const keepSecret = (triggerId: string, current: RoutineCurrentSecret) =>
+		queries.setQueryData([SECRET_KEY, triggerId], current);
 	const written = (result: RoutineWriteResult) => {
-		// A write that returns no secret kept the one it had, or was left without.
-		if (result.secret) keepSecret(result.routine.id, { kind: "set", secret: result.secret });
-		else void queries.invalidateQueries({ queryKey: [SECRET_KEY, result.routine.id] });
+		for (const { triggerId, secret } of result.secrets)
+			keepSecret(triggerId, { kind: "set", secret });
+		// A webhook given no new secret kept the one it had, or was left without.
+		const made = new Set(result.secrets.map((one) => one.triggerId));
+		for (const trigger of result.routine.triggers) {
+			if (trigger.kind === "webhook" && !made.has(trigger.id)) {
+				void queries.invalidateQueries({ queryKey: [SECRET_KEY, trigger.id] });
+			}
+		}
 		return refresh();
 	};
 	const { routines } = client.api;
@@ -103,13 +110,7 @@ export function useRoutineActions() {
 	return {
 		create: useMutation({
 			mutationFn: ({ agentId, json }: { agentId: string; json: NewRoutine }) =>
-				Effect.runPromise(
-					// The generated client splits a union payload into one request type
-					// per member, which a request holding the whole union does not satisfy.
-					routines.create({ params: { agentId }, payload: json } as Parameters<
-						typeof routines.create
-					>[0]),
-				),
+				Effect.runPromise(routines.create({ params: { agentId }, payload: json })),
 			onSuccess: written,
 		}),
 		update: useMutation({
@@ -139,22 +140,48 @@ export function useRoutineActions() {
 				),
 			onSuccess: refresh,
 		}),
-		rotateSecret: useMutation({
+		addTrigger: useMutation({
 			mutationFn: ({
 				agentId,
 				routineId,
-				secret,
+				json,
 			}: {
 				agentId: string;
 				routineId: string;
-				/** Null leaves the routine without one, so its address alone runs it. */
-				secret: string | null;
+				json: RoutineTriggerInput;
 			}) =>
 				Effect.runPromise(
-					routines.rotateSecret({ params: { agentId, routineId }, payload: { secret } }),
+					// The generated client splits a union payload into one request type
+					// per member, which a request holding the whole union does not satisfy.
+					routines.addTrigger({ params: { agentId, routineId }, payload: json } as Parameters<
+						typeof routines.addTrigger
+					>[0]),
 				),
-			onSuccess: ({ secret }, { routineId }) =>
-				keepSecret(routineId, secret === null ? { kind: "none" } : { kind: "set", secret }),
+			onSuccess: written,
+		}),
+		updateTrigger: useMutation({
+			mutationFn: ({ json, ...params }: TriggerAddress & { json: RoutineTriggerInput }) =>
+				Effect.runPromise(
+					routines.updateTrigger({ params, payload: json } as Parameters<
+						typeof routines.updateTrigger
+					>[0]),
+				),
+			onSuccess: written,
+		}),
+		removeTrigger: useMutation({
+			mutationFn: (params: TriggerAddress) => Effect.runPromise(routines.removeTrigger({ params })),
+			onSuccess: refresh,
+		}),
+		rotateSecret: useMutation({
+			mutationFn: ({
+				secret,
+				...params
+			}: TriggerAddress & {
+				/** Null leaves the trigger without one, so its address alone runs the routine. */
+				secret: string | null;
+			}) => Effect.runPromise(routines.rotateSecret({ params, payload: { secret } })),
+			onSuccess: ({ secret }, { triggerId }) =>
+				keepSecret(triggerId, secret === null ? { kind: "none" } : { kind: "set", secret }),
 		}),
 	};
 }

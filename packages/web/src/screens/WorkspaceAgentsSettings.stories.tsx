@@ -1,5 +1,6 @@
 import type { ConnectionTool, Routine } from "@sugabots/contracts";
 import type { TestConnection } from "@sugabots/contracts/testing";
+import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -100,16 +101,17 @@ const podTools: TestConnection[] = [
 function routine(
 	n: number,
 	name: string,
-	trigger: Routine["trigger"],
+	trigger: TestRoutineTrigger,
 	state: Routine["state"],
 ): Routine {
+	const id = `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`;
 	return {
-		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
+		id,
 		workspaceId: growthDesk.workspaceId,
 		agentId: growthDesk.id,
 		name,
 		instructions: "Work the overnight replies and tell me what needs me.",
-		trigger,
+		triggers: routineTriggers(id, trigger),
 		state,
 		results: "keep_in_run",
 		createdById: null,

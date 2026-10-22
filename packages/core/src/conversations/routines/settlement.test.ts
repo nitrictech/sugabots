@@ -103,7 +103,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 				results,
 			},
 		);
@@ -231,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			{
 				name: "Failing run",
 				instructions: "Do the work.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const accepted = [];
@@ -259,7 +259,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			{
 				name: "Never started",
 				instructions: "Do the work.",
-				trigger: { kind: "webhook" },
+				triggers: [{ kind: "webhook" }],
 			},
 		);
 		const requestId = crypto.randomUUID();

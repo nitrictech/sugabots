@@ -1,6 +1,6 @@
 export * as BotRoutines from "./bot-routines.ts";
 
-import type { Routine, RoutineResults, RoutineSchedule } from "@sugabots/contracts";
+import type { Routine, RoutineResults, RoutineSchedule, RoutineTrigger } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -11,7 +11,12 @@ import { agent, workspace } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { RoutineRepository } from "./repository.ts";
-import type { RoutineNotFound, WebhookSecretTooShort } from "./routine.ts";
+import type {
+	RoutineNotFound,
+	RoutineTriggerKindChanged,
+	RoutineTriggerNotFound,
+	WebhookSecretTooShort,
+} from "./routine.ts";
 import { Routines } from "./routines.ts";
 import type { InvalidRoutineSchedule } from "./schedule.ts";
 
@@ -21,14 +26,15 @@ import type { InvalidRoutineSchedule } from "./schedule.ts";
  * cannot act for nobody: a turn answering another bot, or a routine's
  * trigger, is refused.
  *
- * A bot sets up schedules only, in its workspace's timezone, and records
- * itself as their maker. A webhook's secret is shown once, so a webhook made
- * here would leave it in the conversation; webhooks are made in settings.
+ * A bot sets up routines on one schedule, in its workspace's timezone, and
+ * records itself as their maker; it changes that schedule while it is the
+ * routine's only trigger. Other triggers are set up in settings: a webhook's
+ * secret is shown once, so one made here would leave it in the conversation.
  */
 export interface Interface {
 	readonly list: (bot: Bot) => Effect.Effect<BotRoutine[], Refused>;
 	readonly create: (bot: Bot, input: NewBotRoutine) => Effect.Effect<BotRoutine, Refused>;
-	/** Changes one of the bot's routines. A webhook routine's trigger stays as it is. */
+	/** Changes one of the bot's routines. Its schedule changes only while that is its only trigger. */
 	readonly update: (
 		bot: Bot,
 		routineId: string,
@@ -107,11 +113,13 @@ export const make = Effect.gen(function* () {
 								name: input.name,
 								instructions: input.instructions,
 								results: input.results,
-								trigger: {
-									kind: "cron",
-									schedule: { repeat: "cron", expression: input.schedule },
-									timezone: place.timeZone,
-								},
+								triggers: [
+									{
+										kind: "cron",
+										schedule: { repeat: "cron", expression: input.schedule },
+										timezone: place.timeZone,
+									},
+								],
 							},
 						),
 					);
@@ -126,8 +134,9 @@ export const make = Effect.gen(function* () {
 					const place = yield* placeOf(bot.agentId);
 					const addressed = { agentId: bot.agentId, routineId };
 					const current = yield* forAsker(bot, routines.get(addressed));
-					if (changes.schedule !== undefined && current.trigger.kind === "webhook") {
-						return yield* new WebhookKeepsItsTrigger();
+					const [only, ...others] = current.triggers;
+					if (changes.schedule !== undefined && (only?.kind !== "cron" || others.length > 0)) {
+						return yield* new TriggerSetInSettings();
 					}
 					const updated = yield* forAsker(
 						bot,
@@ -137,17 +146,23 @@ export const make = Effect.gen(function* () {
 							results: changes.results,
 							state:
 								changes.paused === undefined ? undefined : changes.paused ? "paused" : "enabled",
-							trigger:
-								changes.schedule === undefined
-									? undefined
-									: {
-											kind: "cron",
-											schedule: { repeat: "cron", expression: changes.schedule },
-											timezone: place.timeZone,
-										},
 						}),
 					);
-					return toBotRoutine(updated.routine, place.routinesUrl);
+					if (changes.schedule === undefined || !only) {
+						return toBotRoutine(updated.routine, place.routinesUrl);
+					}
+					const rescheduled = yield* forAsker(
+						bot,
+						routines.updateTrigger(
+							{ ...addressed, triggerId: only.id },
+							{
+								kind: "cron",
+								schedule: { repeat: "cron", expression: changes.schedule },
+								timezone: place.timeZone,
+							},
+						),
+					);
+					return toBotRoutine(rescheduled.routine, place.routinesUrl);
 				}),
 			),
 	});
@@ -174,13 +189,14 @@ export interface BotRoutine {
 	name: string;
 	instructions: string;
 	/**
-	 * Its schedule and the timezone it runs in, or a webhook, which only
-	 * settings change. A schedule the bot set is a cron expression; one picked
-	 * in settings is by its days and times.
+	 * What starts it: each schedule and the timezone it runs in, or a webhook.
+	 * A schedule the bot set is a cron expression; one picked in settings is by
+	 * its days and times. With none, it runs only when someone runs it.
 	 */
-	when:
+	when: Array<
 		| { kind: "schedule"; schedule: RoutineSchedule; timezone: string; nextRunAt: string | null }
-		| { kind: "webhook" };
+		| { kind: "webhook" }
+	>;
 	paused: boolean;
 	results: RoutineResults;
 	/** The routine's own settings page, for a link in the bot's reply. */
@@ -203,20 +219,26 @@ export interface BotRoutineChanges {
 	paused?: boolean;
 }
 
+function whenOf(trigger: RoutineTrigger): BotRoutine["when"][number] {
+	switch (trigger.kind) {
+		case "cron":
+			return {
+				kind: "schedule",
+				schedule: trigger.schedule,
+				timezone: trigger.timezone,
+				nextRunAt: trigger.nextScheduledAt,
+			};
+		case "webhook":
+			return { kind: "webhook" };
+	}
+}
+
 function toBotRoutine(routine: Routine, routinesUrl: string): BotRoutine {
 	return {
 		id: routine.id,
 		name: routine.name,
 		instructions: routine.instructions,
-		when:
-			routine.trigger.kind === "cron"
-				? {
-						kind: "schedule",
-						schedule: routine.trigger.schedule,
-						timezone: routine.trigger.timezone,
-						nextRunAt: routine.trigger.nextScheduledAt,
-					}
-				: { kind: "webhook" },
+		when: routine.triggers.map(whenOf),
 		paused: routine.state === "paused",
 		results: routine.results,
 		settingsUrl: `${routinesUrl}/${routine.id}`,
@@ -227,11 +249,13 @@ function toBotRoutine(routine: Routine, routinesUrl: string): BotRoutine {
 export type Refused =
 	| NobodyAsked
 	| MayNotManageRoutines
-	| WebhookKeepsItsTrigger
+	| TriggerSetInSettings
 	| RoutineNotFound
 	| RoutineRepository.RoutineNameTaken
 	| InvalidRoutineSchedule
-	| WebhookSecretTooShort;
+	| WebhookSecretTooShort
+	| RoutineTriggerNotFound
+	| RoutineTriggerKindChanged;
 
 export class NobodyAsked extends Data.TaggedError("NobodyAsked") implements UserFacing {
 	get userMessage() {
@@ -248,11 +272,11 @@ export class MayNotManageRoutines
 	}
 }
 
-export class WebhookKeepsItsTrigger
-	extends Data.TaggedError("WebhookKeepsItsTrigger")
+export class TriggerSetInSettings
+	extends Data.TaggedError("TriggerSetInSettings")
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`That routine runs on a webhook, which only its settings can change. Its name, instructions, results and whether it is paused can still be changed here.`;
+		return userText`That routine has triggers other than one schedule, which only its settings can change. Its name, instructions, results and whether it is paused can still be changed here.`;
 	}
 }

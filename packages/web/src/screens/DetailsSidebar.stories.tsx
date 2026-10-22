@@ -6,7 +6,7 @@ import type {
 	ThreadActivity,
 	ThreadParticipant,
 } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { routineTriggers, testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
@@ -67,17 +67,19 @@ function routine(id: string, name: string, expression: string): Routine {
 		agentId: growthDesk.id,
 		name,
 		instructions: "Do the thing.",
-		trigger: {
+		triggers: routineTriggers(id, {
 			kind: "cron",
 			schedule: { repeat: "cron", expression },
 			timezone: "Australia/Sydney",
 			nextScheduledAt: null,
-		},
+		}),
 		state: "enabled",
+		results: "keep_in_run",
 		createdById: null,
+		createdByAgentId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",
-	} as Routine;
+	};
 }
 
 const routines = [

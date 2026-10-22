@@ -4,7 +4,7 @@ import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import { agent, routine, routineExecution } from "../../database/schema.ts";
+import { agent, routine, routineExecution, routineTrigger } from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { RoutineRepository } from "./repository.ts";
 import {
@@ -16,8 +16,12 @@ import {
 } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
 
-/** A trigger for the routine `Scope` names, and the identity a retry of it repeats. */
+/**
+ * A trigger for the routine `Scope` names: which of its triggers fired, none
+ * for a run someone started, and the identity a retry of it repeats.
+ */
 export interface Trigger extends Scope {
+	triggerId: string | null;
 	trigger: RoutineExecutionTrigger;
 	triggerIdentity: string | null;
 }
@@ -55,14 +59,27 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 				if (input.trigger.kind !== "manual" && definition.routine.state !== "enabled") {
 					return yield* new RoutineTriggerRejected();
 				}
-				if (
-					input.trigger.kind !== "manual" &&
-					input.trigger.kind !== definition.routine.triggerKind
-				) {
+				// Only a run someone started has no trigger; any other is one of the routine's own.
+				if ((input.triggerId === null) !== (input.trigger.kind === "manual")) {
 					return yield* new RoutineTriggerRejected();
 				}
+				if (input.triggerId !== null) {
+					const [fired] = yield* query((db) =>
+						db
+							.select({ kind: routineTrigger.kind })
+							.from(routineTrigger)
+							.where(
+								and(
+									eq(routineTrigger.id, input.triggerId ?? ""),
+									eq(routineTrigger.routineId, input.routineId),
+								),
+							)
+							.limit(1),
+					);
+					if (fired?.kind !== input.trigger.kind) return yield* new RoutineTriggerRejected();
+				}
 				const existing = input.triggerIdentity
-					? yield* acceptedAs(input.routineId, input.trigger.kind, input.triggerIdentity)
+					? yield* acceptedAs(input, input.triggerIdentity)
 					: undefined;
 				if (existing) {
 					if (!sameTrigger(existing.trigger, input.trigger)) {
@@ -90,6 +107,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					workspaceId: input.workspaceId,
 					agentId: input.agentId,
 					threadId: runThread.id,
+					triggerId: input.triggerId,
 					triggerKind: input.trigger.kind,
 					triggerIdentity: input.triggerIdentity,
 					trigger: input.trigger,
@@ -130,8 +148,8 @@ export const lockTriggers = (routineId: string) =>
 		),
 	);
 
-/** The run a trigger with this identity already started, if any. */
-const acceptedAs = (routineId: string, kind: RoutineExecutionTrigger["kind"], identity: string) =>
+/** The run this trigger, or someone running the routine, already started with this identity, if any. */
+const acceptedAs = (input: Trigger, identity: string) =>
 	Effect.map(
 		query((db) =>
 			db
@@ -139,8 +157,10 @@ const acceptedAs = (routineId: string, kind: RoutineExecutionTrigger["kind"], id
 				.from(routineExecution)
 				.where(
 					and(
-						eq(routineExecution.routineId, routineId),
-						eq(routineExecution.triggerKind, kind),
+						eq(routineExecution.routineId, input.routineId),
+						input.triggerId === null
+							? eq(routineExecution.triggerKind, "manual")
+							: eq(routineExecution.triggerId, input.triggerId),
 						eq(routineExecution.triggerIdentity, identity),
 					),
 				)
