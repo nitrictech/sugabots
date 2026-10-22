@@ -598,7 +598,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 				defaultModel: "first",
 			});
-			expect(await systemAgentModels()).toEqual(["first", "first", "first"]);
+			expect(await systemAgentModels()).toEqual(["first", "first"]);
 		});
 
 		it("refuses to switch the default off until another model replaces it", async () => {
@@ -655,7 +655,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await expect(refused).rejects.toMatchObject({
 				_tag: "ModelInUse",
 				modelId: "first",
-				holders: { workspaceDefault: false, systemAgents: ["Compaction", "Facilitator", "Scribe"] },
+				holders: { workspaceDefault: false, systemAgents: ["Compaction", "Scribe"] },
 			});
 		});
 

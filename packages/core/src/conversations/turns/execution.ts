@@ -1,6 +1,6 @@
 export * as TurnExecution from "./execution.ts";
 
-import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import type { Message, ThreadParticipant, ThreadType } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
@@ -114,8 +114,8 @@ export const make = Effect.gen(function* () {
 						const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
 						if (!loaded) return yield* refuseRun(run, "The thread is gone", CANCELLED);
 						// The agent has to be crew placed in the thread's pod, not the
-						// thread's host. A shared thread gives the floor to whoever the
-						// facilitator or a mention picks, and that is rarely the host.
+						// thread's host. A shared thread gives the floor to whoever a
+						// mention picks, and that is rarely the host.
 						// Pod membership is still a real check: it is what stops a turn
 						// request naming an agent from another pod or another workspace.
 						const speaker = loaded.pod.agents.find(({ id }) => id === request.agentId);
@@ -135,9 +135,6 @@ export const make = Effect.gen(function* () {
 								status: "failed",
 								userMessage: userText`${UserText.unchecked(speaker.name)} has no model chosen, so it cannot reply. Choose one in its settings.`,
 							});
-						}
-						if (loaded.type === "chat" && request.reason === "facilitator") {
-							return yield* refuseRun(run, "The Facilitator does not route Chats", CANCELLED);
 						}
 						const opened = yield* turns.openReplyTurn({
 							threadId: loaded.id,
@@ -193,7 +190,6 @@ export const make = Effect.gen(function* () {
 									podId: loaded.podId,
 								},
 								reason: request.reason,
-								routing: loaded.pod.routing,
 								podName: loaded.pod.name,
 								workspaceName: loaded.workspace.name,
 								workspaceTimeZone: loaded.workspace.timeZone,
@@ -293,8 +289,6 @@ export interface TurnContext {
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
-	/** Whether non-chat threads use the Facilitator to choose the next speaker. */
-	routing: PodRouting;
 	podName: string;
 	workspaceName: string;
 	/** The workspace's timezone, which the schedules the agent sets up run in. */
@@ -367,7 +361,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 		with: {
 			workspace: { columns: { name: true, timeZone: true } },
 			pod: {
-				columns: { name: true, routing: true },
+				columns: { name: true },
 				with: {
 					// Every agent placed in a pod is crew: system agents are placed in none.
 					agents: {

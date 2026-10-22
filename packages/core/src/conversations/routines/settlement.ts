@@ -22,10 +22,8 @@ import {
 	thread,
 	turn,
 } from "../../database/schema.ts";
-import { Lanes, laneBusy } from "../../workflows/lanes.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { Facilitate } from "../floor/facilitate.workflow.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { workingThreadsOf } from "../threads/tree.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -48,7 +46,7 @@ import { RoutineRuns } from "./runs.ts";
  * `handler` reacts to the conversation events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
  * without locking the run; the run settles once that transaction commits, in
- * its own. A turn or facilitation that failed for good, or a turn that was
+ * its own. A turn that failed for good, or a turn that was
  * cancelled, starts ending its run early: the rest of its work is cancelled, and it ends that way once what is still running
  * stops. Every later settlement of an ending run cancels whatever work is
  * left, since some may have been held by another transaction. A settlement
@@ -78,7 +76,6 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* Turns.Service;
 	const collaborations = yield* Collaborations.Service;
-	const lanes = yield* Lanes.Service;
 	const routines = yield* RoutineRepository.Service;
 	const runs = yield* RoutineRuns.Service;
 	const threads = yield* ThreadRepository.Service;
@@ -107,7 +104,6 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			yield* turns.stopUnder(work);
 			yield* collaborations.failUnder(work);
-			yield* lanes.dropWaiting(work, [Facilitate._tag]);
 		});
 
 	/**
@@ -252,8 +248,6 @@ function settlementFor(
 			return [{ threadId: event.threadId, outcome: { state: "cancelled" } }];
 		case "TurnAbandoned":
 			return [{ threadId: event.threadId, outcome: event.outcome }];
-		case "FacilitationFailed":
-			return [{ threadId: event.threadId, outcome: { state: "failed", error: event.userMessage } }];
 		case "CollaborationAnswered":
 		case "CollaborationStoppedWaiting":
 			return [{ threadId: event.parentThreadId }];
@@ -375,9 +369,8 @@ const threadIdsRelation = (threadIds: readonly string[]) =>
  * stillBusy reports whether work in the threads `work` keeps the run from
  * settling. Until the run is `ending`, that is anything running, waiting or
  * asked for. An ending run waits only for its running turns, which record how
- * they ended, and its running facilitations: its waiting turns and
- * collaborations were cancelled, and the turns its workflows still ask for
- * are refused.
+ * they ended: its waiting turns and collaborations were cancelled, and the
+ * turns its workflows still ask for are refused.
  */
 const stillBusy = (work: readonly string[], ending: boolean) =>
 	Effect.map(
@@ -385,25 +378,23 @@ const stillBusy = (work: readonly string[], ending: boolean) =>
 			db.execute<{ busy: boolean }>(
 				sql`select (
 					exists (
-						select 1 from (${threadIdsRelation(work)}) as work(id)
-						where ${
-							ending
-								? laneBusy(sql`work.id`, [Facilitate._tag])
-								: sql`(${Turns.busyIn(sql`work.id`)} or ${laneBusy(sql`work.id`, [Facilitate._tag])})`
-						}
-					)
-					or exists (
 						select 1 from ${turn}
 						where ${inArray(turn.threadId, [...work])}
 							and ${inArray(turn.status, ending ? ["running"] : ["running", "waiting"])}
 					)
-					${ending ? sql`` : sql`or ${unansweredCollaborations(work)}`}
+					${ending ? sql`` : sql`or ${turnsBusy(work)} or ${unansweredCollaborations(work)}`}
 				) as busy`,
 				"objects",
 			),
 		),
 		([row]) => row?.busy ?? false,
 	);
+
+const turnsBusy = (work: readonly string[]) =>
+	sql`exists (
+		select 1 from (${threadIdsRelation(work)}) as work(id)
+		where ${Turns.busyIn(sql`work.id`)}
+	)`;
 
 const unansweredCollaborations = (work: readonly string[]) =>
 	sql`exists (

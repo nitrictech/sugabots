@@ -54,7 +54,7 @@ export type WorkspacePermission =
 	| "workspace.ownership.transfer"
 	/** Delete the workspace and everything in it. */
 	| "workspace.delete"
-	/** Choose the models the Scribe and the Facilitator run on. */
+	/** Choose the models the Scribe and Compaction run on. */
 	| "workspace.builtInAgents.configure"
 	/** See what the workspace's models cost, every pod's and bot's included, and limit it. */
 	| "workspace.usage.manage"
@@ -265,7 +265,6 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 	const shared = pod.kind === "shared";
 	return {
 		rename: shared && may("pod.update"),
-		changeRouting: may("pod.update"),
 		manageMembers: shared && may("pod.members.manage"),
 		leave: shared && may("pod.leave"),
 		createAgents: may("agent.create"),

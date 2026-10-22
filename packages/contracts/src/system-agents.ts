@@ -8,7 +8,7 @@ import {
 } from "./agents.ts";
 
 /**
- * The Scribe and the Facilitator as the settings screens see them.
+ * The Scribe and Compaction as the settings screens see them.
  *
  * A system agent belongs to the workspace rather than to a pod: there is one of
  * each, and every pod is served by it. That is why it has a shape of its own
@@ -28,9 +28,9 @@ export const systemAgentSchema = Schema.Struct({
 	shape: agentShapeSchema,
 	/**
 	 * The model it runs on. `null` only while the workspace offers no model at
-	 * all, and until then the agent does not run: no summaries are written, and
-	 * no pod may hand the Facilitator the floor. The first model the workspace
-	 * offers becomes this one, and it cannot be cleared after that.
+	 * all, and until then the agent does not run: no summaries are written. The
+	 * first model the workspace offers becomes this one, and it cannot be
+	 * cleared after that.
 	 */
 	model: Schema.NullOr(modelIdSchema),
 });

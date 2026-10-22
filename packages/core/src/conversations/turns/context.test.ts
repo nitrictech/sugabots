@@ -471,7 +471,6 @@ function context(): TurnContext {
 			acceptsImages: false,
 		},
 		reason: "default",
-		routing: { facilitator: false },
 		windowTokens: 256_000,
 		compaction: undefined,
 		podName: "Release",

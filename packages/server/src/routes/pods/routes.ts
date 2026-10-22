@@ -81,7 +81,6 @@ const podErrors = {
 	...refusals,
 	PodSlugTaken: Conflict,
 	PersonalPodFixed: BadRequest,
-	FacilitatorNotSetUp: BadRequest,
 	ModelNotEnabled: BadRequest,
 	EmptyPodUpdate: BadRequest,
 	PodGone: NotFound,

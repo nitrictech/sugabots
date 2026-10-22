@@ -96,7 +96,6 @@ const prepared: PreparedTurn = {
 			acceptsImages: false,
 		},
 		reason: "default",
-		routing: { facilitator: false },
 		windowTokens: 128_000,
 		compaction: undefined,
 		podName: "Release",
@@ -224,7 +223,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});

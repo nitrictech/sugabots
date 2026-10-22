@@ -79,15 +79,6 @@ export function leastUsedPodColor(taken: readonly (PodColor | null)[]): PodColor
 	return podColors.reduce((best, color) => (uses(color) < uses(best) ? color : best));
 }
 
-/** Whether the Facilitator chooses speakers in non-chat threads. */
-export const podRoutingSchema = Schema.Struct({
-	facilitator: Schema.Boolean,
-});
-
-export type PodRouting = typeof podRoutingSchema.Type;
-
-export const DEFAULT_POD_ROUTING: PodRouting = { facilitator: false };
-
 /**
  * What the caller may do in this pod, already decided by the API.
  *
@@ -103,7 +94,6 @@ export const DEFAULT_POD_ROUTING: PodRouting = { facilitator: false };
 export const podPermissionsSchema = Schema.Struct({
 	/** Change the pod's name, address and colour. Never on a Personal pod, which keeps all three. */
 	rename: Schema.Boolean,
-	changeRouting: Schema.Boolean,
 	/** Add and remove members. Never on a Personal pod, which is one person's. */
 	manageMembers: Schema.Boolean,
 	/** Take yourself out of the pod. Never for an administrator, who is in every shared pod. */
@@ -135,7 +125,6 @@ export const podSchema = Schema.Struct({
 	slug: podSlugSchema,
 	/** `null` on a Personal pod, which is drawn as its lock rather than a tile. */
 	color: Schema.NullOr(podColorSchema),
-	routing: podRoutingSchema,
 	permissions: podPermissionsSchema,
 	createdAt: isoTimestampSchema,
 });
@@ -154,9 +143,7 @@ export const newPodSchema = Schema.Struct({
 
 export type NewPod = typeof newPodSchema.Type;
 
-export const podUpdateSchema = newPodSchema
-	.mapFields(Struct.map(Schema.optional))
-	.mapFields(Struct.assign({ routing: Schema.optional(podRoutingSchema) }));
+export const podUpdateSchema = newPodSchema.mapFields(Struct.map(Schema.optional));
 
 export type PodUpdate = typeof podUpdateSchema.Type;
 

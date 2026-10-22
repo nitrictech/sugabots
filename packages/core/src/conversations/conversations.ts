@@ -20,7 +20,6 @@ import { RoutineWorkAdmission } from "./routines/work-admission.ts";
 import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadView } from "./thread-view.ts";
-import { ThreadRepository } from "./threads/repository.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
 import { Turns } from "./turns/turns.ts";
 
@@ -49,8 +48,6 @@ const services = Layer.mergeAll(
 	ChatView.layer,
 	ThreadView.layer,
 	FloorControl.layer,
-	// The Facilitator's workflow step brings the agent it picks into the thread.
-	ThreadRepository.layer,
 ).pipe(Layer.provideMerge(Turns.layer), Layer.provideMerge(RoutineWorkAdmission.layer));
 
 /** Everything `layer` provides. */

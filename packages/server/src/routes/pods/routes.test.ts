@@ -1,5 +1,5 @@
 import type { Pod } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING, podSchema } from "@sugabots/contracts";
+import { podSchema } from "@sugabots/contracts";
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
@@ -54,7 +54,6 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 	name: "Suga-Team",
 	slug: "suga-team",
 	color: kind === "shared" ? "green" : null,
-	routing: DEFAULT_POD_ROUTING,
 	permissions: podPermissions(
 		{ userId, workspaceRole: "admin" },
 		{ kind, ownerId: kind === "personal" ? userId : null, isMember: true },

@@ -6,18 +6,17 @@ import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * The workspace's Scribe and Facilitator: what they are, and the model each
+ * The workspace's Scribe and Compaction: what they are, and the model each
  * runs on.
  *
  * Addressed by key rather than by id, because there is exactly one of each per
  * workspace. That is also what keeps this from being pointed at a crew agent,
  * which is configured in its pod instead.
  *
- * Reading is open to the whole workspace, because a pod's routing options
- * depend on the answer: the owner of a Personal pod holds every permission in
- * it whatever their workspace role, and their settings screen has to tell "no
- * model chosen" apart from "you cannot see". What is exposed is two names and
- * two model ids, which a member already sees on every crew agent in their pods.
+ * Reading is open to the whole workspace, because a chat's summary has to say
+ * why there is none when the Scribe has no model, and has to tell "no model
+ * chosen" apart from "you cannot see". What is exposed is two names and two
+ * model ids, which a member already sees on every crew agent in their pods.
  */
 export class SystemAgentsApi extends HttpApiGroup.make("systemAgents")
 	.add(

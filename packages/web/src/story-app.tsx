@@ -84,9 +84,9 @@ export const storyModel = {
 	displayName: "Claude Sonnet",
 };
 
-const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((key) => ({
+const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key) => ({
 	key,
-	name: key === "summarise" ? "Scribe" : "Facilitator",
+	name: key === "summarise" ? "Scribe" : "Compaction",
 	description: null,
 	color: "ice",
 	face: "pill",

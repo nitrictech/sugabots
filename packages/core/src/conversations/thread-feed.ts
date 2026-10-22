@@ -103,7 +103,6 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				: [],
 		// Watchers see nothing new in this; only routine settlement reacts to it.
 		LaneReleased: () => [],
-		FacilitationFailed: ({ threadId, userMessage }) => [notice(threadId, userMessage)],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [
 			toolCallEvent("tool_call.updated", change),

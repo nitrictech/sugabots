@@ -333,17 +333,11 @@ export const threadParticipant = pgTable(
 );
 
 /**
- * Why an agent was given a turn: a person mentioned it, the Facilitator chose
- * it, it was the default, it was asked to collaborate, or a collaboration
- * answer resumed it.
+ * Why an agent was given a turn: a person mentioned it, it was the default,
+ * it was asked to collaborate, a routine ran, or a collaboration answer
+ * resumed it.
  */
-export type TurnReason =
-	| "mention"
-	| "facilitator"
-	| "default"
-	| "collaboration"
-	| "routine"
-	| "resume";
+export type TurnReason = "mention" | "default" | "collaboration" | "routine" | "resume";
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 

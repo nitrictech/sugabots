@@ -28,9 +28,7 @@ import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
 import {
 	prepareRunnable,
-	queueFacilitationForTests,
 	queueTurnForTests,
-	releaseFacilitation,
 	releaseTurn,
 	replyTurnOf,
 	runningTurns,
@@ -39,7 +37,6 @@ import {
 	TurnExecution,
 	TurnRepository,
 	turnLane,
-	waitingFacilitation,
 } from "../turns/testing.ts";
 import type { Turns } from "../turns/turns.ts";
 import { RoutineRunner } from "./routine-runner.ts";
@@ -205,7 +202,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await turns.complete(
 			replyTurnOf(prepared),
 			{ content, collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 	}
 
@@ -405,42 +402,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({ state: "completed" });
 	});
 
-	it("drops a waiting facilitation and waits for the running one when a run ends early", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
-		await runOnPostgres(releaseTurn(fixture.runningTurn));
-		await onDatabase((db) =>
-			db
-				.update(collaboration)
-				.set({ status: "answered" })
-				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
-		);
-		const running = { threadId: fixture.childThread.id, triggerMessageId: crypto.randomUUID() };
-		await runOnPostgres(queueFacilitationForTests(running));
-		await runOnPostgres(
-			queueFacilitationForTests({
-				threadId: fixture.childThread.id,
-				triggerMessageId: crypto.randomUUID(),
-			}),
-		);
-
-		expect(await settlement.settleRun(fixture.run)).toBe(false);
-		await announce(
-			ConversationEvent.FacilitationFailed({
-				threadId: fixture.childThread.id,
-				userMessage: userText`Model failed`,
-			}),
-		);
-		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({ state: "running" });
-		expect(await runOnPostgres(waitingFacilitation(fixture.childThread.id))).toBeUndefined();
-
-		await runOnPostgres(releaseFacilitation(running));
-		await announce(ConversationEvent.LaneReleased({ threadId: fixture.childThread.id }));
-		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({
-			state: "failed",
-			error: userText`Model failed`,
-		});
-	});
-
 	it("tells the workflows of waiting turns to stop once a run ending early commits", async () => {
 		const fixture = await aRunWithCollaboration("waiting");
 		await onDatabase((db) =>
@@ -579,12 +540,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await holding;
 
 		// Settles while the holder still has the turn locked: a wait here would never end.
-		await announce(
-			ConversationEvent.FacilitationFailed({
-				threadId: accepted.threadId,
-				userMessage: userText`Model failed`,
-			}),
-		);
+		await announce(ended(accepted.threadId, failed(userText`Model failed`)));
 		letGo();
 		await holder;
 
@@ -675,7 +631,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await turns.complete(
 			replyTurnOf(prepared),
 			{ content: "Done.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 
 		const types = delivered.map(({ event }) => event.type);
@@ -810,11 +766,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				.returning(),
 		);
 		if (!childTurn) throw new Error("Could not create settlement test child turn");
-		const childFacilitation = {
-			threadId: fixture.childThread.id,
-			triggerMessageId: childTrigger.id,
-		};
-		await runOnPostgres(queueFacilitationForTests(childFacilitation));
 		await onDatabase((db) =>
 			db
 				.update(collaboration)
@@ -853,7 +804,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		delivered = [];
 		await Promise.all([
 			finish(fixture.askingTurn.id, releaseTurn(fixture.runningTurn), fixture.accepted.threadId),
-			finish(childTurn.id, releaseFacilitation(childFacilitation), fixture.childThread.id),
+			finish(childTurn.id, Effect.void, fixture.childThread.id),
 		]);
 
 		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({

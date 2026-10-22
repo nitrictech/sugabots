@@ -1,7 +1,6 @@
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Conversations } from "@sugabots/core/conversations/conversations";
-import { facilitateLane } from "@sugabots/core/conversations/floor/facilitate.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
@@ -25,7 +24,6 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
-import { lane } from "@sugabots/core/workflows/sql";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -97,17 +95,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await closeDatabase();
 		});
 
-		/** The thread's facilitation lane, which exists once a facilitation has been asked for. */
-		const facilitationLanes = (threadId: string) =>
-			onDatabase((db) =>
-				db
-					.select()
-					.from(lane)
-					.where(eq(lane.key, facilitateLane({ threadId }))),
-			);
-
 		/** A workspace with a pod, a host agent and a helper the host can collaborate with. */
-		async function aRoom(routing?: { facilitator: boolean }) {
+		async function aRoom() {
 			const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 			const [space] = await onDatabase((db) =>
 				db
@@ -135,7 +124,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						name: "Room",
 						slug: `room-${suffix}`,
 						createdById: member.id,
-						...(routing ? { routing } : {}),
 					})
 					.returning(),
 			);
@@ -246,55 +234,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 
 			expect(hostTurn?.status).toBe("done");
-			expect(await facilitationLanes(opened.mainThreadId)).toEqual([]);
 			expect(made).toMatchObject({ status: "answered", answer: "A dog named Krypto." });
 			expect(reply?.content).toBe("Helper says: A dog named Krypto.");
 			// Well inside the tool's wait: the answer woke it, the timeout did not.
 			expect(elapsed).toBeLessThan(5_000);
 		}, 20_000);
-
-		it("stops the child thread once the brief is answered, even with the Facilitator on", async () => {
-			// The answer goes back to the agent that asked, which carries on in the
-			// parent. Deciding who speaks next in the child as well left the two of
-			// them talking to each other there, in a thread nobody was reading, until
-			// the run cap — or until somebody killed the process.
-			const { space, pod: room, member, host } = await aRoom({ facilitator: true });
-
-			const opened = await startChat({
-				workspaceId: space.id,
-				podId: room.id,
-				hostAgentId: host.id,
-				userId: member.id,
-				content: "What pets does Helper have?",
-			});
-
-			const deadline = Date.now() + 10_000;
-			let answered: { childThreadId: string; status: string } | undefined;
-			while (Date.now() < deadline) {
-				[answered] = await onDatabase((db) =>
-					db
-						.select({ childThreadId: collaboration.childThreadId, status: collaboration.status })
-						.from(collaboration)
-						.where(eq(collaboration.parentThreadId, opened.mainThreadId)),
-				);
-				if (answered?.status === "answered") break;
-				await new Promise((resolve) => setTimeout(resolve, 100));
-			}
-			if (!answered) throw new Error("The collaboration was never opened");
-			// Long enough for a facilitation to have run if one had been asked for.
-			await new Promise((resolve) => setTimeout(resolve, 1_500));
-
-			const childMessages = await onDatabase((db) =>
-				db
-					.select({ id: message.id })
-					.from(message)
-					.where(eq(message.threadId, answered.childThreadId)),
-			);
-
-			expect(await facilitationLanes(opened.mainThreadId)).toEqual([]);
-			expect(answered.status).toBe("answered");
-			expect(await facilitationLanes(answered.childThreadId)).toEqual([]);
-			expect(childMessages).toHaveLength(2);
-		}, 25_000);
 	},
 );

@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ResourceHidden } from "../../authorization/access.ts";
-import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -39,7 +38,6 @@ import { Chats } from "../chats/chats.ts";
 import { compactionLane } from "../compaction/compaction.workflow.ts";
 import { Compactions } from "../compaction/compactions.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
-import { loadFacilitatorScope } from "../floor/facilitator.ts";
 import { Summaries } from "../summaries/summaries.ts";
 import { summarise } from "../summaries/summary.steps.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -317,56 +315,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(prepared).toMatchObject({ _tag: "Prepared", threadId: details.thread.id });
 	});
 
-	it("keeps the agent who just spoke off the router's list", async () => {
-		// Two agents answering each other in turn is the loop this prevents: the
-		// router picked the same agent again, and again, until the run cap.
-		const [otherRow] = await onDatabase((db) =>
-			db
-				.insert(agent)
-				.values({
-					workspaceId,
-					podId,
-					name: `Fourth agent ${Date.now()}`,
-					handle: handleFromName(`Fourth agent ${Date.now()}`),
-					color: "yellow",
-					face: "dot",
-					model: "claude-opus-4-1-20250805",
-					createdById: memberId,
-				})
-				.returning({ id: agent.id }),
-		);
-		if (!otherRow) throw new Error("Could not create the fourth agent");
-
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Who is talking?",
-		});
-		const [reply] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					threadId: details.thread.id,
-					authorAgentId: otherRow.id,
-					kind: "text",
-					status: "complete",
-					content: "I just said something.",
-					parts: [{ type: "text", text: "I just said something." }],
-				})
-				.returning({ id: message.id }),
-		);
-		if (!reply) throw new Error("Could not record the reply");
-
-		const scope = await runOnPostgres(
-			query((executor) => loadFacilitatorScope(executor, details.thread.id, reply.id)),
-		);
-
-		expect(scope?.crew.map((member) => member.id)).not.toContain(otherRow.id);
-		expect(scope?.crew.map((member) => member.id)).toContain(agentId);
-	});
-
 	it("refuses an agent's turn by name once its model has been cleared", async () => {
 		// Cleared after the message is queued: a chat refuses the message itself
 		// when the model is already gone, so this is the turn that slips through.
@@ -386,32 +334,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			_tag: "NotRunnable",
 			reason: expect.stringContaining("has no model chosen"),
 		});
-	});
-
-	it("does not facilitate at all until the workspace has chosen a Facilitator model", async () => {
-		// The old arrangement borrowed the host agent's model here, which put a
-		// question nobody asked in front of a model nobody chose for the job.
-		await onDatabase((db) =>
-			db
-				.update(agent)
-				.set({ model: null })
-				.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "facilitate"))),
-		);
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Who is talking?",
-		});
-		const first = details.messages[0];
-		if (!first) throw new Error("The thread has no message to facilitate from");
-
-		const scope = await runOnPostgres(
-			query((executor) => loadFacilitatorScope(executor, details.thread.id, first.id)),
-		);
-
-		expect(scope).toBeUndefined();
 	});
 
 	it("shows a thread as running while its turn lane is busy", async () => {
@@ -734,7 +656,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				contextTokens: 30,
 				contextCapacity: 200_000,
 				readKeptFrom: null,
-				answeredCollaboration: false,
 			},
 		);
 		await runOnPostgres(releaseTurn(firstRun));
@@ -827,7 +748,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(nextTurn),
 			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 		const nextSummary = await preparedSummary({
 			threadId: details.thread.id,
@@ -861,7 +782,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(preparedTurn),
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 		const unreachable = new Models.ProviderUnreachable({
 			provider: DisplayName.fromRecord("Test provider"),
@@ -1000,7 +921,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				contextTokens: 70_000,
 				contextCapacity: turn.context.windowTokens,
 				readKeptFrom: prepared.keptFrom.toISOString(),
-				answeredCollaboration: false,
 			},
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
@@ -1112,7 +1032,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 					contextTokens,
 					contextCapacity: 128_000,
 					readKeptFrom: null,
-					answeredCollaboration: false,
 				},
 			);
 
@@ -1357,7 +1276,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				contextTokens: 50_000,
 				contextCapacity: turn.context.windowTokens,
 				readKeptFrom: null,
-				answeredCollaboration: false,
 			},
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({

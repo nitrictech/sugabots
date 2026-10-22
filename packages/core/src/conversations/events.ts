@@ -8,7 +8,6 @@ import type {
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { Data } from "effect";
-import type { TurnReason } from "./sql.ts";
 import type { Turns } from "./turns/turns.ts";
 
 /**
@@ -66,8 +65,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
-		/** Why the agent was asked to speak. */
-		readonly reason: TurnReason | undefined;
 		readonly messageId: string;
 		readonly content: string;
 		/** The prompt's size, and the window it was read with. */
@@ -75,8 +72,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly contextCapacity: number;
 		/** Where the compaction the turn read from kept history from, if it read one. */
 		readonly readKeptFrom: string | null;
-		/** The reply answered a brief, so it goes back to the agent that asked. */
-		readonly answeredCollaboration: boolean;
 	};
 	/** The turn parked until people decide the tool approvals it asked for. */
 	TurnSuspended: {
@@ -126,15 +121,10 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly outcome: Turns.Ended;
 	};
 	/**
-	 * A turn's or facilitation's workflow in the thread finished and freed its
+	 * A turn's workflow in the thread finished and freed its
 	 * lane, so it no longer keeps the thread busy.
 	 */
 	LaneReleased: { readonly threadId: string };
-	/**
-	 * Every attempt at choosing who speaks after a message in the thread
-	 * failed. `userMessage` says so in words fit for people.
-	 */
-	FacilitationFailed: { readonly threadId: string; readonly userMessage: UserText };
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
 	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */

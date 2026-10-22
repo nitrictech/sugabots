@@ -519,13 +519,11 @@ export const make = Effect.gen(function* () {
 								podId: reply.podId,
 								turnId: locked.id,
 								agentId: reply.agentId,
-								reason: reply.reason,
 								messageId: reply.messageId,
 								content: draft.content,
 								contextTokens: completion.contextTokens,
 								contextCapacity: completion.contextCapacity,
 								readKeptFrom: completion.readKeptFrom,
-								answeredCollaboration: completion.answeredCollaboration,
 							}),
 						]);
 					}),
@@ -912,7 +910,6 @@ export interface TurnCompletion extends ContextMeasurement {
 	/** A reply is always read with a window. */
 	readonly contextCapacity: number;
 	readonly readKeptFrom: string | null;
-	readonly answeredCollaboration: boolean;
 }
 
 function measurementColumns(measured: ContextMeasurement) {

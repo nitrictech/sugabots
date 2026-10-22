@@ -1,6 +1,6 @@
 /**
  * The one client every part of the workspace asks a model through: turns,
- * facilitation, summaries, compaction, model trials and provider settings.
+ * summaries, compaction, model trials and provider settings.
  * It resolves the workspace's provider for a model, signs in where the
  * provider needs it, and either streams the response or collects a whole
  * answer.

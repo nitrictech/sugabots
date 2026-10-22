@@ -11,8 +11,6 @@ import { serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentRepository } from "../agents/agent-repository.ts";
-import { FACILITATE_SYSTEM_AGENT } from "../agents/system-agents.ts";
 import { PersonalPods } from "./personal-pods.ts";
 import { podSeenBy } from "./pod.ts";
 import { podMembers } from "./pod-reads.ts";
@@ -50,7 +48,6 @@ export interface Interface {
 		Pod,
 		| AuthorizationDenied
 		| EmptyPodUpdate
-		| FacilitatorNotSetUp
 		| PodRepository.PersonalPodFixed
 		| PodRepository.PodGone
 		| PodRepository.PodSlugTaken,
@@ -103,7 +100,6 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	const pods = yield* PodRepository.Service;
-	const agents = yield* AgentRepository.Service;
 	const personalPods = yield* PersonalPods.Service;
 
 	const takeOut = (pod: schema.PodRow, userId: string) =>
@@ -171,14 +167,6 @@ export const make = Effect.gen(function* () {
 					if (Object.values(changes).every((value) => value === undefined)) {
 						return yield* new EmptyPodUpdate();
 					}
-					// The Facilitator runs on a model the workspace chooses once, so a pod
-					// cannot hand it the floor before anybody has chosen one.
-					if (
-						changes.routing?.facilitator === true &&
-						!(yield* agents.runnableSystemAgent(standing.pod.workspaceId, FACILITATE_SYSTEM_AGENT))
-					) {
-						return yield* new FacilitatorNotSetUp();
-					}
 					const updated = yield* pods.update(standing.pod.workspaceId, standing.pod.id, changes);
 					return podSeenBy({ ...standing, pod: updated });
 				}),
@@ -236,27 +224,8 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([
-		Authorization.layer,
-		Visibility.layer,
-		PodRepository.layer,
-		AgentRepository.layer,
-		PersonalPods.layer,
-	]),
+	Layer.provide([Authorization.layer, Visibility.layer, PodRepository.layer, PersonalPods.layer]),
 );
-
-/**
- * A pod asked to route through the Facilitator before the workspace chose a
- * model for it: an impossible request rather than a forbidden one.
- */
-export class FacilitatorNotSetUp
-	extends Data.TaggedError("FacilitatorNotSetUp")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Choose a model for the Facilitator before a pod can route through it`;
-	}
-}
 
 /** A pod update that names nothing to change. */
 export class EmptyPodUpdate extends Data.TaggedError("EmptyPodUpdate") implements UserFacing {

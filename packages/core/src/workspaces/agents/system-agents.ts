@@ -22,9 +22,6 @@ export type { SystemAgentKey };
 /** The system agent that keeps thread summaries and titles up to date. */
 export const SUMMARISE_SYSTEM_AGENT: SystemAgentKey = "summarise";
 
-/** The system agent that decides who speaks next when nobody was addressed. */
-export const FACILITATE_SYSTEM_AGENT: SystemAgentKey = "facilitate";
-
 /** The system agent that compacts what a bot reads when its conversation gets long. */
 export const COMPACT_SYSTEM_AGENT: SystemAgentKey = "compact";
 
@@ -48,16 +45,6 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		face: "arc",
 		shape: "circle",
 		prompt: "Summarize conversations accurately and concisely. Do not invent details.",
-	},
-	{
-		key: FACILITATE_SYSTEM_AGENT,
-		name: "Facilitator",
-		description: "Decides who speaks next when nobody was addressed.",
-		color: "teal",
-		face: "pill",
-		shape: "circle",
-		prompt:
-			"Keep the conversation on track: bring in the agent who can answer, and let it rest when the question has been answered.",
 	},
 	{
 		key: COMPACT_SYSTEM_AGENT,

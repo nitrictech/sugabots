@@ -29,7 +29,6 @@ import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
-import { respondingIn } from "./floor/floor.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "./routines/routines.ts";
 import {
 	agentColumns,
@@ -82,7 +81,7 @@ export const make = Effect.gen(function* () {
 					return yield* query((db) =>
 						Effect.gen(function* () {
 							const rows = yield* db
-								.select({ thread, running: respondingIn(sql`${thread.id}`) })
+								.select({ thread, running: Turns.busyIn(sql`${thread.id}`) })
 								.from(thread)
 								// Child threads, whether a system agent's or a collaboration's, are reached
 								// from the thread they hang off rather than listed beside it.
@@ -172,7 +171,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 	return yield* db.query.thread.findFirst({
 		where: { id: threadId },
 		extras: {
-			running: (row) => respondingIn(sql`${row.id}`),
+			running: (row) => Turns.busyIn(sql`${row.id}`),
 			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
 			routineExecutionId: (row) => routineExecutionIdOf(row.id),
 		},

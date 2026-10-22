@@ -319,22 +319,19 @@ const generateReply = (
 						// `answer` runs in a savepoint of this transaction, so a
 						// defect in it rolls back only what it wrote, and catching it here
 						// still lets the reply complete.
-						const answered = prepared.context.thread.parentThreadId
-							? yield* collaborations
-									.answer({ threadId: prepared.context.thread.id, answer: draft.content })
-									.pipe(
-										Effect.catchCause((cause) =>
-											Effect.logError("Delivering a collaboration answer failed", cause).pipe(
-												Effect.as(false),
-											),
-										),
-									)
-							: false;
+						if (prepared.context.thread.parentThreadId) {
+							yield* collaborations
+								.answer({ threadId: prepared.context.thread.id, answer: draft.content })
+								.pipe(
+									Effect.catchCause((cause) =>
+										Effect.logError("Delivering a collaboration answer failed", cause),
+									),
+								);
+						}
 						yield* turns.complete(replyTurn, draft, {
 							contextTokens,
 							contextCapacity: prepared.context.windowTokens,
 							readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
-							answeredCollaboration: answered,
 						});
 					}),
 				);

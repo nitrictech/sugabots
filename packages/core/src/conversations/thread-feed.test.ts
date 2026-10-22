@@ -52,13 +52,11 @@ describe("the thread feed", () => {
 					podId,
 					turnId,
 					agentId,
-					reason: undefined,
 					messageId: "m1",
 					content: "Done.",
 					contextTokens: undefined,
 					contextCapacity: 128_000,
 					readKeptFrom: null,
-					answeredCollaboration: false,
 				}),
 			),
 		).toEqual([
@@ -186,7 +184,6 @@ describe("the thread feed", () => {
 
 	it("tells the thread why a reply it asked for is not coming", () => {
 		const noModel = userText`Ada has no model chosen, so it cannot reply.`;
-		const noChoice = userText`The Facilitator could not choose who speaks next`;
 
 		expect(
 			sent(
@@ -195,7 +192,6 @@ describe("the thread feed", () => {
 					agentId,
 					outcome: { state: "failed", error: noModel },
 				}),
-				ConversationEvent.FacilitationFailed({ threadId, userMessage: noChoice }),
 			),
 		).toEqual([
 			// Nothing waits for the turn any more.
@@ -206,10 +202,6 @@ describe("the thread feed", () => {
 			{
 				channel: threadChannel(threadId),
 				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noModel }),
-			},
-			{
-				channel: threadChannel(threadId),
-				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noChoice }),
 			},
 		]);
 	});

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, streamed } from "../../providers/models/testing.ts";
-import { CASES } from "./cases.ts";
+import { CASES, type TrialSystemAgent } from "./cases.ts";
 import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial } from "./trial.ts";
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
@@ -17,7 +17,7 @@ function scripted(
 	});
 }
 
-const trial = (model: Models.Interface, systemAgentKey: "facilitate" | "summarise", attempts = 1) =>
+const trial = (model: Models.Interface, systemAgentKey: TrialSystemAgent, attempts = 1) =>
 	Effect.runPromise(
 		Effect.provide(
 			runTrial({ systemAgentKey, model: "under-trial", workspaceId: "w1", attempts }, model),
@@ -39,41 +39,28 @@ describe("rating a model", () => {
 	});
 
 	it("judges speed against what the system agent can afford to wait", () => {
-		expect(rateSpeed(1_500, BUDGET_MS.facilitate)).toBe("excellent");
-		expect(rateSpeed(2_500, BUDGET_MS.facilitate)).toBe("good");
-		expect(rateSpeed(4_500, BUDGET_MS.facilitate)).toBe("poor");
-		expect(rateSpeed(9_000, BUDGET_MS.facilitate)).toBe("terrible");
-		// Summarising happens after the reply, so it can take far longer.
-		expect(rateSpeed(9_000, BUDGET_MS.summarise)).toBe("excellent");
+		expect(rateSpeed(15_000, BUDGET_MS.summarise)).toBe("excellent");
+		expect(rateSpeed(25_000, BUDGET_MS.summarise)).toBe("good");
+		expect(rateSpeed(45_000, BUDGET_MS.summarise)).toBe("poor");
+		expect(rateSpeed(90_000, BUDGET_MS.summarise)).toBe("terrible");
+		// Nobody reads a compaction, so it can take longer still.
+		expect(rateSpeed(45_000, BUDGET_MS.compact)).toBe("excellent");
 	});
 });
 
-describe("trying a model on the facilitator", () => {
+describe("running a trial", () => {
 	it("rates a model that answers every case correctly as excellent", async () => {
 		// The right answer differs per case, so the script reads the prompt.
-		const report = await trial(scripted(answerFor), "facilitate");
+		const report = await trial(scripted(summaryAnswer), "summarise");
 
 		expect(report.rating).toBe("excellent");
 		expect(report.accuracy.passed).toBe(report.accuracy.attempts);
 	});
 
-	it("rates a model that always names an agent as terrible, and says which cases failed", async () => {
-		// The failure seen in production: the facilitator never answers nobody.
-		const report = await trial(
-			scripted(() => "@ledger"),
-			"facilitate",
-		);
-
-		expect(report.rating).toBe("terrible");
-		expect(report.cases.filter((one) => one.passed === 0).map((one) => one.name)).toContain(
-			"Ends the exchange when an agent is only reflecting on another agent",
-		);
-	});
-
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
 			scripted(() => new Models.ModelNotOffered({ model: DisplayName.fromRecord("test-model") })),
-			"facilitate",
+			"summarise",
 		);
 
 		expect(report.rating).toBe("terrible");
@@ -83,7 +70,7 @@ describe("trying a model on the facilitator", () => {
 	it("counts a model defect as a failed answer", async () => {
 		const report = await trial(
 			Models.fromStream(() => Effect.die(new Error("model defect"))),
-			"facilitate",
+			"summarise",
 		);
 
 		expect(report.accuracy.passed).toBe(0);
@@ -109,16 +96,16 @@ describe("trying a model on the facilitator", () => {
 						);
 					}),
 				),
-				"facilitate",
+				"summarise",
 			);
 			await vi.advanceTimersByTimeAsync(0);
-			for (let index = 0; index < CASES.facilitate.length; index += 1) {
+			for (let index = 0; index < CASES.summarise.length; index += 1) {
 				expect(signals[index]?.aborted).toBe(false);
 				await vi.advanceTimersByTimeAsync(45_000);
 				expect(signals[index]?.aborted).toBe(true);
 			}
 			const report = await reportPromise;
-			expect(signals).toHaveLength(CASES.facilitate.length);
+			expect(signals).toHaveLength(CASES.summarise.length);
 			expect(report.accuracy.passed).toBe(0);
 			expect(report.cases.every((one) => one.example === "(no answer)")).toBe(true);
 			expect(report.speed.typicalMs).toBe(0);
@@ -130,14 +117,7 @@ describe("trying a model on the facilitator", () => {
 
 describe("trying a model on the summariser", () => {
 	it("accepts only what summarising would accept", async () => {
-		const report = await trial(
-			scripted((input) =>
-				input.system.includes("strict JSON")
-					? '{"title":"September invoices","summary":"Two are on hold."}'
-					: "Two invoices are on hold until their purchase orders reopen.",
-			),
-			"summarise",
-		);
+		const report = await trial(scripted(summaryAnswer), "summarise");
 
 		expect(report.rating).toBe("excellent");
 	});
@@ -155,9 +135,9 @@ describe("trying a model on the summariser", () => {
 });
 
 describe("what the report tells the person choosing", () => {
-	it("rates an accurate but slow router badly, and says it has to be fast", () => {
-		// The point of measuring speed at all: being right is not enough for a
-		// job that runs before anyone can reply.
+	it("rates an accurate but slow summariser badly, and says it has to be faster", () => {
+		// The point of measuring speed at all: being right is not enough when
+		// the answer comes after anyone wanted it.
 		const accuracy = {
 			passed: 15,
 			attempts: 15,
@@ -166,47 +146,44 @@ describe("what the report tells the person choosing", () => {
 			rating: rateAccuracy(15, 15),
 		};
 		const speed = {
-			typicalMs: 7_000,
-			slowestMs: 9_100,
-			budgetMs: BUDGET_MS.facilitate,
-			rating: rateSpeed(7_000, BUDGET_MS.facilitate),
+			typicalMs: 90_000,
+			slowestMs: 110_000,
+			budgetMs: BUDGET_MS.summarise,
+			rating: rateSpeed(90_000, BUDGET_MS.summarise),
 		};
 
 		expect(speed.rating).toBe("terrible");
-		const said = explain("facilitate", accuracy, speed, []).join(" ");
+		const said = explain("summarise", accuracy, speed, []).join(" ");
 		expect(said).toContain("Too slow");
-		expect(said).toContain("about 7.0s");
-		expect(said).toContain("under 2.0s");
-		expect(said).toContain("runs before anyone can reply");
+		expect(said).toContain("about 90.0s");
+		expect(said).toContain("under 20.0s");
+		expect(said).toContain("a summary nobody waits for");
 	});
 
 	it("says how often it was right and how often it needs to be", async () => {
 		const report = await trial(
-			scripted(() => "@ledger"),
-			"facilitate",
+			scripted(() => "Here is your summary: two are on hold."),
+			"summarise",
 		);
 
 		expect(report.verdict.join(" ")).toContain("Too often wrong");
 		expect(report.verdict.join(" ")).toContain("at least 90%");
 		// And which case, with what it actually answered, so the next choice is
 		// informed rather than another guess.
-		expect(report.verdict.join(" ")).toContain("Ends the exchange when an agent is only");
+		expect(report.verdict.join(" ")).toContain("Returns a title and summary as strict JSON");
 	});
 
 	it("says plainly when a model is good enough to rely on", async () => {
-		const report = await trial(scripted(answerFor), "facilitate");
+		const report = await trial(scripted(summaryAnswer), "summarise");
 
 		expect(report.rating).toBe("excellent");
 		expect(report.verdict.join(" ")).toContain("Good enough to rely on");
 	});
 });
 
-/** The answer the facilitator should give for whichever case this prompt is. */
-function answerFor(input: Models.StreamRequest): string {
-	const conversation = input.messages[0]?.content ?? "";
-	if (conversation.includes("do you want me to reopen it?")) return "nobody";
-	if (conversation.includes("It shows how much the order lifecycle matters")) return "nobody";
-	if (conversation.includes("they handle the policy exceptions")) return "nobody";
-	if (conversation.includes("anything I should know?")) return "@assistant";
-	return "@ledger";
+/** What a summariser that does its job answers, whichever case this prompt is. */
+function summaryAnswer(input: Models.StreamRequest): string {
+	return input.system.includes("strict JSON")
+		? '{"title":"September invoices","summary":"Two are on hold."}'
+		: "Two invoices are on hold until their purchase orders reopen.";
 }

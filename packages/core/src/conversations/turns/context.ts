@@ -349,8 +349,6 @@ function whyYou(context: TurnContext): string {
 	switch (context.reason) {
 		case "mention":
 			return "It is your turn because a person mentioned you.";
-		case "facilitator":
-			return "It is your turn because the last message was judged to be for you.";
 		case "collaboration":
 			return "It is your turn because another agent asked you to collaborate.";
 		case "resume":

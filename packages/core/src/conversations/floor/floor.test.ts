@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TurnReason } from "../../database/schema.ts";
-import { decideFloor, type FloorInput, MAX_AGENT_RUN } from "./floor.ts";
+import { decideFloor, type FloorInput } from "./floor.ts";
 
 /**
  * The floor decision on its own. What each layer does, and that the
@@ -13,9 +12,8 @@ const scout = "0199a3a0-0000-7000-8000-000000000009";
 
 function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
-		routing: { facilitator: true },
 		threadType: "chat",
-		author: { kind: "person", peopleOnly: false },
+		peopleOnly: false,
 		content: "Hello",
 		hostAgentId: host,
 		crew: [
@@ -25,7 +23,6 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 		],
 		agentParticipantIds: new Set([host]),
 		lastAgentSpeakerId: undefined,
-		agentRun: 0,
 		...overrides,
 	};
 }
@@ -46,15 +43,6 @@ describe("a person's message", () => {
 	it("goes to nobody when only people are mentioned", () => {
 		expect(decideFloor(input({ threadType: "routine", content: "@sam can you look?" }))).toEqual({
 			kind: "nobody",
-			why: "people-addressed",
-		});
-	});
-
-	it("is routed in a routine when several agents are present and the facilitator is on", () => {
-		expect(
-			decideFloor(input({ threadType: "routine", agentParticipantIds: new Set([host, reviewer]) })),
-		).toEqual({
-			kind: "facilitate",
 		});
 	});
 
@@ -69,43 +57,27 @@ describe("a person's message", () => {
 
 	it("goes to nobody in a chat when only people are mentioned", () => {
 		// The chat's agent used to answer anyway, only to say the message was not for it.
-		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({
-			kind: "nobody",
-			why: "people-addressed",
-		});
+		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
 	});
 
 	it("goes to nobody when written for people only, even with an agent mentioned", () => {
 		expect(
-			decideFloor(
-				input({
-					author: { kind: "person", peopleOnly: true },
-					content: "Should we let @reviewer take this?",
-				}),
-			),
-		).toEqual({ kind: "nobody", why: "people-addressed" });
+			decideFloor(input({ peopleOnly: true, content: "Should we let @reviewer take this?" })),
+		).toEqual({ kind: "nobody" });
 	});
 
-	it("does not let the facilitator introduce a speaker in a chat", () => {
+	it("goes to the chat's agent in a chat with several agents in it", () => {
 		expect(decideFloor(input({ agentParticipantIds: new Set([host, reviewer]) }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "default" }],
 		});
 	});
 
-	it("falls to the host with one agent present, even with the facilitator on", () => {
-		expect(decideFloor(input())).toEqual({
-			kind: "turns",
-			agents: [{ agentId: host, reason: "default" }],
-		});
-	});
-
-	it("falls to the agent that spoke last when the facilitator is off", () => {
+	it("falls to the agent that spoke last when nobody is mentioned", () => {
 		expect(
 			decideFloor(
 				input({
 					threadType: "routine",
-					routing: { facilitator: false },
 					agentParticipantIds: new Set([host, reviewer]),
 					lastAgentSpeakerId: reviewer,
 				}),
@@ -114,64 +86,9 @@ describe("a person's message", () => {
 	});
 
 	it("ignores a last speaker who has since left the thread", () => {
-		expect(
-			decideFloor(
-				input({
-					threadType: "routine",
-					routing: { facilitator: false },
-					lastAgentSpeakerId: scout,
-				}),
-			),
-		).toEqual({ kind: "turns", agents: [{ agentId: host, reason: "default" }] });
-	});
-});
-
-describe("an agent's message", () => {
-	const spoke = (spokeBecause: TurnReason = "facilitator") =>
-		({
-			kind: "agent",
-			agentId: host,
-			spokeBecause,
-		}) as const;
-
-	it("ends the exchange in a chat when the facilitator is off", () => {
-		expect(
-			decideFloor(
-				input({
-					author: spoke(),
-					routing: { facilitator: false },
-					agentRun: 1,
-				}),
-			),
-		).toEqual({ kind: "nobody", why: "exchange-over" });
-	});
-
-	it("does not facilitate after an agent speaks in a chat", () => {
-		expect(decideFloor(input({ author: spoke(), agentRun: 1 }))).toEqual({
-			kind: "nobody",
-			why: "exchange-over",
-		});
-	});
-
-	it("still facilitates after an agent speaks in a routine", () => {
-		expect(
-			decideFloor(input({ threadType: "routine", author: spoke("routine"), agentRun: 1 })),
-		).toEqual({ kind: "facilitate" });
-	});
-
-	it("gives the floor back to the person who named it, once it has answered", () => {
-		// Mentioning one agent means that agent and nobody else. Routing the
-		// reply let the host add a last word to an answer nobody asked it for.
-		expect(decideFloor(input({ author: spoke("mention"), agentRun: 1 }))).toEqual({
-			kind: "nobody",
-			why: "answered-the-person",
-		});
-	});
-
-	it("is paused once agents have talked among themselves for too long", () => {
-		expect(decideFloor(input({ author: spoke(), agentRun: MAX_AGENT_RUN }))).toEqual({
-			kind: "nobody",
-			why: "paused",
+		expect(decideFloor(input({ threadType: "routine", lastAgentSpeakerId: scout }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: host, reason: "default" }],
 		});
 	});
 });
