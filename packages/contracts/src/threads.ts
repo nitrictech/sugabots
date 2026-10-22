@@ -25,6 +25,7 @@ export const threadTypeSchema = Schema.Literals([
 	"pod_chat",
 	"collaboration",
 	"routine",
+	"routine_feed",
 	"system_agent",
 ]);
 

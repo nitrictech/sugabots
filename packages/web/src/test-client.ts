@@ -111,6 +111,7 @@ export const client = {
 			markRead: vi.fn(),
 			open: vi.fn(),
 			openPodChat: vi.fn(),
+			openRoutineFeed: vi.fn(),
 			startThread: vi.fn(),
 			threadFrom: vi.fn(),
 			markDone: vi.fn(),

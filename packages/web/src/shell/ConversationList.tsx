@@ -1,4 +1,4 @@
-import type { ChatList, ChatListItem, Pod } from "@sugabots/contracts";
+import type { ChatList, ChatListItem, ListedRoutine, Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, Library, Plus, Settings2, Users } from "lucide-react";
@@ -11,6 +11,7 @@ import {
 	conversationLink,
 	podChatLink,
 	podSettingsLink,
+	routineThreadLink,
 } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -55,6 +56,7 @@ export function ConversationList({
 				pod={pod}
 				podChat={pod.kind === "shared" ? (list.data?.podChat ?? "unopened") : undefined}
 				rows={rows}
+				routines={list.data?.routines ?? []}
 				hasBots={hasBots}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selected={selected}
@@ -88,6 +90,7 @@ export function ConversationListView({
 	pod,
 	podChat,
 	rows,
+	routines = [],
 	hasBots,
 	status,
 	selected,
@@ -99,6 +102,8 @@ export function ConversationListView({
 	/** The pod's chat, `unopened` until somebody first opens it. Absent from a Personal pod. */
 	podChat?: NonNullable<ChatList["podChat"]> | "unopened";
 	rows: readonly ChatListItem[];
+	/** The pod's routines, under their own heading, folded until opened. */
+	routines?: readonly ListedRoutine[];
 	/** Whether the pod has bots; one without says so, with the way to make the first. */
 	hasBots: boolean;
 	status: "loading" | "ready" | "failed";
@@ -112,6 +117,7 @@ export function ConversationListView({
 	const open = rows.filter((row) => row.conversation.doneAt === null);
 	const done = rows.filter((row) => row.conversation.doneAt !== null);
 	const [doneShown, setDoneShown] = useState(false);
+	const [routinesShown, setRoutinesShown] = useState(false);
 	const isSelected = (row: ChatListItem) =>
 		selected?.kind === "thread" && row.conversation.id === selected.conversationId;
 	const title = pod.name;
@@ -191,23 +197,36 @@ export function ConversationListView({
 							<ConversationRow row={row} pod={pod} selected={isSelected(row)} />
 						</li>
 					))}
+					{routines.length > 0 && (
+						<li className="pt-3.5">
+							<SectionToggle
+								label="Routines"
+								count={routines.length}
+								open={routinesShown}
+								onOpenChange={setRoutinesShown}
+							/>
+						</li>
+					)}
+					{routinesShown &&
+						routines.map((row) => (
+							<li key={row.routine.id}>
+								<RoutineRow
+									row={row}
+									pod={pod}
+									selected={
+										selected?.kind === "thread" && row.conversation?.id === selected.conversationId
+									}
+								/>
+							</li>
+						))}
 					{done.length > 0 && (
 						<li className="pt-3.5">
-							<button
-								type="button"
-								aria-expanded={doneShown}
-								onClick={() => setDoneShown(!doneShown)}
-								className="focus-ring flex w-full items-center gap-1.5 rounded-tail px-2.5 py-1 text-left font-medium text-[12px] text-subtle-foreground hover:text-muted-foreground"
-							>
-								<ChevronRight
-									aria-hidden
-									size={10}
-									strokeWidth={2.6}
-									className={cn("transition-transform duration-150", doneShown && "rotate-90")}
-								/>
-								Done
-								<span>{done.length}</span>
-							</button>
+							<SectionToggle
+								label="Done"
+								count={done.length}
+								open={doneShown}
+								onOpenChange={setDoneShown}
+							/>
 						</li>
 					)}
 					{doneShown &&
@@ -307,6 +326,80 @@ function ConversationRow({
 				{row.conversation.title}
 			</span>
 			<ChatMarker needsYou={needsYou} unreadMessages={row.unreadMessages} />
+		</Link>
+	);
+}
+
+/** A heading that folds the rows under it away, with how many there are. */
+function SectionToggle({
+	label,
+	count,
+	open,
+	onOpenChange,
+}: {
+	label: string;
+	count: number;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+}) {
+	return (
+		<button
+			type="button"
+			aria-expanded={open}
+			onClick={() => onOpenChange(!open)}
+			className="focus-ring flex w-full items-center gap-1.5 rounded-tail px-2.5 py-1 text-left font-medium text-[12px] text-subtle-foreground hover:text-muted-foreground"
+		>
+			<ChevronRight
+				aria-hidden
+				size={10}
+				strokeWidth={2.6}
+				className={cn("transition-transform duration-150", open && "rotate-90")}
+			/>
+			{label}
+			<span>{count}</span>
+		</button>
+	);
+}
+
+/**
+ * A routine on one line: the bot that runs it, its name, and at the end that
+ * it is paused, or a dot when a message in its thread mentions the viewer.
+ */
+function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; selected: boolean }) {
+	const { agent, routine } = row;
+	return (
+		<Link
+			{...(row.conversation
+				? conversationLink({ pod, conversationId: row.conversation.id })
+				: routineThreadLink(pod, routine.id))}
+			aria-current={selected ? "page" : undefined}
+			className={cn(
+				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
+				selected ? "bg-row-selected" : "hover:bg-row-hover",
+			)}
+		>
+			<AgentAvatar
+				color={agent.color}
+				face={agent.face}
+				shape={agent.shape}
+				size={26}
+				className="shrink-0"
+			/>
+			<span
+				className={cn(
+					"min-w-0 flex-1 truncate text-[14.5px]",
+					selected || row.mentionsYou
+						? "font-semibold text-foreground"
+						: "font-medium text-muted-foreground",
+				)}
+			>
+				{routine.name}
+			</span>
+			{routine.state === "paused" ? (
+				<span className="shrink-0 text-[12px] text-subtle-foreground">Paused</span>
+			) : (
+				<ChatMarker needsYou={row.mentionsYou} unreadMessages={0} />
+			)}
 		</Link>
 	);
 }

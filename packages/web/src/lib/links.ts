@@ -119,6 +119,15 @@ export function newThreadLink(pod: Pick<Pod, "slug">) {
 	});
 }
 
+/** A routine's own thread, where its runs post, opened first when it has none yet. */
+export function routineThreadLink(pod: Pick<Pod, "slug">, routineId: string) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/routines/$routine",
+		params: { pod: pod.slug, routine: routineId },
+	});
+}
+
 /** A pod's chat, opened first when nobody has opened it yet. */
 export function podChatLink(pod: Pick<Pod, "slug">) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod/chat", params: { pod: pod.slug } });

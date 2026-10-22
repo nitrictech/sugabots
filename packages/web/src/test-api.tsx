@@ -448,6 +448,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);
 		return Effect.succeed({
 			podChat: null,
+			routines: [],
 			items: agents
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({

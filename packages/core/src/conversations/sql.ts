@@ -45,6 +45,11 @@ export const routine = pgTable(
 		name: text("name").notNull(),
 		instructions: text("instructions").notNull(),
 		state: text("state").$type<RoutineState>().notNull().default("enabled"),
+		/**
+		 * When the routine paused itself after two failed runs in a row, until
+		 * somebody turns it on again or pauses it by hand.
+		 */
+		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		/** Set when the routine's own agent made it, at `createdById`'s request. */
@@ -60,6 +65,10 @@ export const routine = pgTable(
 			name: "routine_agent_workspace_fkey",
 		}).onDelete("cascade"),
 		check("routine_state_valid", sql`${table.state} in ('enabled', 'paused')`),
+		check(
+			"routine_paused_after_failures_valid",
+			sql`${table.pausedAfterFailuresAt} is null or ${table.state} = 'paused'`,
+		),
 		check("routine_results_valid", sql`${table.results} in ('keep_in_run', 'post_to_chat')`),
 		check(
 			"routine_created_by_agent_valid",
@@ -129,6 +138,17 @@ export const routineTrigger = pgTable(
 );
 
 /**
+ * The thread types people open and post in, each one a conversation of its
+ * own: a thread with a bot or between people (`conversation`), a pod's chat,
+ * and a routine's thread. The others are opened under one of these.
+ */
+export const CONVERSATION_TYPES = [
+	"conversation",
+	"pod_chat",
+	"routine_feed",
+] as const satisfies readonly ThreadType[];
+
+/**
  * Deleting a thread, by any route including its workspace's, pod's or host
  * agent's cascade, queues its blobs for deletion: see `blob_deletion`.
  */
@@ -171,13 +191,17 @@ export const thread = pgTable(
 		}),
 		/** When somebody marked the conversation done, until it is reopened. */
 		doneAt: timestamp("done_at", { withTimezone: true }),
+		/** On a routine's own thread: the routine, each of whose runs posts in it. */
+		routineId: uuid("routine_id").references((): AnyPgColumn => routine.id, {
+			onDelete: "cascade",
+		}),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'system_agent')`,
+			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'routine_feed', 'system_agent')`,
 		),
 		// A pod's chat is its people's, a conversation may be with a bot or only
 		// people, and every other thread is some bot's.
@@ -203,6 +227,12 @@ export const thread = pgTable(
 		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
 		index("thread_pod_host_updated_at_idx").on(table.podId, table.hostAgentId, table.updatedAt),
 		index("thread_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
+		check(
+			"thread_routine_valid",
+			sql`(${table.routineId} is not null) = (${table.type} = 'routine_feed')`,
+		),
+		// One thread per routine.
+		uniqueIndex("thread_routine_feed_idx").on(table.routineId),
 		// One chat per pod.
 		uniqueIndex("thread_pod_chat_idx").on(table.podId).where(sql`${table.type} = 'pod_chat'`),
 	],

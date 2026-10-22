@@ -17,6 +17,7 @@ import {
 	agent,
 	message,
 	messageReaction,
+	routineExecution,
 	thread,
 	threadParticipant,
 	threadRead,
@@ -83,12 +84,16 @@ export interface Interface {
 		thread: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">,
 		done: boolean,
 	) => Effect.Effect<void>;
-	/** The pod's chat, created on first use, with `initiatorUserId` in it. */
+	/** The pod's first chat, created on first use, with `initiatorUserId` in it when a person opened it. */
 	readonly openPodChat: (placement: {
 		workspaceId: string;
 		podId: string;
-		initiatorUserId: string;
+		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
+	/** The routine's own thread, where each of its runs posts, with its agent in it, created on first use. */
+	readonly openRoutineFeed: (
+		owned: Pick<schema.RoutineRow, "id" | "workspaceId" | "agentId" | "name"> & { podId: string },
+	) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
 	 * participant, and announces it. Posting a message again with the same
@@ -144,13 +149,21 @@ export interface Interface {
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
-	 * Posts a routine run's result into the agent's conversation
-	 * `threadId`, as a message from the run's agent, and announces it. A run
+	 * Posts a routine run's result into the routine's own thread, from the
+	 * run's agent and linked to the run, which it opens, and announces it. A run
 	 * has one result: posting a second fails.
 	 */
-	readonly postRoutineResult: (input: {
-		threadId: string;
+	readonly postRunResult: (input: {
 		run: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "agentId" | "routineName">;
+		content: string;
+	}) => Effect.Effect<schema.MessageRow>;
+	/**
+	 * Posts a copy of a routine run's result into the pod's chat `chatId`, from
+	 * the run's agent, and announces it.
+	 */
+	readonly postRunResultToChat: (input: {
+		chatId: string;
+		run: Pick<schema.RoutineExecutionRow, "agentId">;
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
@@ -235,6 +248,68 @@ export const make = Effect.gen(function* () {
 				]);
 			}
 			return reactions;
+		});
+
+	/**
+	 * Posts `content` into `threadId` from a routine run's agent `agentId`, and
+	 * announces it: as the run's `result`, which opens the run, when given.
+	 */
+	const postFromRunAgent = (input: {
+		threadId: string;
+		agentId: string;
+		content: string;
+		result?: NonNullable<Message["routineResultOf"]>;
+	}) =>
+		Effect.gen(function* () {
+			const [author] = yield* query((db) =>
+				db
+					.select({
+						id: agent.id,
+						name: agent.name,
+						handle: agent.handle,
+						color: agent.color,
+						face: agent.face,
+						shape: agent.shape,
+					})
+					.from(agent)
+					.where(eq(agent.id, input.agentId))
+					.limit(1),
+			);
+			if (!author) return yield* Effect.die(new Error("A routine run's agent is gone"));
+			const created = yield* query((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: input.threadId,
+						authorAgentId: input.agentId,
+						routineExecutionId: input.result?.executionId ?? null,
+						kind: "text",
+						status: "complete",
+						parts: [{ type: "text", text: input.content }],
+						content: input.content,
+					})
+					.returning(),
+			).pipe(Effect.flatMap(writtenRow("message")));
+			const now = yield* DateTime.nowAsDate;
+			const placed = yield* query((db) =>
+				db
+					.update(thread)
+					.set({ updatedAt: now })
+					.where(eq(thread.id, input.threadId))
+					.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
+			).pipe(Effect.flatMap(writtenRow("thread")));
+			yield* emit([
+				ConversationEvent.MessagePosted({
+					threadId: input.threadId,
+					workspaceId: placed.workspaceId,
+					podId: placed.podId,
+					message: {
+						...toMessage(created, authorRow(null, author)),
+						...(input.result && { routineResultOf: input.result }),
+					},
+				}),
+			]);
+			return created;
 		});
 
 	return Service.of({
@@ -634,66 +709,78 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.flatMap(writtenRow("message"))),
 			),
 
-		postRoutineResult: ({ threadId, run, content }) =>
+		openRoutineFeed: (owned) =>
 			operation(
-				"postRoutineResult",
+				"openRoutineFeed",
 				transaction(
 					Effect.gen(function* () {
-						const [author] = yield* query((db) =>
+						const id = yield* ids.next;
+						const [created] = yield* query((db) =>
 							db
-								.select({
-									id: agent.id,
-									name: agent.name,
-									handle: agent.handle,
-									color: agent.color,
-									face: agent.face,
-									shape: agent.shape,
-								})
-								.from(agent)
-								.where(eq(agent.id, run.agentId))
-								.limit(1),
-						);
-						if (!author) return yield* Effect.die(new Error("A routine run's agent is gone"));
-						const created = yield* query((db) =>
-							db
-								.insert(message)
+								.insert(thread)
 								.values({
-									threadId,
-									authorAgentId: run.agentId,
-									routineExecutionId: run.id,
-									kind: "text",
-									status: "complete",
-									parts: [{ type: "text", text: content }],
-									content,
+									id,
+									workspaceId: owned.workspaceId,
+									podId: owned.podId,
+									hostAgentId: owned.agentId,
+									conversationId: id,
+									routineId: owned.id,
+									type: "routine_feed",
+									title: owned.name,
+									initiatorUserId: null,
 								})
+								.onConflictDoNothing({ target: thread.routineId })
 								.returning(),
-						).pipe(Effect.flatMap(writtenRow("message")));
-						const now = yield* DateTime.nowAsDate;
-						const placed = yield* query((db) =>
-							db
-								.update(thread)
-								.set({ updatedAt: now })
-								.where(eq(thread.id, threadId))
-								.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
-						).pipe(Effect.flatMap(writtenRow("thread")));
-						yield* emit([
-							ConversationEvent.MessagePosted({
-								threadId,
-								workspaceId: placed.workspaceId,
-								podId: placed.podId,
-								message: {
-									...toMessage(created, authorRow(null, author)),
-									routineResultOf: {
-										executionId: run.id,
-										threadId: run.threadId,
-										routineName: run.routineName,
-									},
-								},
-							}),
-						]);
-						return created;
+						);
+						if (created) {
+							yield* query((db) =>
+								db.insert(threadParticipant).values({ threadId: id, agentId: owned.agentId }),
+							);
+							return created;
+						}
+						const [existing] = yield* query((db) =>
+							db.select().from(thread).where(eq(thread.routineId, owned.id)).limit(1),
+						);
+						if (!existing)
+							return yield* Effect.die(new Error("The routine's thread was not opened"));
+						return existing;
 					}),
 				),
+			),
+
+		postRunResult: ({ run, content }) =>
+			operation(
+				"postRunResult",
+				transaction(
+					Effect.gen(function* () {
+						const [runThread] = yield* query((db) =>
+							db
+								.select({ conversationId: thread.conversationId })
+								.from(thread)
+								.where(eq(thread.id, run.threadId))
+								.limit(1),
+						);
+						if (!runThread?.conversationId) {
+							return yield* Effect.die(new Error("A routine run's thread is in no routine thread"));
+						}
+						return yield* postFromRunAgent({
+							threadId: runThread.conversationId,
+							agentId: run.agentId,
+							content,
+							result: {
+								executionId: run.id,
+								threadId: run.threadId,
+								routineName: run.routineName,
+							},
+						});
+					}),
+				),
+			),
+
+		postRunResultToChat: ({ chatId, run, content }) =>
+			operation(
+				"postRunResultToChat",
+				transaction(postFromRunAgent({ threadId: chatId, agentId: run.agentId, content })),
 			),
 
 		openSystemAgentThread: (input) =>
@@ -772,8 +859,8 @@ export const make = Effect.gen(function* () {
 				"markRead",
 				transaction(
 					Effect.gen(function* () {
-						// The newest message's own time rather than this server's clock, so
-						// a message stamped later is never counted as read. As text, which
+						// The newest item's own time rather than this server's clock, so
+						// one stamped later is never counted as read. As text, which
 						// keeps the microseconds a `Date` would drop.
 						const [newest] = yield* query((db) => {
 							const streaming = alias(message, "streaming_message");
@@ -782,8 +869,17 @@ export const make = Effect.gen(function* () {
 								.select({ at: sql`min(${streaming.createdAt})` })
 								.from(streaming)
 								.where(and(eq(streaming.threadId, threadId), eq(streaming.status, "streaming")));
+							// A routine's thread lists its runs among its messages, so reading it reads them too.
+							const run = alias(thread, "run_thread");
+							const newestRun = db
+								.select({ at: sql`max(${routineExecution.acceptedAt})` })
+								.from(routineExecution)
+								.innerJoin(run, eq(run.id, routineExecution.threadId))
+								.where(eq(run.conversationId, threadId));
 							return db
-								.select({ at: sql<string | null>`max(${message.createdAt})::text` })
+								.select({
+									at: sql<string | null>`greatest(max(${message.createdAt}), (${newestRun}))::text`,
+								})
 								.from(message)
 								.where(
 									and(

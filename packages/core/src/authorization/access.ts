@@ -72,6 +72,7 @@ export class ResourceHidden
 			| "agent"
 			| "thread"
 			| "conversation"
+			| "routine"
 			| "message"
 			| "turn"
 			| "member"

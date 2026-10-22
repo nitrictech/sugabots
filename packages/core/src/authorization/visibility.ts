@@ -4,7 +4,7 @@ import { and, eq, inArray, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { thread } from "../database/schema.ts";
+import { CONVERSATION_TYPES, thread } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import {
 	type PodStanding,
@@ -33,7 +33,7 @@ export interface Interface {
 	readonly thread: (
 		threadId: string,
 	) => Effect.Effect<ThreadStanding, ResourceHidden, CurrentActor.Service>;
-	/** The conversation or pod's chat, by its id. */
+	/** The conversation by its id: a thread of one of the `CONVERSATION_TYPES`. */
 	readonly conversation: (
 		conversationId: string,
 	) => Effect.Effect<schema.ThreadRow, ResourceHidden, CurrentActor.Service>;
@@ -88,7 +88,7 @@ export const make = Effect.gen(function* () {
 									.where(
 										and(
 											eq(thread.id, conversationId),
-											inArray(thread.type, ["conversation", "pod_chat"]),
+											inArray(thread.type, [...CONVERSATION_TYPES]),
 											reachesPodFor(thread.podId, userId),
 										),
 									)

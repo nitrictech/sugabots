@@ -359,6 +359,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					];
 				});
 			return HttpResponse.json({
+				routines: [],
 				podChat:
 					pod?.kind === "shared" ? { conversation: storyPodChatFor(pod), unreadMessages: 0 } : null,
 				items,

@@ -2,6 +2,7 @@ import {
 	MAX_ROUTINE_TRIGGERS,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 	type Routine,
+	type RoutineResults,
 	type RoutineTrigger,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
@@ -49,6 +50,18 @@ export const inScope = (scope: Scope) =>
 		eq(routine.agentId, scope.agentId),
 		isNull(routine.deletedAt),
 	);
+
+/**
+ * Whether a run's result is posted in its pod's chat as well as in the
+ * routine's thread: when its routine says so, and its pod is shared, since
+ * only a shared pod has chats.
+ */
+export function resultGoesToPodChat(
+	results: RoutineResults,
+	podKind: schema.PodRow["kind"],
+): boolean {
+	return results === "post_to_chat" && podKind === "shared";
+}
 
 export function toRoutine(
 	row: schema.RoutineRow,
