@@ -51,6 +51,16 @@ const APP_PERMISSIONS = {
 
 export type Permissions = { readonly [K in keyof typeof APP_PERMISSIONS]?: "read" | "write" };
 
+/** What a sandbox's reads are signed in with: enough to clone, fetch, and look at issues, pull requests and CI. */
+export const READ_PERMISSIONS: Permissions = {
+	contents: "read",
+	pull_requests: "read",
+	issues: "read",
+	checks: "read",
+	actions: "read",
+	metadata: "read",
+};
+
 /**
  * The events a workspace's app is sent, chosen when it is made because an
  * app's events can later be changed only by its owner, on GitHub. Each is

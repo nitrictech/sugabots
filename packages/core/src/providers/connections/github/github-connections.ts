@@ -316,15 +316,38 @@ export class Connected {
 		return this.app.installation.account;
 	}
 
+	/**
+	 * GitHub's id for `repository`, as `repository()` gives it. Asking for
+	 * another is a mistake, not a token for every repository the app reaches.
+	 */
+	private idOf(repository: string): number {
+		const id = this.ids.get(repository);
+		if (id === undefined)
+			throw new Error(`${repository} isn't one of the connection's repositories`);
+		return id;
+	}
+
 	/** `repository` as the connection has it, if it is one of its, whatever its case. */
 	repository(repository: string): string | undefined {
 		return this.repositories.find((one) => one.toLowerCase() === repository.toLowerCase());
 	}
 
+	/** A read-only token for the connection's repositories. */
+	readToken() {
+		return Effect.map(
+			GitHub.accessToken(this.http, this.app, {
+				repositoryIds: [...this.ids.values()],
+				permissions: GitHub.READ_PERMISSIONS,
+			}),
+			(token) => token.token,
+		);
+	}
+
 	/**
 	 * What the pod's sandbox reads the repositories with: git's sign-in to the
 	 * account's paths, added outside the sandbox by its provider. Nothing for
-	 * GitHub's API, whose paths don't all name the account.
+	 * GitHub's API, whose paths don't all name the account: bots read through
+	 * the connection's tools instead.
 	 */
 	sandboxSignIn() {
 		return Effect.map(
@@ -347,6 +370,26 @@ export class Connected {
 				expiresAt: token.expiresAt,
 			}),
 		);
+	}
+
+	/** A token that can push to `repository` alone. */
+	writeCredential(repository: string) {
+		return Effect.map(
+			Effect.suspend(() =>
+				GitHub.accessToken(this.http, this.app, {
+					repositoryIds: [this.idOf(repository)],
+					permissions: { contents: "write" },
+				}),
+			),
+			(token): GitHub.GitCredential => ({ username: TOKEN_USERNAME, token: token.token }),
+		);
+	}
+
+	/** Runs `read` with a read-only token for the connection's repositories. */
+	read<A>(
+		read: (http: EgressHttpClient, token: string) => Effect.Effect<A, GitHub.GitHubRequestFailed>,
+	) {
+		return Effect.flatMap(this.readToken(), (token) => read(this.http, token));
 	}
 }
 

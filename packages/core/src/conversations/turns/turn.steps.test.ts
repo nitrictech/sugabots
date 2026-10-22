@@ -401,6 +401,7 @@ describe("runSegment", () => {
 							requests: { [REQUEST_NETWORK_ACCESS_TOOL]: request },
 							usable: true,
 							note: undefined,
+							workspace: undefined,
 							signsIn: false,
 						}),
 				},
