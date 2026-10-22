@@ -128,8 +128,7 @@ describe("what everybody sees", () => {
 		mount(page);
 
 		expect(await screen.findByRole("heading", { name: linear.name })).toBeDefined();
-		expect(screen.getByRole("group", { name: "Colour" })).toBeDefined();
-		expect(screen.getByRole("group", { name: "Eyes" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
 		expect(screen.queryByRole("tab")).toBeNull();
 	});
 
@@ -354,23 +353,58 @@ describe("an admin", () => {
 		expect(await screen.findByRole("alert")).toBeDefined();
 	});
 
-	it("changes the bot's colour and eyes as soon as they are picked", async () => {
-		answers({ color: "rose" });
+	it("saves the bot's colour, shape and eyes from its face's pencil together, on Save", async () => {
+		answers({ color: "rose", face: "wink", shape: "star" });
 		mount(page);
 
-		fireEvent.click(await screen.findByRole("radio", { name: "rose" }));
+		expect(screen.queryByRole("radio", { name: "rose" })).toBeNull();
+		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
+		const save = await screen.findByRole("button", { name: "Save" });
+		expect(save.hasAttribute("disabled")).toBe(true);
+		fireEvent.click(screen.getByRole("radio", { name: "rose" }));
+		fireEvent.click(screen.getByRole("radio", { name: "wink" }));
+		fireEvent.click(screen.getByRole("radio", { name: "star" }));
+		expect(client.api.agents.update).not.toHaveBeenCalled();
+
+		fireEvent.click(save);
 		await waitFor(() =>
 			expect(client.api.agents.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id },
-				payload: { color: "rose" },
+				payload: { color: "rose", face: "wink", shape: "star" },
 			}),
 		);
-		fireEvent.click(screen.getByRole("radio", { name: "wink" }));
-		await waitFor(() =>
-			expect(client.api.agents.update).toHaveBeenLastCalledWith({
-				params: { agentId: linear.id },
-				payload: { face: "wink" },
-			}),
+		expect(client.api.agents.update).toHaveBeenCalledOnce();
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Look" })).toBeNull());
+	});
+
+	it("drops the look's picks when it is closed without saving", async () => {
+		mount(page);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
+		fireEvent.click(await screen.findByRole("radio", { name: "rose" }));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Look" })).toBeNull());
+
+		fireEvent.click(screen.getByRole("button", { name: "Change look" }));
+		const color = await screen.findByRole("radio", { name: linear.color });
+		expect((color as HTMLInputElement).checked).toBe(true);
+		expect(client.api.agents.update).not.toHaveBeenCalled();
+	});
+
+	it("keeps the look's picks open and says why when saving them fails", async () => {
+		client.api.agents.update.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
+		);
+		mount(page);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
+		fireEvent.click(await screen.findByRole("radio", { name: "rose" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		const dialog = await screen.findByRole("dialog", { name: "Look" });
+		expect(await within(dialog).findByRole("alert")).toBeDefined();
+		expect((within(dialog).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
+			true,
 		);
 	});
 

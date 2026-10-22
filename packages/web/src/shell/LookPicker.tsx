@@ -1,4 +1,4 @@
-import { botColors, faceMarks, headShape } from "@sugabots/avatars";
+import { BotFace, type BotLook, botColors, faceMarks, headShape } from "@sugabots/avatars";
 import {
 	type AgentColor,
 	type AgentFace,
@@ -9,7 +9,8 @@ import {
 	type PodColor,
 	podColors,
 } from "@sugabots/contracts";
-import { useId } from "react";
+import { cn } from "cn";
+import { type ReactNode, useId } from "react";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
@@ -55,6 +56,110 @@ export function LookPicker({
 				<EyesPicker value={face} onChange={onFaceChange} />
 			</SettingsControlRow>
 		</>
+	);
+}
+
+/**
+ * The same choices stacked under their own labels, for the Look dialog, with
+ * each shape and each pair of eyes drawn on the bot as it is, so a choice
+ * shows what it will look like.
+ */
+export function LookSections({
+	color,
+	shape,
+	face,
+	onColorChange,
+	onShapeChange,
+	onFaceChange,
+}: {
+	color: AgentColor;
+	shape: AgentShape;
+	face: AgentFace;
+	onColorChange: (color: AgentColor) => void;
+	onShapeChange: (shape: AgentShape) => void;
+	onFaceChange: (face: AgentFace) => void;
+}) {
+	return (
+		<div className="flex flex-col gap-4">
+			<LookSection label="Colour">
+				<Swatches
+					colors={agentColors}
+					swatch={(one) => botColors[one].face}
+					value={color}
+					onChange={onColorChange}
+				/>
+			</LookSection>
+			<LookSection label="Shape">
+				<FaceChoices
+					legend="Shape"
+					options={agentShapes}
+					value={shape}
+					onChange={onShapeChange}
+					look={(one) => ({ color, shape: one, face })}
+					columns="grid-cols-7"
+				/>
+			</LookSection>
+			<LookSection label="Eyes">
+				<FaceChoices
+					legend="Eyes"
+					options={agentFaces}
+					value={face}
+					onChange={onFaceChange}
+					look={(one) => ({ color, shape, face: one })}
+					columns="grid-cols-7"
+				/>
+			</LookSection>
+		</div>
+	);
+}
+
+function LookSection({ label, children }: { label: string; children: ReactNode }) {
+	return (
+		<div className="flex flex-col gap-2">
+			<span className="text-[13px] text-muted-foreground">{label}</span>
+			{children}
+		</div>
+	);
+}
+
+/** One choice of a bot's look per chip, each drawn as the bot would look with it. */
+function FaceChoices<Option extends string>({
+	legend,
+	options,
+	value,
+	onChange,
+	look,
+	columns,
+}: {
+	legend: string;
+	options: readonly Option[];
+	value: Option;
+	onChange: (option: Option) => void;
+	look: (option: Option) => BotLook;
+	columns: string;
+}) {
+	const name = useId();
+	return (
+		<fieldset className={cn("m-0 grid gap-1.5 border-0 p-0", columns)}>
+			<legend className="sr-only">{legend}</legend>
+			{options.map((option) => (
+				<label
+					key={option}
+					className="grid aspect-square cursor-pointer place-items-center rounded-[10px] border border-transparent bg-chip transition-colors hover:bg-hover has-checked:border-ring has-checked:bg-person-avatar has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-2"
+				>
+					<input
+						type="radio"
+						name={name}
+						value={option}
+						aria-label={option}
+						checked={value === option}
+						onChange={() => onChange(option)}
+						className="sr-only"
+					/>
+					<BotFace {...look(option)} className="size-7" />
+				</label>
+			))}
+		</fieldset>
 	);
 }
 
