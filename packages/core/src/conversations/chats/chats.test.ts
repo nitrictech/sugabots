@@ -226,6 +226,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,
+				mentionsYou: false,
 			},
 			{
 				agent: expect.objectContaining({ id: agentId }),
@@ -234,6 +235,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,
+				mentionsYou: false,
 			},
 		]);
 	});
@@ -324,6 +326,56 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect.objectContaining({ id: messageId, threadId: podChat.id }),
 		]);
 		expect(prepared.context.askedBy).toBe(userId);
+	});
+
+	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const doneAt = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+				(item) => item.conversation.id === current.id,
+			)?.conversation.doneAt;
+
+		await chats.setDone({ conversationId: current.id, done: true });
+		expect(await doneAt()).toEqual(expect.any(String));
+
+		await chats.post({
+			conversationId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "One more thing",
+		});
+		expect(await doneAt()).toBeNull();
+	});
+
+	it("says when a message the person has not read mentions them", async () => {
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const mentioned = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+				(item) => item.conversation.id === current.id,
+			)?.mentionsYou;
+		expect(await mentioned()).toBe(false);
+
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: current.id,
+				authorUserId: administratorId,
+				kind: "text",
+				status: "complete",
+				parts: [{ type: "text", text: "@chat-member can you look?" }],
+				content: "@chat-member can you look?",
+			}),
+		);
+		expect(await mentioned()).toBe(true);
+
+		await chats.markRead(current.id);
+		expect(await mentioned()).toBe(false);
+	});
+
+	it("refuses to mark a pod's chat done", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+
+		await expect(chats.setDone({ conversationId: podChat.id, done: true })).rejects.toMatchObject({
+			_tag: "ResourceHidden",
+		});
 	});
 
 	it("starts one thread between people from a message in the pod's chat, quoting it", async () => {

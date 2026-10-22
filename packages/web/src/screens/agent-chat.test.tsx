@@ -42,6 +42,7 @@ const chat: Conversation = {
 	podId: linear.podId,
 	hostAgentId: linear.id,
 	title: `Conversation with ${linear.name}`,
+	doneAt: null,
 	createdAt: "2026-09-18T08:00:00.000Z",
 	updatedAt: "2026-09-18T09:30:00.000Z",
 };
@@ -246,6 +247,7 @@ function details(
 			status: "done",
 			parentThreadId: type === "collaboration" ? chat.id : null,
 			initiatorUserId: sam.id,
+			doneAt: null,
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T09:22:00.000Z",
 		},
@@ -274,6 +276,7 @@ function chatList({ listed }: { listed: boolean }) {
 						waitingOn: null,
 						unreadMessages: 0,
 						needsApproval: false,
+						mentionsYou: false,
 					},
 				]
 			: [],

@@ -9,6 +9,7 @@ export function toConversation(row: schema.ThreadRow): Conversation {
 		podId: row.podId,
 		hostAgentId: row.hostAgentId,
 		title: row.title,
+		doneAt: row.doneAt?.toISOString() ?? null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};

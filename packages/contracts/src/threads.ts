@@ -58,6 +58,8 @@ export const threadSchema = Schema.Struct({
 	status: Schema.Literals(["running", "done"]),
 	/** Set on a thread one agent opened to collaborate with another; the parent holds the collaboration card. */
 	parentThreadId: Schema.NullOr(uuidSchema),
+	/** When somebody marked the conversation done; null while it is open, and on any other thread. */
+	doneAt: Schema.NullOr(isoTimestampSchema),
 	initiatorUserId: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,

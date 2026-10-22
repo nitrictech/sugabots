@@ -142,6 +142,8 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				),
 			},
 		],
+		ConversationDoneChanged: ({ workspaceId, podId, threadId }) =>
+			threadChanged(workspaceId, podId, threadId),
 		ThreadSummarised: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
 		ThreadCompacted: ({ workspaceId, podId, threadId }) =>

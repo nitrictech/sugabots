@@ -1,7 +1,7 @@
 import type { ChatList, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Library, Plus, Settings2, Users } from "lucide-react";
+import { ChevronRight, Library, Plus, Settings2, Users } from "lucide-react";
 import { useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
@@ -109,6 +109,11 @@ export function ConversationListView({
 	className?: string;
 }) {
 	const backToChat = useBackToHere("Chat");
+	const open = rows.filter((row) => row.conversation.doneAt === null);
+	const done = rows.filter((row) => row.conversation.doneAt !== null);
+	const [doneShown, setDoneShown] = useState(false);
+	const isSelected = (row: ChatListItem) =>
+		selected?.kind === "thread" && row.conversation.id === selected.conversationId;
 	const title = pod.name;
 	const empty = status === "ready" && rows.length === 0 && !hasBots;
 	const noBots = (
@@ -174,24 +179,43 @@ export function ConversationListView({
 							<li>
 								<PodChatRow pod={pod} podChat={podChat} selected={selected?.kind === "podChat"} />
 							</li>
-							{rows.length > 0 && (
+							{open.length > 0 && (
 								<li className="px-2.5 pt-3.5 pb-1 font-medium text-[12px] text-subtle-foreground">
 									Threads
 								</li>
 							)}
 						</>
 					)}
-					{rows.map((row) => (
+					{open.map((row) => (
 						<li key={row.conversation.id}>
-							<ConversationRow
-								row={row}
-								pod={pod}
-								selected={
-									selected?.kind === "thread" && row.conversation.id === selected.conversationId
-								}
-							/>
+							<ConversationRow row={row} pod={pod} selected={isSelected(row)} />
 						</li>
 					))}
+					{done.length > 0 && (
+						<li className="pt-3.5">
+							<button
+								type="button"
+								aria-expanded={doneShown}
+								onClick={() => setDoneShown(!doneShown)}
+								className="focus-ring flex w-full items-center gap-1.5 rounded-tail px-2.5 py-1 text-left font-medium text-[12px] text-subtle-foreground hover:text-muted-foreground"
+							>
+								<ChevronRight
+									aria-hidden
+									size={10}
+									strokeWidth={2.6}
+									className={cn("transition-transform duration-150", doneShown && "rotate-90")}
+								/>
+								Done
+								<span>{done.length}</span>
+							</button>
+						</li>
+					)}
+					{doneShown &&
+						done.map((row) => (
+							<li key={row.conversation.id}>
+								<ConversationRow row={row} pod={pod} selected={isSelected(row)} />
+							</li>
+						))}
 				</ul>
 			)}
 			{empty && noBots}
@@ -231,7 +255,7 @@ function PodChatRow({
 			>
 				Pod chat
 			</span>
-			<ChatMarker needsApproval={false} unreadMessages={unreadMessages} />
+			<ChatMarker needsYou={false} unreadMessages={unreadMessages} />
 		</Link>
 	);
 }
@@ -250,7 +274,9 @@ function ConversationRow({
 	selected: boolean;
 }) {
 	const { agent } = row;
-	const lit = selected || row.needsApproval || row.unreadMessages > 0;
+	const needsYou = row.needsApproval || row.mentionsYou;
+	const lit = selected || needsYou || row.unreadMessages > 0;
+	const done = row.conversation.doneAt !== null;
 	return (
 		<Link
 			{...conversationLink({ pod, conversationId: row.conversation.id })}
@@ -274,12 +300,13 @@ function ConversationRow({
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",
-					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+					lit ? "font-semibold" : "font-medium",
+					lit && !done ? "text-foreground" : "text-muted-foreground",
 				)}
 			>
 				{row.conversation.title}
 			</span>
-			<ChatMarker needsApproval={row.needsApproval} unreadMessages={row.unreadMessages} />
+			<ChatMarker needsYou={needsYou} unreadMessages={row.unreadMessages} />
 		</Link>
 	);
 }
@@ -297,20 +324,21 @@ function PeopleTile() {
 }
 
 /**
- * What a chat's row says of it, at the end of its preview: that it needs
- * the viewer's decision, otherwise how many messages are unread.
+ * What a chat's row says of it at its end: that it needs the viewer, as a
+ * dot, otherwise how many messages are unread.
  */
 function ChatMarker({
-	needsApproval,
+	needsYou,
 	unreadMessages,
 }: {
-	needsApproval: boolean;
+	/** A decision waits on the viewer, or an unread message mentions them. */
+	needsYou: boolean;
 	unreadMessages: number;
 }) {
-	if (needsApproval) {
+	if (needsYou) {
 		return (
-			<span className="flex h-5 shrink-0 items-center rounded-tail bg-primary px-[7px] font-semibold text-[11.5px] text-primary-foreground">
-				Needs you
+			<span className="mr-1.5 size-2 shrink-0 rounded-full bg-primary">
+				<span className="sr-only">Needs you</span>
 			</span>
 		);
 	}

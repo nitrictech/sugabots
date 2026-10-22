@@ -63,6 +63,7 @@ const collaboration: ThreadDetails = {
 		status: "running",
 		parentThreadId: null,
 		initiatorUserId: user.id,
+		doneAt: null,
 		createdAt: "2026-09-18T06:04:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",
 	},

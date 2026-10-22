@@ -74,6 +74,15 @@ export interface Interface {
 		title: string;
 		initiatorUserId: string;
 	}) => Effect.Effect<{ thread: schema.ThreadRow; opened: boolean }>;
+	/**
+	 * Marks the conversation `thread` done, or reopens it, and announces it
+	 * when that changed it. Only a conversation is ever done, so any other
+	 * thread is left as it is.
+	 */
+	readonly setDone: (
+		thread: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">,
+		done: boolean,
+	) => Effect.Effect<void>;
 	/** The pod's chat, created on first use, with `initiatorUserId` in it. */
 	readonly openPodChat: (placement: {
 		workspaceId: string;
@@ -349,6 +358,36 @@ export const make = Effect.gen(function* () {
 							}),
 						]);
 						return { thread: created, opened: true };
+					}),
+				),
+			),
+
+		setDone: (conversation, done) =>
+			operation(
+				"setDone",
+				transaction(
+					Effect.gen(function* () {
+						const changed = yield* query((db) =>
+							db
+								.update(thread)
+								.set({ doneAt: done ? sql`now()` : null })
+								.where(
+									and(
+										eq(thread.id, conversation.id),
+										eq(thread.type, "conversation"),
+										done ? sql`${thread.doneAt} is null` : sql`${thread.doneAt} is not null`,
+									),
+								)
+								.returning({ id: thread.id }),
+						);
+						if (changed.length === 0) return;
+						yield* emit([
+							ConversationEvent.ConversationDoneChanged({
+								workspaceId: conversation.workspaceId,
+								podId: conversation.podId,
+								threadId: conversation.id,
+							}),
+						]);
 					}),
 				),
 			),

@@ -340,6 +340,7 @@ export function conversationWith(agent: Agent): Conversation {
 		podId: agent.podId,
 		hostAgentId: agent.id,
 		title: `Conversation with ${agent.name}`,
+		doneAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
@@ -365,6 +366,7 @@ export function conversationDetails(agent: Agent): ThreadDetails {
 			status: "done",
 			parentThreadId: null,
 			initiatorUserId: null,
+			doneAt: null,
 		},
 		routineExecution: null,
 		startedFrom: null,
@@ -455,6 +457,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 					waitingOn: null,
 					unreadMessages: 0,
 					needsApproval: false,
+					mentionsYou: false,
 				})),
 		});
 	});

@@ -107,6 +107,14 @@ export interface Interface {
 	readonly threadFrom: (
 		messageId: string,
 	) => Effect.Effect<Conversation, ResourceHidden, CurrentActor.Service>;
+	/**
+	 * Marks the conversation done, or reopens it. A pod's chat is never done,
+	 * so it is hidden from this.
+	 */
+	readonly setDone: (input: {
+		conversationId: string;
+		done: boolean;
+	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/** Records that the actor has read the conversation up to its newest finished message. */
 	readonly markRead: (
 		conversationId: string,
@@ -198,6 +206,8 @@ export const make = Effect.gen(function* () {
 							attachments: input.attachments ?? [],
 						});
 						if (posted._tag === "AlreadyPosted") return posted.message;
+						// Something new in a done conversation is not left where nobody looks.
+						yield* threads.setDone(visible, false);
 						// Checked once the message is known to be new, so sending it again
 						// still returns it; refusing here rolls the post back.
 						if (visible.hostAgentId && (yield* hostModelOf(visible.hostAgentId)) === null) {
@@ -291,6 +301,20 @@ export const make = Effect.gen(function* () {
 							initiatorUserId: userId,
 						});
 						return toConversation(started.thread);
+					}),
+				),
+			),
+
+		setDone: (input) =>
+			operation(
+				"setDone",
+				transaction(
+					Effect.gen(function* () {
+						const conversation = yield* visibility.conversation(input.conversationId);
+						if (conversation.type !== "conversation") {
+							return yield* new ResourceHidden({ resource: "conversation" });
+						}
+						yield* threads.setDone(conversation, input.done);
 					}),
 				),
 			),

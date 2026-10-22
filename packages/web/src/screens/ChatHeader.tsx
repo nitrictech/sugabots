@@ -1,9 +1,10 @@
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ChevronLeft, Info } from "lucide-react";
+import { ChevronLeft, CircleCheck, Info, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
 
@@ -29,6 +30,7 @@ export type ChatPlace =
 export function ChatHeader({
 	agent,
 	title,
+	done,
 	pod,
 	conversationId,
 	place,
@@ -38,6 +40,8 @@ export function ChatHeader({
 	agent: Agent;
 	/** The thread's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
+	/** Whether the thread is done, and how to mark it done or reopen it. */
+	done?: DoneToggle;
 	pod: Pod;
 	conversationId: string;
 	place: ChatPlace;
@@ -84,6 +88,7 @@ export function ChatHeader({
 				<span className="flex-1" />
 			)}
 			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
+			{done && <DoneButton {...done} />}
 			{place.kind === "away" ? (
 				place.trailing
 			) : staged ? null : (
@@ -110,11 +115,14 @@ export function ChatHeader({
 export function PeopleChatHeader({
 	title,
 	description,
+	done,
 	pod,
 	place,
 }: {
 	title: string;
 	description?: string;
+	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
+	done?: DoneToggle;
 	pod: Pod;
 	place: ChatPlace;
 }) {
@@ -134,8 +142,32 @@ export function PeopleChatHeader({
 			) : (
 				<span className="flex-1" />
 			)}
+			{done && <DoneButton {...done} />}
 			{place.kind === "away" && place.trailing}
 		</header>
+	);
+}
+
+/** Whether a thread is done, and what marks it done or reopens it. */
+export interface DoneToggle {
+	isDone: boolean;
+	onChange: (done: boolean) => void;
+}
+
+/**
+ * Marks the thread done, which moves it to the list's Done, or reopens it,
+ * saying in words which it will do.
+ */
+function DoneButton({ isDone, onChange }: DoneToggle) {
+	return (
+		<Button size="sm" variant="outline" onClick={() => onChange(!isDone)}>
+			{isDone ? (
+				<RotateCcw aria-hidden size={14} strokeWidth={2} />
+			) : (
+				<CircleCheck aria-hidden size={14} strokeWidth={2} />
+			)}
+			{isDone ? "Reopen" : "Mark done"}
+		</Button>
 	);
 }
 

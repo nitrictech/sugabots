@@ -71,6 +71,7 @@ export function storyConversationFor(agent: Agent): Conversation {
 		podId: agent.podId,
 		hostAgentId: agent.id,
 		title: `Conversation with ${agent.name}`,
+		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
@@ -157,6 +158,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 			status: "done",
 			parentThreadId: null,
 			initiatorUserId: storyUser.id,
+			doneAt: null,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
 		},
@@ -181,6 +183,7 @@ export function storyPodChatFor(pod: Pod): Conversation {
 		podId: pod.id,
 		hostAgentId: null,
 		title: "Pod chat",
+		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
@@ -202,6 +205,7 @@ export function storyPodChatDetails(
 			status: "done",
 			parentThreadId: null,
 			initiatorUserId: storyUser.id,
+			doneAt: null,
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
@@ -350,6 +354,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 							waitingOn: null,
 							unreadMessages: 0,
 							needsApproval: false,
+							mentionsYou: false,
 						},
 					];
 				});

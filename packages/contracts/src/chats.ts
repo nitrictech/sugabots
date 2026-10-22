@@ -42,6 +42,8 @@ export const conversationSchema = Schema.Struct({
 	/** The bot it is with; null on the pod's chat, which is the pod's people's. */
 	hostAgentId: Schema.NullOr(uuidSchema),
 	title: Schema.String,
+	/** When somebody marked it done; null while it is open. */
+	doneAt: Schema.NullOr(isoTimestampSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });
@@ -87,6 +89,8 @@ export const chatListItemSchema = Schema.Struct({
 	unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	/** A tool call in the conversation is waiting for a decision the person may make. */
 	needsApproval: Schema.Boolean,
+	/** A message the person has not read mentions them. */
+	mentionsYou: Schema.Boolean,
 });
 
 export type ChatListItem = typeof chatListItemSchema.Type;
