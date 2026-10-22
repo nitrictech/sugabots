@@ -110,6 +110,15 @@ export function conversationLink(
 	});
 }
 
+/** Starting a thread in a pod, from its first message. */
+export function newThreadLink(pod: Pick<Pod, "slug">) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/threads/new",
+		params: { pod: pod.slug },
+	});
+}
+
 /** A pod's chat, opened first when nobody has opened it yet. */
 export function podChatLink(pod: Pick<Pod, "slug">) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod/chat", params: { pod: pod.slug } });

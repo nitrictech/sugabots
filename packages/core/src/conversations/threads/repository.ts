@@ -61,6 +61,19 @@ export interface Interface {
 		hostAgentId: string;
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
+	/**
+	 * The thread hanging off the message `originMessageId` in the pod's chat
+	 * `podChat`, opened and announced when it has none: with the bot
+	 * `hostAgentId`, or between people when it is null, and `initiatorUserId`.
+	 * A message has one thread, so `opened` is false when it already had it.
+	 */
+	readonly openThread: (input: {
+		podChat: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">;
+		originMessageId: string;
+		hostAgentId: string | null;
+		title: string;
+		initiatorUserId: string;
+	}) => Effect.Effect<{ thread: schema.ThreadRow; opened: boolean }>;
 	/** The pod's chat, created on first use, with `initiatorUserId` in it. */
 	readonly openPodChat: (placement: {
 		workspaceId: string;
@@ -276,6 +289,66 @@ export const make = Effect.gen(function* () {
 								]),
 						);
 						return created;
+					}),
+				),
+			),
+
+		openThread: (input) =>
+			operation(
+				"openThread",
+				transaction(
+					Effect.gen(function* () {
+						// Two people starting a thread from one message at once open one.
+						yield* query((db) =>
+							db.execute(
+								sql`select pg_advisory_xact_lock(hashtextextended(${`thread-from:${input.originMessageId}`}, 0))`,
+							),
+						);
+						const [existing] = yield* query((db) =>
+							db
+								.select()
+								.from(thread)
+								.where(eq(thread.originMessageId, input.originMessageId))
+								.limit(1),
+						);
+						if (existing) return { thread: existing, opened: false };
+						const id = yield* ids.next;
+						const created = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: input.podChat.workspaceId,
+									podId: input.podChat.podId,
+									hostAgentId: input.hostAgentId,
+									conversationId: id,
+									parentThreadId: input.podChat.id,
+									type: "conversation",
+									title: input.title,
+									initiatorUserId: input.initiatorUserId,
+									originMessageId: input.originMessageId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						yield* query((db) =>
+							db
+								.insert(threadParticipant)
+								.values([
+									{ threadId: created.id, userId: input.initiatorUserId },
+									...(input.hostAgentId
+										? [{ threadId: created.id, agentId: input.hostAgentId }]
+										: []),
+								]),
+						);
+						yield* emit([
+							ConversationEvent.ThreadOpened({
+								workspaceId: created.workspaceId,
+								podId: created.podId,
+								podChatId: input.podChat.id,
+								threadId: created.id,
+							}),
+						]);
+						return { thread: created, opened: true };
 					}),
 				),
 			),

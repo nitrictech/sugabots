@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Library, Plus, Settings2, Users } from "lucide-react";
 import { useState } from "react";
+import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import {
 	agentChatLink,
@@ -19,12 +20,12 @@ import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
-/** Which row of the list is open: the pod's chat, or a bot's conversation. */
-export type ListSelection = { kind: "podChat" } | { kind: "bot"; agentId: string };
+/** Which row of the list is open: the pod's chat, or a thread. */
+export type ListSelection = { kind: "podChat" } | { kind: "thread"; conversationId: string };
 
 /**
  * The column of conversations for the pod chosen on the rail: a shared pod's
- * chat first, then one row per bot, newest message first.
+ * chat first, then its threads, newest message first.
  */
 export function ConversationList({
 	pod,
@@ -39,6 +40,8 @@ export function ConversationList({
 	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
+	const { agents } = useAgents();
+	const hasBots = agents?.some((agent) => agent.podId === pod.id) ?? true;
 	const emptyState: EmptyList = {
 		title: `No bots in ${pod.name} yet`,
 		hint: newBot ? undefined : "Someone who runs this pod can add one.",
@@ -52,6 +55,7 @@ export function ConversationList({
 				pod={pod}
 				podChat={pod.kind === "shared" ? (list.data?.podChat ?? "unopened") : undefined}
 				rows={rows}
+				hasBots={hasBots}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selected={selected}
 				onNewBot={newBot}
@@ -84,6 +88,7 @@ export function ConversationListView({
 	pod,
 	podChat,
 	rows,
+	hasBots,
 	status,
 	selected,
 	onNewBot,
@@ -94,6 +99,8 @@ export function ConversationListView({
 	/** The pod's chat, `unopened` until somebody first opens it. Absent from a Personal pod. */
 	podChat?: NonNullable<ChatList["podChat"]> | "unopened";
 	rows: readonly ChatListItem[];
+	/** Whether the pod has bots; one without says so, with the way to make the first. */
+	hasBots: boolean;
 	status: "loading" | "ready" | "failed";
 	selected?: ListSelection;
 	/** Absent when the viewer may not make a bot here. */
@@ -103,7 +110,7 @@ export function ConversationListView({
 }) {
 	const backToChat = useBackToHere("Chat");
 	const title = pod.name;
-	const empty = status === "ready" && rows.length === 0;
+	const empty = status === "ready" && rows.length === 0 && !hasBots;
 	const noBots = (
 		// A little above the middle, as the design sets it, with the one next step under it.
 		<div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-6 pb-[18%] text-center">
@@ -175,11 +182,13 @@ export function ConversationListView({
 						</>
 					)}
 					{rows.map((row) => (
-						<li key={row.agent.id}>
+						<li key={row.conversation.id}>
 							<ConversationRow
 								row={row}
 								pod={pod}
-								selected={selected?.kind === "bot" && row.agent.id === selected.agentId}
+								selected={
+									selected?.kind === "thread" && row.conversation.id === selected.conversationId
+								}
 							/>
 						</li>
 					))}
@@ -213,12 +222,7 @@ function PodChatRow({
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
-			<span
-				aria-hidden
-				className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip-strong text-muted-foreground"
-			>
-				<Users size={14} strokeWidth={2} />
-			</span>
+			<PeopleTile />
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",
@@ -249,32 +253,46 @@ function ConversationRow({
 	const lit = selected || row.needsApproval || row.unreadMessages > 0;
 	return (
 		<Link
-			{...(row.conversation
-				? conversationLink({ pod, conversationId: row.conversation.id })
-				: agentChatLink({ pod, agent }))}
+			{...conversationLink({ pod, conversationId: row.conversation.id })}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
-			<AgentAvatar
-				color={agent.color}
-				face={agent.face}
-				shape={agent.shape}
-				size={26}
-				className="shrink-0"
-			/>
+			{agent ? (
+				<AgentAvatar
+					color={agent.color}
+					face={agent.face}
+					shape={agent.shape}
+					size={26}
+					className="shrink-0"
+				/>
+			) : (
+				<PeopleTile />
+			)}
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",
 					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
 				)}
 			>
-				{agent.name}
+				{row.conversation.title}
 			</span>
 			<ChatMarker needsApproval={row.needsApproval} unreadMessages={row.unreadMessages} />
 		</Link>
+	);
+}
+
+/** Where a row has no bot's face, as the pod's chat and threads between people do. */
+function PeopleTile() {
+	return (
+		<span
+			aria-hidden
+			className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip-strong text-muted-foreground"
+		>
+			<Users size={14} strokeWidth={2} />
+		</span>
 	);
 }
 

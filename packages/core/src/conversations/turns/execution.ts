@@ -161,9 +161,12 @@ export const make = Effect.gen(function* () {
 							loadContextWindow(db, loaded.workspaceId, model),
 						);
 						const acceptsImages = yield* modelAcceptsImages(loaded.workspaceId, model);
-						const messages = loaded.messages
+						const inThread = loaded.messages
 							.reverse()
 							.map((stored) => messageFromRelations(stored));
+						// A thread started from a message in a pod's chat begins with that message, which stays there.
+						const startedFrom = loaded.origin ? messageFromRelations(loaded.origin) : undefined;
+						const messages = startedFrom ? [startedFrom, ...inThread] : inThread;
 						const trigger = messages.find(({ id }) => id === request.triggerMessageId);
 						return {
 							_tag: "Prepared",
@@ -202,6 +205,7 @@ export const make = Effect.gen(function* () {
 								),
 								windowTokens,
 								compaction: loaded.compaction ?? undefined,
+								startedFrom,
 								messages: newestWithinLimit(
 									messages,
 									(message) => estimatedTokens(messageTextWithPlacedParts(message)),
@@ -307,6 +311,11 @@ export interface TurnContext {
 	/** What the Compaction agent left in place of older history, once the thread has been compacted. */
 	compaction: TurnCompaction | undefined;
 	/**
+	 * On a thread started from a pod's chat: the message in the chat it hangs
+	 * off, which `messages` begins with while it fits.
+	 */
+	startedFrom: Message | undefined;
+	/**
 	 * The newest completed messages, oldest first: those since the compaction
 	 * kept them word for word, as many as fit the agent's history limit.
 	 */
@@ -341,8 +350,9 @@ function notRunnable(reason: string, ended?: Ended): NotRunnable {
 /**
  * Everything the model is told about the thread, in one statement: the
  * thread with its workspace, its pod and the crew placed there, the people and
- * agents in it, its compaction, and its newest completed messages since the
- * compaction kept them, with the parts placed in them.
+ * agents in it, its compaction, the message in a pod's chat it was started
+ * from, and its newest completed messages since the compaction kept them, with
+ * the parts placed in them.
  */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
@@ -388,6 +398,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 				with: { user: personColumns, agent: agentColumns },
 			},
 			compaction: { columns: { summary: true, historyStartsAt: true, keptFrom: true } },
+			origin: { with: messageRelations },
 			// The reply being written is `streaming`, so this leaves it out.
 			messages: {
 				where: {

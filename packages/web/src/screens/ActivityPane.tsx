@@ -20,6 +20,7 @@ export function ActivityPane({
 	pod,
 	agent,
 	conversationId,
+	isPodChat,
 	user,
 	threadPageId,
 	focusMessageId,
@@ -34,6 +35,8 @@ export function ActivityPane({
 	agent: Agent | null;
 	/** The conversation the item is in, which is with `agent`. */
 	conversationId: string;
+	/** Whether the conversation is the pod's chat, rather than a thread. */
+	isPodChat: boolean;
 	user: SessionUser;
 	/** A run or collaboration shown as the page, in place of the chat. */
 	threadPageId?: string;
@@ -68,6 +71,7 @@ export function ActivityPane({
 	return (
 		<ConversationPage
 			agent={agent}
+			isPodChat={isPodChat}
 			pod={pod}
 			conversationId={conversationId}
 			user={user}

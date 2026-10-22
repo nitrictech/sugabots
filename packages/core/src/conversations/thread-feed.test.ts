@@ -270,58 +270,38 @@ describe("the thread feed", () => {
 		]);
 	});
 
-	it.each([
-		{ recipientConversationId: crypto.randomUUID(), listed: "in the collaborator's chat" },
-		{ recipientConversationId: null, listed: "nowhere else" },
-	])(
-		"shows an opened collaboration in the asking reply, listed $listed",
-		({ recipientConversationId }) => {
-			expect(
-				sent(
-					ConversationEvent.CollaborationOpened({
-						parentThreadId: threadId,
-						parentMessageId: "m1",
-						collaboration,
-						workspaceId,
-						podId,
-						recipientConversationId,
-						collaboratorAgentId: "a1",
-						briefMessageId: "m2",
-					}),
-				),
-			).toEqual([
-				{
-					channel: threadChannel(threadId),
-					event: expect.objectContaining({
-						type: "collaboration.updated",
-						threadId,
-						messageId: "m1",
-						collaboration,
-					}),
-				},
-				{
-					channel: workspaceChannel(workspaceId),
-					event: expect.objectContaining({
-						type: "thread.changed",
-						threadId: collaboration.threadId,
-					}),
-				},
-				...(recipientConversationId
-					? [
-							{
-								channel: workspaceChannel(workspaceId),
-								event: expect.objectContaining({
-									type: "conversation.thread_changed",
-									conversationId: recipientConversationId,
-									threadId: collaboration.threadId,
-									threadType: "collaboration",
-								}),
-							},
-						]
-					: []),
-			]);
-		},
-	);
+	it("shows an opened collaboration in the asking reply, and lists its thread", () => {
+		expect(
+			sent(
+				ConversationEvent.CollaborationOpened({
+					parentThreadId: threadId,
+					parentMessageId: "m1",
+					collaboration,
+					workspaceId,
+					podId,
+					collaboratorAgentId: "a1",
+					briefMessageId: "m2",
+				}),
+			),
+		).toEqual([
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({
+					type: "collaboration.updated",
+					threadId,
+					messageId: "m1",
+					collaboration,
+				}),
+			},
+			{
+				channel: workspaceChannel(workspaceId),
+				event: expect.objectContaining({
+					type: "thread.changed",
+					threadId: collaboration.threadId,
+				}),
+			},
+		]);
+	});
 
 	it("tells each thread a cancelled routine run touched, and the workspace, which thread changed", () => {
 		const childId = crypto.randomUUID();

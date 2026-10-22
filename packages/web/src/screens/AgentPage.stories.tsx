@@ -90,7 +90,7 @@ export const Conversation = meta.story({
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
 		await expect(
-			canvas.getByRole("heading", { name: growthDesk.name, level: 1 }),
+			canvas.getByRole("heading", { name: `Conversation with ${growthDesk.name}`, level: 1 }),
 		).toBeInTheDocument();
 	},
 });
@@ -137,11 +137,94 @@ export const PodChat = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
-		await expect(canvas.getByText(`Everyone in ${revenue.name}.`)).toBeInTheDocument();
+		await expect(
+			canvas.getByText(`Everyone in ${revenue.name}. Mention a bot to start a thread with it.`),
+		).toBeInTheDocument();
 		await expect(
 			canvas.getByRole("textbox", { name: `Message ${revenue.name}` }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
+	},
+});
+
+/**
+ * A thread started from a message sits under it as a collaboration does, with
+ * the faces of who started it and its bot, when it last moved and how many
+ * replies it has. Naming a bot in the draft says sending starts a thread with it.
+ */
+export const PodChatStartsAThread = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...appHandlers({
+				podChatMessages: { [revenue.id]: podChat },
+				podChatThreads: {
+					[revenue.id]: [
+						{
+							kind: "thread",
+							id: "0199a3a0-0000-7000-8000-00000000c991",
+							threadId: "0199a3a0-0000-7000-8000-00000000c991",
+							originMessageId: podChat[0]?.id ?? null,
+							title: "Pricing for the Northwind renewal",
+							agent: {
+								kind: "agent",
+								id: growthDesk.id,
+								name: growthDesk.name,
+								handle: growthDesk.handle,
+								color: growthDesk.color,
+								face: growthDesk.face,
+								shape: growthDesk.shape,
+							},
+							replies: 3,
+							lastReplyAt: "2026-09-18T06:20:00.000Z",
+							createdAt: "2026-09-18T06:14:00.000Z",
+						},
+					],
+				},
+			}),
+		);
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas, userEvent }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const thread = within(log).getByRole("button", {
+			name: /^Open thread: Pricing for the Northwind renewal/,
+		});
+		await expect(thread).toHaveTextContent("Pricing for the Northwind renewal");
+		await expect(thread).toHaveTextContent("Last reply");
+		await expect(thread).toHaveTextContent("3 replies");
+		// Under the message it was started from, before the next one.
+		const started = within(log).getByText("Northwind signed. Thanks for the push, everyone.");
+		const next = within(log).getByText("Drinks on Friday?");
+		await expect(
+			started.compareDocumentPosition(thread) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		await expect(
+			thread.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		await expect(canvas.getByText("Mention a bot to start a thread.")).toBeInTheDocument();
+		await userEvent.type(
+			canvas.getByRole("textbox", { name: `Message ${revenue.name}` }),
+			`@${growthDesk.handle} draft the renewal note with @${accountManager.handle} `,
+		);
+		// The first bot named is the one the thread is with; the other is only mentioned.
+		await expect(canvas.getByText(`Thread with ${growthDesk.name}`)).toBeInTheDocument();
+		await expect(
+			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
+		).toBeInTheDocument();
+	},
+});
+
+/** Starting a thread from its first message, with a chip for each of the pod's bots. */
+export const NewThread = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/new`} />,
+	play: async ({ canvas, userEvent }) => {
+		await canvas.findByRole(
+			"heading",
+			{ name: `New thread in ${revenue.name}`, level: 2 },
+			{ timeout: 10_000 },
+		);
+		await userEvent.click(await canvas.findByRole("button", { name: growthDesk.name }));
+		await expect(canvas.getByText(`Thread with ${growthDesk.name}`)).toBeInTheDocument();
 	},
 });
 
@@ -472,6 +555,7 @@ const collaboration: ThreadDetails = {
 	},
 	capabilities: { approveToolCalls: true },
 	routineExecution: null,
+	startedFrom: null,
 	participants: [asked, asker],
 	crew: [asker, asked],
 	members: [],
@@ -704,13 +788,11 @@ export const Artifact = meta.story({
 		);
 		const stage = await canvas.findByRole("region", { name: pricing.title });
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
-		await expect(canvas.queryByRole("link", { name: new RegExp(accountManager.name) })).toBeNull();
+		await expect(canvas.queryByRole("link", { name: /Pod chat/ })).toBeNull();
 		await expect(canvas.queryByRole("article", { name: pricing.title })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
-		await expect(
-			await canvas.findByRole("link", { name: new RegExp(accountManager.name) }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: /Pod chat/ })).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Details" })).toBeVisible();
 	},
 });

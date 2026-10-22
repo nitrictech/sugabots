@@ -17,18 +17,13 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.routineExecution.threadId,
 		}),
 		compaction: r.one.threadCompaction({ from: r.thread.id, to: r.threadCompaction.threadId }),
+		// The message a thread opened from a pod's chat was started with.
+		origin: r.one.message({ from: r.thread.originMessageId, to: r.message.id }),
+		// On a pod's chat: the threads people started from it.
+		openedThreads: r.many.thread({ from: r.thread.id, to: r.thread.parentThreadId }),
+		hostAgent: r.one.agent({ from: r.thread.hostAgentId, to: r.agent.id }),
 		// On a conversation: every thread in it, the conversation's own included.
 		conversationThreads: r.many.thread({ from: r.thread.id, to: r.thread.conversationId }),
-		// Collaborations the thread's host bot was asked to help with, from any thread.
-		hostCollaborations: r.many.collaboration({
-			from: r.thread.hostAgentId,
-			to: r.collaboration.collaboratorAgentId,
-		}),
-		// The threads of collaborations the thread's host bot was asked to help with.
-		hostCollaborationThreads: r.many.thread({
-			from: r.thread.hostAgentId.through(r.collaboration.collaboratorAgentId),
-			to: r.thread.id.through(r.collaboration.childThreadId),
-		}),
 	},
 	pod: {
 		agents: r.many.agent({ from: r.pod.id, to: r.agent.podId }),

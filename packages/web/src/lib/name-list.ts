@@ -8,3 +8,8 @@ export function listNames(names: readonly string[]): string {
 	const named = names.slice(0, MAX_NAMED - 1);
 	return `${named.join(", ")} and ${names.length - named.length} others`;
 }
+
+/** `count` with the word for one or for several: "1 reply", "3 replies". */
+export function countOf(count: number, one: string, several: string): string {
+	return `${count} ${count === 1 ? one : several}`;
+}

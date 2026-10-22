@@ -9,7 +9,7 @@ import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, pod } from "../../database/schema.ts";
+import { agent, message, pod } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
@@ -17,6 +17,7 @@ import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { toConversation } from "./conversation.ts";
+import { threadTitleFrom } from "./thread-title.ts";
 
 /**
  * Talking to a crew agent: the current actor opens a conversation with an
@@ -72,6 +73,40 @@ export interface Interface {
 		| ChatAgentHasNoModel,
 		CurrentActor.Service
 	>;
+	/**
+	 * Posts the actor's message in the pod's chat `podChatId` and starts a
+	 * thread from it: with the bot `hostAgentId`, which is given the floor and
+	 * answers in the thread, or between people when it is absent. The thread
+	 * is titled from the message and hangs off it in the chat. Starting it again
+	 * with the same message returns the thread it started.
+	 */
+	readonly startThread: (input: {
+		podChatId: string;
+		messageId: string;
+		content: string;
+		/** Ids of the actor's uploads to the pod's chat, not yet sent. None unless set. */
+		attachments?: readonly string[];
+		/** The id of the message in the pod's chat that this one quotes and answers. */
+		replyTo?: string;
+		hostAgentId?: string;
+	}) => Effect.Effect<
+		StartedThread,
+		| ResourceHidden
+		| ChatPlacementRejected
+		| ChatAgentHasNoModel
+		| ThreadRepository.MessageIdConflict
+		| ThreadRepository.ReplyTargetNotFound
+		| ThreadFiles.UploadsNotFound,
+		CurrentActor.Service
+	>;
+	/**
+	 * Starts a thread between people from the message `messageId` in a pod's
+	 * chat, titled from it and linked from the chat. A message has one such
+	 * thread: asking again returns it.
+	 */
+	readonly threadFrom: (
+		messageId: string,
+	) => Effect.Effect<Conversation, ResourceHidden, CurrentActor.Service>;
 	/** Records that the actor has read the conversation up to its newest finished message. */
 	readonly markRead: (
 		conversationId: string,
@@ -179,6 +214,87 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		startThread: (input) =>
+			operation(
+				"startThread",
+				transaction(
+					Effect.gen(function* () {
+						const podChat = yield* visibility.conversation(input.podChatId);
+						if (podChat.type !== "pod_chat") {
+							return yield* new ResourceHidden({ resource: "conversation" });
+						}
+						const { hostAgentId } = input;
+						if (hostAgentId) {
+							const placement = { ...podChat, hostAgentId };
+							if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
+								return yield* new ChatPlacementRejected();
+							}
+							if ((yield* hostModelOf(hostAgentId)) === null) {
+								return yield* new ChatAgentHasNoModel();
+							}
+						}
+						const actor = yield* CurrentActor.Service;
+						// The message stays in the chat, where the thread hangs off it.
+						const posted = yield* threads.post({
+							id: input.messageId,
+							threadId: podChat.id,
+							author: yield* senderOf(actor),
+							content: input.content,
+							attachments: input.attachments ?? [],
+							replyTo: input.replyTo,
+						});
+						const started = yield* threads.openThread({
+							podChat,
+							originMessageId: posted.message.id,
+							hostAgentId: hostAgentId ?? null,
+							title: threadTitleFrom(input.content),
+							initiatorUserId: actor.userId,
+						});
+						if (started.opened) {
+							yield* floor.giveFloor({
+								id: posted.message.id,
+								threadId: started.thread.id,
+								content: posted.message.content,
+								peopleOnly: false,
+							});
+						}
+						return { conversation: toConversation(started.thread), message: posted.message };
+					}),
+				),
+			),
+
+		threadFrom: (messageId) =>
+			operation(
+				"threadFrom",
+				transaction(
+					Effect.gen(function* () {
+						const [origin] = isUuid(messageId)
+							? yield* query((db) =>
+									db
+										.select({ threadId: message.threadId, content: message.content })
+										.from(message)
+										.where(eq(message.id, messageId))
+										.limit(1),
+								)
+							: [];
+						if (!origin) return yield* new ResourceHidden({ resource: "message" });
+						const podChat = yield* visibility.conversation(origin.threadId);
+						if (podChat.type !== "pod_chat") {
+							return yield* new ResourceHidden({ resource: "message" });
+						}
+						const { userId } = yield* CurrentActor.Service;
+						const started = yield* threads.openThread({
+							podChat,
+							originMessageId: messageId,
+							hostAgentId: null,
+							title: threadTitleFrom(origin.content),
+							initiatorUserId: userId,
+						});
+						return toConversation(started.thread);
+					}),
+				),
+			),
+
 		markRead: (conversationId) =>
 			operation(
 				"markRead",
@@ -224,6 +340,12 @@ export class ChatAgentHasNoModel
 	get userMessage() {
 		return userText`This agent has no model chosen, so it cannot answer yet`;
 	}
+}
+
+/** A thread started from a pod's chat, and the message it was started with. */
+export interface StartedThread {
+	conversation: Conversation;
+	message: Message;
 }
 
 /** Whether `reachesPod` reaches the pod and the agent is crew in it. */

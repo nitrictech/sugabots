@@ -75,8 +75,15 @@ describe("modelPrompt", () => {
 		);
 
 		const collaboration = context();
+		collaboration.thread.type = "collaboration";
 		collaboration.thread.parentThreadId = "0199a3a0-0000-7000-8000-000000000010";
 		expect(modelPrompt(collaboration, environment()).system).toContain(
+			"Another agent opened this thread",
+		);
+		// A thread somebody started from a pod's chat hangs off the chat, but no agent asked for it.
+		const fromChat = context();
+		fromChat.thread.parentThreadId = "0199a3a0-0000-7000-8000-000000000010";
+		expect(modelPrompt(fromChat, environment()).system).not.toContain(
 			"Another agent opened this thread",
 		);
 	});
@@ -473,6 +480,7 @@ function context(): TurnContext {
 		reason: "default",
 		windowTokens: 256_000,
 		compaction: undefined,
+		startedFrom: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
 		workspaceTimeZone: "UTC",

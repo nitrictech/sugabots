@@ -98,6 +98,7 @@ const prepared: PreparedTurn = {
 		reason: "default",
 		windowTokens: 128_000,
 		compaction: undefined,
+		startedFrom: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
 		workspaceTimeZone: "UTC",
@@ -124,6 +125,7 @@ describe("runSegment", () => {
 				context: {
 					...prepared.context,
 					compaction: { summary: "Earlier work.", historyStartsAt: keptFrom, keptFrom },
+					startedFrom: undefined,
 				},
 			}),
 		);

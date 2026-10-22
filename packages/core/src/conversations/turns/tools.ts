@@ -2,7 +2,7 @@ import type { CollaborationPart } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
-import type { Effect } from "effect";
+import { Effect } from "effect";
 import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
@@ -31,7 +31,7 @@ import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
-import type { PreparedTurn } from "./execution.ts";
+import type { PreparedTurn, TurnContext } from "./execution.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
 import type { ToolCallRepository } from "./tool-calls/repository.ts";
 
@@ -70,7 +70,7 @@ export interface ToolDependencies {
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
 	/** The thread's files: where long tool results are kept, and what `read_thread_file` reads. */
-	files: Pick<ThreadFiles.Interface, "read" | "write">;
+	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile" | "write">;
 	/** Where the agent's own instructions are saved, as the person it is answering. */
 	agents: Pick<AgentAdministration.Interface, "update">;
 	/** The agent's own routines, read and changed for the person it is answering. */
@@ -232,7 +232,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		READ_THREAD_FILE_TOOL,
 		readThreadFileTool({
 			threadId: prepared.context.thread.id,
-			files: deps.files,
+			files: withStartingFiles(deps.files, prepared.context),
 			acceptsImages: prepared.context.agent.acceptsImages,
 			run: deps.run,
 		}),
@@ -284,5 +284,30 @@ export function bindingOf(offered: OfferedTool): ToolCallRepository.ApprovalBind
 		connectionId: offered.connectionId,
 		connectionRevision: offered.connectionRevision,
 		remoteToolName: offered.remoteToolName,
+	};
+}
+
+/**
+ * `files`, reading as well the files on the message in a pod's chat that the
+ * thread was started from, which stay in the chat with the message.
+ */
+function withStartingFiles(
+	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile">,
+	{ startedFrom }: Pick<TurnContext, "startedFrom">,
+): Pick<ThreadFiles.Interface, "read"> {
+	const startingFiles = new Set(
+		startedFrom?.parts.flatMap((part) => (part.type === "file" ? [part.id] : [])),
+	);
+	return {
+		read: (file) =>
+			files
+				.read(file)
+				.pipe(
+					Effect.catchTag("ThreadFileNotFound", (notFound) =>
+						startedFrom && startingFiles.has(file.fileId)
+							? files.readMessageFile({ threadId: startedFrom.threadId, fileId: file.fileId })
+							: Effect.fail(notFound),
+					),
+				),
 	};
 }

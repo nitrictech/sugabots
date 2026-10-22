@@ -42,6 +42,21 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.openPodChat({ workspace: params.workspace, podId: params.podId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("startThread", ({ params, payload }) =>
+				chats
+					.startThread({
+						podChatId: params.conversationId,
+						messageId: payload.id,
+						content: payload.message,
+						attachments: payload.attachments,
+						replyTo: payload.replyTo,
+						hostAgentId: payload.hostAgentId,
+					})
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("threadFrom", ({ params }) =>
+				chats.threadFrom(params.messageId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("messages", ({ params, query }) =>
 				view.messages(params.conversationId, query).pipe(asSessionUser, asHttpError(chatErrors)),
 			)

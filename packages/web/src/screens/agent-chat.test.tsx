@@ -250,6 +250,7 @@ function details(
 			updatedAt: "2026-09-18T09:22:00.000Z",
 		},
 		routineExecution: type === "routine" ? routineExecution : null,
+		startedFrom: null,
 		participants: type === "collaboration" ? [host, collaborator] : [person, host],
 		crew: [host, collaborator],
 		members: [person, podmate],
@@ -263,16 +264,19 @@ function details(
 /** The pod's conversation list, with Linear Handler's chat in it when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
-		items: [
-			{
-				agent: linear,
-				conversation: listed ? chat : null,
-				lastMessage: null,
-				waitingOn: null,
-				unreadMessages: 0,
-				needsApproval: false,
-			},
-		],
+		podChat: null,
+		items: listed
+			? [
+					{
+						agent: linear,
+						conversation: chat,
+						lastMessage: null,
+						waitingOn: null,
+						unreadMessages: 0,
+						needsApproval: false,
+					},
+				]
+			: [],
 	});
 }
 
@@ -966,46 +970,6 @@ describe("ongoing agent Chat", () => {
 		}
 	});
 
-	it("shows an inbound collaboration and opens its thread from the recipient Chat", async () => {
-		client.api.chats.messages.mockReturnValue(
-			Effect.succeed({
-				items: [
-					{
-						kind: "collaboration",
-						id: collaborationPart.id,
-						threadId: collaborationId,
-						initiator: collaborator,
-						createdAt: collaborationRequest.createdAt,
-					},
-				],
-				nextCursor: null,
-			}),
-		);
-		client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
-			if (params.threadId === collaborationId) {
-				const inbound = details(collaborationId, collaborationEntry.title, "collaboration", [
-					collaborationRequest,
-					collaborationAnswer,
-				]);
-				return Effect.succeed({
-					...inbound,
-					thread: { ...inbound.thread, chatId: "0199a3a0-0000-7000-8000-000000000099" },
-				});
-			}
-			return Effect.succeed(details(chat.id, "Chat", "conversation", []));
-		});
-
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.click(
-			await screen.findByRole("button", {
-				name: new RegExp(`^Open Collaboration: ${linear.name} helped ${triager.name}`),
-			}),
-		);
-
-		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
-		expect(within(panel).getByText(collaborationAnswer.content)).toBeDefined();
-	});
-
 	it("opens a routine run's panel from the thread query", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
 
@@ -1063,7 +1027,8 @@ describe("ongoing agent Chat", () => {
 	it("opens Details from the bot's name, and leads back to the pod's list", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-		const name = await screen.findByRole("button", { name: linear.name });
+		// The header names the thread by its title, here the one its details give it.
+		const name = await screen.findByRole("button", { name: "Chat" });
 		expect(screen.getByRole("link", { name: "Back to Suga-Team" }).getAttribute("href")).toBe(
 			"/suga/pods/suga-team",
 		);

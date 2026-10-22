@@ -197,6 +197,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 				with: { user: personColumns },
 			},
 			routineExecution: true,
+			origin: { with: messageRelations },
 			messages: {
 				// One more than the page, so an older page is known to exist without a count.
 				limit: limit + 1,
@@ -242,6 +243,7 @@ function toThreadDetails(
 			row.routineExecution && row.conversationId
 				? toRoutineExecution(row.routineExecution, row.conversationId)
 				: null,
+		startedFrom: row.origin && messageFromRelations(row.origin),
 		participants: row.participants.map(({ user: person, agent: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),

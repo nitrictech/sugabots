@@ -177,7 +177,7 @@ describe("envelope", () => {
 		}
 	});
 
-	it.each(["collaboration", "routine"])(
+	it.each(["collaboration", "routine", "conversation"])(
 		"accepts conversation thread changes for %s",
 		(threadType) => {
 			const event = {
@@ -192,7 +192,7 @@ describe("envelope", () => {
 		},
 	);
 
-	it.each(["conversation", "system_agent"])(
+	it.each(["pod_chat", "system_agent"])(
 		"rejects conversation thread changes for %s",
 		(threadType) => {
 			expect(

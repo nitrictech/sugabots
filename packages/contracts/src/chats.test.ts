@@ -42,31 +42,6 @@ describe("chat contracts", () => {
 		expect(Schema.decodeUnknownSync(customerThreadTypeSchema)(type)).toBe(type);
 	});
 
-	it("accepts an inbound collaboration in the Chat timeline", () => {
-		expect(
-			Schema.decodeSync(chatMessagesPageSchema)({
-				items: [
-					{
-						kind: "collaboration",
-						id: ID,
-						threadId: "0199a3a0-0000-7000-8000-000000000002",
-						initiator: {
-							kind: "agent",
-							id: "0199a3a0-0000-7000-8000-000000000003",
-							name: "Personal Agent",
-							handle: "personal-agent",
-							color: "green",
-							face: "pill",
-							shape: "circle",
-						},
-						createdAt: "2026-09-18T00:00:00.000Z",
-					},
-				],
-				nextCursor: null,
-			}).items[0]?.kind,
-		).toBe("collaboration");
-	});
-
 	it("accepts a Routine run in the Chat timeline", () => {
 		expect(
 			Schema.decodeSync(chatMessagesPageSchema)({

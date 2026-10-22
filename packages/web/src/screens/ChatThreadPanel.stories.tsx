@@ -68,6 +68,7 @@ const collaboration: ThreadDetails = {
 	},
 	capabilities: { approveToolCalls: true },
 	routineExecution: null,
+	startedFrom: null,
 	participants: [answerer, asker],
 	crew: [asker, answerer],
 	members: [],
