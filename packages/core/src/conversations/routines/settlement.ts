@@ -14,14 +14,7 @@ import {
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type * as schema from "../../database/schema.ts";
-import {
-	chat,
-	collaboration,
-	message,
-	routineExecution,
-	thread,
-	turn,
-} from "../../database/schema.ts";
+import { collaboration, message, routineExecution, thread, turn } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
@@ -81,7 +74,7 @@ export const make = Effect.gen(function* () {
 	const threads = yield* ThreadRepository.Service;
 
 	/**
-	 * Posts the agent's last reply in the run's own thread into its chat. A
+	 * Posts the agent's last reply in the run's own thread into its conversation. A
 	 * run whose agent wrote nothing to show posts nothing.
 	 */
 	const postResult = (run: schema.RoutineExecutionRow) =>
@@ -89,7 +82,7 @@ export const make = Effect.gen(function* () {
 			const content = (yield* lastReplyText(run)).trim();
 			if (content === "") return;
 			yield* threads.postRoutineResult({
-				threadId: yield* chatThreadOf(run.threadId),
+				threadId: yield* conversationOf(run.threadId),
 				run,
 				content,
 			});
@@ -294,21 +287,20 @@ const podOf = (threadId: string) =>
 			row ? Effect.succeed(row.podId) : Effect.die(new Error("A routine run's thread is gone")),
 	);
 
-/** The main thread of the chat the run's thread `threadId` is in. */
-const chatThreadOf = (threadId: string) =>
+/** The conversation the run's thread `threadId` is in. */
+const conversationOf = (threadId: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ mainThreadId: chat.mainThreadId })
+				.select({ conversationId: thread.conversationId })
 				.from(thread)
-				.innerJoin(chat, eq(chat.id, thread.chatId))
 				.where(eq(thread.id, threadId))
 				.limit(1),
 		),
 		([row]) =>
-			row
-				? Effect.succeed(row.mainThreadId)
-				: Effect.die(new Error("A routine run's thread is not in a chat")),
+			row?.conversationId
+				? Effect.succeed(row.conversationId)
+				: Effect.die(new Error("A routine run's thread is in no conversation")),
 	);
 
 /**

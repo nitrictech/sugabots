@@ -8,7 +8,7 @@ import { HttpResponse, http } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Every approval across the workspace, opened from the rail: what waits on
@@ -52,9 +52,8 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			shape: "circle",
 		},
 		podId: revenue.id,
-		threadId: storyChatFor(growthDesk).mainThreadId,
-		chatAgentId: growthDesk.id,
-		inMainThread: true,
+		threadId: storyConversationFor(growthDesk).id,
+		conversationId: storyConversationFor(growthDesk).id,
 	};
 }
 
@@ -124,7 +123,7 @@ export const Opened = meta.story({
 		await expect(page).toHaveTextContent("Acme Retail");
 		// The link waits for the pods and bots too, which can answer after the request.
 		await expect(
-			await canvas.findByRole("link", { name: "Open in Growth Desk" }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Open conversation" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 	},
 });

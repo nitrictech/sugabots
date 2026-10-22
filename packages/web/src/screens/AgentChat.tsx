@@ -26,7 +26,6 @@ import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
-	useChat,
 	useChatHistory,
 	useChatMessages,
 	useMarkReadWhileSeen,
@@ -89,6 +88,7 @@ export type Staged =
 export function AgentChat({
 	agent,
 	pod,
+	conversationId,
 	user,
 	threadId,
 	focusMessageId,
@@ -99,6 +99,8 @@ export function AgentChat({
 }: {
 	agent: Agent;
 	pod: Pod;
+	/** The conversation shown, which is with `agent`. */
+	conversationId: string;
 	user: SessionUser;
 	threadId?: string;
 	/** A message to jump to and point out, such as the mention it was opened from. */
@@ -111,23 +113,22 @@ export function AgentChat({
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
-	const chat = useChat(pod, agent.id);
-	const messages = useChatMessages(chat.data?.id);
-	const history = useChatHistory(chat.data?.id);
-	const mainThread = useThread(chat.data?.mainThreadId);
+	const messages = useChatMessages(conversationId);
+	const history = useChatHistory(conversationId);
+	const mainThread = useThread(conversationId);
 	const authorLinkOf = useAuthorLinks(pod.id);
-	useThreadEvents(chat.data?.mainThreadId);
-	const notices = useThreadNotices(chat.data?.mainThreadId);
-	const optimistic = useOptimisticChatItems(chat.data?.id);
-	const send = useSendChatMessage(chat.data, user);
+	useThreadEvents(conversationId);
+	const notices = useThreadNotices(conversationId);
+	const optimistic = useOptimisticChatItems(conversationId);
+	const send = useSendChatMessage(conversationId, user);
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent.id);
-	const attachments = useComposerAttachments(chat.data?.id);
+	const attachments = useComposerAttachments(conversationId);
 	const [peopleOnly, setPeopleOnly] = useState(false);
-	useTypingSignal(chat.data?.mainThreadId, draft);
-	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
+	useTypingSignal(conversationId, draft);
+	const peopleTyping = usePeopleTyping(conversationId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
 	const opener = useRef<HTMLElement | null>(null);
 	const previousThreadId = useRef<string | undefined>(undefined);
@@ -148,7 +149,7 @@ export function AgentChat({
 	const groups = chatGroupsOf(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
-	useMarkReadWhileSeen(chat.data?.id, newest, latestInView);
+	useMarkReadWhileSeen(conversationId, newest, latestInView);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
 	const threadActivityAt = new Map(
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
@@ -156,13 +157,13 @@ export function AgentChat({
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
 
 	useLayoutEffect(() => {
-		if (!chat.data || !details) return;
+		if (!details) return;
 		if (threadId && !previousThreadId.current) {
 			opener.current = document.activeElement as HTMLElement;
 		}
 		if (!threadId && previousThreadId.current) requestAnimationFrame(() => opener.current?.focus());
 		previousThreadId.current = threadId;
-	}, [chat.data, details, threadId]);
+	}, [details, threadId]);
 
 	useLayoutEffect(() => {
 		if (
@@ -265,28 +266,19 @@ export function AgentChat({
 		<ChatHeader
 			agent={agent}
 			pod={pod}
+			conversationId={conversationId}
 			place={place}
 			staged={staged !== undefined}
 			onOpenDesktop={openDesktop}
 		/>
 	);
-	if (chat.isPending) return <div className="flex min-w-0 flex-1 flex-col">{header}</div>;
-	if (!chat.data || chat.isError)
-		return (
-			<div className="flex min-w-0 flex-1 flex-col">
-				{header}
-				<EmptyState title="Could not open this chat">
-					The API did not answer. Reload this page to try again.
-				</EmptyState>
-			</div>
-		);
 	if (!details || !host)
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
 				{header}
 				{!mainThread.isPending && (
-					<EmptyState title="Could not load this chat">
-						The chat is missing its main conversation.
+					<EmptyState title="Could not load this conversation">
+						The API did not answer. Reload this page to try again.
 					</EmptyState>
 				)}
 			</div>
@@ -369,7 +361,7 @@ export function AgentChat({
 											onOpenThread={openThread}
 											onOpenArtifact={openArtifact}
 											onOpenDesktop={openDesktop}
-											fileUrlOf={(fileId) => chatFileUrl(chat.data.id, fileId)}
+											fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
 											previews={!staged}
 											podId={pod.id}
 											approvalCapabilities={details.capabilities}
@@ -454,7 +446,7 @@ export function AgentChat({
 				/>
 			) : threadId ? (
 				<ChatThreadPanel
-					chatId={chat.data.id}
+					conversationId={conversationId}
 					chatAgentId={agent.id}
 					threadId={threadId}
 					entry={selectedEntry}

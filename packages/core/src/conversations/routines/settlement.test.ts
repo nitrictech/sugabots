@@ -210,7 +210,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	const resultsOf = (executionId: string) =>
 		onDatabase((db) =>
 			db
-				.select({ message, threadType: thread.type, chatId: thread.chatId })
+				.select({ message, threadType: thread.type, conversationId: thread.conversationId })
 				.from(message)
 				.innerJoin(thread, eq(thread.id, message.threadId))
 				.where(eq(message.routineExecutionId, executionId)),
@@ -638,7 +638,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const completed = types.indexOf("turn.completed");
 		const settled = delivered.findIndex(
 			({ event }) =>
-				event.type === "chat.thread_changed" &&
+				event.type === "conversation.thread_changed" &&
 				"threadType" in event &&
 				event.threadType === "routine",
 		);
@@ -656,10 +656,10 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
 		const posted = await resultsOf(run.executionId);
 		expect(posted).toHaveLength(1);
-		const chatId = posted[0]?.chatId;
-		if (!chatId) throw new Error("The result was posted outside a chat");
+		const conversationId = posted[0]?.conversationId;
+		if (!conversationId) throw new Error("The result was posted outside a conversation");
 		const page = await onPostgresAs(userId)(Context.get(conversations, ChatView.Service)).messages(
-			chatId,
+			conversationId,
 		);
 		expect(page.items).toContainEqual({
 			kind: "message",
@@ -673,7 +673,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			}),
 		});
 		expect(posted[0]).toMatchObject({
-			threadType: "chat",
+			threadType: "conversation",
 			message: {
 				authorAgentId: agentId,
 				status: "complete",
@@ -813,7 +813,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		});
 		const settledAnnouncements = delivered.filter(
 			({ event }) =>
-				event.type === "chat.thread_changed" &&
+				event.type === "conversation.thread_changed" &&
 				"threadId" in event &&
 				event.threadId === fixture.accepted.threadId,
 		);

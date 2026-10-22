@@ -35,7 +35,10 @@ export function RecentRuns({ placed }: { placed: PlacedRoutine }) {
 					{runs.data.items.map((run) => (
 						<li key={run.id} className="border-border border-b last:border-b-0">
 							<Link
-								{...activityThreadLink(placed, run.threadId)}
+								{...activityThreadLink(
+									{ pod: placed.pod, conversationId: run.conversationId },
+									run.threadId,
+								)}
 								className="focus-ring flex items-center gap-3 px-4 py-[11px] transition-colors hover:bg-panel"
 							>
 								<RunStatus state={run.state} />

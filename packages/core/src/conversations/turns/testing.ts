@@ -167,7 +167,7 @@ export async function aChatAwaitingReply(
 	const chats = chatsAs(memberId);
 	const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: host.id });
 	await chats.post({
-		chatId: opened.id,
+		conversationId: opened.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
 	});
@@ -177,6 +177,6 @@ export async function aChatAwaitingReply(
 		memberId,
 		hostId: host.id,
 		connectionId: connected.id,
-		threadId: opened.mainThreadId,
+		threadId: opened.id,
 	};
 }

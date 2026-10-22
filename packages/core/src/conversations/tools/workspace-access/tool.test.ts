@@ -100,7 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 					workspaceId,
 					podId: room.id,
 					hostAgentId: host.id,
-					type: "chat",
+					type: "conversation",
 					title: "Access",
 				})
 				.returning(),

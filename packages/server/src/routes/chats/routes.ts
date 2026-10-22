@@ -32,24 +32,24 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("getOrCreate", ({ params, payload }) =>
+			.handle("open", ({ params, payload }) =>
 				chats
 					.open({ ...payload, workspace: params.workspace })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("messages", ({ params, query }) =>
-				view.messages(params.chatId, query).pipe(asSessionUser, asHttpError(chatErrors)),
+				view.messages(params.conversationId, query).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("history", ({ params, query }) =>
-				view.history(params.chatId, query).pipe(asSessionUser, asHttpError(chatErrors)),
+				view.history(params.conversationId, query).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("markRead", ({ params }) =>
-				chats.markRead(params.chatId).pipe(asSessionUser, asHttpError(chatErrors)),
+				chats.markRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("send", ({ params, payload }) =>
 				chats
 					.post({
-						chatId: params.chatId,
+						conversationId: params.conversationId,
 						messageId: payload.id,
 						content: payload.message,
 						attachments: payload.attachments,
@@ -67,7 +67,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						return yield* new ThreadFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
 					}
 					return yield* files.upload({
-						chatId: params.chatId,
+						conversationId: params.conversationId,
 						name: query.name,
 						type: query.type,
 						stream: request.stream.pipe(
@@ -80,12 +80,12 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("removeFile", ({ params }) =>
 				files
-					.removeUpload({ chatId: params.chatId, fileId: params.fileId })
+					.removeUpload({ conversationId: params.conversationId, fileId: params.fileId })
 					.pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("file", ({ params }) =>
 				files
-					.read({ chatId: params.chatId, fileId: params.fileId })
+					.read({ conversationId: params.conversationId, fileId: params.fileId })
 					.pipe(
 						Effect.map(fileResponse),
 						Effect.catchTags(storeOutagesAsDefects),

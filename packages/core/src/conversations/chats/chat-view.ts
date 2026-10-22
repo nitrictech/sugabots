@@ -56,7 +56,6 @@ import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
-	chat,
 	collaboration,
 	message,
 	pod,
@@ -84,21 +83,21 @@ import {
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
 import { Turns } from "../turns/turns.ts";
-import { toChat } from "./chat.ts";
+import { toConversation } from "./conversation.ts";
 
 /**
- * What the chat screens show, of the chats the current actor can see: the
- * pod's bots with their chats, and a chat's two timelines.
+ * What the chat screens show, of the conversations the current actor can see:
+ * the pod's bots with their conversations, and a conversation's two timelines.
  */
 export interface Interface {
-	/** The bots with their chats in one pod, `pod` by its id, of a workspace by its id or its slug. */
+	/** The bots with their conversations in one pod, `pod` by its id, of a workspace by its id or its slug. */
 	readonly list: (input: {
 		workspace: string;
 		pod: string;
 	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * How each pod of the workspace the actor reaches stands for them, Personal
-	 * included: its chats' unread messages, and whether any waits on their decision.
+	 * included: its conversations' unread messages, and whether any waits on their decision.
 	 */
 	readonly podMarkers: (
 		workspace: string,
@@ -111,21 +110,21 @@ export interface Interface {
 		workspace: string,
 	) => Effect.Effect<ApprovalInbox, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * What is new for the actor across the workspace's chats, newest first:
+	 * What is new for the actor across the workspace's conversations, newest first:
 	 * messages that mention them, read or not, and those they have not read;
 	 * and every routine run and collaboration, read or not.
 	 */
 	readonly activity: (
 		workspace: string,
 	) => Effect.Effect<ActivityFeed, AuthorizationDenied, CurrentActor.Service>;
-	/** A page of the chat's main conversation, newest last. */
+	/** A page of the conversation, newest last. */
 	readonly messages: (
-		chatId: string,
+		conversationId: string,
 		page?: ChatPageQuery,
 	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
-	/** A page of the chat's side threads, newest activity first. */
+	/** A page of the threads opened beside the conversation, newest activity first. */
 	readonly history: (
-		chatId: string,
+		conversationId: string,
 		page?: ChatPageQuery,
 	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
 }
@@ -137,24 +136,20 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 
-	/** How each of `bots`' chats stands for the actor: its unread messages, and waiting on their decision. */
-	const chatMarks = Effect.fn("ChatView.chatMarks")(function* (
+	/** How each of `bots`' conversations stands for the actor: its unread messages, and waiting on their decision. */
+	const conversationMarks = Effect.fn("ChatView.conversationMarks")(function* (
 		workspaceId: string,
 		bots: readonly ListedBot[],
 	) {
 		const { userId } = yield* CurrentActor.Service;
-		const threadIds = bots.flatMap((row) => (row.chat ? [row.chat.mainThreadId] : []));
-		const unread = yield* query((db) => unreadMessageCounts(db, userId, threadIds));
+		const conversationIds = bots.flatMap((row) => (row.conversation ? [row.conversation.id] : []));
+		const unread = yield* query((db) => unreadMessageCounts(db, userId, conversationIds));
 		const awaiting = yield* query((db) =>
-			chatsAwaitingDecisionBy(db, {
-				workspaceId,
-				userId,
-				chatIds: bots.flatMap((row) => (row.chat ? [row.chat.id] : [])),
-			}),
+			conversationsAwaitingDecisionBy(db, { workspaceId, userId, conversationIds }),
 		);
 		return (row: ListedBot) => ({
-			unreadMessages: (row.chat && unread.get(row.chat.mainThreadId)) ?? 0,
-			needsApproval: row.chat !== null && awaiting.has(row.chat.id),
+			unreadMessages: (row.conversation && unread.get(row.conversation.id)) ?? 0,
+			needsApproval: row.conversation !== null && awaiting.has(row.conversation.id),
 		});
 	});
 
@@ -163,7 +158,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
+					yield* Effect.annotateCurrentSpan("conversation.list.pod", input.pod);
 					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
 					const reachesPod = yield* visibility.reachesPod;
 					const { userId } = yield* CurrentActor.Service;
@@ -173,18 +168,18 @@ export const make = Effect.gen(function* () {
 					if (!podId) return yield* new ResourceHidden({ resource: "pod" });
 					const listing: Listing = { workspaceId, scope: { pod: podId }, reachesPod };
 					const bots = yield* query((db) => listedBots(db, listing));
-					const threadIds = bots.flatMap((row) => (row.chat ? [row.chat.mainThreadId] : []));
+					const threadIds = bots.flatMap((row) => (row.conversation ? [row.conversation.id] : []));
 					const latest = yield* query((db) => latestMessages(db, threadIds));
 					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, threadIds));
-					const marksOf = yield* chatMarks(workspaceId, bots);
+					const marksOf = yield* conversationMarks(workspaceId, bots);
 					const items = bots.flatMap((row): ChatListItem[] => {
 						const crew = crewAgentRow(row.agent);
 						if (!crew) return [];
-						const last = row.chat ? latest.get(row.chat.mainThreadId) : undefined;
+						const last = row.conversation ? latest.get(row.conversation.id) : undefined;
 						return [
 							{
 								agent: toAgent(crew),
-								chat: row.chat && toChat(row.chat),
+								conversation: row.conversation && toConversation(row.conversation),
 								lastMessage: last
 									? {
 											preview: replyPreview(last),
@@ -192,7 +187,7 @@ export const make = Effect.gen(function* () {
 											at: last.createdAt.toISOString(),
 										}
 									: null,
-								waitingOn: (row.chat && waitingOn.get(row.chat.mainThreadId)) || null,
+								waitingOn: (row.conversation && waitingOn.get(row.conversation.id)) || null,
 								...marksOf(row),
 							},
 						];
@@ -212,7 +207,7 @@ export const make = Effect.gen(function* () {
 						reachesPod: yield* visibility.reachesPod,
 					};
 					const bots = yield* query((db) => listedBots(db, listing));
-					const marksOf = yield* chatMarks(workspaceId, bots);
+					const marksOf = yield* conversationMarks(workspaceId, bots);
 					const pods: Record<string, { unreadMessages: number; needsApproval: boolean }> = {};
 					for (const row of bots) {
 						const crew = crewAgentRow(row.agent);
@@ -275,7 +270,7 @@ export const make = Effect.gen(function* () {
 								author: toParticipant(authorRow(row.authorUser, row.authorAgent)),
 								preview: replyPreview(row),
 								podId: row.podId,
-								chatAgentId: row.chatAgentId,
+								conversationId: row.conversationId,
 								at: row.createdAt.toISOString(),
 								unread: row.unread,
 							}),
@@ -290,7 +285,7 @@ export const make = Effect.gen(function* () {
 								agent: { kind: "agent", ...row.agent },
 								preview: row.lastReply && runReportPreview(row.lastReply),
 								podId: row.podId,
-								chatAgentId: row.chatAgentId,
+								conversationId: row.conversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
@@ -304,7 +299,7 @@ export const make = Effect.gen(function* () {
 								status: row.status,
 								brief: row.brief,
 								podId: row.podId,
-								chatAgentId: row.chatAgentId,
+								conversationId: row.conversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
@@ -318,34 +313,40 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		messages: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
+		messages: (conversationId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
 			operation(
 				"messages",
 				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) return yield* new ResourceHidden({ resource: "chat" });
-					// Before the query, and whether or not the chat is there, so a bad cursor
-					// says nothing about the chat.
+					yield* Effect.annotateCurrentSpan("conversation.id", conversationId);
+					if (!isUuid(conversationId)) {
+						return yield* new ResourceHidden({ resource: "conversation" });
+					}
+					// Before the query, and whether or not the conversation is there, so a
+					// bad cursor says nothing about the conversation.
 					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
 					const reachesPod = yield* visibility.reachesPod;
 					const row = yield* query((db) =>
-						loadMainPage(db, chatId, reachesPod, page.limit, before),
+						loadMainPage(db, conversationId, reachesPod, page.limit, before),
 					);
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toMainPage(row, page.limit);
 				}),
 			),
 
-		history: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
+		history: (conversationId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
 			operation(
 				"history",
 				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) return yield* new ResourceHidden({ resource: "chat" });
+					yield* Effect.annotateCurrentSpan("conversation.id", conversationId);
+					if (!isUuid(conversationId)) {
+						return yield* new ResourceHidden({ resource: "conversation" });
+					}
 					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
 					const reachesPod = yield* visibility.reachesPod;
-					const row = yield* query((db) => loadHistory(db, chatId, reachesPod, page.limit, before));
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					const row = yield* query((db) =>
+						loadHistory(db, conversationId, reachesPod, page.limit, before),
+					);
+					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toHistoryPage(row, page.limit);
 				}),
 			),
@@ -406,13 +407,14 @@ function podNamed(podRef: string, userId: string): SQL | undefined {
 	return eq(pod.slug, podRef);
 }
 
-/** Every crew bot the list covers, with its chat in its pod when it has one. */
+/** Every crew bot the list covers, with its newest conversation in its pod when it has one. */
 const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
+	const conversation = alias(thread, "conversation");
 	return yield* db
-		.select({ agent, chat })
+		.select({ agent, conversation })
 		.from(agent)
 		.innerJoin(pod, crewOf(pod.id))
-		.leftJoin(chat, and(eq(chat.podId, agent.podId), eq(chat.hostAgentId, agent.id)))
+		.leftJoin(conversation, eq(conversation.id, newestConversationWith(agent.podId, agent.id)))
 		.where(
 			and(
 				eq(agent.workspaceId, input.workspaceId),
@@ -422,6 +424,21 @@ const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, inp
 		)
 		.orderBy(asc(agent.name));
 });
+
+/**
+ * The id of the newest conversation with the agent `hostAgentId` in the pod
+ * `podId`, or null when it has none, as a value for a query.
+ */
+function newestConversationWith(podId: SQLWrapper, hostAgentId: SQLWrapper): SQL<string | null> {
+	return sql<string | null>`(
+		select newest.id from ${thread} newest
+		where newest.type = 'conversation'
+			and newest.pod_id = ${podId}
+			and newest.host_agent_id = ${hostAgentId}
+		order by newest.created_at desc, newest.id desc
+		limit 1
+	)`;
+}
 
 /** The newest message with words in it on each thread, in one query. */
 const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
@@ -550,15 +567,15 @@ function mentions(handle: string): SQL {
 	return sql`${message.content} ~* ${`(^|[^a-z0-9_.])@${handle}([^a-z0-9-]|$)`}`;
 }
 
-/** How far back the activity feed looks: past this, a chat is old news, read or not. */
+/** How far back the activity feed looks: past this, a conversation is old news, read or not. */
 const ACTIVITY_WINDOW_DAYS = 30;
 /** The most messages the activity feed lists. */
 const ACTIVITY_ITEMS = 50;
 
 /**
- * The messages in the main conversations of the chats `userId` reaches,
- * since `since`, written by somebody else and either mentioning them or not
- * yet read, newest first, with their authors and their chats' bots.
+ * The messages in the conversations `userId` reaches, since `since`, written
+ * by somebody else and either mentioning them or not yet read, newest first,
+ * with their authors.
  */
 const activityRows = Effect.fn("ChatView.activityRows")(function* (
 	db: Executor,
@@ -582,8 +599,8 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 			parts: message.parts,
 			content: message.content,
 			createdAt: message.createdAt,
-			podId: chat.podId,
-			chatAgentId: chat.hostAgentId,
+			podId: thread.podId,
+			conversationId: thread.id,
 			authorUser: { id: user.id, name: user.name, email: user.email, image: user.image },
 			authorAgent: {
 				id: author.id,
@@ -597,13 +614,13 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 			unread: sql<boolean>`${unread}`,
 		})
 		.from(message)
-		.innerJoin(chat, eq(chat.mainThreadId, message.threadId))
+		.innerJoin(thread, and(eq(thread.id, message.threadId), eq(thread.type, "conversation")))
 		.leftJoin(user, eq(user.id, message.authorUserId))
 		.leftJoin(author, eq(author.id, message.authorAgentId))
 		.where(
 			and(
-				eq(chat.workspaceId, input.workspaceId),
-				input.reachesPod(chat.podId),
+				eq(thread.workspaceId, input.workspaceId),
+				input.reachesPod(thread.podId),
 				gt(message.createdAt, input.since),
 				finishedWordsFromOthers(input.userId),
 				or(mentionsYou, unread),
@@ -663,11 +680,12 @@ function spokenText(reply: Reply): string {
 	return textWithoutNarration(reply.parts) || reply.content;
 }
 
-/** The routine runs in the chats `userId` reaches since `since`, newest first, with their chats' bots and last replies. */
+/** The routine runs in the conversations `userId` reaches since `since`, newest first, with their last replies. */
 const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 	db: Executor,
 	input: ActivityScope,
 ) {
+	const conversation = alias(thread, "conversation");
 	return yield* db
 		.select({
 			threadId: routineExecution.threadId,
@@ -683,22 +701,22 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 				face: agent.face,
 				shape: agent.shape,
 			},
-			podId: chat.podId,
-			chatAgentId: chat.hostAgentId,
+			podId: conversation.podId,
+			conversationId: conversation.id,
 			unread: unreadBy(db, input.userId, {
-				threadId: chat.mainThreadId,
+				threadId: conversation.id,
 				at: routineExecution.acceptedAt,
 			}),
 			lastReply: lastReplyIn(db, routineExecution.threadId),
 		})
 		.from(routineExecution)
 		.innerJoin(thread, eq(thread.id, routineExecution.threadId))
-		.innerJoin(chat, eq(chat.id, thread.chatId))
+		.innerJoin(conversation, eq(conversation.id, thread.conversationId))
 		.innerJoin(agent, eq(agent.id, routineExecution.agentId))
 		.where(
 			and(
-				eq(chat.workspaceId, input.workspaceId),
-				input.reachesPod(chat.podId),
+				eq(conversation.workspaceId, input.workspaceId),
+				input.reachesPod(conversation.podId),
 				gt(routineExecution.acceptedAt, input.since),
 			),
 		)
@@ -707,8 +725,8 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 });
 
 /**
- * The collaborations one bot opened with another in the chats `userId`
- * reaches since `since`, newest first, with both bots and their chats' bots.
+ * The collaborations one bot opened with another in the conversations
+ * `userId` reaches since `since`, newest first, with both bots.
  */
 const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 	db: Executor,
@@ -718,6 +736,7 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 	const askingMessage = alias(message, "asking_message");
 	const initiator = alias(agent, "initiator");
 	const recipient = alias(agent, "recipient");
+	const conversation = alias(thread, "conversation");
 	return yield* db
 		.select({
 			threadId: collaboration.childThreadId,
@@ -740,23 +759,23 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 				face: recipient.face,
 				shape: recipient.shape,
 			},
-			podId: chat.podId,
-			chatAgentId: chat.hostAgentId,
+			podId: conversation.podId,
+			conversationId: conversation.id,
 			unread: unreadBy(db, input.userId, {
-				threadId: chat.mainThreadId,
+				threadId: conversation.id,
 				at: collaboration.createdAt,
 			}),
 		})
 		.from(collaboration)
 		.innerJoin(asked, eq(asked.id, collaboration.childThreadId))
-		.innerJoin(chat, eq(chat.id, asked.chatId))
+		.innerJoin(conversation, eq(conversation.id, asked.conversationId))
 		.innerJoin(askingMessage, eq(askingMessage.id, collaboration.parentMessageId))
 		.innerJoin(initiator, eq(initiator.id, askingMessage.authorAgentId))
 		.innerJoin(recipient, eq(recipient.id, collaboration.collaboratorAgentId))
 		.where(
 			and(
-				eq(chat.workspaceId, input.workspaceId),
-				input.reachesPod(chat.podId),
+				eq(conversation.workspaceId, input.workspaceId),
+				input.reachesPod(conversation.podId),
 				gt(collaboration.createdAt, input.since),
 			),
 		)
@@ -766,7 +785,7 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 
 /** How many answered approvals the inbox lists, newest first. */
 const ANSWERED_APPROVALS = 50;
-/** At most this many waiting approvals are listed; more than this many waiting is a backlog to clear in its chats. */
+/** At most this many waiting approvals are listed; more than this many waiting is a backlog to clear in its conversations. */
 const WAITING_APPROVALS = 100;
 
 /**
@@ -809,7 +828,7 @@ interface DecidablePods {
 	sandboxRequests: readonly string[];
 }
 
-/** The tool calls waiting on a decision in `pods`, oldest first, each with the bot that asked and its chat. */
+/** The tool calls waiting on a decision in `pods`, oldest first, each with the bot that asked and its conversation. */
 const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* (
 	db: Executor,
 	pods: DecidablePods,
@@ -837,7 +856,7 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 		.limit(WAITING_APPROVALS);
 });
 
-/** The tool calls answered in `podIds`, newest answer first, each with the bot that asked and its chat. */
+/** The tool calls answered in `podIds`, newest answer first, each with the bot that asked and its conversation. */
 const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function* (
 	db: Executor,
 	podIds: readonly string[],
@@ -857,7 +876,7 @@ const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function
 });
 
 /**
- * Tool calls with the bot that asked, the chat they are in, and who answered.
+ * Tool calls with the bot that asked, the conversation they are in, and who answered.
  * `asking` is the thread a call was made in, aliased because
  * `routineExecutionIdOf` reads `thread` itself.
  */
@@ -867,8 +886,7 @@ function selectApprovals(db: Executor, asking: AskingThread) {
 		.select({
 			call: toolCall,
 			podId: asking.podId,
-			chatAgentId: chat.hostAgentId,
-			mainThreadId: chat.mainThreadId,
+			conversationId: asking.conversationId,
 			agent: {
 				id: agent.id,
 				name: agent.name,
@@ -883,7 +901,6 @@ function selectApprovals(db: Executor, asking: AskingThread) {
 		.innerJoin(asking, eq(asking.id, toolCall.threadId))
 		.innerJoin(turn, eq(turn.id, toolCall.turnId))
 		.innerJoin(agent, eq(agent.id, turn.agentId))
-		.leftJoin(chat, eq(chat.id, asking.chatId))
 		.leftJoin(decider, eq(decider.id, toolCall.decidedById))
 		.$dynamic();
 }
@@ -898,8 +915,7 @@ function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 		agent: { kind: "agent", ...row.agent },
 		podId: row.podId,
 		threadId: row.call.threadId,
-		chatAgentId: row.chatAgentId,
-		inMainThread: row.mainThreadId === row.call.threadId,
+		conversationId: row.conversationId,
 	};
 }
 
@@ -916,39 +932,48 @@ function answerOf(row: ApprovalRow): AnsweredApproval["answer"] | null {
 }
 
 /**
- * Those of `chatIds` with a tool call waiting for a decision `userId` may
- * make, by the rule deciding the approval checks.
+ * Those of `conversationIds` with a tool call waiting for a decision `userId`
+ * may make, by the rule deciding the approval checks.
  */
-const chatsAwaitingDecisionBy = Effect.fn("ChatView.chatsAwaitingDecisionBy")(function* (
-	db: Executor,
-	{
-		workspaceId,
-		userId,
-		chatIds,
-	}: { workspaceId: string; userId: string; chatIds: readonly string[] },
-) {
-	if (chatIds.length === 0) return new Set<string>();
-	// Aliased, because `routineExecutionIdOf` reads `thread` itself, and an
-	// unaliased column would name its row rather than this one.
-	const asking = alias(thread, "asking_thread");
-	const pending = yield* db
-		.selectDistinct({
-			chatId: asking.chatId,
-			podId: asking.podId,
-			routineExecutionId: routineExecutionIdOf(asking.id),
-			tool: toolCall.tool,
-		})
-		.from(toolCall)
-		.innerJoin(asking, eq(asking.id, toolCall.threadId))
-		.where(and(inArray(asking.chatId, [...chatIds]), eq(toolCall.approvalStatus, "pending")));
-	if (pending.length === 0) return new Set<string>();
-	const { mayDecide } = yield* approvalDecidersIn(db, workspaceId, userId);
-	return new Set(
-		pending.flatMap(({ chatId, podId, routineExecutionId, tool }) =>
-			chatId && mayDecide(podId, routineExecutionId !== null, decidersOf(tool)) ? [chatId] : [],
-		),
-	);
-});
+const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitingDecisionBy")(
+	function* (
+		db: Executor,
+		{
+			workspaceId,
+			userId,
+			conversationIds,
+		}: { workspaceId: string; userId: string; conversationIds: readonly string[] },
+	) {
+		if (conversationIds.length === 0) return new Set<string>();
+		// Aliased, because `routineExecutionIdOf` reads `thread` itself, and an
+		// unaliased column would name its row rather than this one.
+		const asking = alias(thread, "asking_thread");
+		const pending = yield* db
+			.selectDistinct({
+				conversationId: asking.conversationId,
+				podId: asking.podId,
+				routineExecutionId: routineExecutionIdOf(asking.id),
+				tool: toolCall.tool,
+			})
+			.from(toolCall)
+			.innerJoin(asking, eq(asking.id, toolCall.threadId))
+			.where(
+				and(
+					inArray(asking.conversationId, [...conversationIds]),
+					eq(toolCall.approvalStatus, "pending"),
+				),
+			);
+		if (pending.length === 0) return new Set<string>();
+		const { mayDecide } = yield* approvalDecidersIn(db, workspaceId, userId);
+		return new Set(
+			pending.flatMap(({ conversationId, podId, routineExecutionId, tool }) =>
+				conversationId && mayDecide(podId, routineExecutionId !== null, decidersOf(tool))
+					? [conversationId]
+					: [],
+			),
+		);
+	},
+);
 
 function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
 	const leftAt = left.lastMessage?.at;
@@ -960,32 +985,27 @@ function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
 }
 
 /**
- * A page of the chat's main conversation, one statement: its messages with their
- * authors and parts, the collaborations its bot was asked into, and its routine
- * runs, each newest first and one more than the page. Nothing when
- * `reachesPod` does not reach the chat's pod.
+ * A page of the conversation: its messages with their authors and parts, the
+ * collaborations its bot was asked into, and its routine runs, each newest
+ * first and one more than the page. Nothing when `reachesPod` does not reach
+ * the conversation's pod.
  */
 const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	db: Executor,
-	chatId: string,
+	conversationId: string,
 	reachesPod: Visibility.ReachesPod,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
-	return yield* db.query.chat.findFirst({
-		where: { id: chatId, RAW: (row) => reachesPod(row.podId) },
+	const conversation = yield* db.query.thread.findFirst({
+		where: { id: conversationId, type: "conversation", RAW: (row) => reachesPod(row.podId) },
 		columns: { id: true },
 		with: {
-			mainThread: {
-				columns: {},
-				with: {
-					messages: {
-						limit: limit + 1,
-						orderBy: { createdAt: "desc", id: "desc" },
-						...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
-						with: messageRelations,
-					},
-				},
+			messages: {
+				limit: limit + 1,
+				orderBy: { createdAt: "desc", id: "desc" },
+				...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
+				with: messageRelations,
 			},
 			hostCollaborations: {
 				limit: limit + 1,
@@ -999,20 +1019,28 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 					},
 				},
 			},
-			routineExecutions: {
-				limit: limit + 1,
-				orderBy: { acceptedAt: "desc", id: "desc" },
-				...(before && { where: { RAW: (row) => earlierThan(row.acceptedAt, row.id, before) } }),
-				columns: {
-					id: true,
-					threadId: true,
-					routineName: true,
-					triggerKind: true,
-					acceptedAt: true,
-				},
-			},
 		},
 	});
+	if (!conversation) return undefined;
+	const routineExecutions = yield* db.query.routineExecution.findMany({
+		limit: limit + 1,
+		orderBy: { acceptedAt: "desc", id: "desc" },
+		where: {
+			RAW: (row) =>
+				and(
+					sql`${row.threadId} in (select ${thread.id} from ${thread} where ${thread.conversationId} = ${conversationId})`,
+					before && earlierThan(row.acceptedAt, row.id, before),
+				) ?? sql`true`,
+		},
+		columns: {
+			id: true,
+			threadId: true,
+			routineName: true,
+			triggerKind: true,
+			acceptedAt: true,
+		},
+	});
+	return { ...conversation, routineExecutions };
 });
 
 type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
@@ -1020,7 +1048,7 @@ type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
 /** The three sources merged newest first, cut to the page, and put back in reading order. */
 function toMainPage(row: MainPage, limit: number) {
 	const candidates = [
-		...row.mainThread.messages.map((stored) => ({
+		...row.messages.map((stored) => ({
 			id: stored.id,
 			createdAt: stored.createdAt,
 			item: (): ChatMessageItem => ({ kind: "message", message: messageFromRelations(stored) }),
@@ -1073,14 +1101,14 @@ function toMainPage(row: MainPage, limit: number) {
 }
 
 /**
- * A page of the chat's side threads, one statement: its routine runs and
- * collaborations, and those its bot was asked into from elsewhere, each newest
- * activity first and one more than the page. Nothing when `reachesPod` does
- * not reach the chat's pod.
+ * A page of the threads opened beside the conversation, one statement: its
+ * routine runs and collaborations, and those its bot was asked into from
+ * elsewhere, each newest activity first and one more than the page. Nothing
+ * when `reachesPod` does not reach the conversation's pod.
  */
 const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	db: Executor,
-	chatId: string,
+	conversationId: string,
 	reachesPod: Visibility.ReachesPod,
 	limit: number,
 	before: CursorPoint | undefined,
@@ -1112,10 +1140,10 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 			},
 		},
 	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["thread"]>;
-	return yield* db.query.chat.findFirst({
-		where: { id: chatId, RAW: (row) => reachesPod(row.podId) },
+	return yield* db.query.thread.findFirst({
+		where: { id: conversationId, type: "conversation", RAW: (row) => reachesPod(row.podId) },
 		columns: { id: true },
-		with: { threads: sideThreads, hostCollaborationThreads: sideThreads },
+		with: { conversationThreads: sideThreads, hostCollaborationThreads: sideThreads },
 	});
 });
 
@@ -1125,7 +1153,7 @@ type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
 function toHistoryPage(row: HistoryRow, limit: number) {
 	const threads = [
 		...new Map(
-			[...row.threads, ...row.hostCollaborationThreads].map((side) => [side.id, side]),
+			[...row.conversationThreads, ...row.hostCollaborationThreads].map((side) => [side.id, side]),
 		).values(),
 	].sort((left, right) =>
 		left.updatedAt.getTime() === right.updatedAt.getTime()

@@ -15,7 +15,7 @@ import {
 	chatPath,
 	StoryApp,
 	storyBots,
-	storyChatFor,
+	storyConversationFor,
 	storyUser,
 	storyWorkspace,
 } from "../story-app.tsx";
@@ -27,7 +27,7 @@ import {
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const thread = storyChatFor(growthDesk).mainThreadId;
+	const thread = storyConversationFor(growthDesk).id;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
 		threadId: thread,
@@ -101,10 +101,10 @@ export const PodOpensTopChat = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: growthDesk.name, level: 1 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("link", { name: new RegExp(growthDesk.name) })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
+		const list = canvas.getByRole("region", { name: revenue.name });
+		await expect(
+			within(list).getByRole("link", { name: new RegExp(growthDesk.name) }),
+		).toHaveAttribute("aria-current", "page");
 	},
 });
 
@@ -154,7 +154,7 @@ export const ReplyToAMessage = meta.story({
 		const chat = [...conversation];
 		msw.use(
 			...appHandlers({ messages: { [growthDesk.id]: chat } }),
-			http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
+			http.post(`${API}/conversations/:conversationId/messages`, async ({ request }) => {
 				const sent = (await request.json()) as { id: string; message: string; replyTo?: string };
 				const quoted = conversation.find((message) => message.id === sent.replyTo);
 				const reply: Message = {
@@ -410,11 +410,11 @@ const collaboration: ThreadDetails = {
 		workspaceId: growthDesk.workspaceId,
 		podId: growthDesk.podId,
 		hostAgentId: linearHandler.id,
-		chatId: storyChatFor(growthDesk).id,
+		conversationId: storyConversationFor(growthDesk).id,
 		type: "collaboration",
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
-		parentThreadId: storyChatFor(growthDesk).mainThreadId,
+		parentThreadId: storyConversationFor(growthDesk).id,
 		initiatorUserId: storyUser.id,
 		createdAt: "2026-09-18T06:03:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",
@@ -497,7 +497,7 @@ const sandboxHandlers = (messages: Message[]) => [
 
 /** Growth Desk's reply in progress, having opened a page in its browser. */
 const browsing: Message = {
-	...said("90", "bot", "", "2026-09-14T09:20:00.000Z"),
+	...said("90", "bot", "", "2026-09-18T06:20:00.000Z"),
 	status: "streaming",
 	parts: [
 		{
@@ -510,7 +510,7 @@ const browsing: Message = {
 			error: null,
 			mutating: false,
 			atOffset: 0,
-			startedAt: "2026-09-14T09:20:01.000Z",
+			startedAt: "2026-09-18T06:20:01.000Z",
 			finishedAt: null,
 		},
 	],
@@ -682,7 +682,7 @@ const uploadedFileId = "0199a3a0-0000-7000-8000-000000000a51";
 let lastSent: { message: string; attachments?: string[] } | undefined;
 
 const attachmentHandlers = [
-	http.post(`${API}/chats/:chatId/files`, ({ request }) => {
+	http.post(`${API}/conversations/:conversationId/files`, ({ request }) => {
 		const query = new URL(request.url).searchParams;
 		return HttpResponse.json(
 			{
@@ -694,7 +694,7 @@ const attachmentHandlers = [
 			{ status: 201 },
 		);
 	}),
-	http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
+	http.post(`${API}/conversations/:conversationId/messages`, async ({ request }) => {
 		lastSent = (await request.json()) as typeof lastSent;
 		return HttpResponse.json(
 			said("61", "you", lastSent?.message ?? "", "2026-09-18T06:10:00.000Z"),
@@ -745,7 +745,7 @@ export const AttachAndSend = meta.story({
 export const SendRefusedFileGone = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.post(`${API}/chats/:chatId/messages`, () =>
+			http.post(`${API}/conversations/:conversationId/messages`, () =>
 				HttpResponse.json(
 					{
 						_tag: "BadRequest",

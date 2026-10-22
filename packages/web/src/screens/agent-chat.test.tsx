@@ -1,6 +1,6 @@
 import {
-	type Chat,
 	type ChatHistoryEntry,
+	type Conversation,
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	type Message,
 	type RoutineExecution,
@@ -36,15 +36,17 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const chat: Chat = {
+const chat: Conversation = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
 	podId: linear.podId,
 	hostAgentId: linear.id,
-	mainThreadId: "0199a3a0-0000-7000-8000-0000000000e2",
+	title: `Conversation with ${linear.name}`,
 	createdAt: "2026-09-18T08:00:00.000Z",
 	updatedAt: "2026-09-18T09:30:00.000Z",
 };
+/** Where the conversation is, which its bot's address opens. */
+const conversationPage = `/suga/pods/suga-team/threads/${chat.id}`;
 const collaborationId = "0199a3a0-0000-7000-8000-0000000000e3";
 const routineId = "0199a3a0-0000-7000-8000-0000000000e4";
 const routineCollaborationId = "0199a3a0-0000-7000-8000-0000000000e7";
@@ -54,6 +56,7 @@ const routineExecution: RoutineExecution = {
 	workspaceId: linear.workspaceId,
 	agentId: linear.id,
 	threadId: routineId,
+	conversationId: chat.id,
 	routineName: "Overnight review",
 	instructions: "Review overnight changes and summarize anything urgent.",
 	trigger: {
@@ -91,7 +94,7 @@ const collaborator = {
 };
 const mainMessage: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	threadId: chat.mainThreadId,
+	threadId: chat.id,
 	author: person,
 	kind: "text",
 	status: "complete",
@@ -112,7 +115,7 @@ const collaborationPart = {
 };
 const agentMessage: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000000f3",
-	threadId: chat.mainThreadId,
+	threadId: chat.id,
 	author: host,
 	kind: "text",
 	status: "complete",
@@ -182,7 +185,7 @@ const routineTriggerMessage: Message = {
 };
 const collaborationEntry: ChatHistoryEntry = {
 	threadId: collaborationId,
-	parentThreadId: chat.mainThreadId,
+	parentThreadId: chat.id,
 	type: "collaboration",
 	title: "Check release ownership",
 	participants: [host, collaborator],
@@ -237,11 +240,11 @@ function details(
 			workspaceId: linear.workspaceId,
 			podId: linear.podId,
 			hostAgentId: type === "collaboration" ? triager.id : linear.id,
-			chatId: chat.id,
+			conversationId: chat.id,
 			type,
 			title,
 			status: "done",
-			parentThreadId: type === "collaboration" ? chat.mainThreadId : null,
+			parentThreadId: type === "collaboration" ? chat.id : null,
 			initiatorUserId: sam.id,
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T09:22:00.000Z",
@@ -263,7 +266,7 @@ function chatList({ listed }: { listed: boolean }) {
 		items: [
 			{
 				agent: linear,
-				chat: listed ? chat : null,
+				conversation: listed ? chat : null,
 				lastMessage: null,
 				waitingOn: null,
 				unreadMessages: 0,
@@ -275,7 +278,7 @@ function chatList({ listed }: { listed: boolean }) {
 
 function chatAnswers() {
 	client.api.chats.list.mockReturnValue(chatList({ listed: true }));
-	client.api.chats.getOrCreate.mockReturnValue(Effect.succeed(chat));
+	client.api.chats.open.mockReturnValue(Effect.succeed(chat));
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
 			items: [
@@ -292,7 +295,7 @@ function chatAnswers() {
 		}),
 	);
 	client.api.threads.activity.mockImplementation(({ params }: { params: { threadId: string } }) =>
-		params.threadId === chat.mainThreadId
+		params.threadId === chat.id
 			? Effect.succeed(chatActivity)
 			: Effect.fail(new NotFound({ message: userText`No such thread` })),
 	);
@@ -341,7 +344,7 @@ function chatAnswers() {
 			}
 			default:
 				return Effect.succeed(
-					details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]),
+					details(chat.id, "Chat", "conversation", [mainMessage, agentMessage]),
 				);
 		}
 	});
@@ -410,7 +413,7 @@ describe("ongoing agent Chat", () => {
 		});
 		// Both bots' faces, each a disc filling its 40-unit viewbox, in the head's own colour group.
 		expect(collaboration.querySelectorAll('svg > g[fill] > circle[r="20"]')).toHaveLength(2);
-		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
+		expect(client.api.chats.open).not.toHaveBeenCalled();
 	});
 
 	it("asks for a chat page's pods, agents and list at once, each a single time, on its first load", async () => {
@@ -444,7 +447,7 @@ describe("ongoing agent Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		await screen.findByText(mainMessage.content);
-		expect(client.api.chats.getOrCreate).toHaveBeenCalledWith({
+		expect(client.api.chats.open).toHaveBeenCalledWith({
 			params: { workspace: linear.workspaceId },
 			payload: { podId: linear.podId, hostAgentId: linear.id },
 		});
@@ -489,7 +492,7 @@ describe("ongoing agent Chat", () => {
 
 		await waitFor(() =>
 			expect(client.api.chats.send).toHaveBeenCalledWith({
-				params: { chatId: chat.id },
+				params: { conversationId: chat.id },
 				payload: { id: expect.any(String), message: "Send the update", peopleOnly: false },
 			}),
 		);
@@ -508,7 +511,7 @@ describe("ongoing agent Chat", () => {
 
 		await waitFor(() =>
 			expect(client.api.chats.send).toHaveBeenCalledWith({
-				params: { chatId: chat.id },
+				params: { conversationId: chat.id },
 				payload: { id: expect.any(String), message: "Just between us", peopleOnly: true },
 			}),
 		);
@@ -623,7 +626,7 @@ describe("ongoing agent Chat", () => {
 		});
 		messages.scrollTop = 800;
 		fireEvent.scroll(messages);
-		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.id));
 
 		const streaming = {
 			...agentMessage,
@@ -634,16 +637,14 @@ describe("ongoing agent Chat", () => {
 			createdAt: "2026-09-18T09:20:00.000Z",
 		};
 		scrollHeight = 1_400;
-		updates.emit(
-			streamEvent("message.created", { threadId: chat.mainThreadId, message: streaming }),
-		);
+		updates.emit(streamEvent("message.created", { threadId: chat.id, message: streaming }));
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
 		await waitFor(() => expect(messages.scrollTop).toBe(1_400));
 
 		scrollHeight = 1_700;
 		updates.emit(
 			streamEvent("message.completed", {
-				threadId: chat.mainThreadId,
+				threadId: chat.id,
 				messageId: streaming.id,
 				content: "Starting the response",
 				status: "complete",
@@ -658,7 +659,7 @@ describe("ongoing agent Chat", () => {
 		client.events.thread.mockReturnValue(updates.stream);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		await screen.findByRole("log", { name: "Chat messages" });
-		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.id));
 		const streaming = {
 			...agentMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fc",
@@ -667,15 +668,13 @@ describe("ongoing agent Chat", () => {
 			parts: [{ type: "text" as const, text: "Here it is" }],
 			createdAt: "2026-09-18T09:20:00.000Z",
 		};
-		updates.emit(
-			streamEvent("message.created", { threadId: chat.mainThreadId, message: streaming }),
-		);
+		updates.emit(streamEvent("message.created", { threadId: chat.id, message: streaming }));
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
 
 		// Before the reply's words are settled enough to show, its file already is.
 		updates.emit(
 			streamEvent("message.files_changed", {
-				threadId: chat.mainThreadId,
+				threadId: chat.id,
 				messageId: streaming.id,
 				files: [
 					{
@@ -692,7 +691,7 @@ describe("ongoing agent Chat", () => {
 
 		updates.emit(
 			streamEvent("message.delta", {
-				threadId: chat.mainThreadId,
+				threadId: chat.id,
 				messageId: streaming.id,
 				offset: streaming.content.length,
 				text: ", with the totals.",
@@ -700,7 +699,7 @@ describe("ongoing agent Chat", () => {
 		);
 		updates.emit(
 			streamEvent("message.completed", {
-				threadId: chat.mainThreadId,
+				threadId: chat.id,
 				messageId: streaming.id,
 				content: "Here it is, with the totals.",
 				status: "complete",
@@ -726,7 +725,7 @@ describe("ongoing agent Chat", () => {
 			parts: [{ type: "text", text: "Checkout timeouts are tracked." }],
 		};
 		const threadWith = (reply: Message) =>
-			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [mainMessage, reply]));
+			Effect.succeed(details(chat.id, "Chat", "conversation", [mainMessage, reply]));
 		client.api.threads.get.mockReturnValue(threadWith(writing));
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
@@ -773,7 +772,9 @@ describe("ongoing agent Chat", () => {
 			fireEvent.focus(window);
 
 			await waitFor(() =>
-				expect(client.api.chats.markRead).toHaveBeenCalledWith({ params: { chatId: chat.id } }),
+				expect(client.api.chats.markRead).toHaveBeenCalledWith({
+					params: { conversationId: chat.id },
+				}),
 			);
 		});
 
@@ -794,7 +795,7 @@ describe("ongoing agent Chat", () => {
 
 			updates.emit(
 				streamEvent("message.created", {
-					threadId: chat.mainThreadId,
+					threadId: chat.id,
 					message: {
 						...agentMessage,
 						id: "0199a3a0-0000-7000-8000-000000000120",
@@ -835,7 +836,7 @@ describe("ongoing agent Chat", () => {
 		const serverHas = (queuedSince: string | null) =>
 			client.api.threads.get.mockReturnValue(
 				Effect.succeed({
-					...details(chat.mainThreadId, "Chat", "chat", [mainMessage, writing, followUp]),
+					...details(chat.id, "Chat", "conversation", [mainMessage, writing, followUp]),
 					queuedSince,
 				}),
 			);
@@ -846,13 +847,9 @@ describe("ongoing agent Chat", () => {
 			serverHas(null);
 			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 			await screen.findByRole("log", { name: "Chat messages" });
-			await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
-			updates.emit(
-				streamEvent("message.created", { threadId: chat.mainThreadId, message: writing }),
-			);
-			updates.emit(
-				streamEvent("message.created", { threadId: chat.mainThreadId, message: followUp }),
-			);
+			await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.id));
+			updates.emit(streamEvent("message.created", { threadId: chat.id, message: writing }));
+			updates.emit(streamEvent("message.created", { threadId: chat.id, message: followUp }));
 			await screen.findByText("Is the Stripe webhook part of it?");
 			return updates;
 		}
@@ -861,13 +858,13 @@ describe("ongoing agent Chat", () => {
 			const updates = await watchWhileReplying();
 
 			serverHas(followUp.createdAt);
-			updates.emit(streamEvent("thread.changed", { threadId: chat.mainThreadId }));
+			updates.emit(streamEvent("thread.changed", { threadId: chat.id }));
 			await screen.findByRole("article", { name: "Jay Park, queued" });
 
 			serverHas(null);
 			updates.emit(
 				streamEvent("turn.started", {
-					threadId: chat.mainThreadId,
+					threadId: chat.id,
 					turnId: "0199a3a0-0000-7000-8000-0000000000ff",
 					agentId: linear.id,
 				}),
@@ -905,7 +902,7 @@ describe("ongoing agent Chat", () => {
 			}),
 		);
 		client.api.threads.get.mockReturnValue(
-			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [mainMessage, waiting])),
+			Effect.succeed(details(chat.id, "Chat", "conversation", [mainMessage, waiting])),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
@@ -995,7 +992,7 @@ describe("ongoing agent Chat", () => {
 					thread: { ...inbound.thread, chatId: "0199a3a0-0000-7000-8000-000000000099" },
 				});
 			}
-			return Effect.succeed(details(chat.mainThreadId, "Chat", "chat", []));
+			return Effect.succeed(details(chat.id, "Chat", "conversation", []));
 		});
 
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
@@ -1051,7 +1048,7 @@ describe("ongoing agent Chat", () => {
 	it("opens with whom the chat is with, when there is nothing older", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		client.api.threads.get.mockReturnValue(
-			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [])),
+			Effect.succeed(details(chat.id, "Chat", "conversation", [])),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
@@ -1112,7 +1109,7 @@ describe("ongoing agent Chat", () => {
 		await screen.findByRole("heading", { name: linear.name });
 		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
 	it("leads from a person's name to their member page, and back to the Chat", async () => {
@@ -1128,7 +1125,7 @@ describe("ongoing agent Chat", () => {
 		);
 		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
 	it("leads from a bot's name to its settings in the pod, and back to the Chat", async () => {
@@ -1145,7 +1142,7 @@ describe("ongoing agent Chat", () => {
 		);
 		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
 	it("lists who has written in the Chat lately, most recent first", async () => {
@@ -1172,7 +1169,7 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() =>
 			expect(screen.queryByRole("complementary", { name: collaborationEntry.title })).toBeNull(),
 		);
-		expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${linear.handle}`);
+		expect(router.state.location.pathname).toBe(conversationPage);
 	});
 });
 
@@ -1185,7 +1182,7 @@ describe("a message opened from Activity", () => {
 		createdAt: "2026-09-17T09:00:00.000Z",
 	};
 	const opened = (messageId: string) =>
-		`/suga/activity/suga-team/${linear.handle}?item=${messageId}&message=${messageId}`;
+		`/suga/activity/suga-team/${chat.id}?item=${messageId}&message=${messageId}`;
 
 	beforeEach(() => {
 		client.api.chats.messages.mockImplementation(({ query }: { query?: { cursor?: string } }) =>
@@ -1229,7 +1226,7 @@ describe("a message opened from Activity", () => {
 	});
 
 	it("shows a routine run chosen in Activity as a page of its own, with the way back and to its chat", async () => {
-		mount(`/suga/activity/suga-team/${linear.handle}?item=${routineId}&threadPage=${routineId}`);
+		mount(`/suga/activity/suga-team/${chat.id}?item=${routineId}&threadPage=${routineId}`);
 
 		expect(
 			await screen.findByRole("heading", { name: routineExecution.routineName }),
@@ -1239,12 +1236,12 @@ describe("a message opened from Activity", () => {
 			"/suga/activity",
 		);
 		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(
-			`/suga/pods/suga-team/agents/${linear.handle}`,
+			conversationPage,
 		);
 	});
 
 	it("ignores an address naming something other than a message", async () => {
-		mount(`/suga/activity/suga-team/${linear.handle}?item=a%22b&message=a%22b`);
+		mount(`/suga/activity/suga-team/${chat.id}?item=a%22b&message=a%22b`);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();
 		expect(screen.queryByText("Could not find the message you opened in this chat.")).toBeNull();
@@ -1254,7 +1251,7 @@ describe("a message opened from Activity", () => {
 describe("people typing in the Chat", () => {
 	const jyeInThread = testPerson({ id: jye.id, name: jye.name });
 	const jyeTyping = streamEvent("person.typing", {
-		threadId: chat.mainThreadId,
+		threadId: chat.id,
 		person: jyeInThread,
 	});
 
@@ -1262,7 +1259,7 @@ describe("people typing in the Chat", () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.id));
 		return updates;
 	}
 
@@ -1278,7 +1275,7 @@ describe("people typing in the Chat", () => {
 
 		updates.emit(
 			streamEvent("message.created", {
-				threadId: chat.mainThreadId,
+				threadId: chat.id,
 				message: {
 					...mainMessage,
 					id: "0199a3a0-0000-7000-8000-0000000000fc",
@@ -1307,7 +1304,7 @@ describe("people typing in the Chat", () => {
 	it("does not show you your own typing", async () => {
 		const updates = await watchMainThread();
 
-		updates.emit(streamEvent("person.typing", { threadId: chat.mainThreadId, person }));
+		updates.emit(streamEvent("person.typing", { threadId: chat.id, person }));
 		updates.emit(jyeTyping);
 
 		await screen.findByRole("status", { name: "Jye is typing" });
@@ -1324,7 +1321,7 @@ describe("people typing in the Chat", () => {
 		client.events.thread.mockClear();
 
 		await leaveAndReturn(router);
-		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.id));
 		expect(client.api.events.typing).not.toHaveBeenCalled();
 	});
 
@@ -1338,7 +1335,7 @@ describe("people typing in the Chat", () => {
 
 		await waitFor(() =>
 			expect(client.api.events.typing).toHaveBeenCalledWith({
-				params: { threadId: chat.mainThreadId },
+				params: { threadId: chat.id },
 			}),
 		);
 		expect(client.api.events.typing).toHaveBeenCalledTimes(1);
@@ -1765,7 +1762,7 @@ describe("the Chat's summary", () => {
 	it("shows a new summary once the thread says it changed", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockImplementation((threadId: string) =>
-			threadId === chat.mainThreadId ? updates.stream : controlledEventStream().stream,
+			threadId === chat.id ? updates.stream : controlledEventStream().stream,
 		);
 		let summarised = false;
 		answerChatActivity(() => (summarised ? chatActivity : { ...chatActivity, summary: null }));
@@ -1776,7 +1773,7 @@ describe("the Chat's summary", () => {
 		).toBeDefined();
 
 		summarised = true;
-		updates.emit(streamEvent("thread.changed", { threadId: chat.mainThreadId }));
+		updates.emit(streamEvent("thread.changed", { threadId: chat.id }));
 
 		expect(await within(sidebar).findByText("Chat is complete.")).toBeDefined();
 	});

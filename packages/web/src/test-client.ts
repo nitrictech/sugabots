@@ -109,7 +109,7 @@ export const client = {
 			approvals: vi.fn(),
 			activity: vi.fn(),
 			markRead: vi.fn(),
-			getOrCreate: vi.fn(),
+			open: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
 			send: vi.fn(),

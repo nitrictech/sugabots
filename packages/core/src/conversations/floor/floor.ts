@@ -22,9 +22,9 @@ import { crewOf } from "../threads/participants.ts";
  *
  * 1. Writing for people only, or mentioning only people: nobody. They are
  *    talking to each other.
- * 2. Writing in a chat: the chat's agent, whichever agents they mention. A
- *    chat is a conversation with one agent, so another agent the person names
- *    is reached by that agent collaborating, not by joining.
+ * 2. Writing in a conversation: its agent, whichever agents they mention. A
+ *    conversation is with one agent, so another agent the person names is
+ *    reached by that agent collaborating, not by joining.
  * 3. Mentioning agents by handle: those agents, and nobody else.
  * 4. Default: the agent that spoke last, else the host.
  */
@@ -54,7 +54,7 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	if (input.peopleOnly || (mentioned.length > 0 && mentionedAgents.length === 0)) {
 		return { kind: "nobody" };
 	}
-	if (input.threadType === "chat") {
+	if (input.threadType === "conversation") {
 		return { kind: "turns", agents: [{ agentId: input.hostAgentId, reason: "default" }] };
 	}
 	if (mentionedAgents.length > 0) {

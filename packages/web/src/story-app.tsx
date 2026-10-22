@@ -1,7 +1,7 @@
 import type {
 	Agent,
-	Chat,
 	ChatListItem,
+	Conversation,
 	Message,
 	ModelProvider,
 	Pod,
@@ -61,15 +61,15 @@ export const storyPods: Pod[] = podsWithBots.map(({ pod }) =>
 );
 export const storyBots: Agent[] = podsWithBots.flatMap(({ bots }) => bots);
 
-/** One chat per bot, by the bot's id, and its main thread. */
-export function storyChatFor(agent: Agent): Chat {
+/** One conversation per bot, by the bot's id. */
+export function storyConversationFor(agent: Agent): Conversation {
 	const suffix = agent.id.slice(-4);
 	return {
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: agent.workspaceId,
 		podId: agent.podId,
 		hostAgentId: agent.id,
-		mainThreadId: `0199a3a0-0000-7000-8000-00000000d${suffix.slice(1)}`,
+		title: `Conversation with ${agent.name}`,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
@@ -133,7 +133,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 
 /** What a chat's thread holds: its messages, and who is in it. */
 export function storyChatDetails(agent: Agent, messages: Message[] = []): ThreadDetails {
-	const chat = storyChatFor(agent);
+	const chat = storyConversationFor(agent);
 	const bot = {
 		kind: "agent" as const,
 		id: agent.id,
@@ -146,13 +146,13 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {
 		thread: {
-			id: chat.mainThreadId,
+			id: chat.id,
 			workspaceId: agent.workspaceId,
 			podId: agent.podId,
 			hostAgentId: agent.id,
-			chatId: chat.id,
-			type: "chat",
-			title: "Chat",
+			conversationId: chat.id,
+			type: "conversation",
+			title: chat.title,
 			status: "done",
 			parentThreadId: null,
 			initiatorUserId: storyUser.id,
@@ -173,12 +173,12 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 
 /** What a chat's sidebar shows: a summary, and who has written lately. */
 export function storyChatActivity(agent: Agent, messages: Message[] = []): ThreadActivity {
-	const chat = storyChatFor(agent);
+	const chat = storyConversationFor(agent);
 	const details = storyChatDetails(agent, messages);
 	return {
 		summary: {
 			content: `${agent.name} has been keeping things moving.`,
-			sourceMessageId: messages.at(-1)?.id ?? chat.mainThreadId,
+			sourceMessageId: messages.at(-1)?.id ?? chat.id,
 			updatedAt: chat.updatedAt,
 		},
 		context: null,
@@ -215,9 +215,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const bots = data.bots ?? storyBots;
 	const messages = data.messages ?? {};
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
-	const botForChat = (chatId: string) => bots.find((bot) => storyChatFor(bot).id === chatId);
 	const botForThread = (threadId: string) =>
-		bots.find((bot) => storyChatFor(bot).mainThreadId === threadId);
+		bots.find((bot) => storyConversationFor(bot).id === threadId);
 
 	return [
 		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
@@ -259,7 +258,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/chats/pod-markers"), () =>
 			HttpResponse.json({ pods: {} }),
 		),
-		http.post(api("/chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
+		http.post(
+			api("/conversations/:conversationId/read"),
+			() => new HttpResponse(null, { status: 204 }),
+		),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
 			// By the pod's id or its slug, as the API takes it.
 			const named = new URL(request.url).searchParams.get("pod");
@@ -270,7 +272,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					const last = messages[bot.id]?.at(-1);
 					return {
 						agent: bot,
-						chat: last ? storyChatFor(bot) : null,
+						conversation: last ? storyConversationFor(bot) : null,
 						lastMessage: last
 							? {
 									preview: last.content,
@@ -285,13 +287,15 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				});
 			return HttpResponse.json({ items });
 		}),
-		http.post(api("/workspaces/:workspace/chats"), async ({ request }) => {
+		http.post(api("/workspaces/:workspace/conversations"), async ({ request }) => {
 			const body = (await request.json()) as { hostAgentId: string };
 			const bot = botById(body.hostAgentId);
-			return bot ? HttpResponse.json(storyChatFor(bot)) : new HttpResponse(null, { status: 404 });
+			return bot
+				? HttpResponse.json(storyConversationFor(bot))
+				: new HttpResponse(null, { status: 404 });
 		}),
-		http.get(api("/chats/:chatId/messages"), ({ params }) => {
-			const bot = botForChat(String(params.chatId));
+		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
+			const bot = botForThread(String(params.conversationId));
 			return HttpResponse.json({
 				items: (bot ? (messages[bot.id] ?? []) : []).map((message) => ({
 					kind: "message",
@@ -300,7 +304,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				nextCursor: null,
 			});
 		}),
-		http.get(api("/chats/:chatId/history"), () =>
+		http.get(api("/conversations/:conversationId/history"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 		http.get(api("/threads/:threadId/events"), quietStream),

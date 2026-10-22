@@ -8,20 +8,20 @@ import {
 	type SystemAgentKey,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
-	chat,
 	message,
 	messageReaction,
 	thread,
 	threadParticipant,
 	threadRead,
 } from "../../database/schema.ts";
+import { Ids } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -42,7 +42,7 @@ import {
 } from "./participants.ts";
 
 /**
- * The only writer of `thread`, `thread_participant`, `chat` and `thread_read`,
+ * The only writer of `thread`, `thread_participant` and `thread_read`,
  * and of the messages posted into threads. A turn's reply is the exception: it is
  * `TurnRepository`'s while the turn writes it.
  *
@@ -51,16 +51,16 @@ import {
  */
 export interface Interface {
 	/**
-	 * The chat between the pod and its crew agent `hostAgentId`, with its main
-	 * thread, created on first use. The agent is in the main thread, and so is
-	 * `initiatorUserId` when a person opened it.
+	 * The newest conversation with the pod's crew agent `hostAgentId`, created
+	 * on first use. The agent is in it, and so is `initiatorUserId` when a
+	 * person opened it.
 	 */
-	readonly openChat: (placement: {
+	readonly openConversation: (placement: {
 		workspaceId: string;
 		podId: string;
 		hostAgentId: string;
 		initiatorUserId: string | null;
-	}) => Effect.Effect<schema.ChatRow>;
+	}) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
 	 * participant, and announces it. Posting a message again with the same
@@ -92,18 +92,21 @@ export interface Interface {
 	 * and the brief as its first message, written by the asking agent.
 	 */
 	readonly openCollaborationThread: (input: {
-		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId" | "chatId" | "initiatorUserId">;
+		parent: Pick<
+			schema.ThreadRow,
+			"id" | "workspaceId" | "podId" | "conversationId" | "initiatorUserId"
+		>;
 		askingAgentId: string;
 		collaboratorId: string;
 		title: string;
 		brief: string;
 	}) => Effect.Effect<{ threadId: string; briefMessageId: string }>;
-	/** Opens a routine run's thread in the agent's chat, with the agent in it. */
+	/** Opens a routine run's thread in the agent's conversation, with the agent in it. */
 	readonly openRoutineThread: (input: {
 		workspaceId: string;
 		podId: string;
 		agentId: string;
-		chatId: string;
+		conversationId: string;
 		title: string;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/** Posts what started a routine run into its thread, as the run's first message. */
@@ -113,7 +116,7 @@ export interface Interface {
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
-	 * Posts a routine run's result into the agent's chat's main thread
+	 * Posts a routine run's result into the agent's conversation
 	 * `threadId`, as a message from the run's agent, and announces it. A run
 	 * has one result: posting a second fails.
 	 */
@@ -160,6 +163,9 @@ export interface Interface {
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
 }
 
+/** What a conversation is called until its first summary gives it a title of its own. */
+export const conversationTitle = (botName: string) => `Conversation with ${botName}`;
+
 /** One person's emoji on a message in a thread. */
 export interface Reaction {
 	readonly threadId: string;
@@ -176,6 +182,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ThreadRepository");
 	const { emit } = yield* ConversationEvents.Service;
 	const files = yield* ThreadFiles.Service;
+	const ids = yield* Ids.Service;
 
 	/** What the message has now, announced when `changed`. */
 	const reactionsAfter = (reaction: Reaction, changed: boolean) =>
@@ -200,56 +207,63 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		openChat: (placement) =>
+		openConversation: (placement) =>
 			operation(
-				"openChat",
+				"openConversation",
 				transaction(
 					Effect.gen(function* () {
+						// Two first messages to a bot at once would otherwise open two conversations.
 						yield* query((db) =>
 							db.execute(
-								sql`select pg_advisory_xact_lock(hashtextextended(${`chat:${placement.podId}:${placement.hostAgentId}`}, 0))`,
+								sql`select pg_advisory_xact_lock(hashtextextended(${`conversation:${placement.podId}:${placement.hostAgentId}`}, 0))`,
 							),
 						);
 						const [existing] = yield* query((db) =>
 							db
 								.select()
-								.from(chat)
+								.from(thread)
 								.where(
-									and(eq(chat.podId, placement.podId), eq(chat.hostAgentId, placement.hostAgentId)),
+									and(
+										eq(thread.type, "conversation"),
+										eq(thread.podId, placement.podId),
+										eq(thread.hostAgentId, placement.hostAgentId),
+									),
 								)
+								.orderBy(desc(thread.createdAt), desc(thread.id))
 								.limit(1),
 						);
 						if (existing) return existing;
-						const main = yield* query((db) =>
+						const [host] = yield* query((db) =>
+							db
+								.select({ name: agent.name })
+								.from(agent)
+								.where(eq(agent.id, placement.hostAgentId))
+								.limit(1),
+						);
+						const id = yield* ids.next;
+						const created = yield* query((db) =>
 							db
 								.insert(thread)
 								.values({
+									id,
 									workspaceId: placement.workspaceId,
 									podId: placement.podId,
 									hostAgentId: placement.hostAgentId,
-									type: "chat",
-									title: "Chat",
+									conversationId: id,
+									type: "conversation",
+									title: conversationTitle(host?.name ?? "a bot"),
 									initiatorUserId: placement.initiatorUserId,
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("thread")));
-						const created = yield* query((db) =>
-							db
-								.insert(chat)
-								.values({ ...placement, mainThreadId: main.id })
-								.returning(),
-						).pipe(Effect.flatMap(writtenRow("chat")));
-						yield* query((db) =>
-							db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
-						);
 						yield* query((db) =>
 							db
 								.insert(threadParticipant)
 								.values([
 									...(placement.initiatorUserId
-										? [{ threadId: main.id, userId: placement.initiatorUserId }]
+										? [{ threadId: created.id, userId: placement.initiatorUserId }]
 										: []),
-									{ threadId: main.id, agentId: placement.hostAgentId },
+									{ threadId: created.id, agentId: placement.hostAgentId },
 								]),
 						);
 						return created;
@@ -385,7 +399,7 @@ export const make = Effect.gen(function* () {
 									workspaceId: input.parent.workspaceId,
 									podId: input.parent.podId,
 									hostAgentId: input.collaboratorId,
-									chatId: input.parent.chatId,
+									conversationId: input.parent.conversationId,
 									type: "collaboration",
 									title: input.title,
 									parentThreadId: input.parent.id,
@@ -429,7 +443,7 @@ export const make = Effect.gen(function* () {
 									workspaceId: input.workspaceId,
 									podId: input.podId,
 									hostAgentId: input.agentId,
-									chatId: input.chatId,
+									conversationId: input.conversationId,
 									type: "routine",
 									title: input.title,
 									initiatorUserId: null,
@@ -537,7 +551,7 @@ export const make = Effect.gen(function* () {
 								// the system agent hosting it belongs to the workspace.
 								podId: input.served.podId,
 								hostAgentId: input.systemAgentId,
-								chatId: null,
+								conversationId: null,
 								type: "system_agent",
 								title: input.title,
 								systemAgentKey: input.systemAgentKey,

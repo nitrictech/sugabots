@@ -88,7 +88,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					return { executionId: existing.id, threadId: existing.threadId, duplicate: true };
 				}
 
-				const chat = yield* threads.openChat({
+				const conversation = yield* threads.openConversation({
 					workspaceId: input.workspaceId,
 					podId,
 					hostAgentId: input.agentId,
@@ -99,7 +99,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					workspaceId: input.workspaceId,
 					podId,
 					agentId: input.agentId,
-					chatId: chat.id,
+					conversationId: conversation.id,
 					title: executionTitle(definition.routine.name, acceptedAt),
 				});
 				const execution = yield* repository.accept({

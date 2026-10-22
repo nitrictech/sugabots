@@ -1,8 +1,8 @@
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useChat, useChatHistory } from "@/lib/chats.ts";
-import { agentChatLink } from "@/lib/links.ts";
+import { useChatHistory } from "@/lib/chats.ts";
+import { conversationLink } from "@/lib/links.ts";
 import type { Staged } from "./AgentChat.tsx";
 import { AgentPage } from "./AgentPage.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
@@ -19,6 +19,7 @@ const BACK_TO_ACTIVITY: BackTo = { to: "activity" };
 export function ActivityPane({
 	pod,
 	agent,
+	conversationId,
 	user,
 	threadPageId,
 	focusMessageId,
@@ -30,6 +31,8 @@ export function ActivityPane({
 }: {
 	pod: Pod;
 	agent: Agent;
+	/** The conversation the item is in, which is with `agent`. */
+	conversationId: string;
 	user: SessionUser;
 	/** A run or collaboration shown as the page, in place of the chat. */
 	threadPageId?: string;
@@ -44,7 +47,7 @@ export function ActivityPane({
 }) {
 	const openChat = (
 		<Link
-			{...agentChatLink({ pod, agent })}
+			{...conversationLink({ pod, conversationId })}
 			className="focus-ring shrink-0 rounded-sm font-medium text-[13px] text-link"
 		>
 			Open chat
@@ -53,8 +56,8 @@ export function ActivityPane({
 	if (threadPageId) {
 		return (
 			<ActivityThread
-				pod={pod}
 				agent={agent}
+				conversationId={conversationId}
 				threadId={threadPageId}
 				trailing={openChat}
 				onOpenThread={onThreadPageChange}
@@ -65,6 +68,7 @@ export function ActivityPane({
 		<AgentPage
 			agent={agent}
 			pod={pod}
+			conversationId={conversationId}
 			user={user}
 			threadId={threadId}
 			focusMessageId={focusMessageId}
@@ -78,25 +82,23 @@ export function ActivityPane({
 
 /** A run or collaboration in `agent`'s chat, as a page of its own. */
 function ActivityThread({
-	pod,
 	agent,
+	conversationId,
 	threadId,
 	trailing,
 	onOpenThread,
 }: {
-	pod: Pod;
 	agent: Agent;
+	conversationId: string;
 	threadId: string;
 	trailing: ReactNode;
 	onOpenThread: (threadId: string) => void;
 }) {
-	const chat = useChat(pod, agent.id);
-	const history = useChatHistory(chat.data?.id);
-	if (!chat.data) return null;
+	const history = useChatHistory(conversationId);
 	return (
 		<ChatThreadPanel
 			frame={{ kind: "page", back: BACK_TO_ACTIVITY, trailing }}
-			chatId={chat.data.id}
+			conversationId={conversationId}
 			chatAgentId={agent.id}
 			threadId={threadId}
 			entry={history.entries.find((entry) => entry.threadId === threadId)}

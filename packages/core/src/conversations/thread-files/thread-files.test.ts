@@ -41,7 +41,7 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 					workspaceId: owner.workspaceId,
 					podId: owner.podId,
 					hostAgentId: owner.agentId,
-					type: "chat",
+					type: "conversation",
 					title: "Files",
 				})
 				.returning(),

@@ -41,12 +41,13 @@ it("keeps the rail and conversation list visible while the chat screen loads", a
 	expect(
 		screen.getByRole("link", { name: new RegExp(linear.name) }).getAttribute("aria-current"),
 	).toBe("page");
-	expect(screen.queryByRole("heading", { name: linear.name })).toBeNull();
+	expect(screen.queryAllByRole("heading", { name: linear.name })).toHaveLength(0);
 
 	await act(async () => {
 		chatModule.resolve();
 		await import("@/screens/AgentPage.tsx");
 	});
-	expect(await screen.findByRole("heading", { name: linear.name })).toBeDefined();
+	// The bot's name heads more than one part of the chat screen.
+	expect(await screen.findAllByRole("heading", { name: linear.name })).not.toHaveLength(0);
 	expect(screen.getByRole("navigation", { name: "Pods" })).toBe(rail);
 });

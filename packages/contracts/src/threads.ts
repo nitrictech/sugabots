@@ -21,7 +21,7 @@ export const DEFAULT_THREAD_HISTORY_LIMIT = 50;
 export const MAX_THREAD_HISTORY_LIMIT = 100;
 
 export const threadTypeSchema = Schema.Literals([
-	"chat",
+	"conversation",
 	"collaboration",
 	"routine",
 	"system_agent",
@@ -48,7 +48,8 @@ export const threadSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
 	hostAgentId: uuidSchema,
-	chatId: Schema.NullOr(uuidSchema),
+	/** The conversation it is in; its own id on a conversation. Null on a system agent's thread. */
+	conversationId: Schema.NullOr(uuidSchema),
 	type: threadTypeSchema,
 	title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_THREAD_TITLE_CHARACTERS)),
 	/** `running` while a turn is queued or in progress for the thread. */
@@ -264,7 +265,7 @@ export const toolCallPartSchema = Schema.Struct({
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
 
-/** A file attached to the message, served by the chat it was sent in. */
+/** A file attached to the message, served by the conversation it was sent in. */
 export const filePartSchema = Schema.Struct({
 	type: Schema.Literal("file"),
 	id: uuidSchema,
@@ -298,7 +299,7 @@ export function isNarration(parts: readonly { type: string }[], index: number): 
 export const MESSAGE_PREVIEW_CHARACTERS = 140;
 
 /**
- * A message shortened for one line, as a chat list row shows it: its first
+ * A message shortened for one line, as a conversation list row shows it: its first
  * line with words in it, markdown unwrapped to text, runs of spaces closed up,
  * cut at a word to fit `MESSAGE_PREVIEW_CHARACTERS`.
  */
@@ -462,7 +463,7 @@ export const messageSchema = Schema.Struct({
 	content: Schema.String,
 	/** Why a `failed` reply failed, in the provider's words where it had any. */
 	error: Schema.optional(Schema.String),
-	/** Set on a routine run's result, posted in the agent's chat when the run completed. */
+	/** Set on a routine run's result, posted in the agent's conversation when the run completed. */
 	routineResultOf: Schema.optional(routineResultOfSchema),
 	/** The message this one quotes and answers, in the same thread. */
 	replyTo: Schema.optional(messageReplyToSchema),
@@ -494,7 +495,7 @@ export type ThreadSummary = typeof threadSummarySchema.Type;
 
 /**
  * How far a person has read a thread: every message created at or before
- * `readThrough`, as of `readAt`. Recorded only for a Chat's main thread.
+ * `readThrough`, as of `readAt`. Recorded only for a conversation.
  */
 export const threadReadSchema = Schema.Struct({
 	person: personParticipantSchema,
@@ -571,7 +572,7 @@ export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,
 	/** May be empty when the message carries files. */
 	message: Schema.Trim.check(Schema.isMaxLength(20_000)),
-	/** Files the sender uploaded to the chat and has not sent yet. They show in the order listed. */
+	/** Files the sender uploaded to the conversation and has not sent yet. They show in the order listed. */
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),
 	),

@@ -113,8 +113,8 @@ export const eventPayloadSchemas = {
 	 * that what lists show of the thread may be out of date.
 	 */
 	"thread.changed": Schema.Struct({ threadId }),
-	"chat.thread_changed": Schema.Struct({
-		chatId: uuidSchema,
+	"conversation.thread_changed": Schema.Struct({
+		conversationId: uuidSchema,
 		threadId,
 		threadType: customerThreadTypeSchema,
 	}),
@@ -161,7 +161,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"thread.read",
 	"thread.created",
 	"thread.changed",
-	"chat.thread_changed",
+	"conversation.thread_changed",
 	"collaboration.updated",
 	"agent.updated",
 	"pod.updated",
@@ -281,7 +281,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("thread.notice", P["thread.notice"]),
 	withEnvelope("thread.read", P["thread.read"]),
 	withEnvelope("person.typing", P["person.typing"]),
-	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
+	withEnvelope("conversation.thread_changed", P["conversation.thread_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
@@ -291,7 +291,7 @@ export type ThreadUpdateEvent = typeof threadUpdateEventSchema.Type;
 /** Everything a workspace channel can carry. */
 export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("thread.changed", P["thread.changed"]),
-	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
+	withEnvelope("conversation.thread_changed", P["conversation.thread_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 

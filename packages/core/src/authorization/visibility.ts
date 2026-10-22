@@ -4,7 +4,7 @@ import { and, eq, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { chat } from "../database/schema.ts";
+import { thread } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import {
 	type PodStanding,
@@ -19,7 +19,7 @@ import { CurrentActor } from "./current-actor.ts";
 
 /**
  * What the current actor can see. A pod is seen by whoever reaches it, and
- * everything inside it, its threads and chats included, by whoever sees the
+ * everything inside it, its conversations and threads included, by whoever sees the
  * pod. Lists are scoped by `reachesPodFor`, the `pod.read` rule that
  * `Authorization` checks for one pod written as SQL, so a list holds the pods
  * that reading each one directly would allow.
@@ -33,9 +33,10 @@ export interface Interface {
 	readonly thread: (
 		threadId: string,
 	) => Effect.Effect<ThreadStanding, ResourceHidden, CurrentActor.Service>;
-	readonly chat: (
-		chatId: string,
-	) => Effect.Effect<schema.ChatRow, ResourceHidden, CurrentActor.Service>;
+	/** The conversation, by its id: a thread whose type is `conversation`. */
+	readonly conversation: (
+		conversationId: string,
+	) => Effect.Effect<schema.ThreadRow, ResourceHidden, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Visibility") {}
@@ -74,21 +75,27 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		chat: (chatId) =>
+		conversation: (conversationId) =>
 			operation(
-				"chat",
+				"conversation",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const [row] = isUuid(chatId)
+					const [row] = isUuid(conversationId)
 						? yield* query((db) =>
 								db
 									.select()
-									.from(chat)
-									.where(and(eq(chat.id, chatId), reachesPodFor(chat.podId, userId)))
+									.from(thread)
+									.where(
+										and(
+											eq(thread.id, conversationId),
+											eq(thread.type, "conversation"),
+											reachesPodFor(thread.podId, userId),
+										),
+									)
 									.limit(1),
 							)
 						: [];
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return row;
 				}),
 			),

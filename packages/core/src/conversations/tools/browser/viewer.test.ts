@@ -144,7 +144,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					workspaceId,
 					podId: shared.id,
 					hostAgentId: agentId,
-					type: "chat",
+					type: "conversation",
 					title: "Look something up",
 				})
 				.returning(),

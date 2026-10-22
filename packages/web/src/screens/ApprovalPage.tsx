@@ -2,10 +2,9 @@ import type { AnsweredApproval, ApprovalInbox, ApprovalRequest } from "@sugabots
 import { Link } from "@tanstack/react-router";
 import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useAgents } from "@/lib/agents.ts";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
-import { agentChatLink } from "@/lib/links.ts";
+import { conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
@@ -50,13 +49,10 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const { request } = found;
 	const { call, agent } = request;
 	const { data: pods } = usePods();
-	const { agents } = useAgents();
 	const { look, appName, action } = useApprovalApp(request);
 	const review = useReviewToolCall(request.threadId, request.podId);
 	const pod = pods?.find((candidate) => candidate.id === request.podId);
-	const chatAgent = agents?.find((candidate) => candidate.id === request.chatAgentId);
 	const askedIn = [
-		chatAgent && chatAgent.id !== agent.id ? `by ${chatAgent.name}` : undefined,
 		pod && `in ${pod.name}`,
 		`at ${formatListTime(new Date(call.startedAt), new Date())}`,
 	]
@@ -118,15 +114,15 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						</p>
 					)}
 					<span className="flex-1" />
-					{pod && chatAgent && (
+					{pod && request.conversationId && (
 						<Link
-							{...agentChatLink(
-								{ pod, agent: chatAgent },
-								request.inMainThread ? {} : { thread: request.threadId },
+							{...conversationLink(
+								{ pod, conversationId: request.conversationId },
+								request.threadId === request.conversationId ? {} : { thread: request.threadId },
 							)}
 							className="focus-ring rounded-sm font-medium text-[13px] text-link"
 						>
-							Open in {chatAgent.name}
+							Open conversation
 						</Link>
 					)}
 				</div>

@@ -71,7 +71,7 @@ export class ResourceHidden
 			| "pod"
 			| "agent"
 			| "thread"
-			| "chat"
+			| "conversation"
 			| "message"
 			| "turn"
 			| "member"

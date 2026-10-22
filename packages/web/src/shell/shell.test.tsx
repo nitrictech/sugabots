@@ -21,6 +21,7 @@ import {
 	builtInAgents,
 	compaction,
 	controlledEventStream,
+	conversationWith,
 	jye,
 	linear,
 	MODELS,
@@ -41,6 +42,8 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const linearPage = `/suga/pods/suga-team/agents/${linear.handle}`;
+/** Where `linearPage` lands: the bot's conversation, at its own address. */
+const linearConversationPage = `/suga/pods/suga-team/threads/${conversationWith(linear).id}`;
 
 beforeEach(() => {
 	apiAnswers();
@@ -323,7 +326,7 @@ describe("the workspace choice", () => {
 				name: "Leave",
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
 		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
 	});
 
@@ -334,7 +337,7 @@ describe("the workspace choice", () => {
 		await startNewWorkspace(router);
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
 		expect(client.api.workspaces.create).not.toHaveBeenCalled();
 	});
 
@@ -353,7 +356,7 @@ describe("the workspace choice", () => {
 		await screen.findByRole("heading", { name: "Connect a provider" });
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
 		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
 		expect(localStorage.getItem("sugabots-workspace")).toBe(workspace.id);
 	});
@@ -450,7 +453,7 @@ describe("the rail", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/pods/sales"));
 		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
 	});
 
 	it("makes a new bot in the pod whose menu it is chosen from", async () => {
@@ -520,7 +523,7 @@ describe("the conversation list", () => {
 			workspaceId: workspace.id,
 			podId: linear.podId,
 			hostAgentId: linear.id,
-			mainThreadId: "0199a3a0-0000-7000-8000-0000000000c2",
+			title: `Conversation with ${linear.name}`,
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T08:00:00.000Z",
 		};
@@ -528,8 +531,8 @@ describe("the conversation list", () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				items: [
-					{ agent: linear, chat: linearChat, ...unread },
-					{ agent: triager, chat: null, ...unread },
+					{ agent: linear, conversation: linearChat, ...unread },
+					{ agent: triager, conversation: null, ...unread },
 				],
 			}),
 		);
@@ -541,13 +544,13 @@ describe("the conversation list", () => {
 
 		await waitFor(() =>
 			expect(client.api.chats.messages).toHaveBeenCalledWith(
-				expect.objectContaining({ params: { chatId: linearChat.id } }),
+				expect.objectContaining({ params: { conversationId: linearChat.id } }),
 			),
 		);
 		expect(client.api.threads.get).toHaveBeenCalledWith(
-			expect.objectContaining({ params: { threadId: linearChat.mainThreadId } }),
+			expect.objectContaining({ params: { threadId: linearChat.id } }),
 		);
-		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
+		expect(client.api.chats.open).not.toHaveBeenCalled();
 	});
 
 	it("opens its pod's settings and leads back to the Chat", async () => {
@@ -2268,8 +2271,7 @@ describe("the app's badge", () => {
 		},
 		podId: pod.id,
 		threadId: "0199a3a0-0000-7000-8000-0000000004b1",
-		chatAgentId: linear.id,
-		inMainThread: true,
+		conversationId: "0199a3a0-0000-7000-8000-0000000004b1",
 	};
 
 	/** The Badging API, which only Chromium browsers have. */

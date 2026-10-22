@@ -297,6 +297,7 @@ function run(
 ): RoutineExecution {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000003${n}0`,
+		conversationId: "0199a3a0-0000-7000-8000-000000000350",
 		routineId: overnight.routine.id,
 		workspaceId: storyWorkspace.id,
 		agentId: growthDesk.id,

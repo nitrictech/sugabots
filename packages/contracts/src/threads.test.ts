@@ -24,7 +24,7 @@ import {
 const ID = "0199a3a0-0000-7000-8000-000000000001";
 
 describe("thread contracts", () => {
-	it.each(["chat", "collaboration", "routine", "system_agent"])(
+	it.each(["conversation", "collaboration", "routine", "system_agent"])(
 		"accepts supported internal thread type %s",
 		(type) => {
 			expect(Schema.decodeUnknownSync(threadTypeSchema)(type)).toBe(type);

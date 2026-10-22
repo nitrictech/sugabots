@@ -24,9 +24,14 @@ import {
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
-import { prefetchChat, useChatList } from "@/lib/chats.ts";
+import {
+	prefetchConversation,
+	useChatList,
+	useConversationPlace,
+	useOpenConversation,
+} from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { agentChatLink, podLink } from "@/lib/links.ts";
+import { agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -132,11 +137,12 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/settings     workspace settings
  *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
  *   /$workspace/activity     what is new across the workspace: mentions, unread messages, routine runs and collaborations
- *   /$workspace/activity/$pod/$agent   the chat, run or collaboration of the one chosen, beside them
+ *   /$workspace/activity/$pod/$conversation   the conversation, run or collaboration of the one chosen, beside them
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
- *   /$workspace/pods/$pod/agents/$agent       one agent's chat, by pod slug and agent handle
+ *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
+ *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
  *   /$workspace/settings/members/$member   one person, by membership id
  *   /$workspace/settings/pods/$pod   workspace pod detail
  *   /$workspace/settings/pods/$pod/agents/$agent   agent configuration
@@ -896,11 +902,11 @@ const activityRoute = createRoute({
 });
 
 function ActivityRoute() {
-	const { agent } = useParams({ strict: false });
+	const { conversation } = useParams({ strict: false });
 	const { item } = useSearch({ strict: false });
 	return (
 		<ListAndPane
-			open={agent !== undefined}
+			open={conversation !== undefined}
 			list={(className) => <ActivityList selectedItemId={item} className={className} />}
 		>
 			<Outlet />
@@ -927,7 +933,7 @@ interface ActivityChatSearch extends AgentSearch {
 
 const activityChatRoute = createRoute({
 	getParentRoute: () => activityRoute,
-	path: "/$pod/$agent",
+	path: "/$pod/$conversation",
 	validateSearch: (search: Record<string, unknown>): ActivityChatSearch => ({
 		...validateAgentSearch(search),
 		...idParam(search, "item"),
@@ -936,19 +942,20 @@ const activityChatRoute = createRoute({
 	}),
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
-		void prefetchChat(context.queries, params);
+		prefetchConversation(context.queries, params.conversation);
 		return AgentPage.preload();
 	},
 	component: () => {
-		const { pod, agent } = activityChatRoute.useParams();
+		const { pod, conversation } = activityChatRoute.useParams();
 		const navigate = activityChatRoute.useNavigate();
 		const search = activityChatRoute.useSearch();
 		return (
-			<PodAgentScreen podSlug={pod} handle={agent}>
+			<PodConversationScreen podSlug={pod} conversationId={conversation}>
 				{(found, user) => (
 					<ActivityPane
 						pod={found.pod}
 						agent={found.agent}
+						conversationId={conversation}
 						user={user}
 						threadPageId={search.threadPage}
 						focusMessageId={search.message}
@@ -967,7 +974,7 @@ const activityChatRoute = createRoute({
 						}
 					/>
 				)}
-			</PodAgentScreen>
+			</PodConversationScreen>
 		);
 	},
 });
@@ -1076,12 +1083,13 @@ const podRoute = createRoute({
 
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
-	const { agent: handle } = useParams({ strict: false });
+	const { agent: handle, conversation } = useParams({ strict: false });
 	const { artifact: stagedArtifact, desktop: stagedDesktop } = useSearch({ strict: false });
 	const matchRoute = useMatchRoute();
 	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const { data: pods, isPending, error } = usePods();
 	const { found } = usePodAgent(podSlug, handle ?? "");
+	const { found: inConversation } = useConversationPlace(podSlug, conversation ?? "");
 	const pod = findPod(pods, podSlug);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!pod) {
@@ -1098,7 +1106,7 @@ function PodRoute() {
 	return (
 		<ConversationLayout
 			pod={pod}
-			selectedAgentId={found?.agent.id}
+			selectedAgentId={(inConversation ?? found)?.agent.id}
 			artifactsOpen={artifactsOpen}
 			listTuckedAway={stagedArtifact !== undefined || stagedDesktop !== undefined}
 		>
@@ -1130,7 +1138,14 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 	if (!sideBySide) return null;
 	const top = list?.items[0];
 	if (!top) return null;
-	return <Navigate {...agentChatLink({ pod, agent: top.agent })} replace />;
+	return (
+		<Navigate
+			{...(top.conversation
+				? conversationLink({ pod, conversationId: top.conversation.id })
+				: agentChatLink({ pod, agent: top.agent }))}
+			replace
+		/>
+	);
 }
 
 /**
@@ -1224,28 +1239,66 @@ function idParam<Name extends string>(
 	};
 }
 
+/** A bot's newest conversation, opened first if it has none, then shown at its own address. */
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
 	validateSearch: validateAgentSearch,
-	// On every hover, not once per 30 s: the query cache, not the router,
-	// decides what of the chat is still fresh.
-	preloadStaleTime: 0,
-	// Also run while the pointer is on a link here, so the chat is loading before the click.
-	loader: ({ context, params }) => {
-		void prefetchChat(context.queries, params);
-		return AgentPage.preload();
-	},
+	loader: () => AgentPage.preload(),
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
-		const navigate = agentRoute.useNavigate();
 		const search = agentRoute.useSearch();
 		return (
 			<PodAgentScreen podSlug={pod} handle={agent}>
+				{(found) => <OpenConversation pod={found.pod} agent={found.agent} search={search} />}
+			</PodAgentScreen>
+		);
+	},
+});
+
+/** Opens `agent`'s newest conversation in `pod`, keeping what `search` opens beside it. */
+function OpenConversation({ pod, agent, search }: { pod: Pod; agent: Agent; search: AgentSearch }) {
+	const opened = useOpenConversation(pod, agent.id);
+	if (opened.isError) {
+		return (
+			<EmptyState title="Could not open this chat">
+				The API did not answer. Reload this page to try again.
+			</EmptyState>
+		);
+	}
+	if (!opened.data) return null;
+	return (
+		<Navigate
+			{...conversationLink({ pod, conversationId: opened.data.id })}
+			search={search}
+			replace
+		/>
+	);
+}
+
+const conversationRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/threads/$conversation",
+	validateSearch: validateAgentSearch,
+	// On every hover, not once per 30 s: the query cache, not the router,
+	// decides what of the conversation is still fresh.
+	preloadStaleTime: 0,
+	// Also run while the pointer is on a link here, so it is loading before the click.
+	loader: ({ context, params }) => {
+		prefetchConversation(context.queries, params.conversation);
+		return AgentPage.preload();
+	},
+	component: () => {
+		const { pod, conversation } = conversationRoute.useParams();
+		const navigate = conversationRoute.useNavigate();
+		const search = conversationRoute.useSearch();
+		return (
+			<PodConversationScreen podSlug={pod} conversationId={conversation}>
 				{(found, user) => (
 					<AgentPage
 						agent={found.agent}
 						pod={found.pod}
+						conversationId={conversation}
 						user={user}
 						threadId={search.thread}
 						onThreadChange={(thread) =>
@@ -1259,10 +1312,45 @@ const agentRoute = createRoute({
 						}
 					/>
 				)}
-			</PodAgentScreen>
+			</PodConversationScreen>
 		);
 	},
 });
+
+/**
+ * The pod at `podSlug` and the bot the conversation is with, once found, for a
+ * screen of the conversation; while it loads nothing, and if it cannot be
+ * found, why.
+ */
+function PodConversationScreen({
+	podSlug,
+	conversationId,
+	children,
+}: {
+	podSlug: string;
+	conversationId: string;
+	children: (found: { pod: Pod; agent: Agent }, user: SessionUser) => ReactNode;
+}) {
+	const { user } = useSession();
+	const { found, isPending, error } = useConversationPlace(podSlug, conversationId);
+
+	if (isPending) return null;
+	if (!found) {
+		return (
+			<EmptyState title={error ? "Could not load this conversation" : "No such conversation here"}>
+				{error
+					? "The API did not answer. Reload, or check that it is running."
+					: "It may have been removed — or you may not be a member of the pod it is in."}
+			</EmptyState>
+		);
+	}
+	if (!user) return null;
+	return (
+		// The screen's code can arrive after its data. Without a boundary of its
+		// own, React would hide the rail and list with it while it loads.
+		<Suspense fallback={null}>{children(found, user)}</Suspense>
+	);
+}
 
 /**
  * The bot at `handle` in the pod at `podSlug`, once found, for a screen of its
@@ -1342,7 +1430,13 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
-		podRoute.addChildren([podIndexRoute, agentRoute, artifactsRoute, artifactRoute]),
+		podRoute.addChildren([
+			podIndexRoute,
+			agentRoute,
+			conversationRoute,
+			artifactsRoute,
+			artifactRoute,
+		]),
 	]),
 ]);
 

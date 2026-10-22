@@ -427,8 +427,8 @@ const streamReply = (
 				threadId: prepared.context.thread.id,
 				agentId: prepared.context.agent.id,
 				acceptsImages: prepared.context.agent.acceptsImages,
-				// A chat serves the files in its own thread, so only there can people be shown one.
-				...(prepared.context.thread.type === "chat" && {
+				// A conversation serves the files in its own thread, so only there can people be shown one.
+				...(prepared.context.thread.type === "conversation" && {
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
 			});

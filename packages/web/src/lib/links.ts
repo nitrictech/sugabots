@@ -81,17 +81,39 @@ export function connectionSettingsLink(pod: Pod, connection: Pick<Connection, "i
 	});
 }
 
+/** A conversation in its pod. */
+interface ConversationInPod {
+	pod: Pick<Pod, "slug">;
+	conversationId: string;
+}
+
 /** A routine run or collaboration opened in Activity as a page of its own, beside the list, which marks it. */
-export function activityThreadLink({ pod, agent }: AgentInPod, threadId: string) {
+export function activityThreadLink({ pod, conversationId }: ConversationInPod, threadId: string) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./activity/$pod/$agent",
-		params: { pod: pod.slug, agent: agent.handle },
+		to: "./activity/$pod/$conversation",
+		params: { pod: pod.slug, conversation: conversationId },
 		search: { item: threadId, threadPage: threadId },
 	});
 }
 
-/** A bot's chat in its pod, with `thread` open beside it, or `artifact` open large. */
+/** A conversation, with `thread` open beside it, or `artifact` open large. */
+export function conversationLink(
+	{ pod, conversationId }: ConversationInPod,
+	search: { thread?: string; artifact?: string } = {},
+) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/threads/$conversation",
+		params: { pod: pod.slug, conversation: conversationId },
+		search,
+	});
+}
+
+/**
+ * A bot's newest conversation in its pod, started if it has none, with
+ * `thread` open beside it, or `artifact` open large.
+ */
 export function agentChatLink(
 	{ pod, agent }: AgentInPod,
 	search: { thread?: string; artifact?: string } = {},

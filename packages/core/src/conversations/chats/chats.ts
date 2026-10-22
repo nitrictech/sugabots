@@ -1,6 +1,6 @@
 export * as Chats from "./chats.ts";
 
-import type { Chat, Message } from "@sugabots/contracts";
+import type { Conversation, Message } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -15,16 +15,16 @@ import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { toChat } from "./chat.ts";
+import { toConversation } from "./conversation.ts";
 
 /**
- * Talking to a crew agent: the current actor opens a chat with an agent in a
- * pod and posts into it, and whoever has the floor after a message is asked to
+ * Talking to a crew agent: the current actor opens a conversation with an
+ * agent in a pod and posts into it, and whoever has the floor after a message is asked to
  * speak.
  */
 export interface Interface {
 	/**
-	 * The chat with the pod's crew agent, opened on first use, in a workspace
+	 * The newest conversation with the pod's crew agent, opened on first use, in a workspace
 	 * named by its id or its slug. Refused unless the actor reaches the pod and
 	 * the agent is its crew.
 	 */
@@ -32,22 +32,26 @@ export interface Interface {
 		workspace: string;
 		podId: string;
 		hostAgentId: string;
-	}) => Effect.Effect<Chat, AuthorizationDenied | ChatPlacementRejected, CurrentActor.Service>;
+	}) => Effect.Effect<
+		Conversation,
+		AuthorizationDenied | ChatPlacementRejected,
+		CurrentActor.Service
+	>;
 	/**
-	 * Posts the actor's message into the chat's main thread, with the files
+	 * Posts the actor's message into the conversation, with the files
 	 * they uploaded to it, and gives the floor. Posting the same message again
 	 * returns it unchanged.
 	 */
 	readonly post: (input: {
-		chatId: string;
+		conversationId: string;
 		messageId: string;
 		/** May be empty when the message carries files. */
 		content: string;
-		/** Ids of the actor's uploads to the chat, not yet sent. None unless set. */
+		/** Ids of the actor's uploads to the conversation, not yet sent. None unless set. */
 		attachments?: readonly string[];
 		/** Written for the other people, so no bot replies. Off unless set. */
 		peopleOnly?: boolean;
-		/** The id of the message in the chat's main thread that this one quotes and answers. */
+		/** The id of the message in the conversation that this one quotes and answers. */
 		replyTo?: string;
 	}) => Effect.Effect<
 		Message,
@@ -58,8 +62,10 @@ export interface Interface {
 		| ChatAgentHasNoModel,
 		CurrentActor.Service
 	>;
-	/** Records that the actor has read the chat's main conversation up to its newest finished message. */
-	readonly markRead: (chatId: string) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
+	/** Records that the actor has read the conversation up to its newest finished message. */
+	readonly markRead: (
+		conversationId: string,
+	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Chats") {}
@@ -85,7 +91,9 @@ export const make = Effect.gen(function* () {
 						if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 							return yield* new ChatPlacementRejected();
 						}
-						return toChat(yield* threads.openChat({ ...placement, initiatorUserId: actor.userId }));
+						return toConversation(
+							yield* threads.openConversation({ ...placement, initiatorUserId: actor.userId }),
+						);
 					}),
 				),
 			),
@@ -96,11 +104,11 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const peopleOnly = input.peopleOnly ?? false;
-						const visible = yield* visibility.chat(input.chatId);
+						const visible = yield* visibility.conversation(input.conversationId);
 						const sender = yield* senderOf(yield* CurrentActor.Service);
 						const posted = yield* threads.post({
 							id: input.messageId,
-							threadId: visible.mainThreadId,
+							threadId: visible.id,
 							author: sender,
 							content: input.content,
 							replyTo: input.replyTo,
@@ -114,7 +122,7 @@ export const make = Effect.gen(function* () {
 						}
 						yield* floor.giveFloor({
 							id: posted.message.id,
-							threadId: visible.mainThreadId,
+							threadId: visible.id,
 							content: posted.message.content,
 							peopleOnly,
 						});
@@ -123,14 +131,14 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		markRead: (chatId) =>
+		markRead: (conversationId) =>
 			operation(
 				"markRead",
 				transaction(
 					Effect.gen(function* () {
-						const visible = yield* visibility.chat(chatId);
+						const visible = yield* visibility.conversation(conversationId);
 						const { userId } = yield* CurrentActor.Service;
-						yield* threads.markRead(userId, visible.mainThreadId);
+						yield* threads.markRead(userId, visible.id);
 					}),
 				),
 			),
@@ -153,12 +161,12 @@ export class ChatPlacementRejected
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`The agent and pod are not available for this chat`;
+		return userText`The agent and pod are not available for this conversation`;
 	}
 }
 
 /**
- * The chat's agent has no model, so nothing could answer. The message is not
+ * The conversation's agent has no model, so nothing could answer. The message is not
  * kept, rather than kept with a turn that will never run.
  */
 export class ChatAgentHasNoModel
