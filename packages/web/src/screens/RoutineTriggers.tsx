@@ -1,4 +1,4 @@
-import type { RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
+import type { Pod, RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -20,6 +20,13 @@ import {
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { SettingsAddRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
+import {
+	NEW_REPOSITORY_TRIGGER,
+	PICK_AN_EVENT_NOTE,
+	type RepositoryDraft,
+	RepositoryGroups,
+	repositoryTrigger,
+} from "./RoutineRepository.tsx";
 import { ScheduleGroups } from "./RoutineSchedule.tsx";
 import {
 	type TriggerKind,
@@ -47,9 +54,10 @@ import {
 /** A trigger as written in a dialog, before it is saved. */
 export type TriggerDraft =
 	| { kind: "cron"; reading: ScheduleReading; timezone: string }
-	| { kind: "webhook"; webhook: WebhookDraft };
+	| { kind: "webhook"; webhook: WebhookDraft }
+	| { kind: "github"; repository: RepositoryDraft };
 
-/** A new trigger of `kind`, as it starts: a daily schedule, or a webhook taking a bearer token. */
+/** A new trigger of `kind`, as it starts: a daily schedule, a webhook taking a bearer token, a repository to pick. */
 export function newTriggerDraft(kind: TriggerKind): TriggerDraft {
 	switch (kind) {
 		case "cron":
@@ -60,6 +68,8 @@ export function newTriggerDraft(kind: TriggerKind): TriggerDraft {
 			};
 		case "webhook":
 			return { kind: "webhook", webhook: NEW_WEBHOOK };
+		case "github":
+			return { kind: "github", repository: NEW_REPOSITORY_TRIGGER };
 	}
 }
 
@@ -72,6 +82,14 @@ export function triggerDraftOf(trigger: RoutineTriggerInput): TriggerDraft {
 			return {
 				kind: "webhook",
 				webhook: { auth: trigger.auth ?? NEW_WEBHOOK.auth, secret: trigger.secret ?? "" },
+			};
+		case "github":
+			return {
+				kind: "github",
+				repository: {
+					repository: { connectionId: trigger.connectionId, repository: trigger.repository },
+					events: trigger.events,
+				},
 			};
 	}
 }
@@ -96,6 +114,14 @@ export function triggerInputOf(
 			if (!secretReady(auth, secret)) return { notReady: SECRET_TOO_SHORT_NOTE };
 			const trimmed = secret.trim();
 			return { input: { kind: "webhook", auth, secret: trimmed === "" ? null : trimmed } };
+		}
+		case "github": {
+			const input = repositoryTrigger(draft.repository);
+			if (input) return { input };
+			return {
+				notReady:
+					draft.repository.repository === undefined ? PICK_A_REPOSITORY_NOTE : PICK_AN_EVENT_NOTE,
+			};
 		}
 	}
 }
@@ -130,6 +156,7 @@ function zoneName(timezone: string): string {
 }
 
 const PICK_A_DAY_NOTE = "Pick at least one day for it to run on.";
+const PICK_A_REPOSITORY_NOTE = "Pick the repository it runs on.";
 
 export function localTimezone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -187,12 +214,15 @@ export function TriggersGroup({
  * secret, which save as they change.
  */
 export function TriggerDialog({
+	pod,
 	editing,
 	settings,
 	onSave,
 	onRemove,
 	done,
 }: {
+	/** The bot's pod, whose connections decide which integrations' triggers it may have. */
+	pod: Pod | undefined;
 	/** The trigger being changed, as a draft; undefined while adding one. */
 	editing: TriggerDraft | undefined;
 	settings?: ReactNode;
@@ -219,7 +249,11 @@ export function TriggerDialog({
 	if (!draft) {
 		return (
 			<DialogFormFrame>
-				<TriggerKindStep onChoose={(kind) => setDraft(newTriggerDraft(kind))} done={done} />
+				<TriggerKindStep
+					pod={pod}
+					onChoose={(kind) => setDraft(newTriggerDraft(kind))}
+					done={done}
+				/>
 			</DialogFormFrame>
 		);
 	}
@@ -242,7 +276,7 @@ export function TriggerDialog({
 				/>
 				<DialogFormBody>
 					<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1">
-						{settings ?? <DraftGroups draft={draft} onChange={setDraft} />}
+						{settings ?? <DraftGroups pod={pod} draft={draft} onChange={setDraft} />}
 					</div>
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 				</DialogFormBody>
@@ -273,9 +307,11 @@ export function TriggerDialog({
 
 /** The groups that set up a draft of its kind, under what it still needs or what it does. */
 function DraftGroups({
+	pod,
 	draft,
 	onChange,
 }: {
+	pod: Pod | undefined;
 	draft: TriggerDraft;
 	onChange: (draft: TriggerDraft) => void;
 }) {
@@ -300,6 +336,19 @@ function DraftGroups({
 					}
 					onChange={(webhook) => onChange({ ...draft, webhook })}
 				/>
+			);
+		case "github":
+			return pod ? (
+				<RepositoryGroups
+					podId={pod.id}
+					podName={pod.name}
+					draft={draft.repository}
+					onChange={(repository) => onChange({ ...draft, repository })}
+				/>
+			) : (
+				<SettingsGroup>
+					<SettingsRow label="Choose its bot first" />
+				</SettingsGroup>
 			);
 	}
 }

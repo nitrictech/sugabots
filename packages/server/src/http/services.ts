@@ -30,7 +30,8 @@ import type { ChannelAccess } from "../routes/events/access.ts";
  * every method requires the current actor and authorizes them, or the event
  * streams' `ChannelAccess`, which does the same for a channel. The exception
  * is `Routines.Webhooks`, which nobody signs in to call: the routine's secret
- * admits the run instead. `Accounts` is here for the referral link; its
+ * admits the run instead; and `Routines.ConnectionEvents`, which an
+ * integration's signed delivery admits. `Accounts` is here for the referral link; its
  * `admit` is better-auth's, for somebody who has no account yet.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a
@@ -64,4 +65,5 @@ export type HttpServices =
 	| Turns.Controls
 	| Routines.Service
 	| Routines.Webhooks
+	| Routines.ConnectionEvents
 	| ChannelAccess.Service;

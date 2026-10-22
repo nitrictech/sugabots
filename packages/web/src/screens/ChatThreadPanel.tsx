@@ -1,6 +1,6 @@
 import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Braces, ChevronLeft, CircleAlert } from "lucide-react";
+import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -292,6 +292,15 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 						</pre>
 					</div>
 				</details>
+			)}
+			{execution.trigger.kind === "github" && (
+				<IconButton
+					label="Open what started it"
+					variant="bar"
+					render={<a href={execution.trigger.url} target="_blank" rel="noreferrer" />}
+				>
+					<ExternalLink aria-hidden size={15} strokeWidth={2.4} />
+				</IconButton>
 			)}
 			<IconButton
 				label="View routine definition"

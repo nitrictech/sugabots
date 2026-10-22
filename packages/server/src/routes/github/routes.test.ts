@@ -1,4 +1,10 @@
+import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
+import {
+	DeliveryRefused,
+	GitHubConnections,
+} from "@sugabots/core/providers/connections/github/github-connections";
+import type { RepositoryActivity } from "@sugabots/core/providers/connections/github/github-events";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -8,7 +14,101 @@ const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000001";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
 const POD_ID = "0199a3a0-0000-7000-8000-000000000003";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000004";
+const GOOD_SIGNATURE = "sha256=good";
 const inPod = { workspaceId: WORKSPACE_ID, podId: POD_ID };
+
+const opened: RepositoryActivity = {
+	event: "pull_request_opened",
+	repository: "acme/web",
+	sender: "octocat",
+	url: "https://github.com/acme/web/pull/3",
+	number: 3,
+	title: "Fix the login",
+	text: null,
+	branch: "fix-login",
+};
+
+/**
+ * The app with a GitHub connection that admits deliveries with the good
+ * signature, and says a `pull_request` event opened a pull request.
+ */
+function hookApp() {
+	const receiveDelivery = vi.fn<GitHubConnections.Interface["receiveDelivery"]>(
+		({ connectionId, headers }) =>
+			headers["x-hub-signature-256"] === GOOD_SIGNATURE
+				? Effect.succeed({
+						workspaceId: WORKSPACE_ID,
+						connectionId,
+						deliveryId: headers["x-github-delivery"],
+						activity: headers["x-github-event"] === "pull_request" ? opened : undefined,
+					})
+				: Effect.fail(new DeliveryRefused({ connectionId })),
+	);
+	const accept = vi.fn<Routines.ConnectionEventsInterface["accept"]>(() => Effect.succeed([]));
+	const app = createTestApp(
+		Layer.mergeAll(
+			unimplemented(GitHubConnections.Service, { receiveDelivery }),
+			unimplemented(Routines.ConnectionEvents, { accept }),
+		),
+	);
+	return { app, receiveDelivery, accept };
+}
+
+const deliver = (app: ReturnType<typeof hookApp>["app"], headers: Record<string, string>) =>
+	app.request(`/hooks/connections/${CONNECTION_ID}`, {
+		method: "POST",
+		headers: { "content-type": "application/json", ...headers },
+		body: '{ "action":  "opened" }',
+	});
+
+describe("A GitHub connection's deliveries", () => {
+	it("hands the connection the exact body, and the routines what it says happened", async () => {
+		const { app, receiveDelivery, accept } = hookApp();
+
+		const response = await deliver(app, {
+			"x-github-event": "pull_request",
+			"x-github-delivery": "delivery-1",
+			"x-hub-signature-256": GOOD_SIGNATURE,
+		});
+
+		expect(response.status).toBe(204);
+		expect(receiveDelivery.mock.calls[0]?.[0]).toMatchObject({
+			connectionId: CONNECTION_ID,
+			body: '{ "action":  "opened" }',
+		});
+		expect(accept).toHaveBeenCalledWith({
+			workspaceId: WORKSPACE_ID,
+			connectionId: CONNECTION_ID,
+			deliveryId: "delivery-1",
+			activity: opened,
+		});
+	});
+
+	it("refuses a delivery its app didn't sign, and runs nothing", async () => {
+		const { app, accept } = hookApp();
+
+		const response = await deliver(app, {
+			"x-github-event": "pull_request",
+			"x-github-delivery": "delivery-1",
+			"x-hub-signature-256": "sha256=forged",
+		});
+
+		expect(response.status).toBe(401);
+		expect(accept).not.toHaveBeenCalled();
+	});
+
+	it("acknowledges an event no routine runs on", async () => {
+		const { app, accept } = hookApp();
+
+		const response = await deliver(app, {
+			"x-github-event": "ping",
+			"x-hub-signature-256": GOOD_SIGNATURE,
+		});
+
+		expect(response.status).toBe(204);
+		expect(accept).not.toHaveBeenCalled();
+	});
+});
 
 /** The app as someone signed in, with GitHub's setup steps answered by `gitHubApps`. */
 const setupApp = (gitHubApps: Partial<GitHubApps.Interface>) =>

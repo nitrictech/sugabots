@@ -71,12 +71,13 @@ type RoutineSubpage = "routine" | "instructions";
 
 /**
  * Where a new routine's result goes until someone chooses: a schedule is
- * usually something to read, such as a morning standup, and a webhook is
- * usually work handled out of sight.
+ * usually something to read, such as a morning standup, and a webhook or a
+ * repository's events usually work handled out of sight.
  */
 const DEFAULT_RESULTS: Record<TriggerKind, RoutineResults> = {
 	cron: "post_to_chat",
 	webhook: "keep_in_run",
+	github: "keep_in_run",
 };
 
 /**
@@ -167,7 +168,15 @@ export function NewRoutinePage({
 			{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 			<SettingsGroup>
 				<NameInputRow value={name} onChange={setName} />
-				<BotRow chosen={bot} choices={choices} onChoose={setAgentId} />
+				<BotRow
+					chosen={bot}
+					choices={choices}
+					onChoose={(chosen) => {
+						setAgentId(chosen);
+						// Another bot's pod may not have the repositories its triggers watch.
+						setTriggers((current) => current.filter(({ draft }) => draft.kind !== "github"));
+					}}
+				/>
 				<OpensRow
 					label="Instructions"
 					value={instructions.trim() === "" ? "Add" : "Edit"}
@@ -189,6 +198,7 @@ export function NewRoutinePage({
 			<Dialog open={open !== undefined} onOpenChange={(opened) => !opened && setOpen(undefined)}>
 				{open !== undefined && (
 					<TriggerDialog
+						pod={bot?.pod}
 						editing={editing?.draft}
 						onSave={async (input) => {
 							const draft = triggerDraftOf(input);
@@ -327,6 +337,7 @@ export function RoutinePage({
 			<Dialog open={open !== undefined} onOpenChange={(opened) => !opened && setOpen(undefined)}>
 				{open !== undefined && (
 					<TriggerDialog
+						pod={pod}
 						editing={editing && triggerDraftOf(editing)}
 						settings={
 							editing?.kind === "webhook" ? (
@@ -402,7 +413,8 @@ function RoutineMenu({
 /**
  * A copy of the routine on the same bot, paused so the two don't both run.
  * A webhook copy has its own address and a new secret, so a secret its
- * sender made has to be pasted into it again.
+ * sender made has to be pasted into it again. A repository copy runs on the
+ * same repository and events.
  */
 function copyOf(routine: Routine, siblingNames: readonly string[]): NewRoutine {
 	const fields = {
@@ -421,6 +433,13 @@ function copiedTrigger(trigger: RoutineTrigger): RoutineTriggerInput {
 			return { kind: "cron", schedule: trigger.schedule, timezone: trigger.timezone };
 		case "webhook":
 			return { kind: "webhook", auth: trigger.auth };
+		case "github":
+			return {
+				kind: "github",
+				connectionId: trigger.connectionId,
+				repository: trigger.repository,
+				events: trigger.events,
+			};
 	}
 }
 

@@ -132,6 +132,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Turns.Controls),
 	unimplemented(Routines.Service),
 	unimplemented(Routines.Webhooks),
+	unimplemented(Routines.ConnectionEvents),
 	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),
