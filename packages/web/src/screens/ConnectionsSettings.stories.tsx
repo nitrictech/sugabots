@@ -260,6 +260,21 @@ export const AddingByUrlWithHeader = meta.story({
 	},
 });
 
+/** An HTTP endpoint: its base address, and a token, a header or neither; nothing to test before adding. */
+export const AddingAnHttpEndpoint = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
+		);
+		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
+		await userEvent.click(within(list).getByRole("button", { name: /HTTP endpoint/ }));
+		const step = await screen.findByRole("dialog", { name: "HTTP endpoint" });
+		await expect(within(step).getByLabelText("Access token")).toBeInTheDocument();
+		await expect(within(step).queryByRole("radio", { name: "Sign in" })).toBeNull();
+		await expect(within(step).queryByRole("button", { name: "Test" })).toBeNull();
+	},
+});
+
 async function openConnectByUrl(canvas: ReturnType<typeof within>) {
 	await userEvent.click(
 		await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),

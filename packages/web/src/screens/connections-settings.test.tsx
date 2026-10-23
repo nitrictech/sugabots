@@ -161,6 +161,29 @@ describe("the Connections settings", () => {
 		expect(route.update).not.toHaveBeenCalled();
 	});
 
+	it("adds an HTTP endpoint with no secret", async () => {
+		serveConnections();
+		route.create.mockImplementation(() =>
+			Effect.succeed(listedConnection({ ...wiki, kind: "http" })),
+		);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /HTTP endpoint/ }));
+		const step = await screen.findByRole("dialog", { name: "HTTP endpoint" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Alerts" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://alerts.example.com/v2" },
+		});
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
+
+		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
+		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
+			payload: { kind: "http", name: "Alerts", url: "https://alerts.example.com/v2" },
+		});
+		expect(route.create.mock.calls[0]?.[0].payload).not.toHaveProperty("secret");
+	});
+
 	it("tests a server by address before adding it", async () => {
 		serveConnections();
 		route.testUnsaved.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 3 }));
