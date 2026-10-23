@@ -3,7 +3,6 @@ import { cn } from "cn";
 import { MenuIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { accentText } from "@/components/accent";
-import { Button } from "@/components/ui/button";
 import { docGroups } from "@/docs/nav";
 import { findDocPage } from "@/docs/pages";
 
@@ -47,7 +46,7 @@ export function DocsSidebar() {
 	return (
 		<nav
 			aria-label="Docs"
-			className="sticky top-16 hidden max-h-[calc(100svh-4rem)] w-60 shrink-0 overflow-y-auto py-10 pr-2 lg:block"
+			className="sticky top-(--site-header-height) hidden max-h-[calc(100svh-var(--site-header-height))] w-60 shrink-0 overflow-y-auto py-10 pr-2 lg:block"
 		>
 			<DocsLinks />
 		</nav>
@@ -65,19 +64,20 @@ export function DocsMenu() {
 
 	return (
 		<div className="lg:hidden">
-			<Button
-				variant="outline"
-				size="icon"
+			{/* Drawn as the site header's own menu button, which this takes the place of in the docs. */}
+			<button
+				type="button"
 				aria-label={open ? "Close the docs menu" : "Open the docs menu"}
 				aria-expanded={open}
 				onClick={() => setOpen((isOpen) => !isOpen)}
+				className="ml-1 grid size-9 place-items-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 			>
-				{open ? <XIcon /> : <MenuIcon />}
-			</Button>
+				{open ? <XIcon className="size-5" /> : <MenuIcon className="size-5" />}
+			</button>
 			{open && (
 				<nav
 					aria-label="Docs"
-					className="absolute inset-x-0 top-full max-h-[calc(100svh-4rem)] overflow-y-auto border-b bg-background px-3 py-6 shadow-2xl"
+					className="absolute inset-x-0 top-full max-h-[calc(100svh-var(--site-header-height))] overflow-y-auto border-b bg-background px-3 py-6 shadow-2xl"
 				>
 					<DocsLinks />
 				</nav>

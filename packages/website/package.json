@@ -11,7 +11,8 @@
 		"typecheck": "tsc --noEmit",
 		"deploy": "wrangler deploy",
 		"deploy:preview": "wrangler preview",
-		"generate:og": "bun scripts/generate-og-image.tsx"
+		"generate:og": "bun scripts/generate-og-image.tsx",
+		"capture": "node scripts/capture/capture.ts"
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.8.0",
@@ -44,6 +45,7 @@
 		"@vitejs/plugin-react": "^6.1.1",
 		"culori": "^4.0.2",
 		"github-slugger": "^2.0.0",
+		"playwright": "^1.63.0",
 		"rehype-slug": "^6.0.0",
 		"remark-frontmatter": "^5.0.0",
 		"remark-gfm": "^4.0.1",

@@ -32,6 +32,7 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/web`       | React and Vite web app                                                         |
 | `packages/docs`      | The docs pages, which the website publishes and bots read                      |
 | `packages/website`   | Landing page and docs, prerendered and served from Cloudflare                  |
+| `packages/demo`      | Seed data: the development seed, and the showcase the website is captured from |
 
 When an area's errors are all `DomainError`s, add its path to two lists: the
 `biome.json` override that runs the rules in `lint/`, and the Effect language

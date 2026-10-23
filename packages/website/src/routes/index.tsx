@@ -1,14 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
-import { CollaborationSection } from "@/landing/collaboration-section";
-import { ExplainerVideo } from "@/landing/explainer-video";
-import { FeaturesSection } from "@/landing/features-section";
-import { GetStartedSection } from "@/landing/get-started-section";
 import { Hero } from "@/landing/hero";
-import { ModelsSection } from "@/landing/models-section";
-import { OpenSourceSection } from "@/landing/open-source-section";
-import { PodsSection } from "@/landing/pods-section";
+import { PeekingBots } from "@/landing/peeking-bots";
+import { PlansSection } from "@/landing/plans-section";
+import { ScreenshotCarousel } from "@/landing/screenshot-carousel";
+import { VISITOR_OS_SCRIPT } from "@/landing/visitor-os";
+import { WorkspaceSection } from "@/landing/workspace-section";
 import { siteLinks } from "@/site-links";
 import { siteMeta } from "@/site-meta";
 
@@ -63,28 +61,27 @@ const structuredData = {
 
 export const Route = createFileRoute("/")({
 	head: () => ({
-		scripts: [{ type: "application/ld+json", children: JSON.stringify(structuredData) }],
+		scripts: [
+			{ children: VISITOR_OS_SCRIPT },
+			{ type: "application/ld+json", children: JSON.stringify(structuredData) },
+		],
 	}),
 	component: LandingPage,
 });
 
 function LandingPage() {
 	return (
-		<>
-			<SiteHeader />
-			<main id="top" className="mx-auto max-w-5xl px-6">
+		// The landing page is drawn in the app's dark UI, whatever the visitor's colour scheme.
+		<div data-landing className="min-h-screen bg-landing-page text-base/[1.55] text-landing-text">
+			<SiteHeader placement="header" homeHref="#top" />
+			<main>
 				<Hero />
-				<div className="pb-16">
-					<ExplainerVideo />
-				</div>
-				<PodsSection />
-				<CollaborationSection />
-				<ModelsSection />
-				<FeaturesSection />
-				<OpenSourceSection />
-				<GetStartedSection />
+				<WorkspaceSection />
+				<ScreenshotCarousel />
+				<PlansSection />
+				<PeekingBots />
 			</main>
-			<SiteFooter width="medium" />
-		</>
+			<SiteFooter homeHref="#top" />
+		</div>
 	);
 }

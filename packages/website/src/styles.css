@@ -7,6 +7,9 @@
 @source "../../avatars/src";
 @source "../../provider-logos/src";
 
+/* A window wide and tall enough for the landing page's workspace section to pin while scrolling steps through it; kept in step with `PINNING_QUERY` in workspace-section.tsx. */
+@custom-variant pinned (@media (width >= 64rem) and (height >= 44rem));
+
 @theme inline {
 	--font-sans: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
 	--font-heading: var(--font-sans);
@@ -43,9 +46,53 @@
 	--radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * The landing page's palette: the app's dark UI, in every colour scheme. The
+ * docs use the themed tokens below instead.
+ */
+@theme {
+	--color-landing-page: #0b0c0f;
+	--color-landing-card: #111216;
+	--color-landing-raised: #15161a;
+	--color-landing-bubble: #17181d;
+	--color-landing-chip: #1d1f25;
+	--color-landing-button: #262830;
+
+	--color-landing-line: #1d1f25;
+	--color-landing-frame: #23252c;
+	--color-landing-control: #2a2c33;
+	--color-landing-rule: #2f323a;
+	--color-landing-control-hover: #4a4d57;
+
+	--color-landing-text: #eceef2;
+	--color-landing-message: #dcdee3;
+	--color-landing-button-text: #dfe1e6;
+	--color-landing-secondary: #c9ccd3;
+	--color-landing-muted: #9096a1;
+	--color-landing-faint: #7d838e;
+	--color-landing-link: #c3cdff;
+	/* The app's own link colour, for the demos' in-app lines. */
+	--color-landing-app-link: #aebbff;
+
+	/* The site's accent: indigo. */
+	--color-landing-accent: oklch(0.56 0.17 268);
+	--color-landing-accent-hover: oklch(0.6 0.17 268);
+	/* The accent the app's pills and buttons use, in the demos of the app. */
+	--color-landing-pill: oklch(0.52 0.17 268);
+	/* The logo's four dots, in order: the site's palette, and its highlights' gradient. */
+	--color-landing-logo-green: #22c55e;
+	--color-landing-logo-blue: #38bdf8;
+	--color-landing-logo-red: #f43f5e;
+	--color-landing-logo-orange: #f97316;
+
+	--ease-landing: cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
 :root {
 	color-scheme: light;
 	--radius: 0.625rem;
+	/* The site header's height, which the docs' sticky sidebars sit under. */
+	--site-header-height: 76px;
 
 	--background: var(--color-white);
 	--foreground: var(--color-zinc-900);
@@ -107,6 +154,12 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+	/* So scrolling past either end of the dark landing page shows dark, not the light theme. */
+	html:has([data-landing]),
+	html:has([data-landing]) body {
+		color-scheme: dark;
+		background-color: var(--color-landing-page);
+	}
 	/* Tailwind v4 resets buttons to the default cursor. */
 	button:not(:disabled),
 	[role="button"]:not(:disabled) {
@@ -159,4 +212,24 @@
 
 .docs-steps > ol > li > p:first-child {
 	@apply mt-1 text-lg font-bold text-foreground;
+}
+
+/* The highlights' gradient: the logo's four colours, lightened, in rainbow order. Mirrored, letter by letter, in scripts/generate-og-image.tsx. */
+.landing-logo-gradient {
+	background-image: linear-gradient(in oklch 90deg, #fb7185, #fdba74, #86efac, #7dd3fc);
+}
+
+/*
+ * Only the visitor's system's capture shows, by the mark the page's head sets:
+ * macOS until it has set one.
+ */
+[data-for-os="windows"],
+[data-for-os="linux"],
+html[data-os="windows"] [data-for-os="mac"],
+html[data-os="linux"] [data-for-os="mac"] {
+	display: none;
+}
+html[data-os="windows"] [data-for-os="windows"],
+html[data-os="linux"] [data-for-os="linux"] {
+	display: contents;
 }
