@@ -40,9 +40,16 @@ describe("openRouterReportedCost", () => {
 
 	it("adds what the provider charged when the request used the workspace's own key", () => {
 		const byok = sdkUsage({
-			raw: { cost: 0.0002, cost_details: { upstream_inference_cost: 0.004 } },
+			raw: { cost: 0.0002, is_byok: true, cost_details: { upstream_inference_cost: 0.004 } },
 		});
 		expect(openRouterReportedCost(byok)).toBeCloseTo(0.0042);
+	});
+
+	it("does not add the upstream cost to a request OpenRouter billed itself", () => {
+		const billed = sdkUsage({
+			raw: { cost: 0.0042, is_byok: false, cost_details: { upstream_inference_cost: 0.0042 } },
+		});
+		expect(openRouterReportedCost(billed)).toBe(0.0042);
 	});
 
 	it("is undefined when no usable cost was returned", () => {
