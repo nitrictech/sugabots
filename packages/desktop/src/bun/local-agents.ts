@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { localAgentKindSchema } from "@sugabots/contracts/devices";
 import { Schema } from "effect";
 
 /**
@@ -8,7 +9,7 @@ import { Schema } from "effect";
  */
 export const lentAgentSchema = Schema.Struct({
 	id: Schema.String,
-	kind: Schema.Literal("claude-code"),
+	kind: localAgentKindSchema,
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	executable: Schema.String,
@@ -25,16 +26,21 @@ export interface InstalledAgent {
 	readonly version: string | null;
 }
 
-/**
- * The agent CLIs installed on this computer that it knows how to host:
- * Claude Code, found on the PATH as `claude`.
- */
+/** The agent CLIs this computer knows how to host, and the command each is found on the PATH as. */
+const HOSTABLE: ReadonlyArray<{ kind: LentAgent["kind"]; name: string; command: string }> = [
+	{ kind: "claude-code", name: "Claude Code", command: "claude" },
+	{ kind: "opencode", name: "opencode", command: "opencode" },
+];
+
+/** The agent CLIs installed on this computer that it knows how to host. */
 export async function findInstalledAgents(): Promise<ReadonlyArray<InstalledAgent>> {
-	const executable = Bun.which("claude");
-	if (!executable) return [];
-	return [
-		{ kind: "claude-code", name: "Claude Code", executable, version: await versionOf(executable) },
-	];
+	const found = await Promise.all(
+		HOSTABLE.map(async ({ kind, name, command }) => {
+			const executable = Bun.which(command);
+			return executable ? { kind, name, executable, version: await versionOf(executable) } : null;
+		}),
+	);
+	return found.filter((agent) => agent !== null);
 }
 
 async function versionOf(executable: string) {

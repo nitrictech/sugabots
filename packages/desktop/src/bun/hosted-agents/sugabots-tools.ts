@@ -1,5 +1,6 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { OfferedTool } from "@sugabots/contracts/devices";
 
@@ -33,6 +34,55 @@ export async function sugabotsMcpServer(
 ): Promise<McpSdkServerConfigWithInstance | undefined> {
 	const offered = await tools.list(asked);
 	if (offered.length === 0) return undefined;
+	return { type: "sdk", name: SUGABOTS_SERVER, instance: mcpServerFor(tools, asked, offered) };
+}
+
+/**
+ * Serves turns' Sugabots tools over MCP on this computer's loopback, for an
+ * agent that only reaches MCP servers by URL. Each exposed turn gets a path
+ * with a random secret in it, and stops answering once closed.
+ */
+export interface LoopbackTools {
+	/** The turn's tools at a URL, or nothing when it offers none. */
+	readonly expose: (asked: AskedIn) => Promise<{ url: string; close: () => void } | undefined>;
+}
+
+export function startLoopbackTools(tools: SugabotsTools): LoopbackTools {
+	const exposed = new Map<string, { asked: AskedIn; offered: ReadonlyArray<OfferedTool> }>();
+	let server: ReturnType<typeof Bun.serve> | undefined;
+	const serve = () => {
+		server ??= Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: async (request) => {
+				const secret = new URL(request.url).pathname.match(/^\/mcp\/([\w-]+)$/)?.[1];
+				const turn = secret ? exposed.get(secret) : undefined;
+				if (!turn) return new Response("Not found", { status: 404 });
+				// Stateless: a server and transport per request, as the SDK allows.
+				const transport = new WebStandardStreamableHTTPServerTransport({
+					sessionIdGenerator: undefined,
+				});
+				await mcpServerFor(tools, turn.asked, turn.offered).connect(transport);
+				return transport.handleRequest(request);
+			},
+		});
+		return server;
+	};
+	return {
+		expose: async (asked) => {
+			const offered = await tools.list(asked);
+			if (offered.length === 0) return undefined;
+			const secret = crypto.randomUUID();
+			exposed.set(secret, { asked, offered });
+			return {
+				url: `http://127.0.0.1:${serve().port}/mcp/${secret}`,
+				close: () => exposed.delete(secret),
+			};
+		},
+	};
+}
+
+function mcpServerFor(tools: SugabotsTools, asked: AskedIn, offered: ReadonlyArray<OfferedTool>) {
 	const mcp = new McpServer(
 		{ name: SUGABOTS_SERVER, version: "1.0.0" },
 		{ capabilities: { tools: {} } },
@@ -50,5 +100,5 @@ export async function sugabotsMcpServer(
 		const result = await tools.call(asked, params.name, params.arguments ?? {});
 		return { content: [{ type: "text", text: result.text }], isError: result.isError };
 	});
-	return { type: "sdk", name: SUGABOTS_SERVER, instance: mcp };
+	return mcp;
 }

@@ -4,6 +4,7 @@ import type { SetupRPC } from "../shared/rpc.ts";
 import { type DeviceLink, startDeviceLink } from "./device-link.ts";
 import type { ApproveToolUse } from "./hosted-agents/claude-code.ts";
 import { agentOrigin, startAgentHost } from "./hosted-agents/host.ts";
+import { stopOpencode } from "./hosted-agents/opencode.ts";
 import { findInstalledAgents, type LentAgent, lentAgent } from "./local-agents.ts";
 import { startPairing } from "./pairing.ts";
 import { findServer } from "./server.ts";
@@ -252,9 +253,15 @@ async function unpair() {
 	await startLink();
 }
 
+/** Quits, stopping the opencode server this app started, if it did. */
+function quit() {
+	stopOpencode();
+	Utils.quit();
+}
+
 /** Without a tray there would be no way back to a closed app, so closing its last window quits it. */
 function quitWithoutTray() {
-	if (tray.id === 0 && !appWindow && !setupWindow) Utils.quit();
+	if (tray.id === 0 && !appWindow && !setupWindow) quit();
 }
 
 const tray = new Tray({ image: "views://assets/sugabots-logo.svg", template: false });
@@ -279,7 +286,7 @@ tray.on("tray-clicked", (event) => {
 	if (action === "change-server") openSetup();
 	if (action === "pair") pair();
 	if (action === "unpair") unpair();
-	if (action === "quit") Utils.quit();
+	if (action === "quit") quit();
 });
 
 // Links the app opens in a new tab, such as docs and provider sign-ins, belong in the person's browser.

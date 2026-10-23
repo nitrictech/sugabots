@@ -30,7 +30,7 @@ export const DESKTOP_DEVICE_GLOBAL = "sugabotsDesktopDevice";
 export const DEVICE_PAIRING_PAGE = "/pair-device";
 
 /** The kinds of agent a desktop knows how to host. */
-export const localAgentKindSchema = Schema.Literals(["claude-code"]);
+export const localAgentKindSchema = Schema.Literals(["claude-code", "opencode"]);
 
 export type LocalAgentKind = typeof localAgentKindSchema.Type;
 

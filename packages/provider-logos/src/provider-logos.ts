@@ -14,6 +14,8 @@ import ollama from "../logos/ollama.svg";
 import ollamaDark from "../logos/ollama-dark.svg";
 import openai from "../logos/openai.svg";
 import openaiDark from "../logos/openai-dark.svg";
+import opencode from "../logos/opencode.svg";
+import opencodeDark from "../logos/opencode-dark.svg";
 import openrouter from "../logos/openrouter.svg";
 import openrouterDark from "../logos/openrouter-dark.svg";
 import together from "../logos/together.svg";
@@ -196,5 +198,12 @@ export const agentLogos: Record<LocalAgentKind, ProviderLogoAsset> = {
 		guidelines: "https://www.anthropic.com/legal/trademark-guidelines",
 		fetched: "2026-10-23",
 		caution: "Anthropic's trademark guidelines ask for prior approval (marketing@anthropic.com).",
+	},
+	opencode: {
+		light: opencode,
+		dark: opencodeDark,
+		source:
+			"https://github.com/anomalyco/opencode at 5f79a2a (packages/console/app/src/asset/brand/opencode-logo-light-square.svg and opencode-logo-dark-square.svg)",
+		fetched: "2026-10-23",
 	},
 };

@@ -10,8 +10,15 @@ import {
 	UnauthenticatedUser,
 } from "@a2a-js/sdk/server";
 import type { LentAgent } from "../local-agents.ts";
-import { type ApproveToolUse, runClaudeCode } from "./claude-code.ts";
-import { type SugabotsTools, sugabotsMcpServer } from "./sugabots-tools.ts";
+import { type ApproveToolUse, type RunEvent, runClaudeCode } from "./claude-code.ts";
+import { runOpencode } from "./opencode.ts";
+import {
+	type AskedIn,
+	type LoopbackTools,
+	type SugabotsTools,
+	startLoopbackTools,
+	sugabotsMcpServer,
+} from "./sugabots-tools.ts";
 
 /**
  * The A2A agents this computer lends, served in this process rather than on
@@ -45,13 +52,14 @@ export function startAgentHost(options: {
 	tools: SugabotsTools;
 }): AgentHost {
 	let served = new Map<string, Served>();
+	const running = { ...options, loopback: startLoopbackTools(options.tools) };
 	const lend = (agents: ReadonlyArray<LentAgent>) => {
 		const kept = new Map<string, Served>();
 		for (const agent of agents) {
 			const previous = served.get(agent.id);
 			kept.set(
 				agent.id,
-				previous && sameAgent(previous.agent, agent) ? previous : serve(agent, options),
+				previous && sameAgent(previous.agent, agent) ? previous : serve(agent, running),
 			);
 		}
 		served = kept;
@@ -92,10 +100,7 @@ export function agentOrigin(agentId: string) {
 	return `http://${agentId}.agents.invalid`;
 }
 
-function serve(
-	agent: LentAgent,
-	options: { sessions: Sessions; approve: ApproveToolUse; tools: SugabotsTools },
-): Served {
+function serve(agent: LentAgent, options: Runners): Served {
 	const origin = agentOrigin(agent.id);
 	const card: AgentCard = {
 		name: agent.name,
@@ -121,20 +126,55 @@ function serve(
 	const handler = new DefaultRequestHandler(
 		card,
 		new InMemoryTaskStore(),
-		claudeCodeExecutor(agent, options),
+		executor(agent, options),
 	);
 	return { agent, origin, card, transport: new JsonRpcTransportHandler(handler) };
 }
 
-/** Each message sent to `agent` is one Claude Code run, continuing its conversation's session. */
-function claudeCodeExecutor(
+/** What runs a lent agent needs: its sessions, the owner's approval, and the turn's Sugabots tools. */
+interface Runners {
+	sessions: Sessions;
+	approve: ApproveToolUse;
+	tools: SugabotsTools;
+	loopback: LoopbackTools;
+}
+
+/** One run of `agent`'s program with `prompt`, in the session `sessionId` continues. */
+async function* run(
 	agent: LentAgent,
-	{
-		sessions,
-		approve,
-		tools,
-	}: { sessions: Sessions; approve: ApproveToolUse; tools: SugabotsTools },
-): AgentExecutor {
+	runners: Runners,
+	asked: AskedIn,
+	request: { prompt: string; sessionId: string | undefined; signal: AbortSignal },
+): AsyncGenerator<RunEvent> {
+	const common = {
+		agentName: agent.name,
+		workingDirectory: agent.workingDirectory,
+		approve: runners.approve,
+		...request,
+	};
+	switch (agent.kind) {
+		case "claude-code":
+			yield* runClaudeCode({
+				...common,
+				executable: agent.executable,
+				sugabots: await sugabotsMcpServer(runners.tools, asked),
+			});
+			return;
+		case "opencode": {
+			const exposed = await runners.loopback.expose(asked);
+			try {
+				yield* runOpencode({ ...common, sugabotsUrl: exposed?.url });
+			} finally {
+				exposed?.close();
+			}
+			return;
+		}
+	}
+}
+
+/** Each message sent to `agent` is one run of its program, continuing its conversation's session. */
+function executor(agent: LentAgent, runners: Runners): AgentExecutor {
+	const { sessions } = runners;
 	const running = new Map<string, AbortController>();
 	return {
 		execute: async (context, bus) => {
@@ -152,16 +192,16 @@ function claudeCodeExecutor(
 				}),
 			);
 			try {
-				for await (const event of runClaudeCode({
-					agentName: agent.name,
-					executable: agent.executable,
-					workingDirectory: agent.workingDirectory,
-					prompt: textOf(context.userMessage.parts),
-					sessionId: sessions.get(agent.id, contextId),
-					approve,
-					sugabots: await sugabotsMcpServer(tools, { agentUrl: agentOrigin(agent.id), contextId }),
-					signal: aborts.signal,
-				})) {
+				for await (const event of run(
+					agent,
+					runners,
+					{ agentUrl: agentOrigin(agent.id), contextId },
+					{
+						prompt: textOf(context.userMessage.parts),
+						sessionId: sessions.get(agent.id, contextId),
+						signal: aborts.signal,
+					},
+				)) {
 					if (event.type === "session") {
 						sessions.set(agent.id, contextId, event.id);
 						continue;

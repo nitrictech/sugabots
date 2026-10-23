@@ -106,6 +106,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.3.309",
         "@fontsource-variable/rubik": "^5.3.0",
         "@modelcontextprotocol/sdk": "1.30.1",
+        "@opencode-ai/sdk": "1.19.0",
         "@sugabots/contracts": "workspace:*",
         "effect": "catalog:",
       },
@@ -706,6 +707,8 @@
     "@open-draft/until": ["@open-draft/until@2.1.0", "", {}, "sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg=="],
 
     "@opencode-ai/models": ["@opencode-ai/models@0.0.106", "", { "peerDependencies": { "effect": "4.0.0-beta.83" }, "optionalPeers": ["effect"] }, "sha512-Rk1GeNOdWbDhmaQJCAa0nOXlSomUOr5lBT5xBe1KDv41Xv93Qjv0ykK8UiTeMCohYS7uA9esx2lfh6rAGBaEcQ=="],
+
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.19.0", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-lDFYTD6qxzq1mfwxF6Kq1DAs6rEwF4xoZ2I3G1sB7hAZ8Yb28JurtSmmcK7ZzZ8Z4qBUYbZimHJ6DM4JFq5amw=="],
 
     "@openrouter/ai-sdk-provider": ["@openrouter/ai-sdk-provider@3.1.0", "", { "peerDependencies": { "ai": "^7.0.0", "zod": "^3.25.76 || ^4.1.8" } }, "sha512-BQy1TA9fKrh47s9ivsO6FY5QimN7GUF0i8Qon3pkxQclEgShso0dClpcWn8OIyPLEZZPFaFKgI8TW4S/O0p0Dw=="],
 
