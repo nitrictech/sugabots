@@ -113,11 +113,27 @@ without waiting for the bot. Otherwise:
 - `413` if the body is over 64 KiB.
 
 A delivery id makes a retry land on the run the first call started, which the
-reply marks `"duplicate": true`. Sugabots reads it from `Idempotency-Key`,
-`Linear-Delivery`, `X-GitHub-Delivery`, `X-Shopify-Webhook-Id`, `Svix-Id` or
-`Webhook-Id`, else a Slack `event_id` or a Stripe event's `id` in the body. With
-none, every call starts a run. The same id sent with a different body is refused
-with `409`.
+reply marks `"duplicate": true`. The same id sent with a different body is refused
+with `409`. Where the id comes from depends on the **Source**:
+
+- **GitHub** and **Linear**: their own delivery header, `X-GitHub-Delivery` or
+  `Linear-Delivery`.
+- **Slack** and **Stripe**: the `event_id` of a Slack event, or the `id` of a Stripe
+  event, in the body.
+- **Generic**: the header you name in **Delivery ID header**, `Idempotency-Key`
+  until you change it. Clear it, and every call starts a run.
+
+With no id, or when the header is missing, every call starts a run. A generic
+webhook reads nothing else, so a sender that names its deliveries another way, such
+as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its header named here.
+
+<Careful title="Sentry retries aren't deduplicated">
+
+Sentry's `Request-ID` changes with every attempt, so a retry of a Sentry delivery
+starts a second run, whatever **Delivery ID header** says. Leave the field blank
+and let the bot spot the repeat from the alert itself.
+
+</Careful>
 
 ## Runs
 
