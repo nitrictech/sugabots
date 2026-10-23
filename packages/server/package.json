@@ -5,7 +5,8 @@
 	"license": "MIT",
 	"type": "module",
 	"exports": {
-		".": "./src/http/app.ts"
+		".": "./src/http/app.ts",
+		"./auth/authentication": "./src/auth/authentication.ts"
 	},
 	"scripts": {
 		"dev": "node --env-file-if-exists=../../.env scripts/content-origin-alias.ts && node --watch --env-file-if-exists=../../.env src/index.ts",

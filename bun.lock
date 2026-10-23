@@ -98,6 +98,18 @@
         "pg": "^8.23.0",
       },
     },
+    "packages/demo": {
+      "name": "@sugabots/demo",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@sugabots/contracts": "workspace:*",
+        "@sugabots/core": "workspace:*",
+        "@sugabots/server": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "effect": "catalog:",
+      },
+    },
     "packages/docs": {
       "name": "@sugabots/docs",
       "version": "0.0.0",
@@ -243,6 +255,7 @@
         "@vitejs/plugin-react": "^6.1.1",
         "culori": "^4.0.2",
         "github-slugger": "^2.0.0",
+        "playwright": "^1.63.0",
         "rehype-slug": "^6.0.0",
         "remark-frontmatter": "^5.0.0",
         "remark-gfm": "^4.0.1",
@@ -943,6 +956,8 @@
     "@sugabots/contracts": ["@sugabots/contracts@workspace:packages/contracts"],
 
     "@sugabots/core": ["@sugabots/core@workspace:packages/core"],
+
+    "@sugabots/demo": ["@sugabots/demo@workspace:packages/demo"],
 
     "@sugabots/docs": ["@sugabots/docs@workspace:packages/docs"],
 

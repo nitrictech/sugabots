@@ -10,7 +10,9 @@ export const DISCORD_PATH = new URL(projectLinks.discord).pathname;
 /** Where the site's links point. Change a destination here and every link follows. */
 export const siteLinks = {
 	docs: "/docs",
+	selfHost: "/docs/quickstart",
+	/** There is no waitlist form yet, so this goes to Discord until there is. */
+	waitlist: projectLinks.discord,
 	github: projectLinks.repository,
 	discord: projectLinks.discord,
-	getStarted: "#start",
 } as const;

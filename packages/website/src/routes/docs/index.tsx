@@ -11,6 +11,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { buttonVariants } from "@/components/ui/button";
 import { type DocGroup, docGroups } from "@/docs/nav";
 import { docPages, findDocPage } from "@/docs/pages";
+import { pageTop, siteColumn } from "@/layout";
 import { docsMeta } from "@/site-meta";
 
 export const Route = createFileRoute("/docs/")({
@@ -75,8 +76,8 @@ function DocsHome() {
 	const [firstPage] = docPages;
 	return (
 		<>
-			<main className="mx-auto max-w-7xl px-6">
-				<section className="pt-12 pb-14">
+			<main className={siteColumn}>
+				<section className={cn(pageTop, "pb-14")}>
 					<Reveal delay={0.1} className="flex flex-col gap-5">
 						<BotCrowd />
 						<motion.h1
@@ -110,7 +111,7 @@ function DocsHome() {
 					<GroupSection key={group.title} group={group} />
 				))}
 			</main>
-			<SiteFooter width="wide" />
+			<SiteFooter />
 		</>
 	);
 }

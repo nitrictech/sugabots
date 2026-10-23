@@ -1,10 +1,8 @@
 import { NodeRuntime } from "@effect/platform-node";
-import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { Accounts } from "@sugabots/core/accounts/accounts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import { pod, user, workspace } from "@sugabots/core/database/schema";
+import { pod, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
@@ -13,9 +11,10 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
+import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, type SQL } from "drizzle-orm";
-import { ConfigProvider, Effect, Layer } from "effect";
-import { Authentication } from "./auth/authentication.ts";
+import { Effect, Layer } from "effect";
+import { ensureAccount, seedAccountsLayer } from "./accounts.ts";
 
 /**
  * Development seed: the smallest amount of data that makes the app worth
@@ -41,21 +40,7 @@ const seed = Effect.gen(function* () {
 	const personalPods = yield* PersonalPods.Service;
 	const pods = yield* PodRepository.Service;
 	const agents = yield* AgentRepository.Service;
-	const [existingAccount] = yield* query((db) =>
-		db.select({ id: user.id }).from(user).where(eq(user.email, EMAIL)),
-	);
-	if (!existingAccount) {
-		yield* signUp;
-	}
-	const [person] = yield* query((db) => db.select().from(user).where(eq(user.email, EMAIL)));
-	if (!person) {
-		return yield* Effect.die(new Error(`could not create ${EMAIL}`));
-	}
-	if (!person.emailVerified) {
-		yield* query((db) =>
-			db.update(user).set({ emailVerified: true }).where(eq(user.id, person.id)),
-		);
-	}
+	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
 	// Made the way the app makes one, so it has its system agents, search
 	// provider and the person's Personal pod. The system agents are left unset:
@@ -64,16 +49,16 @@ const seed = Effect.gen(function* () {
 	const workspaceId = yield* membership
 		.create({ details: { name: "Development", slug: "dev" } })
 		.pipe(
-			CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(person.id)),
+			CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(personId)),
 			Effect.map((created) => created.id),
 			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
 		);
 	// The seed stands in for setting it up, so it opens straight into the app.
 	yield* Onboarding.recordSetupCompleted(workspaceId);
 
-	const personal = yield* personalPods.provision({ workspaceId, userId: person.id });
+	const personal = yield* personalPods.provision({ workspaceId, userId: personId });
 	const supportId = yield* pods
-		.create(workspaceId, { creatorId: person.id, name: "Support", slug: "support" })
+		.create(workspaceId, { creatorId: personId, name: "Support", slug: "support" })
 		.pipe(
 			Effect.map((created) => created.id),
 			Effect.catchTag("PodSlugTaken", () =>
@@ -109,7 +94,7 @@ const seed = Effect.gen(function* () {
 		},
 	]) {
 		yield* agents
-			.create(workspaceId, { createdById: person.id, agent: { ...seedling, model } })
+			.create(workspaceId, { createdById: personId, agent: { ...seedling, model } })
 			.pipe(Effect.catchTag("AgentNameTaken", () => Effect.void));
 	}
 
@@ -123,37 +108,6 @@ const idOf = (table: typeof workspace | typeof pod, where: SQL | undefined) =>
 		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
 	);
-
-/** Through the same route the web app signs up with. */
-const signUp = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	const authentication = yield* Authentication.Service;
-	const response = yield* authentication.handler(
-		new Request(`${installation.publicUrl}${API_BASE_PATH}/auth/sign-up/email`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				origin: new URL(installation.publicUrl).origin,
-			},
-			body: JSON.stringify({ name: "Development", email: EMAIL, password: PASSWORD }),
-		}),
-	);
-	if (!response.ok) {
-		const reason = yield* Effect.promise(() => response.text());
-		return yield* Effect.die(new Error(`could not sign up ${EMAIL}: ${reason}`));
-	}
-});
-
-/** Whoever may sign up and whether they must verify is the installation's to configure, so the seed configures its own. */
-const seedAccounts = Accounts.layer.pipe(
-	Layer.provide(
-		ConfigProvider.layer(
-			ConfigProvider.fromEnv({
-				env: { SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" },
-			}),
-		),
-	),
-);
 
 seed.pipe(
 	Effect.scoped,
@@ -169,7 +123,7 @@ seed.pipe(
 				Layer.mergeAll(
 					Ids.layer,
 					Credentials.layer,
-					seedAccounts,
+					seedAccountsLayer,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 				).pipe(Layer.provideMerge(Installation.layer), Layer.provideMerge(databaseLayer)),
 			),

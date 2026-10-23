@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { cn } from "cn";
 import { motion } from "motion/react";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { SiteFooter } from "@/components/site-footer";
@@ -8,6 +9,7 @@ import { docsComponents } from "@/docs/components/mdx-components";
 import { OnThisPage } from "@/docs/components/on-this-page";
 import { PageLinks } from "@/docs/components/page-links";
 import { findDocPage, neighbours } from "@/docs/pages";
+import { siteColumn } from "@/layout";
 
 export const Route = createFileRoute("/docs/$slug")({
 	loader: ({ params }) => {
@@ -35,7 +37,7 @@ function DocsPage() {
 
 	return (
 		<>
-			<div className="mx-auto flex max-w-7xl gap-10 px-6">
+			<div className={cn(siteColumn, "flex gap-10")}>
 				<DocsSidebar />
 				<main className="docs-content min-w-0 flex-1 py-10 lg:py-14">
 					<article className="mx-auto max-w-3xl">
@@ -58,7 +60,7 @@ function DocsPage() {
 						<PageLinks {...neighbours(page)} />
 					</article>
 				</main>
-				<aside className="sticky top-16 hidden max-h-[calc(100svh-4rem)] w-52 shrink-0 flex-col gap-6 overflow-y-auto py-10 xl:flex">
+				<aside className="sticky top-(--site-header-height) hidden max-h-[calc(100svh-var(--site-header-height))] w-52 shrink-0 flex-col gap-6 overflow-y-auto py-10 xl:flex">
 					<CopyPageButton markdown={page.markdown} />
 					<OnThisPage headings={page.headings} />
 				</aside>

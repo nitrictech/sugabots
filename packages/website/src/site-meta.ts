@@ -1,14 +1,15 @@
 import { projectLinks } from "@sugabots/contracts/project-links";
 
 /** The headline, split where the accent colour ends. */
-const headline = { accent: "Multiplayer", rest: "agents on any model" } as const;
+const headline = { accent: "Multiplayer", rest: "bots on any model" } as const;
 
 /** What the site says about itself: the hero, the page head and the link-preview image. */
 export const siteMeta = {
 	url: projectLinks.website,
 	headline,
 	title: `Sugabots | ${headline.accent} ${headline.rest}`,
-	description: "An open-source harness where people and agents work together.",
+	description:
+		"A place where people and bots work together. Give each team its own bots, on the models you choose. Open source and self-hosted.",
 	/** Written by scripts/generate-og-image.tsx. */
 	ogImagePath: "/og.png",
 } as const;
