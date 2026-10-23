@@ -71,9 +71,27 @@ that calls the address straight away.
 
 </Careful>
 
-Call the address with a JSON body and the secret as a bearer token. The bot gets the
-body along with its instructions, marked as data from outside so it isn't taken
-as orders.
+Call the address with a JSON body and a `Content-Type` of `application/json`, up to
+64 KiB. The bot gets the body along with its instructions, marked as data from outside
+so it isn't taken as orders. The caller proves it holds the secret the way the
+webhook's **Source** and **Auth** say:
+
+- **GitHub**, **Stripe**, **Slack** or **Linear**: paste the signing secret the
+  sender made, and add the address in the sender, which signs each call itself.
+  Slack's address check is answered for you.
+- **Generic**, for any other sender, with one **Auth**:
+  - **HMAC**: the sender signs the raw body with the secret and sends the digest in
+    the **Header** you name. Pick SHA-1, SHA-256 or SHA-512, and hex or base64. A
+    leading `sha256=` is fine.
+  - **Bearer**: `Authorization: Bearer <secret>`.
+  - **API key**: the secret in the **Header** you name.
+  - **Basic**: HTTP Basic auth with the **Username** you set and the secret as the
+    password.
+
+The secret goes in a header, never in the address. A secret you make up needs at
+least 16 characters. A webhook with no secret is run by anyone who has its address.
+
+For example, with **Bearer** auth:
 
 ```sh
 curl -X POST "https://sugabots.example.com/api/hooks/triggers/<trigger id>" \
@@ -83,8 +101,23 @@ curl -X POST "https://sugabots.example.com/api/hooks/triggers/<trigger id>" \
   -d '{"order": 1042, "customer": "Sam"}'
 ```
 
-`Idempotency-Key` is optional. Send the same key twice and the second call is
-recognised as a repeat.
+A sender that signs, such as Sentry, needs no custom headers. Choose **Generic**,
+**HMAC**, SHA-256 and hex, set the **Header** to `Sentry-Hook-Signature`, and
+paste the integration's client secret as the secret.
+
+A call is answered with `202` and an `executionId` as soon as the run is queued,
+without waiting for the bot. Otherwise:
+
+- `401` if the secret or signature is wrong, or the webhook is off or gone.
+- `400` if the body isn't JSON or the delivery id is over 200 characters.
+- `413` if the body is over 64 KiB.
+
+A delivery id makes a retry land on the run the first call started, which the
+reply marks `"duplicate": true`. Sugabots reads it from `Idempotency-Key`,
+`Linear-Delivery`, `X-GitHub-Delivery`, `X-Shopify-Webhook-Id`, `Svix-Id` or
+`Webhook-Id`, else a Slack `event_id` or a Stripe event's `id` in the body. With
+none, every call starts a run. The same id sent with a different body is refused
+with `409`.
 
 ## Runs
 
