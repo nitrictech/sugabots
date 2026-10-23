@@ -6,6 +6,8 @@
 - "Branches, commits, and PRs" section before creating a branch, committing, or opening a PR.
 - "UI development" section before changing components, views, or stories.
 
+Run tests with `bun run test`, never `bun test`, which writes to the development database. In a linked worktree, run `bun run db:branch` before starting the app; the `run-branch` skill in `.claude/skills/` covers checking a change in the running app.
+
 ## Style and Practices
 
 Write only what the current task needs. Keep behavior, preconditions, and side effects clear without tracing distant definitions.
