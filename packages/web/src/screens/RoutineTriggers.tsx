@@ -1,4 +1,9 @@
-import type { Pod, RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
+import {
+	deliveryIdHeaderOf,
+	type Pod,
+	type RoutineTrigger,
+	type RoutineTriggerInput,
+} from "@sugabots/contracts";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -81,7 +86,11 @@ export function triggerDraftOf(trigger: RoutineTriggerInput): TriggerDraft {
 		case "webhook":
 			return {
 				kind: "webhook",
-				webhook: { auth: trigger.auth ?? NEW_WEBHOOK.auth, secret: trigger.secret ?? "" },
+				webhook: {
+					auth: trigger.auth ?? NEW_WEBHOOK.auth,
+					deliveryIdHeader: deliveryIdHeaderOf(trigger),
+					secret: trigger.secret ?? "",
+				},
 			};
 		case "github":
 			return {
@@ -110,10 +119,17 @@ export function triggerInputOf(
 					}
 				: { notReady: PICK_A_DAY_NOTE };
 		case "webhook": {
-			const { auth, secret } = draft.webhook;
+			const { auth, deliveryIdHeader, secret } = draft.webhook;
 			if (!secretReady(auth, secret)) return { notReady: SECRET_TOO_SHORT_NOTE };
 			const trimmed = secret.trim();
-			return { input: { kind: "webhook", auth, secret: trimmed === "" ? null : trimmed } };
+			return {
+				input: {
+					kind: "webhook",
+					auth,
+					deliveryIdHeader,
+					secret: trimmed === "" ? null : trimmed,
+				},
+			};
 		}
 		case "github": {
 			const input = repositoryTrigger(draft.repository);
