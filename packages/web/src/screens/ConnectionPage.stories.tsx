@@ -164,6 +164,20 @@ const gitHubAppPending = connection(7, {
 	access: "ask",
 });
 
+/** An HTTP endpoint, its method tools at their defaults. */
+const alerts = connection(8, {
+	name: "Alerts",
+	handle: "alerts",
+	url: "https://alerts.example.com/v2",
+	kind: "http",
+	tools: [
+		{ name: "get", description: "Send a GET request.", readOnly: true, destructive: false },
+		{ name: "post", description: "Send a POST request.", readOnly: false, destructive: false },
+		{ name: "delete", description: "Send a DELETE request.", readOnly: false, destructive: true },
+	],
+	access: "ask",
+});
+
 const appRepositories = (account: string | null) =>
 	http.get(`${API}/pods/:podId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
@@ -189,7 +203,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
-		const served = [current, stripe, notion, github, posthog, gitHubApp, gitHubAppPending];
+		const served = [current, stripe, notion, github, posthog, gitHubApp, gitHubAppPending, alerts];
 		msw.use(
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
@@ -467,5 +481,20 @@ export const AddedByUrl = meta.story({
 		await expect(
 			await canvas.findByText("https://api.githubcopilot.com/mcp/", {}, { timeout: 10_000 }),
 		).toBeInTheDocument();
+	},
+});
+
+/** An HTTP endpoint: its address, a request per method, and a check that sends nothing. */
+export const HttpEndpoint = meta.story({
+	render: () => <StoryApp path={pagePath(alerts)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("https://alerts.example.com/v2", {}, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "More for Alerts" }));
+		await expect(
+			await screen.findByRole("menuitem", { name: "Check connection" }),
+		).toBeInTheDocument();
+		await expect(screen.getByRole("menuitem", { name: "Replace secret" })).toBeInTheDocument();
 	},
 });

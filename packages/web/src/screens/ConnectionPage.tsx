@@ -70,8 +70,8 @@ export function ConnectionPage({
 	const [replacingSecret, setReplacingSecret] = useState(false);
 	const preset = connectionPresetFor(connection.url);
 	const mark = connectionMarkFor(connection);
-	// A GitHub connection's tools are Sugabots' own: it has no server to sign in to or check.
-	const isServer = connection.kind === "mcp";
+	// A GitHub connection works through its app: it has no address to sign in to or check.
+	const isServer = connection.kind !== "github";
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const failure = checked
@@ -220,7 +220,13 @@ export function ConnectionPage({
 						{secretActionLabel(connection)}
 					</Button>
 				)}
-				{checked?.reachable && !actions.test.isPending && <Success>Connection successful</Success>}
+				{checked?.reachable && !actions.test.isPending && (
+					<Success>
+						{connection.kind === "http"
+							? "The address is allowed. A check sends no request to it."
+							: "Connection successful"}
+					</Success>
+				)}
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</div>
 			{connection.kind === "github" && (

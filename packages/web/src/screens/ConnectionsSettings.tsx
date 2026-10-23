@@ -9,7 +9,7 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowUpRight, ChevronRight, Code, Search } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Code, Globe, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -42,8 +42,8 @@ import { AccessMenu, AccessValue, accessSettingOf, accessSummaryText } from "./t
  * what its tools are set to, Allow, Ask or Off for all of them at once, and
  * whatever it needs (a sign-in, a reconnect) on its line. A row opens the
  * connection's own page: its address, each of its tools, and removing it.
- * Adding one is a dialog: the app and its sign-in, or any other server by its
- * address. Each tool the server lists starts at its default.
+ * Adding one is a dialog: the app and its sign-in, or any other server or HTTP
+ * endpoint by its address. Each tool the server lists starts at its default.
  */
 
 export function ConnectionsSettings({
@@ -186,7 +186,7 @@ const signInMethodNote: Record<SignInMethod, string> = {
 	header: "The secret is sent in this header exactly as you type it.",
 };
 
-type Choice = ConnectionPreset | "custom" | "github";
+type Choice = ConnectionPreset | "custom" | "http" | "github";
 
 /** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
@@ -208,8 +208,13 @@ function AddConnectionDialog({
 		<DialogFormFrame>
 			{choice === "github" ? (
 				<GitHubConnectStep podId={podId} onBack={() => setChoice(undefined)} done={done} />
-			) : choice === "custom" ? (
-				<ByUrlStep podId={podId} onBack={() => setChoice(undefined)} done={done} />
+			) : choice === "custom" || choice === "http" ? (
+				<ByUrlStep
+					podId={podId}
+					kind={choice === "http" ? "http" : "mcp"}
+					onBack={() => setChoice(undefined)}
+					done={done}
+				/>
 			) : choice ? (
 				<AppStep podId={podId} preset={choice} onBack={() => setChoice(undefined)} />
 			) : (
@@ -308,6 +313,17 @@ function AppList({
 							chevron
 							onClick={() => onChoose("custom")}
 						/>
+						<SettingsRow
+							icon={
+								<SettingsRowIcon className="size-[34px] rounded-[10px]">
+									<Globe size={15} strokeWidth={2.2} />
+								</SettingsRowIcon>
+							}
+							label="HTTP endpoint"
+							sub="Any web API, by its base address"
+							chevron
+							onClick={() => onChoose("http")}
+						/>
 					</SettingsGroup>
 				</div>
 			</DialogFormBody>
@@ -380,17 +396,22 @@ const signInMethodOptions: { value: SignInMethod; label: string }[] = [
 
 /**
  * ByUrlStep adds any other MCP server by its address, signing in with an access
- * token, the server's own OAuth sign-in, or a secret in a custom header.
+ * token, the server's own OAuth sign-in, or a secret in a custom header. An
+ * HTTP endpoint takes a token or a header, or neither, and has nothing to
+ * test before it is added: its check sends no request.
  */
 function ByUrlStep({
 	podId,
+	kind,
 	onBack,
 	done,
 }: {
 	podId: string;
+	kind: "mcp" | "http";
 	onBack: () => void;
 	done: () => void;
 }) {
+	const isEndpoint = kind === "http";
 	const actions = useConnectionActions(podId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
@@ -438,7 +459,7 @@ function ByUrlStep({
 				await actions.connect.mutateAsync({ name, url });
 				return;
 			}
-			await actions.create.mutateAsync({ name, ...server });
+			await actions.create.mutateAsync({ kind, name, ...server });
 		} catch (failure) {
 			setOutcome({ ok: false, message: failureMessage(failure) });
 			return;
@@ -448,9 +469,19 @@ function ByUrlStep({
 
 	return (
 		<DialogFormStep onSubmit={submit}>
-			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
+			<DialogFormHeader
+				title={isEndpoint ? "HTTP endpoint" : "Connect by URL"}
+				onBack={onBack}
+				backDisabled={pending}
+			/>
 			<DialogFormBody>
-				<SettingsGroup>
+				<SettingsGroup
+					note={
+						isEndpoint
+							? "Bots can send GET, POST, PUT, PATCH and DELETE requests to paths under this address. They never see the secret."
+							: undefined
+					}
+				>
 					<SettingsFieldRow
 						label="Name"
 						value={name}
@@ -461,7 +492,7 @@ function ByUrlStep({
 						label="Address"
 						value={url}
 						onChange={clearingOutcome(setUrl)}
-						placeholder="https://mcp.example.com/mcp"
+						placeholder={isEndpoint ? "https://api.example.com/v1" : "https://mcp.example.com/mcp"}
 						mono
 					/>
 				</SettingsGroup>
@@ -471,7 +502,11 @@ function ByUrlStep({
 						trailing={
 							<SegmentedControl
 								label="How to sign in to the server"
-								options={signInMethodOptions}
+								options={
+									isEndpoint
+										? signInMethodOptions.filter((option) => option.value !== "oauth")
+										: signInMethodOptions
+								}
 								value={method}
 								onChange={clearingOutcome(setMethod)}
 							/>
@@ -516,7 +551,8 @@ function ByUrlStep({
 			</DialogFormBody>
 			<DialogFormFooter
 				beside={
-					method !== "oauth" && (
+					method !== "oauth" &&
+					!isEndpoint && (
 						<Button
 							type="button"
 							variant="secondary"
