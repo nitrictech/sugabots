@@ -56,7 +56,15 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 					head: { ref, repo: { full_name: fullName } },
 				});
 	};
-	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories, pullRequests);
+	// A review whose comment is on line 999 is refused, as GitHub does for a line outside the diff.
+	const reviews: Route = ({ method, path, body }) => {
+		if (method !== "POST" || path !== "/repos/acme/web/pulls/6/reviews") return undefined;
+		const { comments } = body as { comments: { line: number }[] };
+		return comments.some((comment) => comment.line === 999)
+			? json({ message: "Unprocessable Entity", errors: ["Line could not be resolved"] }, 422)
+			: json({ html_url: "https://github.com/acme/web/pull/6#pullrequestreview-1" });
+	};
+	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories, pullRequests, reviews);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
 	let fixture: Awaited<ReturnType<typeof workspaceWithPod>>;
@@ -163,6 +171,66 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 				body: { title: "Fix the login" },
 			}),
 		]);
+	});
+
+	it("reviews a pull request with comments on its lines, or says why GitHub refused them", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const review = {
+			repository: "acme/web",
+			number: 6,
+			commit: undefined,
+			body: "Two findings",
+			comments: [
+				{
+					path: "src/login.ts",
+					line: 12,
+					body: "Check the token\n```suggestion\nverify(token);\n```",
+				},
+				{
+					path: "src/login.ts",
+					startLine: 20,
+					line: 24,
+					side: "LEFT" as const,
+					body: "Why drop this?",
+				},
+			],
+		};
+
+		const reviewed = await runOnPostgres(connected.reviewPullRequest(review));
+		const refused = await runOnPostgres(
+			connected.reviewPullRequest({
+				...review,
+				comments: [{ path: "src/login.ts", line: 999, body: "?" }],
+			}),
+		).catch((failure) => failure);
+
+		expect(reviewed).toEqual({ url: "https://github.com/acme/web/pull/6#pullrequestreview-1" });
+		expect(github.asked.find((request) => request.path.endsWith("/reviews"))).toMatchObject({
+			bearer: expect.stringMatching(/^token-/),
+			body: {
+				body: "Two findings",
+				event: "COMMENT",
+				comments: [
+					{
+						path: "src/login.ts",
+						line: 12,
+						body: "Check the token\n```suggestion\nverify(token);\n```",
+					},
+					{ path: "src/login.ts", start_line: 20, line: 24, side: "LEFT", body: "Why drop this?" },
+				],
+			},
+		});
+		expect(refused).toMatchObject({
+			_tag: "GitHubRequestFailed",
+			status: 422,
+			reason: "Unprocessable Entity: Line could not be resolved",
+		});
+		expect(github.asked.find((request) => request.path.endsWith("/access_tokens"))?.body).toEqual({
+			repository_ids: [101],
+			permissions: { pull_requests: "write" },
+		});
 	});
 
 	it("adds a repository and removes one, each a change of the connection's configuration", async () => {

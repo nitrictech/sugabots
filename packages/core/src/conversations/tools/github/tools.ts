@@ -199,7 +199,7 @@ export function gitHubTools({
 		}),
 		comment_on_pull_request: tool({
 			description:
-				"Comment on a pull request, such as to answer its reviewers or say what you changed. For a comment on a line of its code, quote the file and line.",
+				"Comment on a pull request, such as to answer its reviewers or say what you changed. To comment on lines of its code, use review_pull_request.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,
@@ -221,6 +221,52 @@ export function gitHubTools({
 						});
 						return { status: "commented", ...commented };
 					}),
+				),
+		}),
+		review_pull_request: tool({
+			description:
+				"Review a pull request, anyone's, with comments on lines of its diff. Each comment starts its own thread that can be resolved, so give each finding its own comment, and put a suggested change in a ```suggestion block that replaces the lines commented on. The review only comments: it can't approve or request changes. A comment's line must be in the pull request's diff; if one isn't, nothing is posted, and the error says so.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: pullRequestNumberSchema,
+				commit: Schema.optional(commitSchema).annotate({
+					description:
+						"The full hash of the commit the line numbers are of; the pull request's latest if left out",
+				}),
+				body: Schema.optional(Schema.String.check(Schema.isMaxLength(60_000))).annotate({
+					description: "The review's own message, in Markdown, such as a summary of the comments",
+				}),
+				comments: Schema.Array(reviewCommentSchema).check(Schema.isMaxLength(100)),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, number, commit, body, comments }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this review",
+						);
+						const reviewed = yield* connected.reviewPullRequest({
+							repository: path,
+							number,
+							commit,
+							body: body ? `${body}\n\n---\n${signature}` : signature,
+							comments: comments.map(({ start_line, ...comment }) => ({
+								...comment,
+								startLine: start_line,
+							})),
+						});
+						return { status: "reviewed", comments: comments.length, ...reviewed };
+					}).pipe(
+						Effect.catchIf(
+							(failure) => failure._tag === "GitHubRequestFailed" && failure.status === 422,
+							(refused) =>
+								Effect.succeed(
+									failed(
+										`GitHub refused the review, so none of it was posted: ${refused.reason}. Each comment's path must be a file changed by the pull request and its line one of the diff's lines, on the side given (RIGHT, the new code, unless you say LEFT). For a line outside the diff, say it in the review's body instead.`,
+									),
+								),
+						),
+					),
 				),
 		}),
 		list_issues: tool({
@@ -311,7 +357,7 @@ export function gitHubNote(connected: GitHubConnections.Connected, signedIn: boo
 	const reading = signedIn
 		? "In the sandbox, git clone and fetch of them are signed in to read, outside the sandbox, without a token. There is no gh; read issues, pull requests and checks with the connection's tools."
 		: "The sandbox's provider can't sign its requests in, so only public ones can be cloned.";
-	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request.`;
+	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request. To review a pull request, anyone's, with comments on its lines that each start a thread, use review_pull_request.`;
 }
 
 interface Failed {
@@ -351,6 +397,25 @@ const botBranchSchema = Schema.String.check(
 	}),
 ).annotate({
 	description: `The branch, which must start with ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
+});
+
+const reviewCommentSchema = Schema.Struct({
+	path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
+		description: "The file's path in the repository",
+	}),
+	line: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+		description: "The line to comment on, or the last of the lines to, as numbered in the file",
+	}),
+	start_line: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+		description: "The first line, to comment on the lines from here to `line`; before `line`",
+	}),
+	side: Schema.optional(Schema.Literals(["LEFT", "RIGHT"])).annotate({
+		description:
+			"RIGHT (the default) is the new code, and the lines as numbered in the file after the change; LEFT is a deleted line, as numbered before",
+	}),
+	body: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60_000)).annotate({
+		description: "The comment, in Markdown",
+	}),
 });
 
 const pullRequestNumberSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({

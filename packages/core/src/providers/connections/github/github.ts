@@ -326,12 +326,7 @@ export const updatePullRequest = (
 	);
 
 const GraphQlReply = Schema.Struct({
-	// Mostly objects, but some, such as a review comment's line not being in the diff, are plain strings.
-	errors: Schema.optional(
-		Schema.Array(
-			Schema.Union([Schema.String, Schema.Struct({ message: Schema.optional(Schema.String) })]),
-		),
-	),
+	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.String }))),
 });
 
 /** Marks a pull request, by its node id, as a draft or as ready for review: only GitHub's GraphQL API can. */
@@ -378,6 +373,52 @@ export const comment = (
 		Effect.map((made) => ({ url: made.html_url })),
 	);
 
+const Review = Schema.Struct({ html_url: Schema.String });
+
+/** A comment on a line, or a range of lines, of a pull request's diff. */
+export interface ReviewComment {
+	readonly path: string;
+	readonly line: number;
+	readonly startLine?: number | undefined;
+	readonly side?: "LEFT" | "RIGHT" | undefined;
+	readonly body: string;
+}
+
+/**
+ * Posts a review of pull request `number` that only comments, with each of
+ * `comments` as its own thread on the diff. Reviews `commit`, or the pull
+ * request's latest if it is undefined.
+ */
+export const reviewPullRequest = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		number: number;
+		commit: string | undefined;
+		body: string;
+		comments: readonly ReviewComment[];
+	},
+) =>
+	call(http, "POST", `/repos/${request.repository}/pulls/${request.number}/reviews`, {
+		bearer: token,
+		body: {
+			commit_id: request.commit,
+			body: request.body,
+			event: "COMMENT",
+			comments: request.comments.map((comment) => ({
+				path: comment.path,
+				line: comment.line,
+				start_line: comment.startLine,
+				side: comment.side,
+				body: comment.body,
+			})),
+		},
+	}).pipe(
+		Effect.flatMap(decoded(Review)),
+		Effect.map((made) => ({ url: made.html_url })),
+	);
+
 /** How long an app's own token lasts; GitHub takes at most ten minutes. */
 const APP_JWT_SECONDS = 9 * 60;
 /** Back-dated, as GitHub suggests, so a clock a little ahead of GitHub's isn't refused. */
@@ -399,7 +440,12 @@ export const appJwt = (app: AppIdentity) =>
 
 const ErrorBody = Schema.Struct({
 	message: Schema.String,
-	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.optional(Schema.String) }))),
+	// Mostly objects, but some, such as a review comment's line not being in the diff, are plain strings.
+	errors: Schema.optional(
+		Schema.Array(
+			Schema.Union([Schema.String, Schema.Struct({ message: Schema.optional(Schema.String) })]),
+		),
+	),
 });
 
 /** A request to GitHub's API, signed in with `bearer`, answering with the decoded JSON body. */
