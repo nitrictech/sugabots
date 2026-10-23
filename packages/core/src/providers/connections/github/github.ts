@@ -326,7 +326,12 @@ export const updatePullRequest = (
 	);
 
 const GraphQlReply = Schema.Struct({
-	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.String }))),
+	// Mostly objects, but some, such as a review comment's line not being in the diff, are plain strings.
+	errors: Schema.optional(
+		Schema.Array(
+			Schema.Union([Schema.String, Schema.Struct({ message: Schema.optional(Schema.String) })]),
+		),
+	),
 });
 
 /** Marks a pull request, by its node id, as a draft or as ready for review: only GitHub's GraphQL API can. */
@@ -429,7 +434,12 @@ export function call(
 		const failure = Schema.decodeUnknownOption(ErrorBody)(body);
 		const reason =
 			failure._tag === "Some"
-				? [failure.value.message, ...(failure.value.errors ?? []).flatMap((e) => e.message ?? [])]
+				? [
+						failure.value.message,
+						...(failure.value.errors ?? []).flatMap((e) =>
+							typeof e === "string" ? e : (e.message ?? []),
+						),
+					]
 						.filter(Boolean)
 						.join(": ")
 				: response.statusText;
