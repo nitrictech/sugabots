@@ -34,8 +34,12 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
  * a header. `oauth`: the server signed the workspace in itself and issued
  * tokens, which are refreshed as they expire.
  */
-/** An MCP server, or one of the workspace's GitHub accounts, whose tools are Sugabots' own. */
-export const connectionKindSchema = Schema.Literals(["mcp", "github"]);
+/**
+ * An MCP server; one of the workspace's GitHub accounts, whose tools are
+ * Sugabots' own; or an HTTP endpoint, whose tools are a request per method
+ * under its address.
+ */
+export const connectionKindSchema = Schema.Literals(["mcp", "github", "http"]);
 export type ConnectionKind = typeof connectionKindSchema.Type;
 
 export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
