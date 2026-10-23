@@ -23,6 +23,7 @@ import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.t
 import { connectionIn, connectionsIn } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
 import { ConnectionSignIn } from "./connection-sign-in.ts";
+import type { ConnectionTarget } from "./connection-target.ts";
 import { listServerTools } from "./mcp.ts";
 import { type SignInStartFailure, signInStartFailure } from "./oauth.ts";
 
@@ -77,7 +78,11 @@ export interface Interface {
 	readonly remove: (
 		input: InConnection,
 	) => Effect.Effect<void, AuthorizationDenied | ConnectionNotFound, CurrentActor.Service>;
-	/** Asks the server for its tools, and records what it said against the configuration asked. */
+	/**
+	 * Asks the server for its tools, or checks an HTTP endpoint's address
+	 * without sending it anything, and records the outcome against the
+	 * configuration tested.
+	 */
 	readonly test: (
 		input: InConnection,
 	) => Effect.Effect<
@@ -182,6 +187,9 @@ export const make = Effect.gen(function* () {
 			if (!target) {
 				return yield* new ConnectionNotFound();
 			}
+			if (target.kind === "http") {
+				return yield* checkEndpoint(at, target);
+			}
 			const clients = yield* signIn.clients;
 			const { found, result } = yield* askServer(
 				{
@@ -198,6 +206,30 @@ export const make = Effect.gen(function* () {
 				target.configurationUpdatedAt,
 				found.ok ? { tools: found.tools } : { error: found.reason },
 			);
+			return result;
+		});
+
+	/**
+	 * An HTTP endpoint's tools are Sugabots' own, so there is nothing to ask
+	 * it: a request to it would be one a bot never chose. Its address is
+	 * checked against the egress policy again, which may have changed since
+	 * it was saved.
+	 */
+	const checkEndpoint = (at: ConnectionLocation, target: ConnectionTarget) =>
+		Effect.gen(function* () {
+			const checked = yield* Effect.result(egress.validateProviderUrl(target.url));
+			const error = checked._tag === "Failure" ? checked.failure.userMessage : undefined;
+			yield* connections.recordTest(
+				at.workspaceId,
+				at.connectionId,
+				target.configurationUpdatedAt,
+				error ? { error } : {},
+			);
+			const result: ConnectionTestResult = {
+				reachable: error === undefined,
+				latencyMs: 0,
+				...(error && { error }),
+			};
 			return result;
 		});
 
@@ -255,7 +287,7 @@ export const make = Effect.gen(function* () {
 					yield* requireAllowedUrl(egress, connection.url);
 					const made = yield* connections.create(pod.workspaceId, pod.id, actor.userId, connection);
 					const at = { workspaceId: pod.workspaceId, podId: pod.id, connectionId: made.id };
-					if (connection.auth !== "oauth") {
+					if (connection.kind === "http" || connection.auth !== "oauth") {
 						yield* discoverQuietly(at);
 					}
 					return yield* requireConnection(at);

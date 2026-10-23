@@ -36,9 +36,11 @@ import { storedOAuthProvider } from "./oauth.ts";
 
 let http: Server;
 let serverUrl: string;
+let requestsReceived = 0;
 
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
+		requestsReceived += 1;
 		// `/open` takes anybody, as a server signed in to with OAuth would once
 		// it has a token; `/mcp` wants the connection's secret.
 		if (request.url !== "/open" && request.headers["x-fixture-key"] !== "open-sesame") {
@@ -241,6 +243,43 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		expect(stored?.error).toBe(
 			"The server could not be reached. Check the address and port, and that the server is running",
 		);
+	});
+
+	it("adds an HTTP endpoint without sending it a request", async () => {
+		const setup = await setupWith();
+		const before = requestsReceived;
+
+		const made = await setup.create({
+			...inPod(),
+			connection: {
+				kind: "http",
+				name: "Alerts",
+				url: `${serverUrl}/v2`,
+				secretHeader: "authorization",
+				secret: "Bearer alerts-key",
+			},
+		});
+
+		expect(made).toMatchObject({ kind: "http", status: "connected", hasSecret: true });
+		expect(
+			(await setup.get({ ...inPod(), connectionId: made.id })).tools.map((tool) => tool.access),
+		).toEqual(["allow", "ask", "ask", "ask", "off"]);
+		expect(requestsReceived).toBe(before);
+	});
+
+	it("records an HTTP endpoint's address the network policy no longer allows", async () => {
+		const made = await (await setupWith()).create({
+			...inPod(),
+			connection: { kind: "http", name: "Local", url: `${serverUrl}/v2` },
+		});
+		const setup = await setupWith({ allowPrivateNetwork: false });
+
+		const tested = await setup.test({ ...inPod(), connectionId: made.id });
+
+		expect(tested).toMatchObject({ reachable: false, error: expect.any(String) });
+		expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
+			status: "error",
+		});
 	});
 
 	it("takes nothing back from a sign-in that could not start", async () => {
