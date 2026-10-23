@@ -1,6 +1,10 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { MAX_IDEMPOTENCY_KEY_CHARACTERS, type WebhookAuth } from "@sugabots/contracts";
+import {
+	deliveryIdHeaderOf,
+	MAX_IDEMPOTENCY_KEY_CHARACTERS,
+	type WebhookAuth,
+} from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -49,7 +53,7 @@ export const makeWebhooks = Effect.gen(function* () {
 					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
 					const challenge = slackChallengeOf(found.auth, delivery.payload);
 					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
-					const idempotencyKey = deliveryIdOf(delivery);
+					const idempotencyKey = deliveryIdOf(found.auth, found.deliveryIdHeader, delivery);
 					if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
 						return yield* new RoutineDeliveryIdTooLong();
 					}
@@ -86,6 +90,8 @@ interface EnabledWebhook {
 	agentId: string;
 	routineId: string;
 	auth: WebhookAuth;
+	/** Where a generic webhook's delivery id is, if anywhere. */
+	deliveryIdHeader: string | null;
 	/** Sealed with `Credentials`. */
 	secret: string | null;
 	/** The hash of a bearer secret made before secrets were sealed. */
@@ -119,7 +125,11 @@ const enabledWebhook = (triggerId: string) =>
 		([row]): EnabledWebhook | undefined => {
 			if (row?.settings.kind !== "webhook") return undefined;
 			const { settings, ...rest } = row;
-			return { ...rest, auth: settings.auth };
+			return {
+				...rest,
+				auth: settings.auth,
+				deliveryIdHeader: deliveryIdHeaderOf(settings),
+			};
 		},
 	);
 

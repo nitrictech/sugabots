@@ -275,7 +275,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		expect(webhook.routine.triggers).toEqual([
-			{ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } },
+			{
+				id: expect.any(String),
+				kind: "webhook",
+				auth: { kind: "bearer" },
+				deliveryIdHeader: "Idempotency-Key",
+			},
 		]);
 		const { addressed, secret } = firstTriggerOf(webhook);
 		if (secret === null) throw new Error("A new webhook gets a secret");
@@ -443,7 +448,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 		const withWebhook = await routines.addTrigger(addressed, { kind: "webhook" });
 		const webhook = withWebhook.routine.triggers.find((trigger) => trigger.kind === "webhook");
-		expect(webhook).toEqual({ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } });
+		expect(webhook).toEqual({
+			id: expect.any(String),
+			kind: "webhook",
+			auth: { kind: "bearer" },
+			deliveryIdHeader: "Idempotency-Key",
+		});
 		expect(withWebhook.secrets).toEqual([
 			{ triggerId: webhook?.id, secret: expect.stringMatching(/^rtb_/) },
 		]);
@@ -552,6 +562,69 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			WebhookSecretTooShort,
 		);
 		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
+	});
+
+	it("dedupes a generic webhook's retries by the delivery id header it is set to", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Sentry alerts",
+				instructions: "Triage the alert.",
+				triggers: [{ kind: "webhook", deliveryIdHeader: "X-Request-Id" }],
+			},
+		);
+		const { addressed, secret } = firstTriggerOf(created);
+		const { triggerId } = addressed;
+		const send = (headers: Record<string, string>) =>
+			webhooks.accept({ triggerId, delivery: bearerDelivery(secret ?? "", {}, headers) });
+		const executionIdOf = (accepted: Awaited<ReturnType<typeof send>>) =>
+			accepted?.kind === "run" ? accepted.execution.executionId : undefined;
+
+		const first = await send({ "x-request-id": "req-1", "idempotency-key": "a" });
+		const retry = await send({ "x-request-id": "req-1", "idempotency-key": "b" });
+		const other = await send({ "x-request-id": "req-2", "idempotency-key": "a" });
+		expect(first).toMatchObject({ kind: "run", execution: { duplicate: false } });
+		expect(retry).toMatchObject({
+			kind: "run",
+			execution: { duplicate: true, executionId: executionIdOf(first) },
+		});
+		expect(other).toMatchObject({ kind: "run", execution: { duplicate: false } });
+
+		// Changing the auth keeps the header; none at all starts a run for every call.
+		await routines.updateTrigger(addressed, { kind: "webhook", auth: { kind: "bearer" } });
+		expect(await send({ "x-request-id": "req-1" })).toMatchObject({
+			execution: { duplicate: true },
+		});
+		const unset = await routines.updateTrigger(addressed, {
+			kind: "webhook",
+			deliveryIdHeader: null,
+		});
+		expect(unset.routine.triggers[0]).toMatchObject({ deliveryIdHeader: null });
+		const again = await send({ "x-request-id": "req-1" });
+		expect(again).toMatchObject({ execution: { duplicate: false } });
+		expect(executionIdOf(again)).not.toBe(executionIdOf(first));
+	});
+
+	it("reads the Idempotency-Key header for a webhook made before it could be set", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
+		);
+		const { addressed, secret } = firstTriggerOf(created);
+		await onDatabase((db) =>
+			db
+				.update(routineTrigger)
+				.set({ settings: { kind: "webhook", auth: { kind: "bearer" } } })
+				.where(eq(routineTrigger.id, addressed.triggerId)),
+		);
+		const send = () =>
+			webhooks.accept({
+				triggerId: addressed.triggerId,
+				delivery: bearerDelivery(secret ?? "", {}, { "idempotency-key": "order-1" }),
+			});
+
+		expect(await send()).toMatchObject({ execution: { duplicate: false } });
+		expect(await send()).toMatchObject({ execution: { duplicate: true } });
 	});
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {
