@@ -55,6 +55,19 @@ describe("Routine contracts", () => {
 		).toBe("Success");
 	});
 
+	it.each([{ deliveryIdHeader: "X-Request-Id" }, { deliveryIdHeader: null }, {}])(
+		"accepts a webhook with delivery id header %o",
+		(webhook) => {
+			expect(
+				Schema.decodeUnknownResult(newRoutineSchema)({
+					name: "Incoming",
+					instructions: "Handle it.",
+					triggers: [{ kind: "webhook", ...webhook }],
+				})._tag,
+			).toBe("Success");
+		},
+	);
+
 	it.each([
 		["a header name with a space", { auth: { kind: "api_key", header: "X API Key" } }],
 		["a Basic username with a colon", { auth: { kind: "basic", username: "suga:bots" } }],
@@ -64,6 +77,8 @@ describe("Routine contracts", () => {
 		],
 		["a source nobody signs as", { auth: { kind: "shopify" } }],
 		["a blank secret", { secret: "   " }],
+		["a delivery id header name with a space", { deliveryIdHeader: "Request ID" }],
+		["a blank delivery id header name", { deliveryIdHeader: "  " }],
 	])("rejects a webhook with %s", (_, webhook) => {
 		expect(
 			Schema.decodeUnknownResult(newRoutineSchema)({

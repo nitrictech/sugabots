@@ -1,5 +1,6 @@
 import {
 	type Agent,
+	deliveryIdHeaderOf,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
 	type NewRoutine,
@@ -345,11 +346,19 @@ export function RoutinePage({
 									placed={placed}
 									triggerId={editing.id}
 									auth={editing.auth}
+									deliveryIdHeader={deliveryIdHeaderOf(editing)}
 									onChangeAuth={(auth) =>
 										actions.updateTrigger.mutate({
 											...addressed,
 											triggerId: editing.id,
 											json: { kind: "webhook", auth },
+										})
+									}
+									onChangeDeliveryIdHeader={(deliveryIdHeader) =>
+										actions.updateTrigger.mutate({
+											...addressed,
+											triggerId: editing.id,
+											json: { kind: "webhook", deliveryIdHeader },
 										})
 									}
 								/>
@@ -432,7 +441,7 @@ function copiedTrigger(trigger: RoutineTrigger): RoutineTriggerInput {
 		case "cron":
 			return { kind: "cron", schedule: trigger.schedule, timezone: trigger.timezone };
 		case "webhook":
-			return { kind: "webhook", auth: trigger.auth };
+			return { kind: "webhook", auth: trigger.auth, deliveryIdHeader: deliveryIdHeaderOf(trigger) };
 		case "github":
 			return {
 				kind: "github",
