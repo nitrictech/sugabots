@@ -22,6 +22,7 @@ import {
 	useState,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { canAnswer } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -320,7 +321,7 @@ export function AgentChat({
 			>
 				{header}
 				<FileDropTarget
-					onDropFiles={agent.model === null ? undefined : attachments.attach}
+					onDropFiles={canAnswer(agent) ? attachments.attach : undefined}
 					className="flex min-h-0 flex-1 flex-col"
 				>
 					<div
@@ -405,7 +406,7 @@ export function AgentChat({
 						</div>
 					</div>
 					<div className="shrink-0 px-4 md:px-5">
-						{agent.model === null ? (
+						{!canAnswer(agent) ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
 							<ChatComposer
@@ -710,7 +711,13 @@ function useJumpToMessage({
 function ChatIntro({ agent }: { agent: Agent }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
+			<AgentAvatar
+				color={agent.color}
+				face={agent.face}
+				shape={agent.shape}
+				size={64}
+				external={agent.a2a !== null}
+			/>
 			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
 				{agent.name}
 			</h2>
@@ -723,7 +730,7 @@ function ChatIntro({ agent }: { agent: Agent }) {
 }
 
 /**
- * Stands in for the composer while the agent has no model. The API refuses the
+ * Stands in for the composer while the agent has no model or external agent to answer with. The API refuses the
  * message anyway, so offering a box to type into would only lose the draft.
  * Only somebody who may edit the agent is offered the way to fix it.
  */

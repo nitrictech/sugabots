@@ -10,7 +10,7 @@ import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
-import { useModelName } from "@/lib/agents.ts";
+import { useRunsOnLabel } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink, routineSettingsLink } from "@/lib/links.ts";
@@ -54,7 +54,7 @@ export function DetailsSidebar({
 	const backToChat = useBackToHere("Chat");
 	const activity = useThreadActivity(threadId).data;
 	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
-	const modelName = useModelName(agent.model);
+	const runsOn = useRunsOnLabel(agent);
 	return (
 		<ChatSidebar label="Details" onClose={onClose}>
 			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
@@ -64,14 +64,13 @@ export function DetailsSidebar({
 						face={agent.face}
 						shape={agent.shape}
 						size={56}
+						external={agent.a2a !== null}
 						className="shrink-0"
 					/>
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<h3 className="m-0 truncate font-bold text-[18px] text-foreground">{agent.name}</h3>
 						<p className="m-0 truncate text-md text-muted-foreground">{pod.name} pod</p>
-						<p className="m-0 truncate text-sm text-subtle-foreground">
-							{modelName ?? "No model chosen"}
-						</p>
+						<p className="m-0 truncate text-sm text-subtle-foreground">{runsOn}</p>
 					</div>
 				</div>
 				<Link
@@ -153,6 +152,7 @@ function ParticipantRow({
 						face={participant.face}
 						shape={participant.shape}
 						size={26}
+						external={participant.external}
 					/>
 				) : (
 					<PersonAvatar person={participant} size={26} />

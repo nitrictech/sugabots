@@ -289,7 +289,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	const insertTurn = (
-		request: SystemAgentTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
+		request: Omit<SystemAgentTurnRequest, "model"> &
+			Pick<ReplyTurnRequest, "model"> &
+			Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
 	) =>
 		Effect.gen(function* () {
 			const startedAt = yield* DateTime.nowAsDate;
@@ -779,8 +781,8 @@ interface ReplyTurnRequest {
 	readonly threadId: string;
 	readonly agentId: string;
 	readonly triggerMessageId: string;
-	/** The agent's model, already resolved: a turn is never opened without one. */
-	readonly model: string;
+	/** The agent's model, already resolved, or null for an A2A agent, which runs on none of ours. */
+	readonly model: string | null;
 	readonly reason: TurnReason | undefined;
 	/** The workflow execution running the turn. */
 	readonly owner: string;

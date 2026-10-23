@@ -1,6 +1,12 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
-import { agentSchema, agentUpdateSchema, newAgentInPodSchema } from "../../agents.ts";
+import {
+	a2aCardSchema,
+	a2aEndpointInputSchema,
+	agentSchema,
+	agentUpdateSchema,
+	newAgentInPodSchema,
+} from "../../agents.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused } from "../errors.ts";
@@ -18,6 +24,13 @@ export class AgentsApi extends HttpApiGroup.make("agents")
 			payload: newAgentInPodSchema,
 			success: agentSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
+		}),
+		// A POST because the secret goes in the body, never in a URL.
+		HttpApiEndpoint.post("readA2ACard", "/pods/:podId/a2a-card", {
+			params: { podId: uuidSchema },
+			payload: a2aEndpointInputSchema,
+			success: a2aCardSchema,
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.get("get", "/agents/:agentId", {
 			params: { agentId: uuidSchema },

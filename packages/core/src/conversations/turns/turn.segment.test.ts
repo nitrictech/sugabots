@@ -8,8 +8,10 @@ import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { agent, message, toolCall, turn, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { A2A } from "../../providers/a2a/a2a.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
+import { unimplemented } from "../../testing.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -81,6 +83,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				Effect.provide(
 					Layer.mergeAll(
 						Layer.succeed(Models.Service, model),
+						unimplemented(A2A.Service, {}),
 						Layer.succeed(
 							EventBus.Service,
 							outside.events ?? EventBus.inProcess({ store: EventStore.inMemory() }),

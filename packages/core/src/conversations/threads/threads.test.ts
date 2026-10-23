@@ -430,6 +430,45 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(await statusNow()).toBe("done");
 	});
 
+	it("marks a bot standing for an external agent wherever the thread shows it", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ a2aUrl: "http://localhost:8462" }).where(eq(agent.id, agentId)),
+		);
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Anyone there?",
+		});
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: details.thread.id,
+				authorAgentId: agentId,
+				kind: "text",
+				status: "complete",
+				parts: [{ type: "text", text: "Here." }],
+				content: "Here.",
+			}),
+		);
+
+		const shown = await viewAs(memberId).get(details.thread.id);
+		const activity = await viewAs(memberId).activity(details.thread.id);
+
+		expect(shown?.messages.find(({ content }) => content === "Here.")?.author).toMatchObject({
+			kind: "agent",
+			id: agentId,
+			external: true,
+		});
+		expect(shown?.crew.find(({ id }) => id === agentId)).toMatchObject({ external: true });
+		expect(activity?.recentParticipants.find(({ id }) => id === agentId)).toMatchObject({
+			external: true,
+		});
+		expect(activity?.recentParticipants.find(({ id }) => id === memberId)).not.toHaveProperty(
+			"external",
+		);
+	});
+
 	it("loads a Chat thread with its participants and first message", async () => {
 		const details = await createThread({
 			workspaceId,

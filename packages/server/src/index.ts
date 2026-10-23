@@ -25,6 +25,7 @@ import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
+import { A2A } from "@sugabots/core/providers/a2a/a2a";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
@@ -78,10 +79,11 @@ const Infrastructure = Layer.mergeAll(
 	Layer.provideMerge(databaseLayer),
 );
 
-/** The outside systems: email, the workspaces' models, and the tools turns are offered. */
+/** The outside systems: email, the workspaces' models and A2A agents, and the tools turns are offered. */
 const OutsideSystems = Layer.mergeAll(
 	Email.layer,
 	Models.layer,
+	A2A.layer,
 	BuiltInTools.layer,
 	SandboxTools.layer,
 	DesktopViewer.layer,

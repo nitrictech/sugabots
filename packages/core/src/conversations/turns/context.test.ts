@@ -46,7 +46,7 @@ describe("modelPrompt", () => {
 		expect(prompt.system).not.toContain("Sam (@sam, person)");
 	});
 
-	it("lists potential collaborators, and tells one why its thread exists", () => {
+	it("lists potential collaborators, marks the external ones, and tells one why its thread exists", () => {
 		const asking = context();
 		asking.crew = [
 			{
@@ -54,17 +54,19 @@ describe("modelPrompt", () => {
 				name: "Reviewer",
 				handle: "reviewer",
 				description: "Checks facts.",
+				external: false,
 			},
 			{
 				id: "0199a3a0-0000-7000-8000-000000000009",
 				name: "Scout",
 				handle: "scout",
 				description: null,
+				external: true,
 			},
 		];
 		const instruction = () => modelPrompt(asking, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction()).toContain(
-			"Other agents in this pod, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
+			"Other agents in this pod, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout) (external agent: has its own tools, not this pod's)",
 		);
 		expect(instruction()).toContain(
 			"Use the collaborate tool when you need another agent's answer",
@@ -464,11 +466,10 @@ function context(): TurnContext {
 			podId: "0199a3a0-0000-7000-8000-000000000009",
 			name: "Host Agent",
 			handle: "host-agent",
-			model: "claude-sonnet-4-20250514",
+			runsOn: { kind: "model", model: "claude-sonnet-4-20250514", acceptsImages: false },
 			prompt: "Check facts carefully.",
 			disabledTools: [],
 			usesSandbox: false,
-			acceptsImages: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

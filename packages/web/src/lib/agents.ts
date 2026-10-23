@@ -1,4 +1,4 @@
-import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
+import type { A2AEndpointInput, Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
 import {
 	queryOptions,
 	skipToken,
@@ -113,6 +113,22 @@ export function useModelName(model: string | null): string | null {
 	return inUse?.displayName ?? model;
 }
 
+/** Whether the agent can answer: it runs on a model, or on an external agent. */
+export function canAnswer(agent: Pick<Agent, "model" | "a2a">): boolean {
+	return agent.model !== null || agent.a2a !== null;
+}
+
+/** What the agent runs on, in a few words: its model's name, or the external agent's host. */
+export function useRunsOnLabel(agent: Pick<Agent, "model" | "a2a">): string {
+	// Not asked for an external agent's model, which nothing reads while it stands for one.
+	const modelName = useModelName(agent.a2a ? null : agent.model);
+	if (agent.a2a) {
+		const host = URL.canParse(agent.a2a.url) ? new URL(agent.a2a.url).host : agent.a2a.url;
+		return `External agent · ${host}`;
+	}
+	return modelName ?? "No model chosen";
+}
+
 export function useCreateAgent(podId: string) {
 	const invalidate = useInvalidateAgents();
 	const workspaceId = useWorkspace().workspace?.id;
@@ -125,6 +141,14 @@ export function useCreateAgent(podId: string) {
 			return Effect.runPromise(client.api.agents.create({ params: { podId }, payload: input }));
 		},
 		onSuccess: invalidate,
+	});
+}
+
+/** Reads what the A2A agent at an address says it is, before a bot is made to stand for it. */
+export function useReadA2ACard(podId: string) {
+	return useMutation({
+		mutationFn: (endpoint: A2AEndpointInput) =>
+			Effect.runPromise(client.api.agents.readA2ACard({ params: { podId }, payload: endpoint })),
 	});
 }
 
@@ -146,7 +170,12 @@ export function useUpdateAgent(agentId: string) {
 			await queries.cancelQueries({ queryKey: rosterKey });
 			const before = queries.getQueryData<Agent[]>(rosterKey);
 			queries.setQueryData<Agent[]>(rosterKey, (roster) =>
-				roster?.map((agent) => (agent.id === agentId ? { ...agent, ...input } : agent)),
+				roster?.map((agent) => {
+					if (agent.id !== agentId) return agent;
+					// The endpoint comes back from the save, with what it keeps of the secret.
+					const { a2a: _endpoint, ...shown } = input;
+					return { ...agent, ...shown };
+				}),
 			);
 			return { before };
 		},

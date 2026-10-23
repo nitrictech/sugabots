@@ -479,6 +479,7 @@ function MentionMenu({
 								face={participant.face}
 								shape={participant.shape}
 								size={26}
+								external={participant.external}
 							/>
 						) : (
 							<PersonAvatar person={participant} size={26} />
@@ -486,7 +487,11 @@ function MentionMenu({
 						<span className="flex min-w-0 flex-1 flex-col gap-px">
 							<span className="truncate font-medium text-[14px]">{participant.name}</span>
 							<span className="truncate text-muted-foreground text-xs">
-								{participant.kind === "agent" ? "Bot" : `@${participant.handle}`}
+								{participant.kind === "agent"
+									? participant.external
+										? "External bot"
+										: "Bot"
+									: `@${participant.handle}`}
 							</span>
 						</span>
 					</button>

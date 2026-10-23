@@ -75,6 +75,7 @@ function bot(
 		prompt: "",
 		disabledTools: [],
 		usesSandbox: false,
+		a2a: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }

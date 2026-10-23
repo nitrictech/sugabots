@@ -185,6 +185,7 @@ function ConversationRow({
 				face={agent.face}
 				shape={agent.shape}
 				size={26}
+				external={agent.a2a !== null}
 				className="shrink-0"
 			/>
 			<span

@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronLeft, Info } from "lucide-react";
 import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, BotTag } from "@/shell/Agent.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
 
@@ -47,9 +47,11 @@ export function ChatHeader({
 				face={agent.face}
 				shape={agent.shape}
 				size={24}
+				external={agent.a2a !== null}
 				className="shrink-0"
 			/>
 			<span className="truncate">{agent.name}</span>
+			{agent.a2a && <BotTag external />}
 		</>
 	);
 	return (

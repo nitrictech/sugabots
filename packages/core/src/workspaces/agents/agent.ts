@@ -32,6 +32,28 @@ export function toAgent(row: CrewAgentRow): Agent {
 		prompt: row.prompt,
 		disabledTools: row.disabledTools,
 		usesSandbox: row.usesSandbox,
+		a2a:
+			row.a2aUrl === null
+				? null
+				: {
+						url: row.a2aUrl,
+						secretHeader: row.a2aSecretHeader,
+						hasSecret: row.a2aSecretEncrypted !== null,
+					},
 		createdAt: row.createdAt.toISOString(),
 	};
 }
+
+/** An A2A agent's endpoint as stored, its secret already sealed. */
+export interface SealedA2AEndpoint {
+	a2aUrl: string;
+	a2aSecretHeader: string | null;
+	a2aSecretEncrypted: string | null;
+}
+
+/** The columns that make an agent one of ours, running on its model. */
+export const NOT_A2A: { [K in keyof SealedA2AEndpoint]: null } = {
+	a2aUrl: null,
+	a2aSecretHeader: null,
+	a2aSecretEncrypted: null,
+};

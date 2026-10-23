@@ -369,7 +369,8 @@ export const turn = pgTable(
 		 */
 		owner: text("owner"),
 		status: text("status").$type<TurnStatus>().notNull(),
-		model: text("model").notNull(),
+		// Null for a turn of an A2A agent, which runs on no model of ours.
+		model: text("model"),
 		contextTokens: integer("context_tokens"),
 		contextCapacity: integer("context_capacity"),
 		cancelRequested: boolean("cancel_requested").notNull().default(false),

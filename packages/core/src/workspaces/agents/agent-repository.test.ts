@@ -1,4 +1,3 @@
-import type { NewAgent } from "@sugabots/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
@@ -32,7 +31,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		await closeDatabase();
 	});
 
-	const create = (createdById: string, input: NewAgent) =>
+	const create = (createdById: string, input: AgentRepository.NewCrewAgent) =>
 		repository.create(workspaceId, { createdById, agent: input });
 	const visibleTo = (userId: string) => administrationAs(userId).list({ workspace: workspaceId });
 

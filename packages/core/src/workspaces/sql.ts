@@ -368,6 +368,11 @@ export const agent = pgTable(
 		// Null when nobody has chosen one, or somebody has cleared it. A system
 		// agent with no model does not run; a crew agent's turns refuse.
 		model: text("model"),
+		// Set for an agent that is another service's agent, reached over A2A:
+		// its replies come from there, so its model, prompt and tools go unused.
+		a2aUrl: text("a2a_url"),
+		a2aSecretHeader: text("a2a_secret_header"),
+		a2aSecretEncrypted: text("a2a_secret_encrypted"),
 		prompt: text("prompt").notNull().default(""),
 		// The built-in tools switched off for this agent, by key. What is off
 		// rather than what is on, so a new tool reaches every existing agent.

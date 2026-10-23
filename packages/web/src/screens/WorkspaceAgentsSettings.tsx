@@ -72,10 +72,11 @@ export function WorkspaceAgentsSettings({ selectedAgentId }: { selectedAgentId?:
 											face={agent.face}
 											shape={agent.shape}
 											size={36}
+											external={agent.a2a !== null}
 										/>
 									}
 									label={agent.name}
-									sub={pod.name}
+									sub={agent.a2a ? `${pod.name} · External agent` : pod.name}
 									selected={agent.id === selected?.id && (selectedAgentId ? true : "wide")}
 									render={<Link {...agentSettingsLink({ pod, agent })} />}
 								/>

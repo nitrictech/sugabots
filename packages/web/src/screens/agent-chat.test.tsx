@@ -550,6 +550,23 @@ describe("ongoing agent Chat", () => {
 		expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull();
 	});
 
+	it("offers the composer to an agent with no model that stands for an external agent", async () => {
+		const external = {
+			url: "http://localhost:8462",
+			secretHeader: "Authorization",
+			hasSecret: true,
+		};
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed(
+				agents.map((one) => (one.id === linear.id ? { ...one, model: null, a2a: external } : one)),
+			),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+
+		expect(await screen.findByLabelText(`Message ${linear.name}`)).toBeDefined();
+		expect(screen.queryByText(/has no model yet/)).toBeNull();
+	});
+
 	it("clears the composer while the message is still in flight", async () => {
 		const posting = pendingAnswer();
 		client.api.chats.send.mockReturnValue(posting.effect);

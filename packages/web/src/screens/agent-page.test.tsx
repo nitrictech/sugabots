@@ -70,7 +70,7 @@ function rosterAnswers(change: Partial<typeof linear>): void {
 	);
 }
 
-async function openSlide(name: "Model" | "Instructions") {
+async function openSlide(name: "Runs on" | "Instructions") {
 	fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
 }
 
@@ -163,7 +163,7 @@ describe("a member", () => {
 	it("edits the model and the instructions, which a member of the pod may do", async () => {
 		mount(page);
 
-		await openSlide("Model");
+		await openSlide("Runs on");
 		expect(await screen.findByRole("button", { name: MODELS[1] })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: linear.name }));
 		await openSlide("Instructions");
@@ -466,7 +466,7 @@ describe("an admin", () => {
 	it("chooses a model from those switched on, grouped by provider", async () => {
 		client.api.agents.update.mockReturnValue(Effect.succeed({ ...linear, model: MODELS[1] }));
 		mount(page);
-		await openSlide("Model");
+		await openSlide("Runs on");
 
 		expect(await screen.findByRole("heading", { name: "Anthropic" })).toBeDefined();
 		// The one in use is checked, with nothing to press.
@@ -486,7 +486,7 @@ describe("an admin", () => {
 			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
-		await openSlide("Model");
+		await openSlide("Runs on");
 
 		fireEvent.click(await screen.findByRole("button", { name: MODELS[1] }));
 

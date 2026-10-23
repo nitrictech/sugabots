@@ -16,7 +16,22 @@ let created: Record<string, unknown>[] = [];
 const createAgent = http.post(`${API}/pods/:podId/agents`, async ({ request }) => {
 	const body = (await request.json()) as Record<string, unknown>;
 	created.push(body);
-	return HttpResponse.json({ ...growthDesk, ...body }, { status: 201 });
+	// An A2A endpoint comes back with its secret kept out, as the API returns it.
+	const a2a = body.a2a as { url: string; secretHeader?: string; secret?: string } | undefined;
+	return HttpResponse.json(
+		{
+			...growthDesk,
+			...body,
+			a2a: a2a
+				? {
+						url: a2a.url,
+						secretHeader: a2a.secretHeader ?? null,
+						hasSecret: a2a.secret !== undefined,
+					}
+				: null,
+		},
+		{ status: 201 },
+	);
 });
 /** The roster, which creating a bot fetches again. */
 const listAgents = http.get(`${API}/workspaces/:workspace/agents`, () =>
@@ -96,7 +111,7 @@ export const ChoosingAPod = meta.story({
 	},
 });
 
-/** Before any model is connected, it says where to connect one, and cannot make the bot yet. */
+/** Before any model is connected, it runs on an external agent, and cannot make the bot until it has an address. */
 export const NoModelYet = meta.story({
 	args: { podId: revenue.id, pods: [revenue] },
 	render: (args) => (
@@ -109,8 +124,61 @@ export const NoModelYet = meta.story({
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		await userEvent.type(within(dialog).getByLabelText("Name"), "Support Desk");
+		await expect(within(dialog).getByRole("radio", { name: "External agent" })).toBeChecked();
+		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+		await userEvent.click(within(dialog).getByRole("radio", { name: "Model" }));
 		await expect(within(dialog).getByText(/Connect a model first/)).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+	},
+});
+
+/** The address the A2A agent's card was last read from, by the story below. */
+let cardReadFrom: unknown;
+
+/**
+ * On an external agent: leaving its address reads the agent's card, which names
+ * the bot and describes it, and the bot is made with no model or instructions.
+ */
+export const OnAnExternalAgent = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	beforeEach({ msw }) {
+		created = [];
+		cardReadFrom = undefined;
+		msw.use(
+			createAgent,
+			listAgents,
+			http.post(`${API}/pods/:podId/a2a-card`, async ({ request }) => {
+				cardReadFrom = await request.json();
+				return HttpResponse.json({
+					name: "Pet Finder",
+					description: "Answers questions about pets.",
+				});
+			}),
+		);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.click(within(dialog).getByRole("radio", { name: "External agent" }));
+		await expect(within(dialog).queryByRole("radio", { name: "Interview me" })).toBeNull();
+		await userEvent.type(within(dialog).getByLabelText("Address"), "https://pets.example.com");
+		await userEvent.tab();
+		await expect(
+			await within(dialog).findByText(/Found Pet Finder: Answers questions about pets/),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByLabelText("Name")).toHaveValue("Pet Finder");
+		await expect(cardReadFrom).toEqual({ url: "https://pets.example.com" });
+		await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+		await waitFor(() => expect(args.onCreated).toHaveBeenCalled());
+		await expect(created).toEqual([
+			{
+				name: "Pet Finder",
+				description: "Answers questions about pets.",
+				color: "green",
+				shape: "circle",
+				face: "pill",
+				a2a: { url: "https://pets.example.com" },
+			},
+		]);
 	},
 });
 

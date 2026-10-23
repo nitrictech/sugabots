@@ -18,6 +18,11 @@ export const agentRoutes = HttpApiBuilder.group(ServerApi, "agents", (handlers) 
 					.create({ podId: params.podId, agent: payload })
 					.pipe(asSessionUser, asHttpError(agentErrors)),
 			)
+			.handle("readA2ACard", ({ params, payload }) =>
+				agents
+					.readA2ACard({ podId: params.podId, endpoint: payload })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
+			)
 			.handle("get", ({ params }) =>
 				agents.get({ agentId: params.agentId }).pipe(asSessionUser, asHttpError(agentErrors)),
 			)
@@ -40,4 +45,7 @@ const agentErrors = {
 	AgentGone: NotFound,
 	SystemAgentImmutable: BadRequest,
 	PodOutsideWorkspace: BadRequest,
+	AgentNeedsModel: BadRequest,
+	EgressRefused: BadRequest,
+	A2ACardUnreadable: BadRequest,
 };

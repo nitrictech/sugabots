@@ -3,6 +3,7 @@ import { BlobStore } from "../blob-store/blob-store.ts";
 import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
 import { Installation } from "../installation/installation.ts";
+import { Egress } from "../providers/network/egress.ts";
 import {
 	Database,
 	type Executor,
@@ -34,11 +35,17 @@ import {
 export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
-	Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+	Egress.layer,
+).pipe(
+	Layer.provideMerge(
+		Layer.succeed(
+			Installation.Service,
+			Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+		),
 	),
-).pipe(Layer.provideMerge(Ids.layer), Layer.provideMerge(layer));
+	Layer.provideMerge(Ids.layer),
+	Layer.provideMerge(layer),
+);
 
 export type TestInfrastructure = Layer.Success<typeof testInfrastructure>;
 

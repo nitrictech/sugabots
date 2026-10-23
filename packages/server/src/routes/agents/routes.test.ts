@@ -36,6 +36,7 @@ const agent: Agent = {
 	prompt: "",
 	disabledTools: [],
 	usesSandbox: false,
+	a2a: null,
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
@@ -97,7 +98,9 @@ describe("agent routes", () => {
 	it("reports a model the workspace does not offer as a bad request", async () => {
 		const response = await app({
 			create: (input) =>
-				Effect.fail(new ModelProviderRepository.ModelNotEnabled({ model: input.agent.model })),
+				Effect.fail(
+					new ModelProviderRepository.ModelNotEnabled({ model: input.agent.model ?? "" }),
+				),
 		}).request(`/pods/${POD}/agents`, auth({ name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);

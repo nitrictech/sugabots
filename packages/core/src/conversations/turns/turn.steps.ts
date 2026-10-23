@@ -1,4 +1,4 @@
-import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { type Message, messageAuthorName, streamEvent, threadChannel } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
@@ -13,12 +13,14 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	type Scope,
 	Semaphore,
 } from "effect";
 import { Artifacts } from "../../artifacts/artifacts.ts";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
+import { A2A } from "../../providers/a2a/a2a.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
@@ -26,6 +28,7 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
+import { messageTextWithPlacedParts } from "../threads/message-text.ts";
 import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -40,6 +43,7 @@ import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/app
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
 	type PreparedTurn,
+	type RunsOn,
 	replyTurnOf,
 	TurnExecution,
 	type TurnRun,
@@ -80,6 +84,7 @@ const TURN_MODEL_CALLS = 100;
  */
 type SegmentServices =
 	| Models.Service
+	| A2A.Service
 	| BuiltInTools.Service
 	| SandboxTools.Service
 	| ConnectionTools.Service
@@ -172,7 +177,8 @@ type TurnFailure =
 	| TurnInterrupted
 	| TurnStoppedUnexpectedly
 	| ApprovalForUnknownTool
-	| ReplyWithoutAnswer;
+	| ReplyWithoutAnswer
+	| A2A.RequestFailed;
 
 class TurnCancelled extends Data.TaggedError("TurnCancelled") {
 	override get message() {
@@ -357,7 +363,7 @@ const generateReply = (
 const logTurnFailure = (prepared: PreparedTurn, why: string) =>
 	Effect.logError(
 		`Turn ${prepared.turnId} failed: ${why}`,
-		`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, model ${prepared.context.agent.model})`,
+		`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, ${runsOnDescription(prepared.context.agent.runsOn)})`,
 	);
 
 /**
@@ -380,25 +386,14 @@ const streamReply = (
 	| ApprovedToolChanged
 	| ApprovalForUnknownTool
 	| ReplyWithoutAnswer
+	| A2A.RequestFailed
 	| TurnCancelled,
 	SegmentServices | Database
 > =>
 	Effect.scoped(
 		Effect.gen(function* () {
-			const model = yield* Models.Service;
 			const events = yield* EventBus.Service;
-			const builtInTools = yield* BuiltInTools.Service;
-			const connectionTools = yield* ConnectionTools.Service;
-			const sandboxTools = yield* SandboxTools.Service;
 			const turns = yield* TurnRepository.Service;
-			const toolCalls = yield* ToolCallRepository.Service;
-			const collaborations = yield* Collaborations.Service;
-			const artifacts = yield* Artifacts.Authoring;
-			const approvals = yield* ApprovedToolCalls.Service;
-			const agents = yield* AgentAdministration.Service;
-			const files = yield* ThreadFiles.Service;
-			const routines = yield* BotRoutines.Service;
-			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
 			// marking the reply must not interleave, or an older draft could land
@@ -409,253 +404,14 @@ const streamReply = (
 				saveReplySoFar(replyTurnOf(prepared), turns, reply, lastSaved),
 			);
 
-			// A tool runs inside the SDK as a promise, so it needs a way back to
-			// this runtime's database.
-			const context = yield* Effect.context<Database>();
-			const now = yield* DateTime.nowAsDate;
-			const offeredBuiltIns = yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId);
-			const builtIn = {
-				tools: offeredBuiltIns.tools,
-				usable: offeredBuiltIns.usable.filter(
-					(key) => !prepared.context.agent.disabledTools.includes(key),
-				),
-			};
-			const sandbox = yield* sandboxTools.forTurn({
-				pod: {
-					workspaceId: prepared.context.thread.workspaceId,
-					podId: prepared.context.agent.podId,
-				},
-				usesSandbox: prepared.context.agent.usesSandbox,
-				turnId: prepared.turnId,
-				threadId: prepared.context.thread.id,
-				agentId: prepared.context.agent.id,
-				acceptsImages: prepared.context.agent.acceptsImages,
-				// A chat serves the files in its own thread, so only there can people be shown one.
-				...(prepared.context.thread.type === "chat" && {
-					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
-				}),
-			});
-			// The connections' sessions live as long as the turn.
-			const connections = yield* Effect.acquireRelease(
-				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
-					turnId: prepared.turnId,
-					agentId: prepared.context.agent.id,
-					workspace: sandbox.usable ? sandbox.workspace : undefined,
-					sandboxSignsIn: sandbox.signsIn,
-				}),
-				(opened) => Effect.promise(() => opened.close()),
-			);
-			const approvalBoundTools = new Set<string>();
-			for (const binding of prepared.checkpoint?.approvals ?? []) {
-				if ("builtIn" in binding) {
-					if (!sandbox.usable || !sandbox.requests[binding.tool]) {
-						return yield* new ApprovedToolChanged({ tool: binding.tool });
-					}
-					continue;
-				}
-				const offered = connections.tools[binding.tool];
-				if (
-					!offered ||
-					offered.connectionId !== binding.connectionId ||
-					offered.connectionRevision !== binding.connectionRevision ||
-					offered.remoteToolName !== binding.remoteToolName
-				) {
-					return yield* new ApprovedToolChanged({ tool: binding.tool });
-				}
-				approvalBoundTools.add(binding.tool);
-			}
-			const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
-				...callToolApproval(connections.tools),
-				// A request refused outright runs at once, to be recorded as refused.
-				...Object.fromEntries(
-					Object.entries(sandbox.requests).map(([key, request]) => [
-						key,
-						(input: unknown) =>
-							sandbox.usable && request.refusal(input) === undefined
-								? "user-approval"
-								: "not-applicable",
-					]),
-				),
-			};
-			const { tools, catalog } = toolsForTurn(prepared, {
-				collaborations,
-				artifacts,
-				calls: toolCalls,
-				approvals,
-				approvalBoundTools,
-				builtIn,
-				sandbox,
-				connections: connections.tools,
-				files,
-				agents,
-				routines,
-				bus: events,
-				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
-				reply: {
-					length: () => Ref.getUnsafe(reply).content.length,
-					noteCollaboration: (collaboration) =>
-						Ref.update(reply, (draft) => ({
-							...draft,
-							collaborations: [...draft.collaborations, collaboration],
-						})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
-					noteToolCall: ({ id, atOffset }) =>
-						Ref.update(reply, (draft) => ({
-							...draft,
-							toolCalls: draft.toolCalls.some((call) => call.id === id)
-								? draft.toolCalls
-								: [...draft.toolCalls, { id, atOffset }],
-						})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
-					markActed: () =>
-						Ref.update(reply, (draft) => ({ ...draft, acted: true })).pipe(
-							Effect.andThen(Effect.provideContext(saveReply, context)),
-						),
-				},
-				signal,
-			});
-
-			const environment: TurnEnvironment = {
-				now,
-				builtInTools: [
-					...builtIn.usable,
-					...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key)),
-				],
-				toolCatalog: toolCatalogNote({
-					catalog,
-					unavailable: connections.unavailable,
-					instructions: connections.instructions,
-				}),
-				sandbox: sandbox.note,
-			};
-			const resultFiles = yield* files.resultFiles(prepared.context.thread.id);
-			const freshPrompt = modelPrompt(prepared.context, environment, resultFiles);
-			const modelInput =
-				prepared.checkpoint?.modelInput ??
-				({
-					model: prepared.context.agent.model,
-					system: freshPrompt.system,
-					messages: freshPrompt.messages,
-				} satisfies TurnCheckpoint["modelInput"]);
-			const approvalResponse = prepared.checkpoint
-				? yield* approvals.responsesForTurn(
-						prepared.turnId,
-						prepared.checkpoint.approvals.map(({ approvalId }) => approvalId),
-					)
-				: undefined;
-			const priorMessages = prepared.checkpoint?.messages ?? [];
-			const segmentMessages = approvalResponse
-				? [...priorMessages, approvalResponse]
-				: priorMessages;
-			const generated = yield* model.stream({
-				workspaceId: prepared.context.thread.workspaceId,
-				activity: {
-					purpose: "agent-turn",
-					podId: prepared.context.agent.podId,
-					agentId: prepared.context.agent.id,
-					threadId: prepared.context.thread.id,
-					turnId: prepared.turnId,
-				},
-				model: modelInput.model,
-				system: modelInput.system,
-				messages: modelInput.messages,
-				continuationMessages: segmentMessages,
-				tools,
-				toolApproval,
-				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
-			});
-
-			const consume = Effect.gen(function* () {
-				yield* consumeDeltas(prepared, generated.text, events, reply, saveReply);
-				yield* saveReply;
-				const finished = yield* generated.finished;
-				// A resumed segment starts with the earlier segment's tool results,
-				// so the first segment's prompt is the one measured.
-				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
-				if (finished.approvalRequests.length === 0) {
-					const { content, collaborations } = yield* Ref.get(reply);
-					const answered = content.trim() !== "" || collaborations.length > 0;
-					// Files the agent shared answer as words do. Looked up only when nothing else answered.
-					const carriesFiles = Effect.map(
-						turns.replyFiles(replyTurnOf(prepared)),
-						(files) => files.length > 0,
-					);
-					if (!answered && !(yield* carriesFiles)) {
-						return yield* new ReplyWithoutAnswer();
-					}
-					return { kind: "completed" as const, contextTokens };
-				}
-				const atOffset = (yield* Ref.get(reply)).content.length;
-				const ids = yield* Ids.Service;
-				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const target = findApprovalTarget(connections.tools, request.toolCall);
-					const asked:
-						| Pick<
-								ToolCallRepository.PendingToolApproval,
-								"tool" | "input" | "binding" | "mutating"
-						  >
-						| undefined = sandbox.requests[request.toolCall.toolName]
-						? {
-								tool: request.toolCall.toolName,
-								input: request.toolCall.input,
-								binding: { kind: "built-in" },
-								mutating: true,
-							}
-						: target
-							? {
-									tool: target.key,
-									input: target.input,
-									binding: bindingOf(target.offered),
-									mutating: target.offered.mutating,
-								}
-							: undefined;
-					if (!asked) {
-						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
-					}
-					return Effect.map(
-						ids.next,
-						(id): ToolCallRepository.PendingToolApproval => ({
-							id,
-							approvalId: request.approvalId,
-							sdkToolCallId: request.toolCall.toolCallId,
-							reason: request.reason,
-							...asked,
-							atOffset,
-						}),
-					);
-				});
-				// Only the checkpoint's reply places the calls: they exist once the
-				// turn suspends, and a turn that may not suspend ends with the reply
-				// as it was.
-				const draft = yield* Ref.get(reply);
-				const suspendedReply: ReplyDraft = {
-					...draft,
-					toolCalls: [
-						...draft.toolCalls,
-						...pending.map((call) => ({ id: call.id, atOffset: call.atOffset })),
-					],
-				};
-				return {
-					kind: "suspended" as const,
-					approvals: pending,
-					checkpoint: {
-						messages: [...segmentMessages, ...finished.responseMessages],
-						approvals: pending.map(({ approvalId, tool, binding }) =>
-							binding.kind === "connection"
-								? {
-										approvalId,
-										tool,
-										connectionId: binding.connectionId,
-										connectionRevision: binding.connectionRevision,
-										remoteToolName: binding.remoteToolName,
-									}
-								: { approvalId, tool, builtIn: true as const },
-						),
-						modelInput,
-						reply: suspendedReply,
-						modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
-						contextTokens,
-					},
-				};
-			});
+			const runsOn = prepared.context.agent.runsOn;
+			const consume: Effect.Effect<
+				StreamOutcome,
+				Exclude<TurnFailure, TurnTimedOut | TurnInterrupted | TurnStoppedUnexpectedly>,
+				SegmentServices | Database | Scope.Scope
+			> = runsOn.kind === "a2a"
+				? a2aReply(prepared, runsOn.endpoint, reply, saveReply)
+				: modelReply(prepared, runsOn, reply, saveReply);
 
 			// Suspended so each check reads the flag again rather than replaying one answer.
 			const cancelChecks = Effect.suspend(() =>
@@ -682,6 +438,316 @@ const streamReply = (
 			);
 		}),
 	);
+
+function runsOnDescription(runsOn: RunsOn) {
+	return runsOn.kind === "model" ? `model ${runsOn.model}` : `A2A agent ${runsOn.endpoint.url}`;
+}
+
+/**
+ * The reply from another service's agent, over A2A. It is sent what was said
+ * since it last spoke, as one message naming each speaker, in the A2A
+ * conversation that is this thread: it keeps its own history of the rest, and
+ * runs its own tools, so it is offered none of ours.
+ */
+const a2aReply = (
+	prepared: PreparedTurn,
+	endpoint: A2A.Endpoint,
+	reply: Ref.Ref<ReplyDraft>,
+	saveReply: Effect.Effect<void, never, Database>,
+) =>
+	Effect.gen(function* () {
+		const a2a = yield* A2A.Service;
+		const events = yield* EventBus.Service;
+		const answer = yield* a2a.send({
+			endpoint,
+			contextId: prepared.context.thread.id,
+			text: sinceLastSpoke(prepared.context.messages, prepared.context.agent.id),
+		});
+		yield* consumeDeltas(prepared, answer.text, events, reply, saveReply);
+		yield* saveReply;
+		yield* answer.finished;
+		if ((yield* Ref.get(reply)).content.trim() === "") return yield* new ReplyWithoutAnswer();
+		return { kind: "completed" as const, contextTokens: undefined };
+	});
+
+/** The thread's complete messages after `agentId`'s last, each with who said it. */
+function sinceLastSpoke(messages: readonly Message[], agentId: string): string {
+	const complete = messages.filter((message) => message.status === "complete");
+	const lastSpoke = complete.findLastIndex(
+		(message) => message.author.kind === "agent" && message.author.id === agentId,
+	);
+	return complete
+		.slice(lastSpoke + 1)
+		.map(
+			(message) => `${messageAuthorName(message.author)}: ${messageTextWithPlacedParts(message)}`,
+		)
+		.join("\n\n");
+}
+
+/** The reply from one of the workspace's models, with the tools the turn offers it. */
+const modelReply = (
+	prepared: PreparedTurn,
+	runsOn: Extract<RunsOn, { kind: "model" }>,
+	reply: Ref.Ref<ReplyDraft>,
+	saveReply: Effect.Effect<void, never, Database>,
+) =>
+	Effect.gen(function* () {
+		const model = yield* Models.Service;
+		const events = yield* EventBus.Service;
+		const builtInTools = yield* BuiltInTools.Service;
+		const connectionTools = yield* ConnectionTools.Service;
+		const sandboxTools = yield* SandboxTools.Service;
+		const turns = yield* TurnRepository.Service;
+		const toolCalls = yield* ToolCallRepository.Service;
+		const collaborations = yield* Collaborations.Service;
+		const artifacts = yield* Artifacts.Authoring;
+		const approvals = yield* ApprovedToolCalls.Service;
+		const agents = yield* AgentAdministration.Service;
+		const files = yield* ThreadFiles.Service;
+		const routines = yield* BotRoutines.Service;
+		const signal = yield* Effect.abortSignal;
+
+		// A tool runs inside the SDK as a promise, so it needs a way back to
+		// this runtime's database.
+		const context = yield* Effect.context<Database>();
+		const now = yield* DateTime.nowAsDate;
+		const offeredBuiltIns = yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId);
+		const builtIn = {
+			tools: offeredBuiltIns.tools,
+			usable: offeredBuiltIns.usable.filter(
+				(key) => !prepared.context.agent.disabledTools.includes(key),
+			),
+		};
+		const sandbox = yield* sandboxTools.forTurn({
+			pod: {
+				workspaceId: prepared.context.thread.workspaceId,
+				podId: prepared.context.agent.podId,
+			},
+			usesSandbox: prepared.context.agent.usesSandbox,
+			turnId: prepared.turnId,
+			threadId: prepared.context.thread.id,
+			agentId: prepared.context.agent.id,
+			acceptsImages: runsOn.acceptsImages,
+			// A chat serves the files in its own thread, so only there can people be shown one.
+			...(prepared.context.thread.type === "chat" && {
+				attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
+			}),
+		});
+		// The connections' sessions live as long as the turn.
+		const connections = yield* Effect.acquireRelease(
+			connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
+				turnId: prepared.turnId,
+				agentId: prepared.context.agent.id,
+				workspace: sandbox.usable ? sandbox.workspace : undefined,
+				sandboxSignsIn: sandbox.signsIn,
+			}),
+			(opened) => Effect.promise(() => opened.close()),
+		);
+		const approvalBoundTools = new Set<string>();
+		for (const binding of prepared.checkpoint?.approvals ?? []) {
+			if ("builtIn" in binding) {
+				if (!sandbox.usable || !sandbox.requests[binding.tool]) {
+					return yield* new ApprovedToolChanged({ tool: binding.tool });
+				}
+				continue;
+			}
+			const offered = connections.tools[binding.tool];
+			if (
+				!offered ||
+				offered.connectionId !== binding.connectionId ||
+				offered.connectionRevision !== binding.connectionRevision ||
+				offered.remoteToolName !== binding.remoteToolName
+			) {
+				return yield* new ApprovedToolChanged({ tool: binding.tool });
+			}
+			approvalBoundTools.add(binding.tool);
+		}
+		const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
+			...callToolApproval(connections.tools),
+			// A request refused outright runs at once, to be recorded as refused.
+			...Object.fromEntries(
+				Object.entries(sandbox.requests).map(([key, request]) => [
+					key,
+					(input: unknown) =>
+						sandbox.usable && request.refusal(input) === undefined
+							? "user-approval"
+							: "not-applicable",
+				]),
+			),
+		};
+		const { tools, catalog } = toolsForTurn(prepared, {
+			collaborations,
+			artifacts,
+			calls: toolCalls,
+			approvals,
+			approvalBoundTools,
+			builtIn,
+			sandbox,
+			connections: connections.tools,
+			files,
+			agents,
+			routines,
+			bus: events,
+			run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
+			reply: {
+				length: () => Ref.getUnsafe(reply).content.length,
+				noteCollaboration: (collaboration) =>
+					Ref.update(reply, (draft) => ({
+						...draft,
+						collaborations: [...draft.collaborations, collaboration],
+					})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
+				noteToolCall: ({ id, atOffset }) =>
+					Ref.update(reply, (draft) => ({
+						...draft,
+						toolCalls: draft.toolCalls.some((call) => call.id === id)
+							? draft.toolCalls
+							: [...draft.toolCalls, { id, atOffset }],
+					})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
+				markActed: () =>
+					Ref.update(reply, (draft) => ({ ...draft, acted: true })).pipe(
+						Effect.andThen(Effect.provideContext(saveReply, context)),
+					),
+			},
+			signal,
+		});
+
+		const environment: TurnEnvironment = {
+			now,
+			builtInTools: [
+				...builtIn.usable,
+				...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key)),
+			],
+			toolCatalog: toolCatalogNote({
+				catalog,
+				unavailable: connections.unavailable,
+				instructions: connections.instructions,
+			}),
+			sandbox: sandbox.note,
+		};
+		const resultFiles = yield* files.resultFiles(prepared.context.thread.id);
+		const freshPrompt = modelPrompt(prepared.context, environment, resultFiles);
+		const modelInput =
+			prepared.checkpoint?.modelInput ??
+			({
+				model: runsOn.model,
+				system: freshPrompt.system,
+				messages: freshPrompt.messages,
+			} satisfies TurnCheckpoint["modelInput"]);
+		const approvalResponse = prepared.checkpoint
+			? yield* approvals.responsesForTurn(
+					prepared.turnId,
+					prepared.checkpoint.approvals.map(({ approvalId }) => approvalId),
+				)
+			: undefined;
+		const priorMessages = prepared.checkpoint?.messages ?? [];
+		const segmentMessages = approvalResponse ? [...priorMessages, approvalResponse] : priorMessages;
+		const generated = yield* model.stream({
+			workspaceId: prepared.context.thread.workspaceId,
+			activity: {
+				purpose: "agent-turn",
+				podId: prepared.context.agent.podId,
+				agentId: prepared.context.agent.id,
+				threadId: prepared.context.thread.id,
+				turnId: prepared.turnId,
+			},
+			model: modelInput.model,
+			system: modelInput.system,
+			messages: modelInput.messages,
+			continuationMessages: segmentMessages,
+			tools,
+			toolApproval,
+			maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
+		});
+
+		yield* consumeDeltas(prepared, generated.text, events, reply, saveReply);
+		yield* saveReply;
+		const finished = yield* generated.finished;
+		// A resumed segment starts with the earlier segment's tool results,
+		// so the first segment's prompt is the one measured.
+		const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
+		if (finished.approvalRequests.length === 0) {
+			const { content, collaborations } = yield* Ref.get(reply);
+			const answered = content.trim() !== "" || collaborations.length > 0;
+			// Files the agent shared answer as words do. Looked up only when nothing else answered.
+			const carriesFiles = Effect.map(
+				turns.replyFiles(replyTurnOf(prepared)),
+				(files) => files.length > 0,
+			);
+			if (!answered && !(yield* carriesFiles)) {
+				return yield* new ReplyWithoutAnswer();
+			}
+			return { kind: "completed" as const, contextTokens };
+		}
+		const atOffset = (yield* Ref.get(reply)).content.length;
+		const ids = yield* Ids.Service;
+		const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
+			const target = findApprovalTarget(connections.tools, request.toolCall);
+			const asked:
+				| Pick<ToolCallRepository.PendingToolApproval, "tool" | "input" | "binding" | "mutating">
+				| undefined = sandbox.requests[request.toolCall.toolName]
+				? {
+						tool: request.toolCall.toolName,
+						input: request.toolCall.input,
+						binding: { kind: "built-in" },
+						mutating: true,
+					}
+				: target
+					? {
+							tool: target.key,
+							input: target.input,
+							binding: bindingOf(target.offered),
+							mutating: target.offered.mutating,
+						}
+					: undefined;
+			if (!asked) {
+				return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
+			}
+			return Effect.map(
+				ids.next,
+				(id): ToolCallRepository.PendingToolApproval => ({
+					id,
+					approvalId: request.approvalId,
+					sdkToolCallId: request.toolCall.toolCallId,
+					reason: request.reason,
+					...asked,
+					atOffset,
+				}),
+			);
+		});
+		// Only the checkpoint's reply places the calls: they exist once the
+		// turn suspends, and a turn that may not suspend ends with the reply
+		// as it was.
+		const draft = yield* Ref.get(reply);
+		const suspendedReply: ReplyDraft = {
+			...draft,
+			toolCalls: [
+				...draft.toolCalls,
+				...pending.map((call) => ({ id: call.id, atOffset: call.atOffset })),
+			],
+		};
+		return {
+			kind: "suspended" as const,
+			approvals: pending,
+			checkpoint: {
+				messages: [...segmentMessages, ...finished.responseMessages],
+				approvals: pending.map(({ approvalId, tool, binding }) =>
+					binding.kind === "connection"
+						? {
+								approvalId,
+								tool,
+								connectionId: binding.connectionId,
+								connectionRevision: binding.connectionRevision,
+								remoteToolName: binding.remoteToolName,
+							}
+						: { approvalId, tool, builtIn: true as const },
+				),
+				modelInput,
+				reply: suspendedReply,
+				modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
+				contextTokens,
+			},
+		};
+	});
 
 /** Saves the reply so far, unless it is what was last saved. */
 const saveReplySoFar = (

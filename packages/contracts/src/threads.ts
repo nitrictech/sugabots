@@ -82,6 +82,11 @@ export const agentParticipantSchema = Schema.Struct({
 	color: agentColorSchema,
 	face: agentFaceSchema,
 	shape: agentShapeSchema,
+	/**
+	 * True for a bot standing for an external agent, which answers with its own
+	 * tools rather than the pod's. Left out for every other bot.
+	 */
+	external: Schema.optional(Schema.Literal(true)),
 });
 
 export type AgentParticipant = typeof agentParticipantSchema.Type;

@@ -13,6 +13,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
+import type { A2A } from "../../providers/a2a/a2a.ts";
 import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -128,9 +129,27 @@ export const make = Effect.gen(function* () {
 						// An agent whose model has been cleared does not fall back to
 						// another one: it stops, and says so, until somebody chooses.
 						// Read out here so what opens the turn is handed a model rather
-						// than an agent that might not carry one.
+						// than an agent that might not carry one. An A2A agent runs on
+						// none of ours.
+						const endpoint: A2A.Endpoint | undefined =
+							speaker.a2aUrl === null
+								? undefined
+								: {
+										url: speaker.a2aUrl,
+										secretHeader: speaker.a2aSecretHeader,
+										secretEncrypted: speaker.a2aSecretEncrypted,
+									};
 						const model = speaker.model;
-						if (model === null) {
+						const runsOn: RunsOn | undefined = endpoint
+							? { kind: "a2a", endpoint }
+							: model === null
+								? undefined
+								: {
+										kind: "model",
+										model,
+										acceptsImages: yield* modelAcceptsImages(loaded.workspaceId, model),
+									};
+						if (!runsOn) {
 							return yield* refuseRun(run, "The agent has no model chosen", {
 								status: "failed",
 								userMessage: userText`${UserText.unchecked(speaker.name)} has no model chosen, so it cannot reply. Choose one in its settings.`,
@@ -143,7 +162,7 @@ export const make = Effect.gen(function* () {
 							threadId: loaded.id,
 							agentId: speaker.id,
 							triggerMessageId: request.triggerMessageId,
-							model,
+							model: runsOn.kind === "model" ? runsOn.model : null,
 							reason: request.reason,
 							owner: run.executionId,
 							author: authorRow(null, speaker),
@@ -160,10 +179,10 @@ export const make = Effect.gen(function* () {
 							}
 							return opened;
 						}
-						const windowTokens = yield* query((db) =>
-							loadContextWindow(db, loaded.workspaceId, model),
-						);
-						const acceptsImages = yield* modelAcceptsImages(loaded.workspaceId, model);
+						const windowTokens =
+							runsOn.kind === "model"
+								? yield* query((db) => loadContextWindow(db, loaded.workspaceId, runsOn.model))
+								: A2A_HISTORY_WINDOW_TOKENS;
 						const messages = loaded.messages
 							.reverse()
 							.map((stored) => messageFromRelations(stored));
@@ -185,8 +204,7 @@ export const make = Effect.gen(function* () {
 									id: speaker.id,
 									name: speaker.name,
 									handle: speaker.handle,
-									model,
-									acceptsImages,
+									runsOn,
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
@@ -200,7 +218,13 @@ export const make = Effect.gen(function* () {
 								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
 								crew: loaded.pod.agents
 									.filter(({ id }) => id !== speaker.id)
-									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
+									.map(({ id, name, handle, description, a2aUrl }) => ({
+										id,
+										name,
+										handle,
+										description,
+										external: a2aUrl !== null,
+									})),
 								participants: loaded.participants.map(({ user, agent }) =>
 									toParticipant(authorRow(user, agent)),
 								),
@@ -229,6 +253,23 @@ export const make = Effect.gen(function* () {
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
+
+/** What a turn's reply comes from: one of the workspace's models, or another service's agent over A2A. */
+export type RunsOn =
+	| {
+			kind: "model";
+			model: string;
+			/** Whether the model takes images, which tools can then show it. */
+			acceptsImages: boolean;
+	  }
+	| { kind: "a2a"; endpoint: A2A.Endpoint };
+
+/**
+ * How much of the thread an A2A agent's turn reads. It is sent only what came
+ * since it last spoke, as it keeps its own history of the conversation, so
+ * this bounds only a thread it has never spoken in.
+ */
+const A2A_HISTORY_WINDOW_TOKENS = 32_000;
 
 export const layer = layerNoDeps.pipe(Layer.provide(TurnRepository.layer));
 
@@ -281,9 +322,7 @@ export interface TurnContext {
 		id: string;
 		name: string;
 		handle: string;
-		model: string;
-		/** Whether its model takes images, which tools can then show it. */
-		acceptsImages: boolean;
+		runsOn: RunsOn;
 		prompt: string;
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];
@@ -306,7 +345,14 @@ export interface TurnContext {
 	 */
 	askedBy: string | null;
 	/** The other crew agents in the pod, who this agent may collaborate with. */
-	crew: Array<{ id: string; name: string; handle: string; description: string | null }>;
+	crew: Array<{
+		id: string;
+		name: string;
+		handle: string;
+		description: string | null;
+		/** Whether it stands for an external agent, which works with its own tools rather than the pod's. */
+		external: boolean;
+	}>;
 	participants: ThreadParticipant[];
 	/** The context window the agent's model is treated as having, which every limit is a share of. */
 	windowTokens: number;
@@ -383,6 +429,9 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							prompt: true,
 							disabledTools: true,
 							usesSandbox: true,
+							a2aUrl: true,
+							a2aSecretHeader: true,
+							a2aSecretEncrypted: true,
 						},
 						orderBy: { name: "asc" },
 					},

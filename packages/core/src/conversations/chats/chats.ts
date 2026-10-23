@@ -109,7 +109,7 @@ export const make = Effect.gen(function* () {
 						if (posted._tag === "AlreadyPosted") return posted.message;
 						// Checked once the message is known to be new, so sending it again
 						// still returns it; refusing here rolls the post back.
-						if ((yield* hostModelOf(visible.hostAgentId)) === null) {
+						if (!(yield* hostCanAnswer(visible.hostAgentId))) {
 							return yield* new ChatAgentHasNoModel();
 						}
 						yield* floor.giveFloor({
@@ -158,8 +158,9 @@ export class ChatPlacementRejected
 }
 
 /**
- * The chat's agent has no model, so nothing could answer. The message is not
- * kept, rather than kept with a turn that will never run.
+ * The chat's agent has no model and stands for no external agent, so nothing
+ * could answer. The message is not kept, rather than kept with a turn that
+ * will never run.
  */
 export class ChatAgentHasNoModel
 	extends Data.TaggedError("ChatAgentHasNoModel")
@@ -204,10 +205,15 @@ const senderOf = ({ userId }: CurrentActor.Interface) =>
 			sender ? Effect.succeed(sender) : Effect.die(new Error("The current actor has no account")),
 	);
 
-const hostModelOf = (agentId: string) =>
+/** Whether the agent has something to answer with: a model, or an external agent it stands for. */
+const hostCanAnswer = (agentId: string) =>
 	Effect.map(
 		query((db) =>
-			db.select({ model: agent.model }).from(agent).where(eq(agent.id, agentId)).limit(1),
+			db
+				.select({ model: agent.model, a2aUrl: agent.a2aUrl })
+				.from(agent)
+				.where(eq(agent.id, agentId))
+				.limit(1),
 		),
-		([row]) => row?.model ?? null,
+		([row]) => row !== undefined && (row.model !== null || row.a2aUrl !== null),
 	);

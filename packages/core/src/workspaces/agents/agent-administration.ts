@@ -1,6 +1,8 @@
 export * as AgentAdministration from "./agent-administration.ts";
 
 import type {
+	A2ACard,
+	A2AEndpointInput,
 	Agent,
 	AgentUpdate,
 	NewAgentInPod,
@@ -13,11 +15,14 @@ import { type AuthorizationDenied, ResourceHidden } from "../../authorization/ac
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
+import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
+import { A2A } from "../../providers/a2a/a2a.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { Egress } from "../../providers/network/egress.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { crewAgentRow, toAgent } from "./agent.ts";
+import { crewAgentRow, type SealedA2AEndpoint, toAgent } from "./agent.ts";
 import { systemAgents, visibleCrewAgents } from "./agent-reads.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
@@ -41,6 +46,8 @@ export interface Interface {
 		Agent,
 		| AuthorizationDenied
 		| ModelProviderRepository.ModelNotEnabled
+		| AgentNeedsModel
+		| Egress.EgressRefused
 		| AgentRepository.AgentNameTaken
 		| AgentRepository.PodOutsideWorkspace,
 		CurrentActor.Service
@@ -53,6 +60,7 @@ export interface Interface {
 		| AuthorizationDenied
 		| EmptyAgentUpdate
 		| ModelProviderRepository.ModelNotEnabled
+		| Egress.EgressRefused
 		| AgentRepository.AgentNameTaken
 		| AgentRepository.AgentGone
 		| AgentRepository.SystemAgentImmutable,
@@ -63,6 +71,15 @@ export interface Interface {
 	}) => Effect.Effect<
 		void,
 		AuthorizationDenied | AgentRepository.SystemAgentImmutable,
+		CurrentActor.Service
+	>;
+	/** What the agent at an A2A address says it is, for somebody who may add a bot to the pod. */
+	readonly readA2ACard: (input: {
+		podId: string;
+		endpoint: A2AEndpointInput;
+	}) => Effect.Effect<
+		A2ACard,
+		AuthorizationDenied | Egress.EgressRefused | A2ACardUnreadable,
 		CurrentActor.Service
 	>;
 	readonly systemAgents: (input: {
@@ -92,6 +109,32 @@ export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const agents = yield* AgentRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
+	const credentials = yield* Credentials.Service;
+	const egress = yield* Egress.Service;
+	const a2a = yield* A2A.Service;
+
+	/**
+	 * The endpoint checked against the egress policy, with its secret sealed.
+	 * An update that leaves the secret out keeps the one stored, while the
+	 * header it is sent in stays the same.
+	 */
+	const sealA2A = (input: A2AEndpointInput, stored?: SealedA2AEndpoint) =>
+		Effect.gen(function* () {
+			yield* egress.validateProviderUrl(input.url);
+			const secretHeader = input.secretHeader ?? null;
+			const keptSecret =
+				input.secret === undefined && stored?.a2aSecretHeader === secretHeader
+					? stored.a2aSecretEncrypted
+					: null;
+			return {
+				a2aUrl: input.url,
+				a2aSecretHeader: secretHeader,
+				a2aSecretEncrypted:
+					input.secret === undefined
+						? keptSecret
+						: credentials.encrypt(input.secret, A2A.SECRET_PURPOSE),
+			} satisfies SealedA2AEndpoint;
+		});
 
 	return Service.of({
 		list: (input) =>
@@ -120,11 +163,16 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { pod, actor } = yield* authorization.pod(podId, "agent.create");
 					if (agent.usesSandbox) yield* authorization.pod(podId, "sandbox.manage");
-					yield* modelProviders.requireEnabled(pod.workspaceId, agent.model);
+					if (agent.model !== undefined) {
+						yield* modelProviders.requireEnabled(pod.workspaceId, agent.model);
+					} else if (agent.a2a === undefined) {
+						return yield* new AgentNeedsModel();
+					}
+					const a2a = agent.a2a && (yield* sealA2A(agent.a2a));
 					return toAgent(
 						yield* agents.create(pod.workspaceId, {
 							createdById: actor.userId,
-							agent: { ...agent, podId: pod.id },
+							agent: { ...agent, podId: pod.id, a2a },
 						}),
 					);
 				}),
@@ -145,7 +193,13 @@ export const make = Effect.gen(function* () {
 					if (changes.model != null) {
 						yield* modelProviders.requireEnabled(agent.workspaceId, changes.model);
 					}
-					return toAgent(yield* agents.update(agent.workspaceId, agent.id, changes));
+					const a2a = changes.a2a && (yield* sealA2A(changes.a2a, sealedEndpointOf(agent)));
+					return toAgent(
+						yield* agents.update(agent.workspaceId, agent.id, {
+							...changes,
+							a2a: changes.a2a === null ? null : a2a,
+						}),
+					);
 				}),
 			),
 
@@ -155,6 +209,18 @@ export const make = Effect.gen(function* () {
 				Effect.flatMap(authorization.agent(agentId, "agent.delete"), ({ agent }) =>
 					agents.remove(agent.workspaceId, agent.id),
 				),
+			),
+
+		readA2ACard: ({ podId, endpoint }) =>
+			operation(
+				"readA2ACard",
+				Effect.gen(function* () {
+					yield* authorization.pod(podId, "agent.create");
+					yield* egress.validateProviderUrl(endpoint.url);
+					return yield* a2a
+						.readCard(endpoint)
+						.pipe(Effect.mapError((failure) => new A2ACardUnreadable({ reason: failure.reason })));
+				}),
 			),
 
 		systemAgents: (input) =>
@@ -199,8 +265,37 @@ export const layer = layerNoDeps.pipe(
 		Visibility.layer,
 		AgentRepository.layer,
 		ModelProviderRepository.layer,
+		A2A.layer,
 	]),
 );
+
+/** No A2A agent card could be read at the address given, with the secret given. */
+export class A2ACardUnreadable
+	extends Data.TaggedError("A2ACardUnreadable")<{ readonly reason: string }>
+	implements UserFacing
+{
+	override get message() {
+		return `Reading an A2A agent card failed: ${this.reason}`;
+	}
+	get userMessage() {
+		return userText`No agent card could be read at that address. Check it, and the secret if its service needs one.`;
+	}
+}
+
+/** An agent created with neither a model to run on nor an A2A agent to reach. */
+export class AgentNeedsModel extends Data.TaggedError("AgentNeedsModel") implements UserFacing {
+	get userMessage() {
+		return userText`Choose a model for the bot, or the external agent it stands for`;
+	}
+}
+
+function sealedEndpointOf(row: {
+	a2aUrl: string | null;
+	a2aSecretHeader: string | null;
+	a2aSecretEncrypted: string | null;
+}): SealedA2AEndpoint | undefined {
+	return row.a2aUrl === null ? undefined : { ...row, a2aUrl: row.a2aUrl };
+}
 
 /** An agent update that names nothing to change. */
 export class EmptyAgentUpdate extends Data.TaggedError("EmptyAgentUpdate") implements UserFacing {

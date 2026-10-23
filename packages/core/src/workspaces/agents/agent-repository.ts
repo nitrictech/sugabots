@@ -20,7 +20,7 @@ import {
 import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { agent, pod } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
+import { type CrewAgentRow, crewAgentRow, NOT_A2A, type SealedA2AEndpoint } from "./agent.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import {
 	findRunnableSystemAgent,
@@ -33,6 +33,12 @@ import {
  * Assistant in each Personal pod, and the workspace's system agents, which sit
  * in no pod and of which only the model ever changes.
  */
+/** A crew agent to create, an A2A agent's secret already sealed. */
+export type NewCrewAgent = Omit<NewAgent, "a2a"> & { a2a?: SealedA2AEndpoint };
+
+/** Changes to a crew agent; a null `a2a` makes it one of ours again. */
+export type CrewAgentChanges = Omit<AgentUpdate, "a2a"> & { a2a?: SealedA2AEndpoint | null };
+
 export interface Interface {
 	/**
 	 * Creates a crew agent in `agent.podId`, which must be in the workspace.
@@ -40,12 +46,12 @@ export interface Interface {
 	 */
 	readonly create: (
 		workspaceId: string,
-		input: { createdById: string; agent: NewAgent },
+		input: { createdById: string; agent: NewCrewAgent },
 	) => Effect.Effect<CrewAgentRow, AgentNameTaken | PodOutsideWorkspace>;
 	readonly update: (
 		workspaceId: string,
 		agentId: string,
-		changes: AgentUpdate,
+		changes: CrewAgentChanges,
 	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentGone | SystemAgentImmutable>;
 	readonly remove: (
 		workspaceId: string,
@@ -175,7 +181,8 @@ export const make = Effect.gen(function* () {
 										color: input.color ?? colorFromText(input.name),
 										face: input.face ?? "pill",
 										shape: input.shape ?? "circle",
-										model: input.model,
+										model: input.model ?? null,
+										...input.a2a,
 										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
 										usesSandbox: input.usesSandbox ?? false,
@@ -192,7 +199,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		update: (workspaceId, agentId, changes) =>
+		update: (workspaceId, agentId, { a2a, ...changes }) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
@@ -205,7 +212,7 @@ export const make = Effect.gen(function* () {
 						(db) =>
 							db
 								.update(agent)
-								.set(changes)
+								.set({ ...changes, ...(a2a === null ? NOT_A2A : a2a) })
 								.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
 								.returning(),
 						(failure) => nameTaken(failure, changes),

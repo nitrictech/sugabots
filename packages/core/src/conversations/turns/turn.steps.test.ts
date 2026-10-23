@@ -8,6 +8,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { Ids } from "../../ids/ids.ts";
+import { A2A } from "../../providers/a2a/a2a.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
@@ -89,11 +90,10 @@ const prepared: PreparedTurn = {
 			podId: "0199a3a0-0000-7000-8000-000000000004",
 			name: "Host Agent",
 			handle: "host-agent",
-			model: "claude-sonnet-4-20250514",
+			runsOn: { kind: "model", model: "claude-sonnet-4-20250514", acceptsImages: false },
 			prompt: "",
 			disabledTools: [],
 			usesSandbox: false,
-			acceptsImages: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },
@@ -247,7 +247,11 @@ describe("runSegment", () => {
 			...prepared,
 			context: {
 				...prepared.context,
-				agent: { ...prepared.context.agent, model: "new-model", prompt: "new prompt" },
+				agent: {
+					...prepared.context.agent,
+					runsOn: { kind: "model", model: "new-model", acceptsImages: false },
+					prompt: "new prompt",
+				},
 			},
 			checkpoint: {
 				messages: [],
@@ -746,6 +750,7 @@ function segmentWith(given: Given) {
 		Effect.provide(
 			Layer.mergeAll(
 				Layer.succeed(Models.Service, given.model),
+				unimplemented(A2A.Service, {}),
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
 				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),

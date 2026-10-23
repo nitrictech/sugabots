@@ -169,6 +169,17 @@ export const agentSchema = Schema.Struct({
 	 * and only they may change it. Experimental.
 	 */
 	usesSandbox: Schema.Boolean,
+	/**
+	 * Where the agent is reached when it is another service's agent, over A2A.
+	 * Its replies then come from there, and its model, prompt and tools go unused.
+	 */
+	a2a: Schema.NullOr(
+		Schema.Struct({
+			url: Schema.String,
+			secretHeader: Schema.NullOr(Schema.String),
+			hasSecret: Schema.Boolean,
+		}),
+	),
 	createdAt: isoTimestampSchema,
 });
 
@@ -185,6 +196,36 @@ export const PROMPT_MAX_LENGTH = 20_000;
 /** How long a description may be: one or two lines, read by people and by the bot's pod mates. */
 export const DESCRIPTION_MAX_LENGTH = 280;
 
+// Checked here rather than with `providerUrlSchema` and the connection's
+// header schema: those modules import this one.
+const a2aUrlSchema = Schema.Trim.check(
+	Schema.makeFilter((value) => URL.canParse(value) && /^https?:\/\//i.test(value), {
+		message: "Use an HTTP URL",
+	}),
+);
+const a2aSecretHeaderSchema = Schema.Trim.check(
+	Schema.makeFilter((value) => /^[A-Za-z0-9-]{1,64}$/.test(value), {
+		message: "Use a header name",
+	}),
+);
+
+/** The agent card's base URL, and the header and secret its service expects, if any. */
+export const a2aEndpointInputSchema = Schema.Struct({
+	url: a2aUrlSchema,
+	secretHeader: Schema.optional(a2aSecretHeaderSchema),
+	secret: Schema.optional(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096))),
+});
+
+export type A2AEndpointInput = typeof a2aEndpointInputSchema.Type;
+
+/** What an A2A agent's card says it is: what a new bot standing for it is named and described as. */
+export const a2aCardSchema = Schema.Struct({
+	name: Schema.String,
+	description: Schema.NullOr(Schema.String),
+});
+
+export type A2ACard = typeof a2aCardSchema.Type;
+
 export const newAgentInPodSchema = Schema.Struct({
 	name: nameSchema,
 	/** Derived from the name when left out. */
@@ -195,10 +236,12 @@ export const newAgentInPodSchema = Schema.Struct({
 	color: Schema.optional(agentColorSchema),
 	face: Schema.optional(agentFaceSchema),
 	shape: Schema.optional(agentShapeSchema),
-	model: modelIdSchema,
+	/** Required unless `a2a` is given. */
+	model: Schema.optional(modelIdSchema),
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),
 	disabledTools: Schema.optional(toolKeysSchema),
 	usesSandbox: Schema.optional(Schema.Boolean),
+	a2a: Schema.optional(a2aEndpointInputSchema),
 });
 
 export const newAgentSchema = newAgentInPodSchema.mapFields(Struct.assign({ podId: uuidSchema }));
@@ -214,6 +257,12 @@ export const agentUpdateSchema = newAgentSchema
 	.mapFields(Struct.map(Schema.optional))
 	// A model may be cleared, which creation has no use for: an agent is made
 	// with one, and stops having one only when somebody takes it away.
-	.mapFields(Struct.assign({ model: Schema.optional(Schema.NullOr(modelIdSchema)) }));
+	.mapFields(
+		Struct.assign({
+			model: Schema.optional(Schema.NullOr(modelIdSchema)),
+			/** Null makes it one of ours again, running on its model. */
+			a2a: Schema.optional(Schema.NullOr(a2aEndpointInputSchema)),
+		}),
+	);
 
 export type AgentUpdate = typeof agentUpdateSchema.Type;

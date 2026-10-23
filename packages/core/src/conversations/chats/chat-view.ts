@@ -80,6 +80,7 @@ import {
 	messageFromRelations,
 	messageRelations,
 	personColumns,
+	toAgentParticipant,
 	toParticipant,
 } from "../threads/participants.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
@@ -299,8 +300,8 @@ export const make = Effect.gen(function* () {
 							(row): ActivityItem => ({
 								kind: "collaboration",
 								threadId: row.threadId,
-								initiator: { kind: "agent", ...row.initiator },
-								recipient: { kind: "agent", ...row.recipient },
+								initiator: toAgentParticipant(row.initiator),
+								recipient: toAgentParticipant(row.recipient),
 								status: row.status,
 								brief: row.brief,
 								podId: row.podId,
@@ -592,6 +593,7 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 				color: author.color,
 				face: author.face,
 				shape: author.shape,
+				a2aUrl: author.a2aUrl,
 			},
 			mentionsYou: sql<boolean>`${mentionsYou}`,
 			unread: sql<boolean>`${unread}`,
@@ -731,6 +733,7 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 				color: initiator.color,
 				face: initiator.face,
 				shape: initiator.shape,
+				a2aUrl: initiator.a2aUrl,
 			},
 			recipient: {
 				id: recipient.id,
@@ -739,6 +742,7 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 				color: recipient.color,
 				face: recipient.face,
 				shape: recipient.shape,
+				a2aUrl: recipient.a2aUrl,
 			},
 			podId: chat.podId,
 			chatAgentId: chat.hostAgentId,

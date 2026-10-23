@@ -1,4 +1,6 @@
 import {
+	type A2ACard,
+	type A2AEndpointInput,
 	type Agent,
 	type AgentColor,
 	type AgentFace,
@@ -8,12 +10,20 @@ import {
 } from "@sugabots/contracts";
 import { Check, ChevronRight } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
+import { useAgents, useCreateAgent, useModels, useReadA2ACard } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
-import { Alert } from "@/ui/alert.tsx";
+import {
+	type A2ADraft,
+	A2AEndpointFields,
+	a2aEndpointOf,
+	emptyA2ADraft,
+	type RunsOn,
+	RunsOnControl,
+} from "@/shell/RunsOn.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import {
 	DialogForm,
 	DialogFormBody,
@@ -38,9 +48,11 @@ const INSTRUCTIONS_STARTS = [
 
 /**
  * Making a bot: its face first, as it will look, then its name and the pod it
- * lives in, and whether it interviews its creator for its instructions or is
- * given them. It runs on the workspace's first switched-on model until
- * somebody chooses another on its page, which is also where it is described.
+ * lives in, then what it runs on. On a model, the workspace's first switched-on
+ * one until somebody chooses another on its page, it interviews its creator for
+ * its instructions or is given them. On an external agent, its A2A card is read
+ * once its address is typed, which shows the address works and names and
+ * describes the bot after the agent, unless somebody has named it already.
  */
 export function NewAgentDialog({
 	podId: fixedPodId,
@@ -66,6 +78,12 @@ export function NewAgentDialog({
 	const create = useCreateAgent(podId);
 	const models = useModels();
 	const offered = models.data?.models ?? [];
+	const [chosenRunsOn, setChosenRunsOn] = useState<RunsOn>();
+	// With no model to run on, an external agent is the only thing a bot can be.
+	const runsOn = chosenRunsOn ?? (models.isSuccess && offered.length === 0 ? "a2a" : "model");
+	const [a2aDraft, setA2ADraft] = useState<A2ADraft>(emptyA2ADraft);
+	const endpoint = a2aEndpointOf(a2aDraft);
+	const card = useAgentCard(podId, endpoint);
 	// The default goes unoffered while a failed test has its provider off.
 	const model =
 		offered.find((candidate) => candidate.modelId === models.data?.defaultModel)?.modelId ??
@@ -75,17 +93,24 @@ export function NewAgentDialog({
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
-		if (!trimmedName || !model || !podId) return;
+		if (!trimmedName || !podId) return;
+		const look = { name: trimmedName, color, shape, face };
+		if (runsOn === "a2a" ? !endpoint : !model) return;
 		try {
-			const agent = await create.mutateAsync({
-				name: trimmedName,
-				model,
-				color,
-				shape,
-				face,
-				// A bot created without a prompt starts by interviewing its creator.
-				...(instructionsStart === "written" ? { prompt: instructions } : {}),
-			});
+			const agent = await create.mutateAsync(
+				runsOn === "a2a"
+					? {
+							...look,
+							a2a: endpoint,
+							...(card.found?.description ? { description: card.found.description } : {}),
+						}
+					: {
+							...look,
+							model,
+							// A bot created without a prompt starts by interviewing its creator.
+							...(instructionsStart === "written" ? { prompt: instructions } : {}),
+						},
+			);
 			await onCreated(agent, chosenPod);
 		} catch {
 			return;
@@ -132,43 +157,74 @@ export function NewAgentDialog({
 					/>
 				</SettingsGroup>
 
-				<SettingsGroup
-					className="mt-2"
-					note={
-						instructionsStart === "interview"
-							? `${trimmedName || "It"} will ask what it's for in its first chat, then write its own instructions for you to approve.`
-							: "Leave them blank to start without any. You can change them later in its settings."
-					}
-				>
-					<SettingsControlRow label="Instructions">
-						<SegmentedControl
-							label="Instructions"
-							options={INSTRUCTIONS_STARTS}
-							value={instructionsStart}
-							onChange={setInstructionsStart}
-						/>
-					</SettingsControlRow>
-					{instructionsStart === "written" && (
-						<div className="border-border border-t p-1">
-							<label htmlFor={instructionsId} className="sr-only">
-								Instructions
-							</label>
-							<textarea
-								id={instructionsId}
-								value={instructions}
-								onChange={(event) => setInstructions(event.target.value)}
-								maxLength={PROMPT_MAX_LENGTH}
-								placeholder="What it's for, how to sound, and what to never do."
-								className="block min-h-[120px] w-full resize-y rounded-[12px] bg-transparent p-3 text-[14.5px] text-foreground leading-[1.6] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
-							/>
-						</div>
-					)}
+				<SettingsGroup className="mt-2">
+					<RunsOnControl value={runsOn} onChange={setChosenRunsOn} />
 				</SettingsGroup>
 
+				{runsOn === "a2a" ? (
+					<>
+						<A2AEndpointFields
+							draft={a2aDraft}
+							onChange={setA2ADraft}
+							onLeave={() => {
+								void card.lookUp().then((found) => {
+									// A name somebody typed stays; one taken from an earlier card follows the new one.
+									if (found && (trimmedName === "" || trimmedName === card.named)) {
+										setName(found.name);
+										card.setNamed(found.name);
+									}
+								});
+							}}
+						/>
+						{card.found && (
+							<Success>
+								Found {card.found.name}
+								{card.found.description ? `: ${card.found.description}` : ""}
+							</Success>
+						)}
+						{card.failure && <Alert>{card.failure}</Alert>}
+					</>
+				) : (
+					<SettingsGroup
+						className="mt-2"
+						note={
+							instructionsStart === "interview"
+								? `${trimmedName || "It"} will ask what it's for in its first chat, then write its own instructions for you to approve.`
+								: "Leave them blank to start without any. You can change them later in its settings."
+						}
+					>
+						<SettingsControlRow label="Instructions">
+							<SegmentedControl
+								label="Instructions"
+								options={INSTRUCTIONS_STARTS}
+								value={instructionsStart}
+								onChange={setInstructionsStart}
+							/>
+						</SettingsControlRow>
+						{instructionsStart === "written" && (
+							<div className="border-border border-t p-1">
+								<label htmlFor={instructionsId} className="sr-only">
+									Instructions
+								</label>
+								<textarea
+									id={instructionsId}
+									value={instructions}
+									onChange={(event) => setInstructions(event.target.value)}
+									maxLength={PROMPT_MAX_LENGTH}
+									placeholder="What it's for, how to sound, and what to never do."
+									className="block min-h-[120px] w-full resize-y rounded-[12px] bg-transparent p-3 text-[14.5px] text-foreground leading-[1.6] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+								/>
+							</div>
+						)}
+					</SettingsGroup>
+				)}
+
 				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
-					{models.isPending || model
-						? "Every bot lives in one pod and uses that pod's connections. You can describe it and choose a model after it's created."
-						: "Connect a model first, in Settings under Models. Bots think with one."}
+					{runsOn === "a2a"
+						? "Every bot lives in one pod. This one answers with the external agent's own model, instructions and tools."
+						: models.isPending || model
+							? "Every bot lives in one pod and uses that pod's connections. You can describe it and choose a model after it's created."
+							: "Connect a model first, in Settings under Models, or run it on an external agent."}
 				</p>
 
 				{models.error && <Alert>Models could not be loaded. Close this form and try again.</Alert>}
@@ -183,10 +239,48 @@ export function NewAgentDialog({
 			</DialogFormBody>
 			<DialogFormFooter
 				action="Create"
-				actionDisabled={!trimmedName || !model || !podId || create.isPending}
+				actionDisabled={
+					!trimmedName || !podId || create.isPending || (runsOn === "a2a" ? !endpoint : !model)
+				}
 			/>
 		</DialogForm>
 	);
+}
+
+/**
+ * The card of the A2A agent at `endpoint`, read when asked. What was found, or
+ * why nothing was, is shown only while the address and secret are still the
+ * ones it was read with. `named` is the name last taken from a card, so a
+ * later card can replace it where it would not replace a name somebody typed.
+ */
+function useAgentCard(podId: string, endpoint: A2AEndpointInput | undefined) {
+	const read = useReadA2ACard(podId);
+	const [result, setResult] = useState<
+		{ key: string } & ({ found: A2ACard } | { failure: string })
+	>();
+	const [named, setNamed] = useState<string>();
+	const key = endpoint && JSON.stringify(endpoint);
+	const current = result && result.key === key ? result : undefined;
+
+	async function lookUp(): Promise<A2ACard | undefined> {
+		if (!endpoint || !key || !podId || current) return undefined;
+		try {
+			const found = await read.mutateAsync(endpoint);
+			setResult({ key, found });
+			return found;
+		} catch (error) {
+			setResult({ key, failure: failureMessage(error) });
+			return undefined;
+		}
+	}
+
+	return {
+		lookUp,
+		found: current && "found" in current ? current.found : undefined,
+		failure: current && "failure" in current ? current.failure : undefined,
+		named,
+		setNamed,
+	};
 }
 
 /**

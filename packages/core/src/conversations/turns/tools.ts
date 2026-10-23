@@ -233,7 +233,9 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		readThreadFileTool({
 			threadId: prepared.context.thread.id,
 			files: deps.files,
-			acceptsImages: prepared.context.agent.acceptsImages,
+			acceptsImages:
+				prepared.context.agent.runsOn.kind === "model" &&
+				prepared.context.agent.runsOn.acceptsImages,
 			run: deps.run,
 		}),
 		recording,

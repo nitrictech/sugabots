@@ -20,7 +20,7 @@ import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, BotTag } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -512,6 +512,7 @@ function MessageRow({
 								face={author.face}
 								shape={author.shape}
 								size={size.face}
+								external={author.external}
 							/>
 						) : (
 							<PersonAvatar person={author} size={size.face} />
@@ -533,11 +534,7 @@ function MessageRow({
 				{startsGroup && (
 					<div className="flex items-center gap-2 pb-px">
 						<AuthorName name={author.name} link={authorLink} />
-						{agent && (
-							<span className="rounded-[4px] bg-chip px-[5px] py-px font-semibold text-[10.5px] text-muted-foreground leading-[1.4]">
-								Bot
-							</span>
-						)}
+						{agent && <BotTag external={agent.external} />}
 						<span className="text-subtle-foreground text-xs">
 							<MessageTime createdAt={message.createdAt} />
 						</span>

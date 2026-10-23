@@ -6,7 +6,6 @@ import type {
 	ThreadContext,
 	ThreadDetails,
 	ThreadHistoryQuery,
-	ThreadParticipant,
 	ThreadSummary,
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
@@ -38,6 +37,7 @@ import {
 	messageRelations,
 	personColumns,
 	recentParticipantsOf,
+	toAgentParticipant,
 	toParticipant,
 	toPerson,
 } from "./threads/participants.ts";
@@ -242,7 +242,7 @@ function toThreadDetails(
 		participants: row.participants.map(({ user: person, agent: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),
-		crew: row.pod.agents.map((crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent })),
+		crew: row.pod.agents.map(toAgentParticipant),
 		members: row.pod.members.map(toPerson),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn?.error)),
 		olderMessagesCursor:

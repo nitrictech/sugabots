@@ -2,7 +2,7 @@ import type { ConnectionTool, Routine } from "@sugabots/contracts";
 import type { TestConnection } from "@sugabots/contracts/testing";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import {
@@ -16,7 +16,7 @@ import {
 
 /*
  * Bots in settings: every bot, each under its pod's name, beside the open
- * one's contact card. Model and Instructions open on pages of their own in
+ * one's contact card. Runs on and Instructions open on pages of their own in
  * the same place; on a phone the card covers the list, with Back to it.
  *
  * Handlers a story adds with `msw.use` are tried before the meta's, so each
@@ -180,11 +180,11 @@ export const Look = meta.story({
 	},
 });
 
-/** The Model page: the switched-on models grouped by provider, the one in use checked. */
+/** The Runs on page, on a model: the switched-on models grouped by provider, the one in use checked. */
 export const ModelPage = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Model/ }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: /^Runs on/ }, { timeout: 10_000 }),
 		);
 		await expect(await canvas.findByRole("heading", { name: "OpenAI" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
@@ -217,14 +217,14 @@ function memberHandlers() {
 	});
 }
 
-/** The Model page for a member: the models stated, and a workspace admin named as who adds more. */
+/** The Runs on page for a member: the models stated, and a workspace admin named as who adds more. */
 export const MemberModelPage = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...memberHandlers());
 	},
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Model/ }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: /^Runs on/ }, { timeout: 10_000 }),
 		);
 		await expect(await canvas.findByText(/ask a workspace admin/)).toBeInTheDocument();
 		await expect(
@@ -258,6 +258,82 @@ export const ToolsAndRoutines = meta.story({
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Overnight outbound")).toBeInTheDocument();
 		await expect(canvas.getByText("Inbound lead")).toBeInTheDocument();
+	},
+});
+
+/** Growth Desk standing for an external agent, reached over A2A: no model, instructions or tools of ours. */
+export const ExternalAgentCard = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...appHandlers({
+				models,
+				bots: bots.map((bot) =>
+					bot.id === growthDesk.id
+						? {
+								...bot,
+								a2a: {
+									url: "https://agents.example.com",
+									secretHeader: "Authorization",
+									hasSecret: true,
+								},
+							}
+						: bot,
+				),
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("button", { name: /^Runs on/ }, { timeout: 10_000 }),
+		).toHaveTextContent("External agent · agents.example.com");
+		await expect(canvas.getByText(/Replies come from the external agent/)).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: /^Instructions/ })).toBeNull();
+		await expect(canvas.queryByRole("heading", { name: "Tools" })).toBeNull();
+	},
+});
+
+/** What the Runs on page last saved, for its story to check. */
+let savedChange: unknown;
+
+/** The Runs on page, switched to an external agent: the address its agent card is under, and the secret its service expects, saved together. */
+export const ExternalAgentPage = meta.story({
+	beforeEach({ msw }) {
+		savedChange = undefined;
+		msw.use(
+			http.patch(`${API}/agents/:agentId`, async ({ request }) => {
+				savedChange = await request.json();
+				const change = savedChange as { a2a: { url: string; secretHeader?: string } };
+				return HttpResponse.json({
+					...bots.find((bot) => bot.id === growthDesk.id),
+					a2a: {
+						url: change.a2a.url,
+						secretHeader: change.a2a.secretHeader ?? null,
+						hasSecret: true,
+					},
+				});
+			}),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Runs on/ }, { timeout: 10_000 }),
+		);
+		await userEvent.click(await canvas.findByRole("radio", { name: "External agent" }));
+		const save = await canvas.findByRole("button", { name: "Save" });
+		await expect(save).toBeDisabled();
+		await userEvent.type(canvas.getByLabelText("Address"), "https://agents.example.com");
+		await userEvent.type(canvas.getByLabelText("Header name"), "Authorization");
+		await userEvent.type(canvas.getByLabelText("Secret"), "Bearer s3cret");
+		await userEvent.click(save);
+		await waitFor(() =>
+			expect(savedChange).toEqual({
+				a2a: {
+					url: "https://agents.example.com",
+					secretHeader: "Authorization",
+					secret: "Bearer s3cret",
+				},
+			}),
+		);
 	},
 });
 

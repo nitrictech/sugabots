@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { StreamResponse } from "@a2a-js/sdk";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Conversations } from "@sugabots/core/conversations/conversations";
@@ -23,13 +26,14 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
+import { A2A } from "@sugabots/core/providers/a2a/a2a";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
 import { lane } from "@sugabots/core/workflows/sql";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
  * The whole round trip through the real turn workflows: the host's
@@ -75,6 +79,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(Models.Service, model),
+						A2A.layer,
 						Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
 						Layer.succeed(SandboxTools.Service, SandboxTools.none),
 						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
@@ -107,7 +112,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 
 		/** A workspace with a pod, a host agent and a helper the host can collaborate with. */
-		async function aRoom(routing?: { facilitator: boolean }) {
+		async function aRoom(routing?: { facilitator: boolean }, helperA2aUrl?: string) {
 			const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 			const [space] = await onDatabase((db) =>
 				db
@@ -167,7 +172,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							description: "Has pets.",
 							color: "rose",
 							face: "dot",
-							model: "m",
+							model: helperA2aUrl ? null : "m",
+							a2aUrl: helperA2aUrl ?? null,
 							createdById: member.id,
 						},
 					])
@@ -296,5 +302,174 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(await facilitationLanes(answered.childThreadId)).toEqual([]);
 			expect(childMessages).toHaveLength(2);
 		}, 25_000);
+		/**
+		 * The A2A agents the helper may stand for: one on v1.0 and one still on
+		 * v0.3, each streaming "A cat " then "named Tom." as one artifact, and
+		 * ending its task with that answer again, as agents often do.
+		 */
+		const agentVersions = {
+			"1.0": {
+				card: (origin: string) => ({
+					name: "Pets",
+					supportedInterfaces: [
+						{ url: `${origin}/rpc`, protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+					],
+					version: "1",
+					capabilities: { streaming: true },
+					defaultInputModes: ["text/plain"],
+					defaultOutputModes: ["text/plain"],
+					skills: [],
+				}),
+				streamMethod: "SendStreamingMessage",
+				// Through the SDK's own codec, so a shape it would not read fails here rather than in the turn.
+				events: (task: { taskId: string; contextId: string }) =>
+					[
+						{ statusUpdate: { ...task, status: { state: "TASK_STATE_WORKING" } } },
+						{
+							artifactUpdate: {
+								...task,
+								artifact: { artifactId: "a1", parts: [{ text: "A cat " }] },
+							},
+						},
+						{
+							artifactUpdate: {
+								...task,
+								append: true,
+								artifact: { artifactId: "a1", parts: [{ text: "named Tom." }] },
+							},
+						},
+						{
+							statusUpdate: {
+								...task,
+								status: {
+									state: "TASK_STATE_COMPLETED",
+									message: {
+										messageId: "m2",
+										role: "ROLE_AGENT",
+										parts: [{ text: "A cat named Tom." }],
+									},
+								},
+							},
+						},
+					].map((event) => StreamResponse.toJSON(StreamResponse.fromJSON(event))),
+			},
+			"0.3": {
+				card: (origin: string) => ({
+					name: "Pets",
+					url: `${origin}/rpc`,
+					protocolVersion: "0.3.0",
+					version: "1",
+					capabilities: { streaming: true },
+					defaultInputModes: ["text/plain"],
+					defaultOutputModes: ["text/plain"],
+					skills: [],
+				}),
+				streamMethod: "message/stream",
+				events: (task: { taskId: string; contextId: string }) => [
+					{ ...task, kind: "status-update", status: { state: "working" }, final: false },
+					{
+						...task,
+						kind: "artifact-update",
+						artifact: { artifactId: "a1", parts: [{ kind: "text", text: "A cat " }] },
+					},
+					{
+						...task,
+						kind: "artifact-update",
+						append: true,
+						artifact: { artifactId: "a1", parts: [{ kind: "text", text: "named Tom." }] },
+					},
+					{
+						...task,
+						kind: "status-update",
+						final: true,
+						status: {
+							state: "completed",
+							message: {
+								kind: "message",
+								messageId: "m2",
+								role: "agent",
+								parts: [{ kind: "text", text: "A cat named Tom." }],
+							},
+						},
+					},
+				],
+			},
+		};
+
+		describe.each(Object.keys(agentVersions) as Array<keyof typeof agentVersions>)(
+			"with a helper that is an A2A %s agent",
+			(version) => {
+				const agentVersion = agentVersions[version];
+				/** What the A2A agent was sent, by JSON-RPC method. */
+				const received: Array<{
+					method: string;
+					params: { message: { contextId: string; parts: Array<{ text: string }> } };
+				}> = [];
+				const agentServer = createServer((request, response) => {
+					const origin = `http://${request.headers.host}`;
+					if (request.method === "GET" && request.url === "/.well-known/agent-card.json") {
+						response.setHeader("content-type", "application/json");
+						response.end(JSON.stringify(agentVersion.card(origin)));
+						return;
+					}
+					let body = "";
+					request.on("data", (chunk) => {
+						body += chunk;
+					});
+					request.on("end", () => {
+						const rpc = JSON.parse(body);
+						received.push(rpc);
+						const task = { taskId: "t1", contextId: rpc.params.message.contextId };
+						response.setHeader("content-type", "text/event-stream");
+						for (const result of agentVersion.events(task)) {
+							response.write(`data: ${JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result })}\n\n`);
+						}
+						response.end();
+					});
+				});
+				let agentUrl = "";
+				beforeAll(async () => {
+					await new Promise<void>((resolve) => agentServer.listen(0, "127.0.0.1", resolve));
+					agentUrl = `http://127.0.0.1:${(agentServer.address() as AddressInfo).port}`;
+				});
+				afterAll(() => {
+					agentServer.close();
+				});
+
+				it("answers the host with what the agent streamed, once, in the child thread's context", async () => {
+					const { space, pod: room, member, host } = await aRoom(undefined, agentUrl);
+					const opened = await startChat({
+						workspaceId: space.id,
+						podId: room.id,
+						hostAgentId: host.id,
+						userId: member.id,
+						content: "What pets does Helper have?",
+					});
+
+					const deadline = Date.now() + 10_000;
+					let made: { childThreadId: string; status: string; answer: string | null } | undefined;
+					while (Date.now() < deadline) {
+						[made] = await onDatabase((db) =>
+							db
+								.select({
+									childThreadId: collaboration.childThreadId,
+									status: collaboration.status,
+									answer: collaboration.answer,
+								})
+								.from(collaboration)
+								.where(eq(collaboration.parentThreadId, opened.mainThreadId)),
+						);
+						if (made?.status === "answered") break;
+						await new Promise((resolve) => setTimeout(resolve, 100));
+					}
+
+					expect(made).toMatchObject({ status: "answered", answer: "A cat named Tom." });
+					expect(received).toHaveLength(1);
+					expect(received[0]?.method).toBe(agentVersion.streamMethod);
+					expect(received[0]?.params.message.contextId).toBe(made?.childThreadId);
+					expect(received[0]?.params.message.parts[0]?.text).toContain("What pets do you have?");
+				}, 20_000);
+			},
+		);
 	},
 );

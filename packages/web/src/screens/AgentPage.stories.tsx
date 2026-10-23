@@ -94,6 +94,45 @@ export const Conversation = meta.story({
 	},
 });
 
+/**
+ * Growth Desk standing for an external agent: tagged in the header and on its
+ * messages, so people can tell it answers with its own tools, not the pod's.
+ */
+export const ExternalAgent = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...appHandlers({
+				bots: storyBots.map((bot) =>
+					bot.id === growthDesk.id
+						? {
+								...bot,
+								model: null,
+								a2a: { url: "http://localhost:8462", secretHeader: null, hasSecret: false },
+							}
+						: bot,
+				),
+				messages: {
+					[growthDesk.id]: conversation.map((message) =>
+						message.author.kind === "agent"
+							? { ...message, author: { ...message.author, external: true as const } }
+							: message,
+					),
+				},
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		await expect((await within(log).findAllByText("External bot")).length).toBeGreaterThan(0);
+		await expect(
+			within(canvas.getByRole("heading", { name: /Growth Desk/, level: 1 })).getByText(
+				"External bot",
+			),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` })).toBeVisible();
+	},
+});
+
 /** A pod opened from the rail opens the chat at the top of its list. */
 export const PodOpensTopChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,

@@ -208,10 +208,13 @@ export function SettingsFieldRow({
 	maxLength,
 	mono = false,
 	secret = false,
+	onBlur,
 }: {
 	label: string;
 	value: string;
 	onChange: (value: string) => void;
+	/** When focus leaves the field, for a check of what was typed. */
+	onBlur?: () => void;
 	placeholder: string;
 	maxLength?: number;
 	/** For addresses, keys and header names. */
@@ -227,6 +230,7 @@ export function SettingsFieldRow({
 				autoComplete="off"
 				value={value}
 				onChange={(event) => onChange(event.target.value)}
+				onBlur={onBlur}
 				placeholder={placeholder}
 				maxLength={maxLength}
 				className={cn(

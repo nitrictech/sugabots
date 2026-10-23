@@ -11,8 +11,8 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { MessageCircle, Pencil, RefreshCw } from "lucide-react";
-import { useId, useRef, useState } from "react";
-import { useAgents, useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
+import { type FormEvent, useId, useRef, useState } from "react";
+import { useAgents, useDeleteAgent, useRunsOnLabel, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
@@ -23,6 +23,13 @@ import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookSections } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
+import {
+	type A2ADraft,
+	A2AEndpointFields,
+	a2aEndpointOf,
+	type RunsOn,
+	RunsOnControl,
+} from "@/shell/RunsOn.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -44,9 +51,10 @@ import { AgentRoutines } from "./RoutinesSettings.tsx";
 
 /*
  * One bot, as its contact card: its face and colour first, then what it is,
- * what it thinks with and what it is told, what it can reach, and what it does
- * unprompted. Model and instructions each open on a page of their own in the
- * same place, so the card never rearranges under you.
+ * what it runs on and what it is told, what it can reach, and what it does
+ * unprompted. What it runs on and its instructions each open on a page of
+ * their own in the same place, so the card never rearranges under you. A bot
+ * standing for an external agent has no instructions or tools of ours to show.
  *
  * What can be changed comes from the pod's resolved permissions, and a control
  * nobody may use is not drawn. Each field saves on its own; instructions are
@@ -60,7 +68,7 @@ export function AgentSettingsPage({
 	/** The pod this bot lives in, and what the viewer may do in it. */
 	pod: Pod;
 }) {
-	const [page, setPage] = useState<"card" | "model" | "instructions">("card");
+	const [page, setPage] = useState<"card" | "runs-on" | "instructions">("card");
 	const update = useUpdateAgent(agent.id);
 	const failure = update.error ? failureMessage(update.error) : undefined;
 	const back = (
@@ -70,19 +78,17 @@ export function AgentSettingsPage({
 		/>
 	);
 
-	if (page === "model") {
+	if (page === "runs-on") {
 		return (
-			<SettingsPage back={back} title="Model" description={`What ${agent.name} thinks with.`}>
-				{failure && <Alert>{failure}</Alert>}
-				<AgentModelPicker
-					agentName={agent.name}
-					model={agent.model}
-					canChoose={pod.permissions.updateAgents}
-					onChoose={(model) => {
-						void update.mutateAsync({ model }).catch(() => {});
-					}}
-				/>
-			</SettingsPage>
+			<RunsOnPage
+				agent={agent}
+				editable={pod.permissions.updateAgents}
+				back={back}
+				save={update.mutateAsync}
+				savePending={update.isPending}
+				failure={failure}
+				done={() => setPage("card")}
+			/>
 		);
 	}
 	if (page === "instructions") {
@@ -104,7 +110,7 @@ export function AgentSettingsPage({
 			save={update.mutateAsync}
 			savePending={update.isPending}
 			failure={failure}
-			onOpenModel={() => setPage("model")}
+			onOpenRunsOn={() => setPage("runs-on")}
 			onOpenInstructions={() => setPage("instructions")}
 		/>
 	);
@@ -118,7 +124,7 @@ function ContactCard({
 	save,
 	savePending,
 	failure,
-	onOpenModel,
+	onOpenRunsOn,
 	onOpenInstructions,
 }: {
 	agent: Agent;
@@ -126,11 +132,11 @@ function ContactCard({
 	save: Save;
 	savePending: boolean;
 	failure: string | undefined;
-	onOpenModel: () => void;
+	onOpenRunsOn: () => void;
 	onOpenInstructions: () => void;
 }) {
 	const may = pod.permissions;
-	const modelName = useModelName(agent.model);
+	const runsOn = useRunsOnLabel(agent);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
 	const navigate = useNavigate();
@@ -154,7 +160,13 @@ function ContactCard({
 				may.updateAgents ? (
 					<EditableLook agent={agent} save={save} />
 				) : (
-					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={88} />
+					<AgentAvatar
+						color={agent.color}
+						face={agent.face}
+						shape={agent.shape}
+						size={88}
+						external={agent.a2a !== null}
+					/>
 				)
 			}
 			title={agent.name}
@@ -167,7 +179,13 @@ function ContactCard({
 			}
 		>
 			{failure && <Alert>{failure}</Alert>}
-			<SettingsGroup label="About">
+			<SettingsGroup
+				label="About"
+				note={
+					agent.a2a &&
+					`Replies come from the external agent at ${hostOf(agent.a2a.url)}, which brings its own model, instructions and tools.`
+				}
+			>
 				<TextRow
 					label="Name"
 					value={agent.name}
@@ -187,19 +205,21 @@ function ContactCard({
 					onCommit={(description) => save({ description })}
 				/>
 				<SettingsRow
-					label="Model"
-					trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
+					label="Runs on"
+					trailing={<SettingsValue>{runsOn}</SettingsValue>}
 					chevron
-					onClick={onOpenModel}
+					onClick={onOpenRunsOn}
 				/>
-				<SettingsRow
-					label="Instructions"
-					trailing={<SettingsValue>{may.updateAgents ? "Edit" : "View"}</SettingsValue>}
-					chevron
-					onClick={onOpenInstructions}
-				/>
+				{!agent.a2a && (
+					<SettingsRow
+						label="Instructions"
+						trailing={<SettingsValue>{may.updateAgents ? "Edit" : "View"}</SettingsValue>}
+						chevron
+						onClick={onOpenInstructions}
+					/>
+				)}
 			</SettingsGroup>
-			<Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />
+			{!agent.a2a && <Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />}
 			<AgentRoutines agent={agent} pod={pod} />
 			{may.deleteAgents && (
 				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete bot</SettingsDanger>
@@ -261,7 +281,7 @@ function EditableLook({ agent, save }: { agent: Agent; save: Save }) {
 
 	return (
 		<div className="relative">
-			<AgentAvatar {...current} size={88} />
+			<AgentAvatar {...current} size={88} external={agent.a2a !== null} />
 			<IconButton
 				label="Change look"
 				variant="round"
@@ -430,6 +450,98 @@ function Instructions({
 						{savePending ? "Saving…" : "Save"}
 					</Button>
 				</div>
+			)}
+		</SettingsPage>
+	);
+}
+
+/** The host of `url`, which is how an address is shown in a row. */
+function hostOf(url: string) {
+	return URL.canParse(url) ? new URL(url).host : url;
+}
+
+/**
+ * What answers as the bot: one of the workspace's models, chosen from the
+ * list and saved as it is picked, or another service's agent over A2A, whose
+ * address and secret are saved together. Choosing a model for a bot on an A2A
+ * agent takes it off the agent. A saved secret is never shown; leaving the
+ * field empty keeps it, as long as the header stays the same.
+ */
+function RunsOnPage({
+	agent,
+	editable,
+	back,
+	save,
+	savePending,
+	failure,
+	done,
+}: {
+	agent: Agent;
+	editable: boolean;
+	back: React.ReactNode;
+	save: Save;
+	savePending: boolean;
+	failure: string | undefined;
+	done: () => void;
+}) {
+	const [runsOn, setRunsOn] = useState<RunsOn>(agent.a2a ? "a2a" : "model");
+	const [draft, setDraft] = useState<A2ADraft>({
+		url: agent.a2a?.url ?? "",
+		secretHeader: agent.a2a?.secretHeader ?? "",
+		secret: "",
+	});
+	const endpoint = a2aEndpointOf(draft);
+	const keepsSecret =
+		agent.a2a?.hasSecret === true && draft.secretHeader.trim() === (agent.a2a.secretHeader ?? "");
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!endpoint) return;
+		try {
+			await save({ a2a: endpoint });
+		} catch {
+			return;
+		}
+		done();
+	}
+
+	return (
+		<SettingsPage
+			back={back}
+			title="Runs on"
+			description={`What answers as ${agent.name}: one of the workspace's models, or an external agent another service runs, reached over the Agent2Agent (A2A) protocol, with its own model, instructions and tools.`}
+		>
+			{failure && <Alert>{failure}</Alert>}
+			{editable && (
+				<SettingsGroup>
+					<RunsOnControl value={runsOn} onChange={setRunsOn} />
+				</SettingsGroup>
+			)}
+			{runsOn === "model" ? (
+				<AgentModelPicker
+					agentName={agent.name}
+					model={agent.a2a ? null : agent.model}
+					canChoose={editable}
+					onChoose={(model) => {
+						void save({ model, ...(agent.a2a ? { a2a: null } : {}) }).catch(() => {});
+					}}
+				/>
+			) : editable ? (
+				<form onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
+					<A2AEndpointFields draft={draft} onChange={setDraft} keepsSecret={keepsSecret} />
+					<div className="flex justify-end">
+						<Button type="submit" disabled={!endpoint || savePending}>
+							{savePending ? "Saving…" : "Save"}
+						</Button>
+					</div>
+				</form>
+			) : (
+				<SettingsGroup>
+					<SettingsRow
+						label="External agent"
+						trailing={<SettingsValue>{agent.a2a?.url}</SettingsValue>}
+					/>
+				</SettingsGroup>
 			)}
 		</SettingsPage>
 	);

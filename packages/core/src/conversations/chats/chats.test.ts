@@ -584,6 +584,25 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
 	});
 
+	it("takes a message for an agent with no model that stands for an external agent, and starts its turn", async () => {
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ model: null, a2aUrl: "http://localhost:8462" })
+				.where(eq(agent.id, agentId)),
+		);
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+
+		const sent = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Anyone there?",
+		});
+
+		expect(sent?.threadId).toBe(current.mainThreadId);
+		expect(await runOnPostgres(runningTurns(current.mainThreadId))).toHaveLength(1);
+	});
+
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });

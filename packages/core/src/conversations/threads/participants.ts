@@ -1,5 +1,6 @@
 import type {
 	AgentColor,
+	AgentParticipant,
 	Message,
 	MessagePart,
 	MessageReaction,
@@ -39,6 +40,7 @@ export const participantColumns = {
 	agentColor: agent.color,
 	agentFace: agent.face,
 	agentShape: agent.shape,
+	agentExternal: sql<boolean>`${agent.a2aUrl} is not null`,
 };
 
 export interface ParticipantRow {
@@ -52,6 +54,8 @@ export interface ParticipantRow {
 	agentColor: AgentColor | null;
 	agentFace: schema.AgentRow["face"] | null;
 	agentShape: schema.AgentRow["shape"] | null;
+	/** Whether the agent stands for an external agent; meaningless for a person. */
+	agentExternal: boolean | null;
 }
 
 export function toParticipant(row: ParticipantRow): ThreadParticipant {
@@ -79,6 +83,7 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 			color: row.agentColor,
 			face: row.agentFace,
 			shape: row.agentShape,
+			...(row.agentExternal ? { external: true } : {}),
 		};
 	}
 	throw new Error("Thread participant has no identity");
@@ -146,8 +151,21 @@ export function toPerson(row: PersonIdentity): PersonParticipant {
 
 /** An agent's columns, for a relational query that names who wrote or joined. */
 export const agentColumns = {
-	columns: { id: true, name: true, handle: true, color: true, face: true, shape: true },
+	columns: {
+		id: true,
+		name: true,
+		handle: true,
+		color: true,
+		face: true,
+		shape: true,
+		a2aUrl: true,
+	},
 } as const;
+
+/** An agent read with {@link agentColumns}, as the API shows it. */
+export function toAgentParticipant({ a2aUrl, ...identity }: AgentIdentity): AgentParticipant {
+	return { kind: "agent", ...identity, ...(a2aUrl !== null ? { external: true as const } : {}) };
+}
 
 /** The columns and relations a relational query reads of a message a reply quotes. */
 export const quotedMessageColumns = {
@@ -220,7 +238,10 @@ export const messageRelations = {
 
 /** Who a person is, as read with {@link personColumns}. */
 export type PersonIdentity = { id: string; name: string; email: string; image: string | null };
-type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face" | "shape">;
+type AgentIdentity = Pick<
+	schema.AgentRow,
+	"id" | "name" | "handle" | "color" | "face" | "shape" | "a2aUrl"
+>;
 
 /** A message row read with `messageRelations`. */
 export interface MessageWithRelations extends schema.MessageRow {
@@ -285,6 +306,7 @@ export function authorRow(
 		agentColor: author?.color ?? null,
 		agentFace: author?.face ?? null,
 		agentShape: author?.shape ?? null,
+		agentExternal: author ? author.a2aUrl !== null : null,
 	};
 }
 
@@ -304,13 +326,14 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 		'userImage', recent.user_image,
 		'agentId', recent.agent_id, 'agentName', recent.agent_name, 'agentHandle', recent.agent_handle,
 		'agentColor', recent.agent_color, 'agentFace', recent.agent_face,
-		'agentShape', recent.agent_shape
+		'agentShape', recent.agent_shape, 'agentExternal', recent.agent_external
 	) order by recent.last_active_at desc), '[]'::json)
 	from (
 		select ${user.id} as user_id, ${user.name} as user_name, ${user.email} as user_email,
 			${user.image} as user_image,
 			${agent.id} as agent_id, ${agent.name} as agent_name, ${agent.handle} as agent_handle,
 			${agent.color} as agent_color, ${agent.face} as agent_face, ${agent.shape} as agent_shape,
+			${agent.a2aUrl} is not null as agent_external,
 			max(${message.createdAt}) as last_active_at
 		from ${message}
 		left join ${user} on ${user.id} = ${message.authorUserId}
@@ -326,7 +349,7 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 				), '-infinity'::timestamptz),
 				now() - ${RECENT_ACTIVITY_WINDOW}
 			)
-		group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+		group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 	) as recent
 )`;
 

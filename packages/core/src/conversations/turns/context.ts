@@ -32,6 +32,12 @@ export interface TurnEnvironment {
 }
 
 /**
+ * What a crew member standing for an external agent is marked with, so an
+ * agent choosing whom to ask knows that one cannot use the pod's tools.
+ */
+const EXTERNAL_CREW_NOTE = " (external agent: has its own tools, not this pod's)";
+
+/**
  * The prompt for one turn.
  *
  * Laid out for the provider's prefix cache: the system text and the history
@@ -239,7 +245,7 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 		.join(", ");
 	const crew = context.crew.map(
 		(member) =>
-			`- ${member.name} (@${member.handle})${member.description ? `: ${member.description}` : ""}`,
+			`- ${member.name} (@${member.handle})${member.description ? `: ${member.description}` : ""}${member.external ? EXTERNAL_CREW_NOTE : ""}`,
 	);
 	return [
 		`[Turn] In the thread now: ${participants}. ${whyYou(context)}`,
