@@ -83,6 +83,21 @@ describe("a pod's connections", () => {
 		]);
 	});
 
+	it("adds an HTTP endpoint as one", async () => {
+		const calls: Array<{ input: unknown; userId: string }> = [];
+		const endpoint = {
+			kind: "http",
+			name: "Alerts",
+			url: "https://alerts.example.com/v2",
+		} as const;
+		const response = await app({
+			create: (input) => Effect.as(asked(calls, input), { ...wiki, ...endpoint }),
+		}).request(root, { method: "POST", headers, body: JSON.stringify(endpoint) });
+
+		expect(response.status).toBe(201);
+		expect(calls).toEqual([{ input: { podId: POD_ID, connection: endpoint }, userId: USER_ID }]);
+	});
+
 	it("answers a change the caller may not make as forbidden", async () => {
 		const response = await app({
 			create: () => Effect.fail(new ActionForbidden({ permission: "connection.manage" })),

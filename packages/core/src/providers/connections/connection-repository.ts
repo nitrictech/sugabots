@@ -171,8 +171,9 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const oauth = input.auth === "oauth";
+					const oauth = input.kind !== "http" && input.auth === "oauth";
 					const values = {
+						kind: input.kind ?? "mcp",
 						name: input.name,
 						url: input.url,
 						authKind: oauth ? ("oauth" as const) : ("header" as const),
@@ -519,8 +520,11 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** What a test found: the server's tools, or why it could not be asked. */
-export type TestOutcome = { tools: ConnectionTool[] } | { error: UserText };
+/**
+ * What a test found: the server's tools, absent for a connection whose tools
+ * are Sugabots' own, or why it could not be asked.
+ */
+export type TestOutcome = { tools?: ConnectionTool[] } | { error: UserText };
 
 export class ConnectionNameTaken
 	extends Data.TaggedError("ConnectionNameTaken")

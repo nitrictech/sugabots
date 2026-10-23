@@ -176,7 +176,8 @@ const secretHeaderSchema = headerNameSchema.check(
 	Schema.makeFilter((name) => !isClientOwnedHeader(name), { message: "Header name is reserved" }),
 );
 
-export const newConnectionSchema = Schema.Struct({
+const newMcpConnectionSchema = Schema.Struct({
+	kind: Schema.optional(Schema.Literal("mcp")),
 	name: connectionNameSchema,
 	url: providerUrlSchema,
 	/** `oauth` to sign in through the server; the secret fields are then ignored. */
@@ -185,6 +186,18 @@ export const newConnectionSchema = Schema.Struct({
 	secretHeader: Schema.optional(secretHeaderSchema),
 	secret: Schema.optional(secretSchema),
 });
+
+/** An HTTP endpoint: requests go under `url`, with the secret, when there is one, in `secretHeader`. */
+const newHttpConnectionSchema = Schema.Struct({
+	kind: Schema.Literal("http"),
+	name: connectionNameSchema,
+	url: providerUrlSchema,
+	secretHeader: Schema.optional(secretHeaderSchema),
+	secret: Schema.optional(secretSchema),
+});
+
+/** An MCP server when `kind` is absent. */
+export const newConnectionSchema = Schema.Union([newMcpConnectionSchema, newHttpConnectionSchema]);
 
 export type NewConnection = typeof newConnectionSchema.Type;
 
