@@ -163,7 +163,7 @@ async function* run(
 		case "opencode": {
 			const exposed = await runners.loopback.expose(asked);
 			try {
-				yield* runOpencode({ ...common, sugabotsUrl: exposed?.url });
+				yield* runOpencode({ ...common, executable: agent.executable, sugabotsUrl: exposed?.url });
 			} finally {
 				exposed?.close();
 			}

@@ -1,8 +1,10 @@
+import { spawn } from "node:child_process";
 import {
 	type CanUseTool,
 	type McpSdkServerConfigWithInstance,
 	query,
 } from "@anthropic-ai/claude-agent-sdk";
+import { confined } from "./sandbox.ts";
 import { SUGABOTS_SERVER } from "./sugabots-tools.ts";
 
 /** Whether the person at this computer lets the agent use `toolName` with `input`. */
@@ -21,7 +23,8 @@ export type RunEvent = { type: "text"; text: string } | { type: "session"; id: s
  * It runs as the person at this computer, with their own Claude Code login and
  * settings; whatever those settings would ask about is asked through
  * `approve`, except Sugabots' own tools, which the server runs under the
- * pod's rules. Throws when the run fails.
+ * pod's rules. The whole program runs confined to its folder, and its shell
+ * commands in Claude Code's own sandbox inside that. Throws when the run fails.
  */
 export async function* runClaudeCode(options: {
 	agentName: string;
@@ -54,6 +57,15 @@ export async function* runClaudeCode(options: {
 			includePartialMessages: true,
 			canUseTool,
 			abortController,
+			// Sandboxed shell commands still ask: being confined is no reason to run unasked.
+			sandbox: { enabled: true, autoAllowBashIfSandboxed: false },
+			spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
+				const [program = command, ...rest] = confined([command, ...args], {
+					kind: "claude-code",
+					workingDirectory: options.workingDirectory,
+				});
+				return spawn(program, rest, { cwd, env, signal, stdio: ["pipe", "pipe", "inherit"] });
+			},
 			...(options.sugabots && { mcpServers: { [SUGABOTS_SERVER]: options.sugabots } }),
 		},
 	})) {

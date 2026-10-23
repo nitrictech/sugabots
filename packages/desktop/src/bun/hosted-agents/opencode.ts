@@ -1,24 +1,69 @@
-import { createOpencodeClient, createOpencodeServer, type Event } from "@opencode-ai/sdk/v2";
+import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2";
 import type { ApproveToolUse, RunEvent } from "./claude-code.ts";
+import { confined } from "./sandbox.ts";
+
+interface OpencodeServer {
+	url: string;
+	close: () => void;
+}
 
 /**
- * opencode, run through its own server, which this app starts once on
- * loopback (`opencode serve`) and shares between runs. It stops when this
- * process does.
+ * opencode, run through its own server (`opencode serve`) on loopback, one per
+ * folder so each is confined to its own. Started on first use and shared by
+ * that folder's runs; they stop when this process does.
  */
-let server: Promise<{ url: string; close: () => void }> | undefined;
+const servers = new Map<string, Promise<OpencodeServer>>();
 
-function opencodeServer() {
-	server ??= createOpencodeServer({ port: 0 }).catch((failure: unknown) => {
-		server = undefined;
-		throw failure;
-	});
+/** How long opencode's server has to say where it listens. */
+const STARTUP_TIMEOUT_MS = 15_000;
+
+function opencodeServer(executable: string, workingDirectory: string) {
+	let server = servers.get(workingDirectory);
+	if (!server) {
+		server = startServer(executable, workingDirectory).catch((failure: unknown) => {
+			servers.delete(workingDirectory);
+			throw failure;
+		});
+		servers.set(workingDirectory, server);
+	}
 	return server;
 }
 
+async function startServer(executable: string, workingDirectory: string): Promise<OpencodeServer> {
+	const [program = executable, ...args] = confined(
+		[executable, "serve", "--hostname=127.0.0.1", "--port=0"],
+		{ kind: "opencode", workingDirectory },
+	);
+	const child = Bun.spawn([program, ...args], {
+		cwd: workingDirectory,
+		stdout: "pipe",
+		stderr: "inherit",
+	});
+	const close = () => child.kill();
+	const reader = child.stdout.pipeThrough(new TextDecoderStream()).getReader();
+	const timeout = setTimeout(close, STARTUP_TIMEOUT_MS);
+	let output = "";
+	try {
+		while (true) {
+			const { value, done } = await reader.read();
+			if (done) throw new Error(`opencode's server stopped before it listened: ${output.trim()}`);
+			output += value;
+			const url = output.match(/opencode server listening on (https?:\/\/\S+)/)?.[1];
+			if (url) return { url, close };
+		}
+	} finally {
+		clearTimeout(timeout);
+		reader.releaseLock();
+	}
+}
+
 export function stopOpencode() {
-	void server?.then(({ close }) => close());
-	server = undefined;
+	for (const server of servers.values())
+		void server.then(
+			({ close }) => close(),
+			() => {},
+		);
+	servers.clear();
 }
 
 /** The name an MCP server's tools are prefixed with, so their permission requests can be recognised. */
@@ -30,10 +75,11 @@ const SUGABOTS_PREFIX = "sugabots";
  * computer, with their own opencode settings and providers; whatever those
  * settings would ask about is asked through `approve`, except Sugabots' own
  * tools, served at `sugabotsUrl`, which the server runs under the pod's
- * rules. Throws when the run fails.
+ * rules. Its server runs confined to the folder. Throws when the run fails.
  */
 export async function* runOpencode(options: {
 	agentName: string;
+	executable: string;
 	workingDirectory: string;
 	prompt: string;
 	sessionId: string | undefined;
@@ -41,7 +87,7 @@ export async function* runOpencode(options: {
 	sugabotsUrl: string | undefined;
 	signal: AbortSignal;
 }): AsyncGenerator<RunEvent> {
-	const { url } = await opencodeServer();
+	const { url } = await opencodeServer(options.executable, options.workingDirectory);
 	const directory = options.workingDirectory;
 	const client = createOpencodeClient({ baseUrl: url, directory });
 
