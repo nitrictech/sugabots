@@ -505,6 +505,29 @@ export class Connected {
 		);
 	}
 
+	/**
+	 * Posts a review of pull request `number`, anyone's, that only comments:
+	 * `comments` are threads on lines of its diff, and `body` is the review's
+	 * own message.
+	 */
+	reviewPullRequest(request: {
+		repository: string;
+		number: number;
+		commit: string | undefined;
+		body: string;
+		comments: readonly GitHub.ReviewComment[];
+	}) {
+		return Effect.flatMap(
+			Effect.suspend(() =>
+				GitHub.accessToken(this.http, this.app, {
+					repositoryIds: [this.idOf(request.repository)],
+					permissions: { pull_requests: "write" },
+				}),
+			),
+			({ token }) => GitHub.reviewPullRequest(this.http, token, request),
+		);
+	}
+
 	/** Runs `read` with a read-only token for the connection's repositories. */
 	read<A>(
 		read: (http: EgressHttpClient, token: string) => Effect.Effect<A, GitHub.GitHubRequestFailed>,

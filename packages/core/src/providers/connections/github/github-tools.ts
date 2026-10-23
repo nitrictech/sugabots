@@ -33,6 +33,13 @@ export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [
 		destructive: false,
 	},
 	{
+		name: "review_pull_request",
+		description:
+			"Review a pull request, with comments on lines of its diff that each start a thread.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
 		name: "list_issues",
 		description: "List a repository's issues.",
 		readOnly: true,
