@@ -55,6 +55,24 @@ describe("Routine contracts", () => {
 		).toBe("Success");
 	});
 
+	it("accepts a webhook that runs only the calls meeting its conditions", () => {
+		expect(
+			Schema.decodeUnknownResult(newRoutineSchema)({
+				name: "Incoming",
+				instructions: "Handle it.",
+				triggers: [
+					{
+						kind: "webhook",
+						filter: [
+							{ path: "action", oneOf: ["create", "update"] },
+							{ path: "data.labels.name", oneOf: ["10x"] },
+						],
+					},
+				],
+			})._tag,
+		).toBe("Success");
+	});
+
 	it.each([
 		["a header name with a space", { auth: { kind: "api_key", header: "X API Key" } }],
 		["a Basic username with a colon", { auth: { kind: "basic", username: "suga:bots" } }],
@@ -64,6 +82,9 @@ describe("Routine contracts", () => {
 		],
 		["a source nobody signs as", { auth: { kind: "shopify" } }],
 		["a blank secret", { secret: "   " }],
+		["a condition without a path", { filter: [{ path: " ", oneOf: ["create"] }] }],
+		["a condition path with an empty key", { filter: [{ path: "data..id", oneOf: ["a"] }] }],
+		["a condition accepting nothing", { filter: [{ path: "action", oneOf: [] }] }],
 	])("rejects a webhook with %s", (_, webhook) => {
 		expect(
 			Schema.decodeUnknownResult(newRoutineSchema)({
