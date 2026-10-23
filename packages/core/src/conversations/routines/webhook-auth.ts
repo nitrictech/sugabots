@@ -25,16 +25,6 @@ export type SentSecretAuth = Extract<WebhookAuth, { kind: "api_key" | "bearer" |
  */
 const SIGNED_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
 
-/** The headers callers name a delivery by, so a retry lands on the first delivery's run. */
-const DELIVERY_ID_HEADERS = [
-	"idempotency-key",
-	"linear-delivery",
-	"x-github-delivery",
-	"x-shopify-webhook-id",
-	"svix-id",
-	"webhook-id",
-];
-
 export function generateSecret(kind: WebhookAuthKind): string {
 	return `${WEBHOOK_SECRET_PREFIXES[kind]}${randomBytes(32).toString("base64url")}`;
 }
@@ -117,20 +107,32 @@ export function presentedSecret(
 }
 
 /**
- * What the delivery calls itself, if anything: a header most senders name
- * their deliveries by, else the body's `event_id` (Slack), or the `id` of a
- * body that is an event object (Stripe).
+ * What the delivery calls itself, if anything, so a retry lands on the first
+ * delivery's run. A known source names it its own way: GitHub's and Linear's
+ * header, Slack's `event_id`, or the `id` of a Stripe event. Any other
+ * sender's is in the header `deliveryIdHeader` names, with none to read when
+ * that is null or the header is missing or empty.
  */
-export function deliveryIdOf(delivery: Delivery): string | null {
-	for (const header of DELIVERY_ID_HEADERS) {
-		const value = nonEmpty(delivery.headers[header]?.trim());
-		if (value) return value;
+export function deliveryIdOf(
+	auth: WebhookAuth,
+	deliveryIdHeader: string | null,
+	{ headers, payload }: Delivery,
+): string | null {
+	switch (auth.kind) {
+		case "github":
+			return headerValue(headers, "x-github-delivery");
+		case "linear":
+			return headerValue(headers, "linear-delivery");
+		case "slack":
+			return bodyString(payload, "event_id");
+		case "stripe":
+			return bodyString(payload, "object") === "event" ? bodyString(payload, "id") : null;
+		case "hmac":
+		case "api_key":
+		case "bearer":
+		case "basic":
+			return deliveryIdHeader === null ? null : headerValue(headers, deliveryIdHeader);
 	}
-	const eventId = bodyString(delivery.payload, "event_id");
-	if (eventId) return eventId;
-	return bodyString(delivery.payload, "object") === "event"
-		? bodyString(delivery.payload, "id")
-		: null;
 }
 
 /**
@@ -199,6 +201,11 @@ function bodyString(payload: unknown, field: string): string | null {
 	if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
 	const value: unknown = Reflect.get(payload, field);
 	return typeof value === "string" && value !== "" ? value : null;
+}
+
+/** The trimmed value of the header called `name` in any case, or null when it is missing or empty. */
+function headerValue(headers: Delivery["headers"], name: string): string | null {
+	return nonEmpty(headers[name.toLowerCase()]?.trim()) ?? null;
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
