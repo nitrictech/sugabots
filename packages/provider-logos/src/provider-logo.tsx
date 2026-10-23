@@ -1,6 +1,6 @@
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { LocalAgentKind, ProviderPresetId } from "@sugabots/contracts";
 import { cn } from "cn";
-import { providerLogos } from "./provider-logos.ts";
+import { agentLogos, type ProviderLogoAsset, providerLogos } from "./provider-logos.ts";
 
 interface ProviderLogoProps {
 	preset: ProviderPresetId;
@@ -13,7 +13,15 @@ interface ProviderLogoProps {
  * dark mode where it has one. Decorative: show the provider's name beside it.
  */
 export function ProviderLogo({ preset, className }: ProviderLogoProps) {
-	const logo = providerLogos[preset];
+	return <Logo logo={providerLogos[preset]} className={className} />;
+}
+
+/** The official logo of an agent program a desktop lends. Decorative, like {@link ProviderLogo}. */
+export function AgentLogo({ kind, className }: { kind: LocalAgentKind; className?: string }) {
+	return <Logo logo={agentLogos[kind]} className={className} />;
+}
+
+function Logo({ logo, className }: { logo: ProviderLogoAsset; className?: string | undefined }) {
 	const image = cn("shrink-0 object-contain", logo.scale, className);
 	if (!logo.dark) return <img src={logo.light} alt="" className={image} />;
 	return (

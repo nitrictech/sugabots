@@ -2,7 +2,7 @@ import type { Device, LocalAgent } from "@sugabots/contracts";
 import { useState } from "react";
 import { useDevices, useForgetDevice, useStopLending, useThisDevice } from "@/lib/devices.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { LendAgentRow } from "@/shell/LendAgentRow.tsx";
+import { AgentKindIcon, LendAgentRow } from "@/shell/LendAgentRow.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -104,6 +104,7 @@ function LentAgentRow({
 }) {
 	return (
 		<SettingsRow
+			icon={<AgentKindIcon kind={agent.kind} />}
 			label={agent.name}
 			sub={agent.workingDirectory}
 			trailing={

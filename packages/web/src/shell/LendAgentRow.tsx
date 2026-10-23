@@ -1,9 +1,19 @@
-import type { Device, InstalledAgent, LocalAgent } from "@sugabots/contracts";
+import type { Device, InstalledAgent, LocalAgent, LocalAgentKind } from "@sugabots/contracts";
+import { AgentLogo } from "@sugabots/provider-logos";
 import { isApiFailure } from "@sugabots/sdk";
 import { useLendAgent } from "@/lib/devices.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { Button } from "@/ui/button.tsx";
-import { SettingsRow } from "@/ui/settings-page.tsx";
+import { SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
+
+/** The official logo of the program an agent runs on, as a row's icon. */
+export function AgentKindIcon({ kind }: { kind: LocalAgentKind }) {
+	return (
+		<SettingsRowIcon className="bg-panel">
+			<AgentLogo kind={kind} className="size-[18px]" />
+		</SettingsRowIcon>
+	);
+}
 
 /**
  * An agent program found on one of your computers, and lending it there in a
@@ -24,6 +34,7 @@ export function LendAgentRow({
 	const name = installed.version ? `${installed.name} ${installed.version}` : installed.name;
 	return (
 		<LendAgentRowView
+			kind={installed.kind}
 			name={name}
 			deviceName={device.name}
 			state={lendState(lend)}
@@ -56,12 +67,14 @@ function lendState(lend: ReturnType<typeof useLendAgent>): LendState {
 
 /** {@link LendAgentRow} as drawn, for each state. */
 export function LendAgentRowView({
+	kind,
 	name,
 	deviceName,
 	state,
 	onLend,
 	onStopWaiting,
 }: {
+	kind: LocalAgentKind;
 	name: string;
 	deviceName: string;
 	state: LendState;
@@ -70,6 +83,7 @@ export function LendAgentRowView({
 }) {
 	return (
 		<SettingsRow
+			icon={<AgentKindIcon kind={kind} />}
 			label={name}
 			sub={subOf(state, deviceName)}
 			trailing={

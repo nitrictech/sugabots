@@ -1,5 +1,5 @@
 /**
- * Model providers' official logos, shared by the app and the website.
+ * Model providers' and agent programs' official logos, shared by the app and the website.
  *
  * `ProviderLogo` uses Tailwind classes for its dark-mode switch, so an app
  * that renders it must scan this package, e.g.

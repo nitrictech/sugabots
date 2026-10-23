@@ -13,7 +13,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { LendAgentRow } from "./LendAgentRow.tsx";
+import { AgentKindIcon, LendAgentRow } from "./LendAgentRow.tsx";
 
 /** What answers as a bot: one of the workspace's models, or an external agent another service runs, over A2A. */
 export type RunsOn = "model" | "a2a";
@@ -263,6 +263,7 @@ export function DeviceAgentList({
 									onClick={() => onChoose({ deviceId: device.id, agent })}
 									className="focus-ring flex w-full min-w-0 items-center gap-3 border-border border-b px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-panel"
 								>
+									<AgentKindIcon kind={agent.kind} />
 									<span className="flex min-w-0 flex-1 flex-col gap-px">
 										<span className="truncate font-medium text-[14.5px] text-foreground">
 											{agent.name}

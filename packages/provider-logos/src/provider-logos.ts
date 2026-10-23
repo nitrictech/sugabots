@@ -1,7 +1,8 @@
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { LocalAgentKind, ProviderPresetId } from "@sugabots/contracts";
 import anthropic from "../logos/anthropic.svg";
 import anthropicDark from "../logos/anthropic-dark.svg";
 import cerebras from "../logos/cerebras.svg";
+import claudeSpark from "../logos/claude-spark.svg";
 import deepseek from "../logos/deepseek.svg";
 import fireworks from "../logos/fireworks.svg";
 import gemini from "../logos/gemini.svg";
@@ -183,5 +184,17 @@ export const providerLogos: Record<ProviderPresetId, ProviderLogoAsset> = {
 		source: "https://github.com/vllm-project/media-kit at 79b2ea5 (vLLM-Logo.svg)",
 		guidelines: "https://github.com/vllm-project/media-kit",
 		fetched: FETCHED,
+	},
+};
+
+/** The agent programs a desktop can lend, by kind: the same rules as the providers' logos. */
+export const agentLogos: Record<LocalAgentKind, ProviderLogoAsset> = {
+	"claude-code": {
+		light: claudeSpark,
+		source:
+			"https://www.anthropic.com/press-kit (zip: Anthropic logos/Claude logos/3 Claude Spark/SVG/Claude Spark - Clay.svg)",
+		guidelines: "https://www.anthropic.com/legal/trademark-guidelines",
+		fetched: "2026-10-23",
+		caution: "Anthropic's trademark guidelines ask for prior approval (marketing@anthropic.com).",
 	},
 };
