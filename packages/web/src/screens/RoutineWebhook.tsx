@@ -4,6 +4,7 @@ import {
 	WEBHOOK_SOURCES,
 	type WebhookAuth,
 	type WebhookAuthKind,
+	type WebhookCondition,
 	type WebhookHmacAlgorithm,
 	type WebhookSignatureEncoding,
 	type WebhookSource,
@@ -25,6 +26,7 @@ import {
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsControlRow, SettingsFieldLabel, SettingsGroup } from "@/ui/settings-page.tsx";
 import type { PlacedRoutine } from "./RoutineEditor.tsx";
+import { FilterGroup } from "./RoutineWebhookFilter.tsx";
 
 /*
  * How a webhook routine checks who calls it: the sender it comes from, which
@@ -119,9 +121,11 @@ export interface WebhookDraft {
 	auth: WebhookAuth;
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
+	/** What a call must meet to run it; none runs every call. */
+	filter: WebhookCondition[];
 }
 
-export const NEW_WEBHOOK: WebhookDraft = { auth: DEFAULT_WEBHOOK_AUTH, secret: "" };
+export const NEW_WEBHOOK: WebhookDraft = { auth: DEFAULT_WEBHOOK_AUTH, secret: "", filter: [] };
 
 /**
  * Whether a secret can be saved for `auth`: a source's, however long its
@@ -192,6 +196,7 @@ export function NewWebhookGroups({
 					onChange={(secret) => onChange({ ...draft, secret })}
 				/>
 			</SettingsGroup>
+			<FilterGroup filter={draft.filter} onChange={(filter) => onChange({ ...draft, filter })} />
 		</>
 	);
 }
@@ -200,18 +205,22 @@ export function NewWebhookGroups({
  * An existing webhook trigger's groups: its address and where it comes from,
  * then its auth, which saves as it changes, and its secret, under a note of
  * what a caller must send, or, while it has no secret, that nothing is asked
- * of them.
+ * of them, and its filter, which saves as it changes.
  */
 export function WebhookGroups({
 	placed,
 	triggerId,
 	auth,
+	filter,
 	onChangeAuth,
+	onChangeFilter,
 }: {
 	placed: PlacedRoutine;
 	triggerId: string;
 	auth: WebhookAuth;
+	filter: readonly WebhookCondition[];
 	onChangeAuth: (auth: WebhookAuth) => void;
+	onChangeFilter: (filter: WebhookCondition[]) => void;
 }) {
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;
@@ -251,6 +260,7 @@ export function WebhookGroups({
 					</SettingsControlRow>
 				</SettingsGroup>
 			)}
+			<FilterGroup filter={filter} onChange={onChangeFilter} />
 		</>
 	);
 }

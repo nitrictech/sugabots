@@ -345,11 +345,19 @@ export function RoutinePage({
 									placed={placed}
 									triggerId={editing.id}
 									auth={editing.auth}
+									filter={editing.filter ?? []}
 									onChangeAuth={(auth) =>
 										actions.updateTrigger.mutate({
 											...addressed,
 											triggerId: editing.id,
 											json: { kind: "webhook", auth },
+										})
+									}
+									onChangeFilter={(filter) =>
+										actions.updateTrigger.mutate({
+											...addressed,
+											triggerId: editing.id,
+											json: { kind: "webhook", filter },
 										})
 									}
 								/>
@@ -412,8 +420,8 @@ function RoutineMenu({
 
 /**
  * A copy of the routine on the same bot, paused so the two don't both run.
- * A webhook copy has its own address and a new secret, so a secret its
- * sender made has to be pasted into it again. A repository copy runs on the
+ * A webhook copy keeps its filter but has its own address and a new secret, so a
+ * secret its sender made has to be pasted into it again. A repository copy runs on the
  * same repository and events.
  */
 function copyOf(routine: Routine, siblingNames: readonly string[]): NewRoutine {
@@ -432,7 +440,11 @@ function copiedTrigger(trigger: RoutineTrigger): RoutineTriggerInput {
 		case "cron":
 			return { kind: "cron", schedule: trigger.schedule, timezone: trigger.timezone };
 		case "webhook":
-			return { kind: "webhook", auth: trigger.auth };
+			return {
+				kind: "webhook",
+				auth: trigger.auth,
+				...(trigger.filter && { filter: trigger.filter }),
+			};
 		case "github":
 			return {
 				kind: "github",
