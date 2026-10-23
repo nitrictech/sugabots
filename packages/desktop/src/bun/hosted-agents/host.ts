@@ -11,6 +11,7 @@ import {
 } from "@a2a-js/sdk/server";
 import type { LentAgent } from "../local-agents.ts";
 import { type ApproveToolUse, runClaudeCode } from "./claude-code.ts";
+import { type SugabotsTools, sugabotsMcpServer } from "./sugabots-tools.ts";
 
 /**
  * The A2A agents this computer lends, served in this process rather than on
@@ -41,6 +42,7 @@ export function startAgentHost(options: {
 	agents: ReadonlyArray<LentAgent>;
 	sessions: Sessions;
 	approve: ApproveToolUse;
+	tools: SugabotsTools;
 }): AgentHost {
 	let served = new Map<string, Served>();
 	const lend = (agents: ReadonlyArray<LentAgent>) => {
@@ -90,7 +92,10 @@ export function agentOrigin(agentId: string) {
 	return `http://${agentId}.agents.invalid`;
 }
 
-function serve(agent: LentAgent, options: { sessions: Sessions; approve: ApproveToolUse }): Served {
+function serve(
+	agent: LentAgent,
+	options: { sessions: Sessions; approve: ApproveToolUse; tools: SugabotsTools },
+): Served {
 	const origin = agentOrigin(agent.id);
 	const card: AgentCard = {
 		name: agent.name,
@@ -124,7 +129,11 @@ function serve(agent: LentAgent, options: { sessions: Sessions; approve: Approve
 /** Each message sent to `agent` is one Claude Code run, continuing its conversation's session. */
 function claudeCodeExecutor(
 	agent: LentAgent,
-	{ sessions, approve }: { sessions: Sessions; approve: ApproveToolUse },
+	{
+		sessions,
+		approve,
+		tools,
+	}: { sessions: Sessions; approve: ApproveToolUse; tools: SugabotsTools },
 ): AgentExecutor {
 	const running = new Map<string, AbortController>();
 	return {
@@ -150,6 +159,7 @@ function claudeCodeExecutor(
 					prompt: textOf(context.userMessage.parts),
 					sessionId: sessions.get(agent.id, contextId),
 					approve,
+					sugabots: await sugabotsMcpServer(tools, { agentUrl: agentOrigin(agent.id), contextId }),
 					signal: aborts.signal,
 				})) {
 					if (event.type === "session") {

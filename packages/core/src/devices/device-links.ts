@@ -6,10 +6,11 @@ import {
 	deviceToServerSchema,
 	type LocalAgent,
 	type LocalAgentKind,
+	type OfferedTool,
 	type ServerToDevice,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { Context, Data, Deferred, Effect, Layer, Option, Queue, Schema } from "effect";
+import { Context, Data, Deferred, Effect, Layer, Option, Queue, Schema, type Scope } from "effect";
 import type { Socket } from "effect/unstable/socket";
 import type { UserFacing } from "../user-message.ts";
 
@@ -44,6 +45,15 @@ export interface Interface {
 	/** Tells the device to stop lending the agent at `url`. */
 	readonly stopLending: (deviceId: string, url: string) => Effect.Effect<void, DeviceOffline>;
 	/**
+	 * Offers `toolbox` to the agent at `agentUrl` on the device, for what it
+	 * is asked in A2A context `contextId`, until the scope closes: the turn
+	 * asking it. The device can list and call those tools, and no others.
+	 */
+	readonly offerTools: (
+		asked: { deviceId: string; agentUrl: string; contextId: string },
+		toolbox: Toolbox,
+	) => Effect.Effect<void, never, Scope.Scope>;
+	/**
 	 * A `fetch` whose requests the device makes on its own computer. It
 	 * rejects while the device isn't connected, and the device refuses any
 	 * address but its agents'.
@@ -55,6 +65,35 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.sync(() => {
 	const links = new Map<string, Link>();
+	/** The toolboxes offered to each device's agents, by device then {@link askedInKey}. */
+	const toolboxes = new Map<string, Map<string, Toolbox>>();
+	const toolboxFor = (deviceId: string, asked: { agentUrl: string; contextId: string }) =>
+		toolboxes.get(deviceId)?.get(askedInKey(asked));
+
+	/** Answers what a device asks about its agents' tools, from the toolboxes offered to it. */
+	const answerToolUse = (deviceId: string, link: Link, message: ToolUse) => {
+		const toolbox = toolboxFor(deviceId, message);
+		if (message.type === "listTools") {
+			link.send({ type: "tools", id: message.id, tools: toolbox?.list() ?? [] });
+			return;
+		}
+		if (!toolbox) {
+			link.send({
+				type: "toolResult",
+				id: message.id,
+				text: "That turn has ended, so its tools are gone.",
+				isError: true,
+			});
+			return;
+		}
+		const aborts = new AbortController();
+		link.toolCalls.add(aborts);
+		void toolbox
+			.call(message.name, message.input, aborts.signal)
+			.catch((failure: unknown) => ({ text: `The tool failed: ${String(failure)}`, isError: true }))
+			.then((result) => link.send({ type: "toolResult", id: message.id, ...result }))
+			.finally(() => link.toolCalls.delete(aborts));
+	};
 	/** Numbers what is sent down links to be answered, so each answer finds its question. */
 	let questionsSent = 0;
 	const connected = (deviceId: string) => {
@@ -72,6 +111,7 @@ export const make = Effect.sync(() => {
 					agents: { lent: [], installed: [] },
 					pending: new Map(),
 					lendings: new Map(),
+					toolCalls: new Set(),
 					send: (message) => {
 						Queue.offerUnsafe(outgoing, JSON.stringify(message));
 					},
@@ -87,6 +127,7 @@ export const make = Effect.sync(() => {
 						if (links.get(deviceId) === link) links.delete(deviceId);
 						for (const request of link.pending.values()) request.fail("The device disconnected");
 						for (const answer of link.lendings.values()) answer(undefined);
+						for (const call of link.toolCalls) call.abort();
 					}),
 				);
 				const reader = yield* socket.reader;
@@ -98,7 +139,9 @@ export const make = Effect.sync(() => {
 								const message = decodeMessage(
 									typeof frame === "string" ? frame : TEXT.decode(frame),
 								);
-								if (Option.isSome(message)) receive(link, message.value);
+								if (Option.isNone(message)) continue;
+								if (isToolUse(message.value)) answerToolUse(deviceId, link, message.value);
+								else receive(link, message.value);
 							}
 						}),
 					),
@@ -132,6 +175,21 @@ export const make = Effect.sync(() => {
 
 		stopLending: (deviceId, url) =>
 			Effect.map(connected(deviceId), (link) => link.send({ type: "stopLending", url })),
+
+		offerTools: ({ deviceId, ...asked }, toolbox) =>
+			Effect.acquireRelease(
+				Effect.sync(() => {
+					const offered = toolboxes.get(deviceId) ?? new Map<string, Toolbox>();
+					offered.set(askedInKey(asked), toolbox);
+					toolboxes.set(deviceId, offered);
+				}),
+				() =>
+					Effect.sync(() => {
+						const offered = toolboxes.get(deviceId);
+						if (offered?.get(askedInKey(asked)) === toolbox) offered.delete(askedInKey(asked));
+						if (offered?.size === 0) toolboxes.delete(deviceId);
+					}),
+			),
 
 		fetchThrough: (deviceId) => async (input, init) => {
 			const link = links.get(deviceId);
@@ -201,6 +259,8 @@ interface Link {
 	readonly pending: Map<string, PendingRequest>;
 	/** Where each owner's answer to being asked to lend goes, by id: nothing when the device went. */
 	readonly lendings: Map<string, (agent: LocalAgent | null | undefined) => void>;
+	/** The tool calls its agents made that are still running, called off if it goes. */
+	readonly toolCalls: Set<AbortController>;
 	readonly send: (message: ServerToDevice) => void;
 	/** Closes it, for a newer link or for the device being forgotten. */
 	readonly end: () => void;
@@ -212,6 +272,27 @@ interface PendingRequest {
 	readonly chunk: (bytes: Uint8Array) => void;
 	readonly end: () => void;
 	readonly fail: (reason: string) => void;
+}
+
+/** Sugabots tools offered to a lent agent while a turn asks it. */
+export interface Toolbox {
+	readonly list: () => ReadonlyArray<OfferedTool>;
+	/** Runs tool `name` with `input` in the turn; a failure the agent should see is an error result. */
+	readonly call: (
+		name: string,
+		input: unknown,
+		signal: AbortSignal,
+	) => Promise<{ text: string; isError: boolean }>;
+}
+
+type ToolUse = Extract<DeviceToServer, { type: "listTools" | "callTool" }>;
+
+function isToolUse(message: DeviceToServer): message is ToolUse {
+	return message.type === "listTools" || message.type === "callTool";
+}
+
+function askedInKey({ agentUrl, contextId }: { agentUrl: string; contextId: string }) {
+	return `${agentUrl}\n${contextId}`;
 }
 
 /** A device's message, or nothing for one that isn't: a device is not trusted to send well-formed ones. */

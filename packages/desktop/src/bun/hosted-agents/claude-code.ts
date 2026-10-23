@@ -1,4 +1,9 @@
-import { type CanUseTool, query } from "@anthropic-ai/claude-agent-sdk";
+import {
+	type CanUseTool,
+	type McpSdkServerConfigWithInstance,
+	query,
+} from "@anthropic-ai/claude-agent-sdk";
+import { SUGABOTS_SERVER } from "./sugabots-tools.ts";
 
 /** Whether the person at this computer lets the agent use `toolName` with `input`. */
 export type ApproveToolUse = (request: {
@@ -15,7 +20,8 @@ export type RunEvent = { type: "text"; text: string } | { type: "session"; id: s
  * in `workingDirectory`, continuing `sessionId` when the conversation has one.
  * It runs as the person at this computer, with their own Claude Code login and
  * settings; whatever those settings would ask about is asked through
- * `approve`. Throws when the run fails.
+ * `approve`, except Sugabots' own tools, which the server runs under the
+ * pod's rules. Throws when the run fails.
  */
 export async function* runClaudeCode(options: {
 	agentName: string;
@@ -24,11 +30,14 @@ export async function* runClaudeCode(options: {
 	prompt: string;
 	sessionId: string | undefined;
 	approve: ApproveToolUse;
+	/** The turn's Sugabots tools, when it offers any. */
+	sugabots: McpSdkServerConfigWithInstance | undefined;
 	signal: AbortSignal;
 }): AsyncGenerator<RunEvent> {
 	const abortController = new AbortController();
 	options.signal.addEventListener("abort", () => abortController.abort(), { once: true });
 	const canUseTool: CanUseTool = async (toolName, input) =>
+		toolName.startsWith(`mcp__${SUGABOTS_SERVER}__`) ||
 		(await options.approve({ agentName: options.agentName, toolName, input }))
 			? { behavior: "allow", updatedInput: input }
 			: { behavior: "deny", message: "The person at this computer didn't allow it." };
@@ -45,6 +54,7 @@ export async function* runClaudeCode(options: {
 			includePartialMessages: true,
 			canUseTool,
 			abortController,
+			...(options.sugabots && { mcpServers: { [SUGABOTS_SERVER]: options.sugabots } }),
 		},
 	})) {
 		if (!sessionAnnounced && message.session_id) {

@@ -11,6 +11,7 @@ export const installedClaudeCode: InstalledAgent = {
 /** Claude Code, lent in the sugabots checkout. */
 export const lentInSugabots: LocalAgent = {
 	url: "http://0199a3a0-0000-7000-8000-0000000000a1.agents.invalid",
+	kind: "claude-code",
 	name: "Claude Code in sugabots",
 	description: "Claude Code, working in /Users/tim/Code/sugabots on this computer.",
 	workingDirectory: "/Users/tim/Code/sugabots",
@@ -19,6 +20,7 @@ export const lentInSugabots: LocalAgent = {
 /** Claude Code, lent in the docs checkout. */
 export const lentInDocs: LocalAgent = {
 	url: "http://0199a3a0-0000-7000-8000-0000000000a2.agents.invalid",
+	kind: "claude-code",
 	name: "Claude Code in docs",
 	description: "Claude Code, working in /Users/tim/Code/docs on this computer.",
 	workingDirectory: "/Users/tim/Code/docs",

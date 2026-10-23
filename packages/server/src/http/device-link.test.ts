@@ -18,6 +18,7 @@ const DEVICE_ID = "0199a3a0-0000-7000-8000-0000000000d1";
 const TOKEN = "device-token";
 const AGENT = {
 	url: "http://agent.agents.invalid",
+	kind: "claude-code" as const,
 	name: "Claude Code in notes",
 	description: null,
 	workingDirectory: "/home/sam/notes",
@@ -184,6 +185,64 @@ describe("a device's link", () => {
 		await until(() => device.received.filter(({ type }) => type === "lend").length === 3);
 		device.socket.close();
 		expect((await abandoned)._tag).toBe("DeviceOffline");
+		await until(() => links.agents(DEVICE_ID) === undefined);
+	});
+
+	it("offers a turn's tools to the agent it asks, only while the turn runs", async () => {
+		const device = await connectDevice();
+		const asked = { agentUrl: AGENT.url, contextId: "thread-1" };
+		const echo = {
+			name: "echo",
+			description: "Says it back",
+			inputSchema: { type: "object" },
+		};
+		const turn = await Effect.runPromise(Scope.make());
+		await Effect.runPromise(
+			links
+				.offerTools(
+					{ deviceId: DEVICE_ID, ...asked },
+					{
+						list: () => [echo],
+						call: async (name, input) => ({
+							text: `${name}: ${JSON.stringify(input)}`,
+							isError: false,
+						}),
+					},
+				)
+				.pipe(Scope.provide(turn)),
+		);
+		const answerTo = async (message: DeviceToServer) => {
+			const before = device.received.length;
+			device.send(message);
+			await until(() => device.received.length > before);
+			return device.received.at(-1);
+		};
+
+		expect(await answerTo({ type: "listTools", id: "a", ...asked })).toEqual({
+			type: "tools",
+			id: "a",
+			tools: [echo],
+		});
+		expect(await answerTo({ type: "listTools", id: "b", ...asked, contextId: "thread-2" })).toEqual(
+			{
+				type: "tools",
+				id: "b",
+				tools: [],
+			},
+		);
+		expect(
+			await answerTo({ type: "callTool", id: "c", ...asked, name: "echo", input: { said: "hi" } }),
+		).toEqual({ type: "toolResult", id: "c", text: 'echo: {"said":"hi"}', isError: false });
+
+		await Effect.runPromise(Scope.close(turn, Exit.void));
+		expect(
+			await answerTo({ type: "callTool", id: "d", ...asked, name: "echo", input: {} }),
+		).toMatchObject({
+			type: "toolResult",
+			id: "d",
+			isError: true,
+		});
+		device.socket.close();
 		await until(() => links.agents(DEVICE_ID) === undefined);
 	});
 });

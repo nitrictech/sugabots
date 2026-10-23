@@ -7,6 +7,7 @@ import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import { Ids } from "../../ids/ids.ts";
 import { A2A } from "../../providers/a2a/a2a.ts";
 import { Models } from "../../providers/models/models.ts";
@@ -751,6 +752,7 @@ function segmentWith(given: Given) {
 			Layer.mergeAll(
 				Layer.succeed(Models.Service, given.model),
 				unimplemented(A2A.Service, {}),
+				unimplemented(DeviceLinks.Service, {}),
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
 				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),

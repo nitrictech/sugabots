@@ -9,6 +9,7 @@ import {
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Schema } from "effect";
 import { type AgentHost, agentOrigin } from "./hosted-agents/host.ts";
+import type { SugabotsTools } from "./hosted-agents/sugabots-tools.ts";
 import type { LentAgent } from "./local-agents.ts";
 
 /**
@@ -19,7 +20,7 @@ import type { LentAgent } from "./local-agents.ts";
  * or its network. The server can also ask for an agent to be lent, which
  * only the person at this computer can agree to, through `askToLend`.
  */
-export interface DeviceLink {
+export interface DeviceLink extends SugabotsTools {
 	/** Replaces the agents lent, telling the server if it's connected. */
 	readonly lend: (agents: ReadonlyArray<LentAgent>) => void;
 	/** Closes the link for good and abandons its requests. */
@@ -58,6 +59,16 @@ export function startDeviceLink(options: {
 	let retryMs = FIRST_RETRY_MS;
 	let retry: ReturnType<typeof setTimeout> | undefined;
 	const inFlight = new Map<string, AbortController>();
+	/** What this end asked the server about tools, waiting for answers, by id. */
+	const asked = new Map<string, (answer: ToolAnswer | undefined) => void>();
+	let questionsAsked = 0;
+	const ask = (question: (id: string) => DeviceToServer) =>
+		new Promise<ToolAnswer | undefined>((resolve) => {
+			if (socket?.readyState !== WebSocket.OPEN) return resolve(undefined);
+			const id = String(++questionsAsked);
+			asked.set(id, resolve);
+			send(question(id));
+		});
 
 	const send = (message: DeviceToServer) => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -73,6 +84,8 @@ export function startDeviceLink(options: {
 	const abandonRequests = () => {
 		for (const controller of inFlight.values()) controller.abort();
 		inFlight.clear();
+		for (const answer of asked.values()) answer(undefined);
+		asked.clear();
 	};
 
 	const connect = () => {
@@ -112,6 +125,11 @@ export function startDeviceLink(options: {
 			);
 			return;
 		}
+		if (message.type === "tools" || message.type === "toolResult") {
+			asked.get(message.id)?.(message);
+			asked.delete(message.id);
+			return;
+		}
 		if (message.type === "hello") {
 			options.identified(message.deviceId);
 			return;
@@ -130,6 +148,16 @@ export function startDeviceLink(options: {
 	connect();
 
 	return {
+		list: async (where) => {
+			const answer = await ask((id) => ({ type: "listTools", id, ...where }));
+			return answer?.type === "tools" ? answer.tools : [];
+		},
+		call: async (where, name, input) => {
+			const answer = await ask((id) => ({ type: "callTool", id, ...where, name, input }));
+			return answer?.type === "toolResult"
+				? { text: answer.text, isError: answer.isError }
+				: { text: "Sugabots couldn't be reached, so the tool didn't run.", isError: true };
+		},
 		lend: (lent) => {
 			agents = lent;
 			sendAgents();
@@ -144,11 +172,13 @@ export function startDeviceLink(options: {
 }
 
 /** A lent agent as the server knows it: by the address its requests come to. */
-function toLocalAgent({ id, name, description, workingDirectory }: LentAgent) {
-	return { url: agentOrigin(id), name, description, workingDirectory };
+function toLocalAgent({ id, kind, name, description, workingDirectory }: LentAgent) {
+	return { url: agentOrigin(id), kind, name, description, workingDirectory };
 }
 
 type RelayedRequest = Extract<ServerToDevice, { type: "request" }>;
+
+type ToolAnswer = Extract<ServerToDevice, { type: "tools" | "toolResult" }>;
 
 /** Answers `request` with the agent host, and streams its response back as it's written. */
 export async function relay(

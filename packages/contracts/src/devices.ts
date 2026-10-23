@@ -29,9 +29,15 @@ export const DESKTOP_DEVICE_GLOBAL = "sugabotsDesktopDevice";
 /** The web app's page where a signed-in person approves a pairing. */
 export const DEVICE_PAIRING_PAGE = "/pair-device";
 
+/** The kinds of agent a desktop knows how to host. */
+export const localAgentKindSchema = Schema.Literals(["claude-code"]);
+
+export type LocalAgentKind = typeof localAgentKindSchema.Type;
+
 /** An agent a desktop lends: the address it answers at through the device, and what it is. */
 export const localAgentSchema = Schema.Struct({
 	url: Schema.String,
+	kind: localAgentKindSchema,
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	/** The folder on the computer it works in. */
@@ -39,11 +45,6 @@ export const localAgentSchema = Schema.Struct({
 });
 
 export type LocalAgent = typeof localAgentSchema.Type;
-
-/** The kinds of agent a desktop knows how to host. */
-export const localAgentKindSchema = Schema.Literals(["claude-code"]);
-
-export type LocalAgentKind = typeof localAgentKindSchema.Type;
 
 /** An agent program found on the computer, which the desktop can lend in a folder. */
 export const installedAgentSchema = Schema.Struct({
@@ -101,6 +102,19 @@ export const pendingDevicePairingSchema = Schema.Struct({
 
 export type PendingDevicePairing = typeof pendingDevicePairingSchema.Type;
 
+/** A Sugabots tool offered to a lent agent while it answers a turn. */
+export const offeredToolSchema = Schema.Struct({
+	name: Schema.String,
+	description: Schema.String,
+	/** Its input, as JSON Schema. */
+	inputSchema: Schema.Unknown,
+});
+
+export type OfferedTool = typeof offeredToolSchema.Type;
+
+/** Which turn a lent agent's tool use belongs to: its address, and the A2A context it was asked in. */
+const askedInSchema = { agentUrl: Schema.String, contextId: Schema.String };
+
 /** A header and its value, in the order sent. */
 const headersSchema = Schema.Array(Schema.Tuple([Schema.String, Schema.String]));
 
@@ -127,6 +141,19 @@ export const serverToDeviceSchema = Schema.Union([
 	/** Asks the owner to lend an agent of `kind`; answered by "lent" with the same id. */
 	Schema.Struct({ type: Schema.Literal("lend"), id: Schema.String, kind: localAgentKindSchema }),
 	Schema.Struct({ type: Schema.Literal("stopLending"), url: Schema.String }),
+	/** The answer to "listTools": none when no turn is asking that agent in that context. */
+	Schema.Struct({
+		type: Schema.Literal("tools"),
+		id: Schema.String,
+		tools: Schema.Array(offeredToolSchema),
+	}),
+	/** The answer to "callTool": what the tool said, as text. */
+	Schema.Struct({
+		type: Schema.Literal("toolResult"),
+		id: Schema.String,
+		text: Schema.String,
+		isError: Schema.Boolean,
+	}),
 ]);
 
 export type ServerToDevice = typeof serverToDeviceSchema.Type;
@@ -151,6 +178,16 @@ export const deviceToServerSchema = Schema.Union([
 	}),
 	Schema.Struct({ type: Schema.Literal("body"), id: Schema.String, chunk: bytesSchema }),
 	Schema.Struct({ type: Schema.Literal("end"), id: Schema.String }),
+	/** Which Sugabots tools the turn asking this agent, in this context, offers it. */
+	Schema.Struct({ type: Schema.Literal("listTools"), id: Schema.String, ...askedInSchema }),
+	/** Calls one of them; the server runs it in that turn. */
+	Schema.Struct({
+		type: Schema.Literal("callTool"),
+		id: Schema.String,
+		...askedInSchema,
+		name: Schema.String,
+		input: Schema.Unknown,
+	}),
 	Schema.Struct({ type: Schema.Literal("failed"), id: Schema.String, reason: Schema.String }),
 ]);
 

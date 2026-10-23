@@ -190,6 +190,13 @@ const sessions = await loadSessions();
 const agentHost = startAgentHost({
 	agents: await loadAgents(),
 	approve: approveToolUse,
+	// Through whichever link is open when a run asks.
+	tools: {
+		list: (asked) => deviceLink?.list(asked) ?? Promise.resolve([]),
+		call: (asked, name, input) =>
+			deviceLink?.call(asked, name, input) ??
+			Promise.resolve({ text: "This computer isn't connected to Sugabots.", isError: true }),
+	},
 	sessions: {
 		get: (agentId, contextId) => sessions[agentId]?.[contextId],
 		set: (agentId, contextId, sessionId) => {

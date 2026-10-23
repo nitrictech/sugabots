@@ -19,6 +19,7 @@ import {
 import { Artifacts } from "../../artifacts/artifacts.ts";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import { Ids } from "../../ids/ids.ts";
 import { A2A } from "../../providers/a2a/a2a.ts";
 import { Models } from "../../providers/models/models.ts";
@@ -34,6 +35,7 @@ import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
+import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
 import {
 	callToolApproval,
 	findApprovalTarget,
@@ -41,6 +43,7 @@ import {
 } from "../tools/tool-search/tool.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
+import { type AsksFirst, deviceToolbox } from "./device-toolbox.ts";
 import {
 	type PreparedTurn,
 	type RunsOn,
@@ -85,6 +88,7 @@ const TURN_MODEL_CALLS = 100;
 type SegmentServices =
 	| Models.Service
 	| A2A.Service
+	| DeviceLinks.Service
 	| BuiltInTools.Service
 	| SandboxTools.Service
 	| ConnectionTools.Service
@@ -447,7 +451,8 @@ function runsOnDescription(runsOn: RunsOn) {
  * The reply from another service's agent, over A2A. It is sent what was said
  * since it last spoke, as one message naming each speaker, in the A2A
  * conversation that is this thread: it keeps its own history of the rest, and
- * runs its own tools, so it is offered none of ours.
+ * runs its own tools. An agent lent from somebody's computer is also offered
+ * ours, through the device, for as long as the turn runs.
  */
 const a2aReply = (
 	prepared: PreparedTurn,
@@ -458,6 +463,29 @@ const a2aReply = (
 	Effect.gen(function* () {
 		const a2a = yield* A2A.Service;
 		const events = yield* EventBus.Service;
+		if (endpoint.deviceId !== null) {
+			const offered = yield* turnTools(prepared, {
+				acceptsImages: false,
+				reply,
+				saveReply,
+				signal: yield* Effect.abortSignal,
+			});
+			const kept = Object.fromEntries(
+				Object.entries(offered.tools).filter(([key]) => !notForDeviceAgents(offered, key)),
+			);
+			yield* (yield* DeviceLinks.Service).offerTools(
+				{
+					deviceId: endpoint.deviceId,
+					agentUrl: endpoint.url,
+					contextId: prepared.context.thread.id,
+				},
+				yield* deviceToolbox({
+					tools: kept,
+					asksFirst: offered.asksFirst,
+					callIdPrefix: prepared.turnId,
+				}),
+			);
+		}
 		const answer = yield* a2a.send({
 			endpoint,
 			contextId: prepared.context.thread.id,
@@ -469,6 +497,21 @@ const a2aReply = (
 		if ((yield* Ref.get(reply)).content.trim() === "") return yield* new ReplyWithoutAnswer();
 		return { kind: "completed" as const, contextTokens: undefined };
 	});
+
+/**
+ * Tools a lent agent isn't offered: the sandbox's, since it has its own
+ * computer, and saving instructions, since it has no prompt of ours.
+ */
+function notForDeviceAgents(
+	offered: { sandbox: { tools: object; requests: object } },
+	key: string,
+) {
+	return (
+		key in offered.sandbox.tools ||
+		key in offered.sandbox.requests ||
+		key === SAVE_INSTRUCTIONS_TOOL
+	);
+}
 
 /** The thread's complete messages after `agentId`'s last, each with who said it. */
 function sinceLastSpoke(messages: readonly Message[], agentId: string): string {
@@ -484,16 +527,22 @@ function sinceLastSpoke(messages: readonly Message[], agentId: string): string {
 		.join("\n\n");
 }
 
-/** The reply from one of the workspace's models, with the tools the turn offers it. */
-const modelReply = (
+/**
+ * The tools a turn offers: the workspace's built-ins, the pod's sandbox and
+ * connections, and Sugabots' own, each recorded as a tool call on the reply.
+ * The connections' sessions close with the scope. A resumed segment's approved
+ * calls must still name the tools they were approved for.
+ */
+const turnTools = (
 	prepared: PreparedTurn,
-	runsOn: Extract<RunsOn, { kind: "model" }>,
-	reply: Ref.Ref<ReplyDraft>,
-	saveReply: Effect.Effect<void, never, Database>,
+	options: {
+		acceptsImages: boolean;
+		reply: Ref.Ref<ReplyDraft>;
+		saveReply: Effect.Effect<void, never, Database>;
+		signal: AbortSignal;
+	},
 ) =>
 	Effect.gen(function* () {
-		const model = yield* Models.Service;
-		const events = yield* EventBus.Service;
 		const builtInTools = yield* BuiltInTools.Service;
 		const connectionTools = yield* ConnectionTools.Service;
 		const sandboxTools = yield* SandboxTools.Service;
@@ -505,12 +554,11 @@ const modelReply = (
 		const agents = yield* AgentAdministration.Service;
 		const files = yield* ThreadFiles.Service;
 		const routines = yield* BotRoutines.Service;
-		const signal = yield* Effect.abortSignal;
+		const events = yield* EventBus.Service;
 
 		// A tool runs inside the SDK as a promise, so it needs a way back to
 		// this runtime's database.
 		const context = yield* Effect.context<Database>();
-		const now = yield* DateTime.nowAsDate;
 		const offeredBuiltIns = yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId);
 		const builtIn = {
 			tools: offeredBuiltIns.tools,
@@ -527,7 +575,7 @@ const modelReply = (
 			turnId: prepared.turnId,
 			threadId: prepared.context.thread.id,
 			agentId: prepared.context.agent.id,
-			acceptsImages: runsOn.acceptsImages,
+			acceptsImages: options.acceptsImages,
 			// A chat serves the files in its own thread, so only there can people be shown one.
 			...(prepared.context.thread.type === "chat" && {
 				attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
@@ -562,7 +610,7 @@ const modelReply = (
 			}
 			approvalBoundTools.add(binding.tool);
 		}
-		const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
+		const asksFirst: AsksFirst = {
 			...callToolApproval(connections.tools),
 			// A request refused outright runs at once, to be recorded as refused.
 			...Object.fromEntries(
@@ -575,6 +623,7 @@ const modelReply = (
 				]),
 			),
 		};
+		const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = asksFirst;
 		const { tools, catalog } = toolsForTurn(prepared, {
 			collaborations,
 			artifacts,
@@ -590,26 +639,48 @@ const modelReply = (
 			bus: events,
 			run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
 			reply: {
-				length: () => Ref.getUnsafe(reply).content.length,
+				length: () => Ref.getUnsafe(options.reply).content.length,
 				noteCollaboration: (collaboration) =>
-					Ref.update(reply, (draft) => ({
+					Ref.update(options.reply, (draft) => ({
 						...draft,
 						collaborations: [...draft.collaborations, collaboration],
-					})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
+					})).pipe(Effect.andThen(Effect.provideContext(options.saveReply, context))),
 				noteToolCall: ({ id, atOffset }) =>
-					Ref.update(reply, (draft) => ({
+					Ref.update(options.reply, (draft) => ({
 						...draft,
 						toolCalls: draft.toolCalls.some((call) => call.id === id)
 							? draft.toolCalls
 							: [...draft.toolCalls, { id, atOffset }],
-					})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
+					})).pipe(Effect.andThen(Effect.provideContext(options.saveReply, context))),
 				markActed: () =>
-					Ref.update(reply, (draft) => ({ ...draft, acted: true })).pipe(
-						Effect.andThen(Effect.provideContext(saveReply, context)),
+					Ref.update(options.reply, (draft) => ({ ...draft, acted: true })).pipe(
+						Effect.andThen(Effect.provideContext(options.saveReply, context)),
 					),
 			},
-			signal,
+			signal: options.signal,
 		});
+		return { builtIn, sandbox, connections, tools, catalog, toolApproval, asksFirst };
+	});
+
+/** The reply from one of the workspace's models, with the tools the turn offers it. */
+const modelReply = (
+	prepared: PreparedTurn,
+	runsOn: Extract<RunsOn, { kind: "model" }>,
+	reply: Ref.Ref<ReplyDraft>,
+	saveReply: Effect.Effect<void, never, Database>,
+) =>
+	Effect.gen(function* () {
+		const model = yield* Models.Service;
+		const events = yield* EventBus.Service;
+		const turns = yield* TurnRepository.Service;
+		const approvals = yield* ApprovedToolCalls.Service;
+		const files = yield* ThreadFiles.Service;
+		const signal = yield* Effect.abortSignal;
+		const now = yield* DateTime.nowAsDate;
+		const { builtIn, sandbox, connections, tools, catalog, toolApproval } = yield* turnTools(
+			prepared,
+			{ acceptsImages: runsOn.acceptsImages, reply, saveReply, signal },
+		);
 
 		const environment: TurnEnvironment = {
 			now,
