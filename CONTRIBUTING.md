@@ -15,6 +15,28 @@ bun run db:studio       # inspect the database with Drizzle Studio
 bun run build:sandbox   # build the sandbox image, ghcr.io/nitrictech/sugabots-sandbox:latest
 ```
 
+Run tests with `bun run test`, never `bun test`: Bun's own runner skips
+`vitest.config.ts`, so the tests write to the development database instead of
+one of their own.
+
+### Run a branch beside main
+
+Each `git worktree` can run its own copy of Sugabots, with its own database and
+URLs, while the main checkout keeps running:
+
+```sh
+git worktree add ../sugabots-fix-ui -b fix-ui
+cd ../sugabots-fix-ui && bun install
+bun run db:branch         # copy the main checkout's database, migrate it, point .env at it
+bun run dev               # https://fix-ui.sugabots.localhost
+bun run db:branch reset   # start over from a fresh copy of the main checkout's database
+bun run db:branch prune   # drop databases of branches that no longer exist
+```
+
+The copy takes under a second for a small database, and is a copy-on-write
+clone on btrfs or XFS. Run `bun run db:branch` again if the Portless proxy
+moves to another port, since the URLs in `.env` include it.
+
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing
 lines in `.env` (see `.env.example`). For local development,
 [motel](https://github.com/kitlangton/motel#readme) is one easy option.
