@@ -6,7 +6,9 @@ description: Plug apps like Linear and Notion into a pod, so its bots can work w
 A connection links a pod to an app through the
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP). Once it's
 connected, every bot in the pod can use the app's tools, with the
-[approval](/docs/tools-and-approvals#tools-from-connections) you choose.
+[approval](/docs/tools-and-approvals#tools-from-connections) you choose. A
+connection can also be an [HTTP endpoint](#http-endpoints): a web API that bots
+send requests to.
 
 Admins add and manage connections. Members and viewers can see which ones a pod
 has.
@@ -46,6 +48,36 @@ Choose **Something else**, then **Connect by URL**, and fill in:
 Once Sugabots has found a connection's tools, each one starts at an
 [approval](/docs/tools-and-approvals#tools-from-connections) that suits it, and
 you can change it from the pod's settings.
+
+## HTTP endpoints
+
+An HTTP endpoint lets bots call a web API that isn't an MCP server. Choose
+**Something else**, then **HTTP endpoint**, and fill in:
+
+- **Address**: the API's base URL, such as `https://api.example.com/v1`.
+  Requests only go to paths under it.
+- **Sign in with**: **Token** sends `Authorization: Bearer <token>`, and
+  **Header** sends a secret in the header you name. Leave it empty for an API
+  that needs no credential.
+
+Each endpoint has one tool per method, named like `alerts__get`: `get`,
+`post`, `put`, `patch` and `delete`. A bot gives a path, query parameters,
+headers and, except for `get` and `delete`, a body. It gets back the status,
+the `content-type`, `location`, `retry-after` and `x-request-id` headers, and
+up to 5 MB of body. Redirects come back to the bot and aren't followed.
+
+Bots never see the secret. Sugabots adds it after the bot has written the
+request, refuses a request that sets that header itself, and replaces the
+secret with `[credential]` wherever the API sends it back. A bot can't send it
+to another address.
+
+The tools start with `get` on **Allow**, `delete` on **Off**, and the others on
+**Ask**. Set `post` to **Allow** for bots that should send without waiting for
+a person, such as from a [routine](/docs/routines).
+
+**Check connection** checks the address against the
+[network settings](/docs/configuration#network) again. It sends nothing to the
+API, so a wrong secret shows up only when a bot first uses it.
 
 ## Look after it
 
