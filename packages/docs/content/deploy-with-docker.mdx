@@ -147,6 +147,46 @@ Either way, the service needs these settings:
 
 See the [configuration reference](/docs/configuration) for what each does.
 
+## Files on a volume
+
+Sugabots keeps files in the database unless told otherwise. There, every file
+adds to the database and its backups, and each one is held in memory while it's
+saved. To keep them on a volume instead, give the `sugabots` service these
+settings and a `files` volume in `compose.yml`:
+
+```yaml title="compose.yml"
+services:
+  sugabots:
+    environment:
+      BLOB_STORE_PROVIDER: filesystem
+      BLOB_STORE_FILESYSTEM_ROOT: /data/files
+    volumes:
+      - files:/data/files
+
+volumes:
+  postgres_data:
+  files:
+```
+
+Choose before any files are kept. Files already in the database stay there,
+and Sugabots can't read them once this changes.
+
+To keep files in a folder on the server rather than a Docker volume, mount the
+folder at `/data/files` instead, and give it to the user Sugabots runs as:
+
+```sh
+sudo mkdir -p /srv/sugabots/files
+sudo chown 1000:1000 /srv/sugabots/files
+```
+
+```yaml title="compose.yml"
+    volumes:
+      - /srv/sugabots/files:/data/files
+```
+
+On a hosting platform, attach a persistent disk at `/data/files` and set the
+same two settings. Without one, keep the default.
+
 ## Email
 
 Sugabots sends email for invites and address verification. Without a provider,
@@ -230,6 +270,14 @@ docker compose start sugabots
 This deletes whatever is in the database before loading the backup. If the
 backup is from an older version, Sugabots applies the newer migrations when it
 starts.
+
+If you keep [files on a volume](#files-on-a-volume), back it up at the same
+time as the database, and restore the two together: the database lists the
+files, and the volume holds them. To write the volume to a file:
+
+```sh
+docker run --rm -v sugabots_files:/data/files -v "$PWD":/backup alpine   tar czf /backup/sugabots-files.tar.gz -C /data/files .
+```
 
 On a hosting platform, use the platform's database backups, and keep a copy of
 the two keys.

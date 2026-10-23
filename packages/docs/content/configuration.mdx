@@ -61,11 +61,11 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
 ## File storage
 
-| Variable                     | Default                   | Description                                                                                                                                                                                      |
-| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `BLOB_STORE_PROVIDER`        | `postgres`                | Where files are kept, such as tool results too large to hand a model whole. `postgres` keeps them in the database, up to 100 MiB each. `filesystem` keeps them on disk, for a single server. |
-| `BLOB_STORE_FILESYSTEM_ROOT` | Required for `filesystem` | The directory files are kept under, such as a mounted volume. Back it up with the database.                                                                                                     |
-| `THREAD_FILE_MAX_BYTES`      | The blob store's limit    | The largest file a thread keeps, in bytes, when lower than what the blob store keeps.                                                                                                           |
+| Variable                     | Default                   | Description                                                                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BLOB_STORE_PROVIDER`        | `postgres`                | Where files are kept, such as tool results too large to hand a model whole. `postgres` keeps them in the database, up to 100 MiB each. `filesystem` keeps them on disk, for a single server. Choose before any files are kept: changing it doesn't move them.    |
+| `BLOB_STORE_FILESYSTEM_ROOT` | Required for `filesystem` | The directory files are kept under, such as a mounted volume. The Docker image has `/data/files` ready for one; [another directory](/docs/deploy-with-docker#files-on-a-volume) must be writable by the user it runs as, uid 1000. Back it up with the database. |
+| `THREAD_FILE_MAX_BYTES`      | The blob store's limit    | The largest file a thread keeps, in bytes, when lower than what the blob store keeps.                                                                                                                                                                            |
 
 ## Web app
 

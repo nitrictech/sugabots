@@ -63,6 +63,10 @@ ARG SUGABOTS_VERSION SUGABOTS_COMMIT
 ENV SUGABOTS_VERSION=$SUGABOTS_VERSION \
     SUGABOTS_COMMIT=$SUGABOTS_COMMIT
 
+# Where the filesystem blob store keeps files when it is chosen. Made here so a
+# volume mounted on it starts out writable by the app's user.
+RUN mkdir -p /data/files && chown node:node /data/files
+
 USER node
 EXPOSE 3000
 
