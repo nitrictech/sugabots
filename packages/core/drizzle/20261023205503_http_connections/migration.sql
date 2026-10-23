@@ -1,0 +1,2 @@
+ALTER TABLE "connection" ADD CONSTRAINT "connection_http_auth_check" CHECK ("kind" <> 'http' or "auth_kind" = 'header');--> statement-breakpoint
+ALTER TABLE "connection" DROP CONSTRAINT "connection_kind_check", ADD CONSTRAINT "connection_kind_check" CHECK ("kind" in ('mcp', 'github', 'http'));

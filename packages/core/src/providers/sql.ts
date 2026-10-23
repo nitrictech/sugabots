@@ -142,8 +142,9 @@ export type SearchProviderRow = typeof searchProvider.$inferSelect;
 
 /**
  * A service a pod owner has connected every agent in that pod to, by `kind`:
- * an MCP server at `url`, or the pod's own GitHub App, whose tools are
- * Sugabots' own, on the repositories in its `settings`.
+ * an MCP server at `url`; the pod's own GitHub App, whose tools are
+ * Sugabots' own, on the repositories in its `settings`; or an HTTP endpoint,
+ * whose requests stay under `url` and carry the header secret, if any.
  * A pod has at most one GitHub connection, since its sandbox can be signed in
  * to only one account there.
  *
@@ -208,7 +209,11 @@ export const connection = pgTable(
 		uniqueIndex("connection_id_pod_id_idx").on(table.id, table.podId),
 		uniqueIndex("connection_oauth_state_idx").on(table.oauthState),
 		uniqueIndex("connection_github_pod_idx").on(table.podId).where(sql`${table.kind} = 'github'`),
-		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github')`),
+		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github', 'http')`),
+		check(
+			"connection_http_auth_check",
+			sql`${table.kind} <> 'http' or ${table.authKind} = 'header'`,
+		),
 		check(
 			"connection_settings_kind_check",
 			sql`(${table.kind} = 'github') = (${table.settings} is not null)
