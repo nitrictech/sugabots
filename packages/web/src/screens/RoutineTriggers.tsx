@@ -85,6 +85,7 @@ export function triggerDraftOf(trigger: RoutineTriggerInput): TriggerDraft {
 					auth: trigger.auth ?? NEW_WEBHOOK.auth,
 					deliveryIdHeader: trigger.deliveryIdHeader,
 					secret: trigger.secret ?? "",
+					filter: trigger.filter ?? [],
 				},
 			};
 		case "github":
@@ -114,7 +115,7 @@ export function triggerInputOf(
 					}
 				: { notReady: PICK_A_DAY_NOTE };
 		case "webhook": {
-			const { auth, deliveryIdHeader, secret } = draft.webhook;
+			const { auth, deliveryIdHeader, secret, filter } = draft.webhook;
 			if (!secretReady(auth, secret)) return { notReady: SECRET_TOO_SHORT_NOTE };
 			const trimmed = secret.trim();
 			return {
@@ -123,6 +124,7 @@ export function triggerInputOf(
 					auth,
 					deliveryIdHeader,
 					secret: trimmed === "" ? null : trimmed,
+					filter,
 				},
 			};
 		}
