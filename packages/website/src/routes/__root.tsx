@@ -1,3 +1,4 @@
+import rubikUrl from "@fontsource-variable/rubik/files/rubik-latin-wght-normal.woff2?url";
 import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
@@ -27,6 +28,14 @@ export const Route = createRootRoute({
 			links: [
 				{ rel: "canonical", href: url },
 				{ rel: "stylesheet", href: stylesUrl },
+				// Fetched with the stylesheet rather than after it, so headings don't re-wrap when it arrives.
+				{
+					rel: "preload",
+					href: rubikUrl,
+					as: "font",
+					type: "font/woff2",
+					crossOrigin: "anonymous",
+				},
 				{ rel: "icon", type: "image/svg+xml", href: logoUrl },
 			],
 		};
@@ -46,7 +55,8 @@ function RootDocument({ children }: { children: ReactNode }) {
 	useEffect(startAnalytics, []);
 
 	return (
-		<html lang="en">
+		// The landing page's head script marks the visitor's system on it before React loads.
+		<html lang="en" suppressHydrationWarning>
 			<head>
 				<HeadContent />
 			</head>

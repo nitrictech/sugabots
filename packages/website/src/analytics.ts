@@ -26,15 +26,10 @@ export function startAnalytics() {
 }
 
 /** A call to action whose clicks are counted. */
-export type CallToAction = "get_started" | "docs" | "github" | "discord";
+export type CallToAction = "self_host" | "waitlist" | "docs" | "github" | "discord";
 
 /** Where on the site a call to action sits. */
-export type CallToActionPlacement =
-	| "header"
-	| "hero"
-	| "get_started_section"
-	| "footer"
-	| "docs_header";
+export type CallToActionPlacement = "header" | "hero" | "plans" | "footer" | "docs_header";
 
 /** Counts a click on a call to action, when analytics is running. */
 export function trackCallToActionClick(cta: CallToAction, placement: CallToActionPlacement) {
@@ -42,7 +37,7 @@ export function trackCallToActionClick(cta: CallToAction, placement: CallToActio
 	posthog.capture("website:cta_clicked", { cta, placement });
 }
 
-/** Counts a press of play on the landing page's film, when analytics is running. */
+/** Counts a press of play on the landing page's demo video, when analytics is running. */
 export function trackVideoPlay() {
 	if (!posthog.__loaded) return;
 	posthog.capture("website:video_played");

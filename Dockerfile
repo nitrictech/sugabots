@@ -51,8 +51,8 @@ ENV NODE_ENV=production \
     PORT=3000
 
 COPY --from=server /app ./
-# The web app arrives built, below; the website is served elsewhere.
-COPY --exclude=web --exclude=website packages packages
+# The web app arrives built, below; the website is served elsewhere, and the demo package only seeds databases.
+COPY --exclude=web --exclude=website --exclude=demo packages packages
 COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh
 COPY --from=web /app/packages/web/dist packages/web/dist
 

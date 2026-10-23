@@ -9,10 +9,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Resvg } from "@resvg/resvg-js";
-import { formatHex, parse, toGamut } from "culori";
+import { formatHex, interpolate, parse, toGamut } from "culori";
 import satori from "satori";
 import colors from "tailwindcss/colors";
 import { siteMeta } from "../src/site-meta.ts";
+
+/** The highlights' rainbow, as `.landing-logo-gradient` in `src/styles.css` draws it. */
+const ACCENT_STOPS = ["#fb7185", "#fdba74", "#86efac", "#7dd3fc"];
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -22,6 +25,17 @@ function hex(tailwindColor: string): string {
 	const parsed = parse(tailwindColor);
 	if (!parsed) throw new Error(`Unparseable Tailwind colour: ${tailwindColor}`);
 	return formatHex(toSrgb(parsed));
+}
+
+/** Each letter of `word` with the colour from its place along the highlights' rainbow, mixed as CSS mixes `in oklch`. */
+function accentLetters(word: string) {
+	const along = interpolate(ACCENT_STOPS, "oklch");
+	const letters = [...word];
+	return letters.map((letter, offset) => ({
+		letter,
+		offset,
+		color: formatHex(toSrgb(along(letters.length === 1 ? 0 : offset / (letters.length - 1)))),
+	}));
 }
 
 function readModule(specifier: string): Buffer {
@@ -79,12 +93,33 @@ const image = (
 					letterSpacing: -2,
 				}}
 			>
-				<span style={{ color: hex(colors.emerald[400]) }}>{siteMeta.headline.accent}</span>
+				{/* satori draws no gradient text, so each letter takes its colour from along the hero's rainbow. */}
+				<span style={{ display: "flex" }}>
+					{accentLetters(siteMeta.headline.accent).map(({ letter, color, offset }) => (
+						<span key={offset} style={{ color }}>
+							{letter}
+						</span>
+					))}
+				</span>
 				{`${siteMeta.headline.rest}.`.split(" ").map((word) => (
 					<span key={word}>{word}</span>
 				))}
 			</div>
-			<span style={{ fontSize: 34, color: hex(colors.zinc[400]) }}>{siteMeta.description}</span>
+			{/* A span per word here too, so satori doesn't break "self-hosted" at its hyphen. */}
+			<div
+				style={{
+					display: "flex",
+					flexWrap: "wrap",
+					columnGap: 9,
+					fontSize: 34,
+					color: hex(colors.zinc[400]),
+				}}
+			>
+				{/* Keyed by where each word starts, since a word like "and" can come up twice. */}
+				{[...siteMeta.description.matchAll(/\S+/g)].map((word) => (
+					<span key={word.index}>{word[0]}</span>
+				))}
+			</div>
 		</div>
 	</div>
 );
