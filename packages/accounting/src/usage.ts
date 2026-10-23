@@ -32,15 +32,18 @@ export function usageFromAiSdk(usage: LanguageModelUsage): RequestUsage {
 
 /**
  * What OpenRouter says a request cost, in US dollars, from the usage it
- * returns. `cost` is what OpenRouter charged; when the request used the
- * workspace's own provider key, the provider charged the rest itself, as
- * `cost_details.upstream_inference_cost`. `undefined` when it did not say.
+ * returns. `cost` is what OpenRouter charged. Only when the request used the
+ * workspace's own provider key (`is_byok`) did the provider charge the rest
+ * itself, as `cost_details.upstream_inference_cost`. On any other request that
+ * field repeats what `cost` already includes, so it is not added.
+ * `undefined` when OpenRouter did not say.
  */
 export function openRouterReportedCost(usage: LanguageModelUsage): Usd | undefined {
 	const raw = usage.raw;
 	const charged = amount(raw?.cost);
 	if (charged === undefined) return undefined;
-	const details = raw?.cost_details;
+	if (raw?.is_byok !== true) return Usd.make(charged);
+	const details = raw.cost_details;
 	const upstream = isRecord(details) ? amount(details.upstream_inference_cost) : undefined;
 	return Usd.make(charged + (upstream ?? 0));
 }
