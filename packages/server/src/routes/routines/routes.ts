@@ -36,6 +36,7 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 						message: userText`Invalid Routine webhook credentials`,
 					});
 				}
+				if (accepted.kind === "ignored") return { ignored: true as const };
 				if (accepted.kind === "challenge") return { challenge: accepted.challenge };
 				const { executionId, duplicate } = accepted.execution;
 				return { executionId, duplicate };

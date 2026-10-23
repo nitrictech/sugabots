@@ -3,6 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	acceptedRoutineExecutionSchema,
 	acceptedRoutineWebhookSchema,
+	ignoredRoutineWebhookSchema,
 	manualRoutineRunSchema,
 	newRoutineSchema,
 	routineCurrentSecretSchema,
@@ -28,9 +29,10 @@ const agent = { agentId: uuidSchema };
 const routine = { agentId: uuidSchema, routineId: Schema.String };
 const trigger = { ...routine, triggerId: uuidSchema };
 
-/** A run queued, or Slack's address check. */
+/** A run queued, a call its trigger's filter turned away, or Slack's address check. */
 const webhookAnswers = [
 	acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
+	ignoredRoutineWebhookSchema,
 	routineWebhookChallengeSchema,
 ];
 
