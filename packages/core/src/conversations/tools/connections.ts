@@ -28,6 +28,7 @@ import {
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
 import { gitHubNote, gitHubTools, type Workspace } from "./github/tools.ts";
+import { httpTools } from "./http/tools.ts";
 
 /**
  * The tools an agent inherits from its pod for one turn.
@@ -46,7 +47,8 @@ import { gitHubNote, gitHubTools, type Workspace } from "./github/tools.ts";
  * has, and the connection's own test is where the owner learns why.
  *
  * A GitHub connection's tools are Sugabots' own (see `github/tools.ts`), with
- * no server to reach; they are offered the same way, keyed by its handle.
+ * no server to reach; they are offered the same way, keyed by its handle. So
+ * are an HTTP connection's, a request per method (see `http/tools.ts`).
  */
 
 export interface OfferedTool {
@@ -177,8 +179,16 @@ export function from({
 	return {
 		forPod: (workspaceId, podId, turn) =>
 			Effect.gen(function* () {
-				const targets = yield* connections.targetsForPod(workspaceId, podId);
-				const ownTools = yield* gitHubOffered(workspaceId, podId, turn);
+				const reached = yield* connections.targetsForPod(workspaceId, podId);
+				const endpointTools = reached
+					.filter((target) => target.kind === "http")
+					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
+				const gitHub = yield* gitHubOffered(workspaceId, podId, turn);
+				const ownTools = {
+					tools: Object.assign({}, ...endpointTools, gitHub.tools),
+					instructions: gitHub.instructions,
+				};
+				const targets = reached.filter((target) => target.kind === "mcp");
 				if (targets.length === 0) return { ...nothingOffered, ...ownTools };
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const now = yield* Clock.currentTimeMillis;

@@ -202,7 +202,10 @@ function parseContentType(header: string): { mediaType: string; charset: string 
 }
 
 /** The whole body, or nothing once it has gone past `maxBytes`. */
-async function readUpTo(response: Response, maxBytes: number): Promise<Uint8Array | undefined> {
+export async function readUpTo(
+	response: Response,
+	maxBytes: number,
+): Promise<Uint8Array | undefined> {
 	if (!response.body) {
 		return new Uint8Array();
 	}

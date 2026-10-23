@@ -2,7 +2,7 @@ import type { ConnectionTool, NewConnection } from "@sugabots/contracts";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../../credentials/credentials.ts";
-import { pod, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -232,6 +232,37 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		);
 		expect(tools).toContainEqual(expect.objectContaining({ name: "list_issues", access: "off" }));
 		expect(tools).toContainEqual(expect.objectContaining({ name: "push_branch", access: "ask" }));
+	});
+
+	it("hands a turn an HTTP connection, with this version's method tools", async () => {
+		const [made] = await onDatabase((db) =>
+			db
+				.insert(connection)
+				.values({
+					workspaceId,
+					podId,
+					createdById: userId,
+					kind: "http",
+					name: "Alerts",
+					handle: "alerts",
+					url: "https://alerts.example.com/v2",
+				})
+				.returning(),
+		);
+		if (!made) throw new Error("fixture");
+
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { delete: "ask" } });
+
+		expect(await connections.targetsForPod(workspaceId, podId)).toEqual([
+			expect.objectContaining({ connectionId: made.id, kind: "http" }),
+		]);
+		expect((await shown(made.id))?.tools.map(({ name, access }) => [name, access])).toEqual([
+			["get", "allow"],
+			["post", "ask"],
+			["put", "ask"],
+			["patch", "ask"],
+			["delete", "ask"],
+		]);
 	});
 
 	it("does not expose a connection through another pod", async () => {

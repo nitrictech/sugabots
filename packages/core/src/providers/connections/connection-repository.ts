@@ -3,7 +3,7 @@ export * as ConnectionRepository from "./connection-repository.ts";
 import type { ConnectionTool, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
@@ -19,6 +19,7 @@ import type { UserFacing } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
+import { HTTP_CONNECTION_TOOLS } from "./http-tools.ts";
 import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
@@ -108,9 +109,9 @@ export interface Interface {
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
 	/**
-	 * The MCP servers a turn may use. A connection still waiting on its
-	 * sign-in offers nothing, and neither does one whose every listed tool is
-	 * off, so a turn does not reach its server at all.
+	 * The MCP servers and HTTP endpoints a turn may use. A connection still
+	 * waiting on its sign-in offers nothing, and neither does one whose every
+	 * listed tool is off, so a turn does not reach its server at all.
 	 */
 	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<ConnectionTarget[]>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
@@ -155,6 +156,7 @@ export const make = Effect.gen(function* () {
 		return {
 			connectionId: row.id,
 			handle: row.handle,
+			kind: row.kind,
 			url: row.url,
 			auth: row.authKind,
 			headers,
@@ -343,10 +345,10 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!current) return undefined;
-							const names =
-								current.kind === "github"
-									? GITHUB_CONNECTION_TOOLS.map((tool) => tool.name)
-									: current.names;
+							const names = toolsOf({
+								kind: current.kind,
+								tools: current.names.map((name) => ({ name })),
+							}).map((tool) => tool.name);
 							chosen = yield* choicesFor(names, changes);
 						}
 						const [row] = yield* queryCatching(
@@ -452,8 +454,8 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.workspaceId, workspaceId),
 								eq(connection.podId, podId),
-								// Other kinds' tools are Sugabots' own, with no server to reach.
-								eq(connection.kind, "mcp"),
+								// GitHub's tools work through its app, with no address of its own to reach.
+								inArray(connection.kind, ["mcp", "http"]),
 							),
 						)
 						.orderBy(asc(connection.createdAt)),
@@ -564,13 +566,16 @@ function choicesFor(
 
 /**
  * A connection's tools: an MCP server's as it listed them when last asked,
- * or GitHub's, which are Sugabots' own, as this version has them.
+ * or GitHub's or an HTTP endpoint's, which are Sugabots' own, as this
+ * version has them.
  */
 export function toolsOf<Tool>(row: {
 	kind: ConnectionRow["kind"];
 	tools: readonly Tool[];
 }): readonly (Tool | ConnectionTool)[] {
-	return row.kind === "github" ? GITHUB_CONNECTION_TOOLS : row.tools;
+	if (row.kind === "github") return GITHUB_CONNECTION_TOOLS;
+	if (row.kind === "http") return HTTP_CONNECTION_TOOLS;
+	return row.tools;
 }
 
 /** Whether the connection has tools and every one of them is off. */

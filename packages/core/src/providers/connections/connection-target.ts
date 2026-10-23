@@ -1,9 +1,11 @@
+import type { ConnectionKind } from "@sugabots/contracts";
 import type { ToolAccess } from "../../database/schema.ts";
 
 /** What it takes to call a connection's server: where, and with which headers. */
 export interface ConnectionTarget {
 	connectionId: string;
 	handle: string;
+	kind: ConnectionKind;
 	url: string;
 	/** `oauth` calls carry no header of ours: the SDK adds the tokens it holds. */
 	auth: "header" | "oauth";

@@ -188,7 +188,7 @@ describe("provider http clients", () => {
 		const dispatch = vi.fn<EgressDispatch>();
 		const clients = httpClients({ allowPrivateNetwork: true, lookup: publicDns, fetch: dispatch });
 
-		await expect(clients.for(local)(url)).rejects.toThrow("isn't under the provider's address");
+		await expect(clients.for(local)(url)).rejects.toThrow("isn't under the configured address");
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 

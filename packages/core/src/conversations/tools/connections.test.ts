@@ -79,6 +79,7 @@ afterAll(async () => {
 const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 	connectionId: "0199a3a0-0000-7000-8000-0000000000f1",
 	handle: "wiki",
+	kind: "mcp",
 	url,
 	auth: "header",
 	headers: { "x-fixture-key": "open-sesame" },
