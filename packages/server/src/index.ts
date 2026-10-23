@@ -22,6 +22,7 @@ import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
+import { AgentPresence } from "@sugabots/core/devices/agent-presence";
 import { DeviceLinks } from "@sugabots/core/devices/device-links";
 import { Devices } from "@sugabots/core/devices/devices";
 import { Email } from "@sugabots/core/email/email";
@@ -125,7 +126,8 @@ const ConversationServices = Conversations.layer.pipe(
 /**
  * What runs without a request: the workflows, the routine scheduler, the
  * nightly event prune, deleting queued blobs, seeding the preset providers
- * into every workspace, and pausing idle sandboxes.
+ * into every workspace, pausing idle sandboxes, and telling workspaces when
+ * bots on people's computers go online or offline.
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
@@ -135,6 +137,7 @@ const Background = Layer.mergeAll(
 	UnsentUploads.layer,
 	PresetSeeding.layer,
 	PodSandboxes.pauseSweepLayer,
+	AgentPresence.layer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */

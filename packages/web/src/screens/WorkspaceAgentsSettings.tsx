@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useDeferredValue, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { isOffline, useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
@@ -73,6 +73,7 @@ export function WorkspaceAgentsSettings({ selectedAgentId }: { selectedAgentId?:
 											shape={agent.shape}
 											size={36}
 											external={agent.a2a !== null}
+											offline={isOffline(agent)}
 										/>
 									}
 									label={agent.name}

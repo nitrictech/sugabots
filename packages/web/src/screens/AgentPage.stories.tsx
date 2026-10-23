@@ -112,6 +112,7 @@ export const ExternalAgent = meta.story({
 									secretHeader: null,
 									hasSecret: false,
 									deviceId: null,
+									online: null,
 								},
 							}
 						: bot,
@@ -134,6 +135,51 @@ export const ExternalAgent = meta.story({
 				"External bot",
 			),
 		).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` })).toBeVisible();
+	},
+});
+
+/**
+ * Growth Desk standing for an agent on a computer that isn't connected: faded,
+ * marked Offline in the header with why, and a note over the composer that
+ * messages fail until it's back.
+ */
+export const OfflineOnAComputer = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			// Not the viewer's computer, so it is named only in general.
+			http.get(`${API}/devices`, () => HttpResponse.json([])),
+			...appHandlers({
+				bots: storyBots.map((bot) =>
+					bot.id === growthDesk.id
+						? {
+								...bot,
+								model: null,
+								a2a: {
+									url: "http://0199a3a0-0000-7000-8000-0000000000a1.agents.invalid",
+									secretHeader: null,
+									hasSecret: false,
+									deviceId: "0199a3a0-0000-7000-8000-0000000000d1",
+									online: false,
+								},
+							}
+						: bot,
+				),
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		const heading = await canvas.findByRole(
+			"heading",
+			{ name: /Growth Desk/, level: 1 },
+			{ timeout: 10_000 },
+		);
+		await expect(within(heading).getByText("Offline")).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(
+				`${growthDesk.name} is offline: the computer it runs on isn't connected. Messages will fail until it's back.`,
+			),
+		).toBeVisible();
 		await expect(canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` })).toBeVisible();
 	},
 });

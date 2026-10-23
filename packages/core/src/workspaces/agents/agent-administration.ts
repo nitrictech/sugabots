@@ -17,6 +17,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import { Devices } from "../../devices/devices.ts";
 import { A2A } from "../../providers/a2a/a2a.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
@@ -115,6 +116,7 @@ export const make = Effect.gen(function* () {
 	const credentials = yield* Credentials.Service;
 	const egress = yield* Egress.Service;
 	const a2a = yield* A2A.Service;
+	const deviceLinks = yield* DeviceLinks.Service;
 	const devices = yield* Devices.Service;
 
 	/**
@@ -156,7 +158,11 @@ export const make = Effect.gen(function* () {
 				"list",
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
-					return yield* visibleCrewAgents(workspaceId, yield* visibility.reachesPod);
+					return yield* visibleCrewAgents(
+						workspaceId,
+						yield* visibility.reachesPod,
+						deviceLinks.lends,
+					);
 				}),
 			),
 
@@ -167,7 +173,7 @@ export const make = Effect.gen(function* () {
 					const standing = yield* authorization.agent(agentId, "agent.read");
 					const crew = crewAgentRow(standing.agent);
 					if (!crew) return yield* new ResourceHidden({ resource: "agent" });
-					return toAgent(crew);
+					return toAgent(crew, deviceLinks.lends);
 				}),
 			),
 
@@ -188,6 +194,7 @@ export const make = Effect.gen(function* () {
 							createdById: actor.userId,
 							agent: { ...agent, podId: pod.id, a2a },
 						}),
+						deviceLinks.lends,
 					);
 				}),
 			),
@@ -213,6 +220,7 @@ export const make = Effect.gen(function* () {
 							...changes,
 							a2a: changes.a2a === null ? null : a2a,
 						}),
+						deviceLinks.lends,
 					);
 				}),
 			),

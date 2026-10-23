@@ -154,7 +154,14 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 			podId,
 			agent: { name: "Local", a2a: { url, deviceId: mine.id } },
 		});
-		expect(made.a2a).toEqual({ url, secretHeader: null, hasSecret: false, deviceId: mine.id });
+		// Nothing is connected in the test, so its computer is offline.
+		expect(made.a2a).toEqual({
+			url,
+			secretHeader: null,
+			hasSecret: false,
+			deviceId: mine.id,
+			online: false,
+		});
 	});
 
 	it("refuses to move an agent to a model the workspace does not offer, but lets it be cleared", async () => {

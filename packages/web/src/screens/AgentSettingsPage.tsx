@@ -12,9 +12,15 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { MessageCircle, Pencil, RefreshCw } from "lucide-react";
 import { type FormEvent, useId, useRef, useState } from "react";
-import { useAgents, useDeleteAgent, useRunsOnLabel, useUpdateAgent } from "@/lib/agents.ts";
+import {
+	isOffline,
+	useAgents,
+	useDeleteAgent,
+	useRunsOnLabel,
+	useUpdateAgent,
+} from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
-import { useDevices, useThisDevice } from "@/lib/devices.ts";
+import { useDevices, useOfflineReason, useThisDevice } from "@/lib/devices.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
@@ -142,6 +148,7 @@ function ContactCard({
 }) {
 	const may = pod.permissions;
 	const runsOn = useRunsOnLabel(agent);
+	const offlineReason = useOfflineReason(agent);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
 	const navigate = useNavigate();
@@ -171,6 +178,7 @@ function ContactCard({
 						shape={agent.shape}
 						size={88}
 						external={agent.a2a !== null}
+						offline={isOffline(agent)}
 					/>
 				)
 			}
@@ -188,9 +196,11 @@ function ContactCard({
 				label="About"
 				note={
 					agent.a2a &&
-					(agent.a2a.deviceId
-						? "Replies come from an external agent on a computer in the workspace, which brings its own model, instructions and tools."
-						: `Replies come from the external agent at ${hostOf(agent.a2a.url)}, which brings its own model, instructions and tools.`)
+					`${offlineReason ? `Offline: ${offlineReason}. ` : ""}${
+						agent.a2a.deviceId
+							? "Replies come from an external agent on a computer in the workspace, which brings its own model, instructions and tools."
+							: `Replies come from the external agent at ${hostOf(agent.a2a.url)}, which brings its own model, instructions and tools.`
+					}`
 				}
 			>
 				<TextRow
@@ -288,7 +298,12 @@ function EditableLook({ agent, save }: { agent: Agent; save: Save }) {
 
 	return (
 		<div className="relative">
-			<AgentAvatar {...current} size={88} external={agent.a2a !== null} />
+			<AgentAvatar
+				{...current}
+				size={88}
+				external={agent.a2a !== null}
+				offline={isOffline(agent)}
+			/>
 			<IconButton
 				label="Change look"
 				variant="round"

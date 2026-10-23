@@ -125,6 +125,8 @@ export const eventPayloadSchemas = {
 		collaboration: collaborationPartSchema,
 	}),
 	"agent.updated": nothing,
+	/** Whether a bot standing for an agent on somebody's computer can answer now changed. */
+	"agent.presence_changed": Schema.Struct({ agentId: uuidSchema, online: Schema.Boolean }),
 	"pod.updated": nothing,
 	/**
 	 * The one control event. Sent when the server cannot give the client a
@@ -179,6 +181,7 @@ export type DurableEventType = typeof durableEventTypeSchema.Type;
 export const ephemeralEventTypeSchema = Schema.Literals([
 	"message.delta",
 	"person.typing",
+	"agent.presence_changed",
 ] satisfies KnownEventType[]);
 
 export type EphemeralEventType = typeof ephemeralEventTypeSchema.Type;
@@ -292,6 +295,7 @@ export type ThreadUpdateEvent = typeof threadUpdateEventSchema.Type;
 export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("thread.changed", P["thread.changed"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
+	withEnvelope("agent.presence_changed", P["agent.presence_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 

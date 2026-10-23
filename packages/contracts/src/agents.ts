@@ -180,6 +180,11 @@ export const agentSchema = Schema.Struct({
 			hasSecret: Schema.Boolean,
 			/** The device that carries its requests, when `url` is an address on somebody's computer. */
 			deviceId: Schema.NullOr(Schema.String),
+			/**
+			 * Whether it can answer now: its computer is connected and lends it.
+			 * Null for an agent at an address, whose reachability isn't tracked.
+			 */
+			online: Schema.NullOr(Schema.Boolean),
 		}),
 	),
 	createdAt: isoTimestampSchema,

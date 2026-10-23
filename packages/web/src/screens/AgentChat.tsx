@@ -22,7 +22,7 @@ import {
 	useState,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { canAnswer } from "@/lib/agents.ts";
+import { canAnswer, isOffline } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -35,6 +35,7 @@ import {
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
+import { useOfflineReason } from "@/lib/devices.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
@@ -113,6 +114,7 @@ export function AgentChat({
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
 	const chat = useChat(pod, agent.id);
+	const offlineReason = useOfflineReason(agent);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
 	const mainThread = useThread(chat.data?.mainThreadId);
@@ -406,6 +408,11 @@ export function AgentChat({
 						</div>
 					</div>
 					<div className="shrink-0 px-4 md:px-5">
+						{offlineReason && canAnswer(agent) && (
+							<p role="status" className="m-0 px-3 pb-1.5 text-muted-foreground text-sm">
+								{agent.name} is offline: {offlineReason}. Messages will fail until it's back.
+							</p>
+						)}
 						{!canAnswer(agent) ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
@@ -717,6 +724,7 @@ function ChatIntro({ agent }: { agent: Agent }) {
 				shape={agent.shape}
 				size={64}
 				external={agent.a2a !== null}
+				offline={isOffline(agent)}
 			/>
 			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
 				{agent.name}

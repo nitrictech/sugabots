@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import type { Visibility } from "../../authorization/visibility.ts";
 import { query } from "../../database/database.ts";
 import { agent } from "../../database/schema.ts";
+import type { DeviceLinks } from "../../devices/device-links.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { SYSTEM_AGENTS } from "./system-agents.ts";
 
@@ -12,7 +13,11 @@ import { SYSTEM_AGENTS } from "./system-agents.ts";
  * rule for somebody, says they reach, by name. System agents are in no pod
  * and are not here.
  */
-export const visibleCrewAgents = (workspaceId: string, reachesPod: Visibility.ReachesPod) =>
+export const visibleCrewAgents = (
+	workspaceId: string,
+	reachesPod: Visibility.ReachesPod,
+	lends: DeviceLinks.Interface["lends"],
+) =>
 	query((db) =>
 		db
 			.select()
@@ -27,7 +32,7 @@ export const visibleCrewAgents = (workspaceId: string, reachesPod: Visibility.Re
 		Effect.map((rows): Agent[] =>
 			rows.flatMap((row) => {
 				const crew = crewAgentRow(row);
-				return crew ? [toAgent(crew)] : [];
+				return crew ? [toAgent(crew, lends)] : [];
 			}),
 		),
 	);

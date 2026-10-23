@@ -113,6 +113,11 @@ export function useModelName(model: string | null): string | null {
 	return inUse?.displayName ?? model;
 }
 
+/** Whether the bot stands for an agent on somebody's computer that isn't connected now. */
+export function isOffline(agent: Pick<Agent, "a2a">): boolean {
+	return agent.a2a?.online === false;
+}
+
 /** Whether the agent can answer: it runs on a model, or on an external agent. */
 export function canAnswer(agent: Pick<Agent, "model" | "a2a">): boolean {
 	return agent.model !== null || agent.a2a !== null;

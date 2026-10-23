@@ -8,7 +8,7 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
 import { type ReactNode, useDeferredValue, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { isOffline, useAgents } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
@@ -318,6 +318,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 							shape={agent.shape}
 							size={30}
 							external={agent.a2a !== null}
+							offline={isOffline(agent)}
 						/>
 					}
 					label={agent.name}

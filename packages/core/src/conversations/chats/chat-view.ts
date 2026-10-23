@@ -67,6 +67,7 @@ import {
 	turn,
 	user,
 } from "../../database/schema.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
@@ -137,6 +138,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatView");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
+	const devices = yield* DeviceLinks.Service;
 
 	/** How each of `bots`' chats stands for the actor: its unread messages, and waiting on their decision. */
 	const chatMarks = Effect.fn("ChatView.chatMarks")(function* (
@@ -184,7 +186,7 @@ export const make = Effect.gen(function* () {
 						const last = row.chat ? latest.get(row.chat.mainThreadId) : undefined;
 						return [
 							{
-								agent: toAgent(crew),
+								agent: toAgent(crew, devices.lends),
 								chat: row.chat && toChat(row.chat),
 								lastMessage: last
 									? {

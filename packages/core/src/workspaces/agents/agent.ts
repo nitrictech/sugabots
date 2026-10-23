@@ -1,5 +1,6 @@
 import type { Agent } from "@sugabots/contracts";
 import type * as schema from "../../database/schema.ts";
+import type { DeviceLinks } from "../../devices/device-links.ts";
 
 /**
  * An agent row that is a crew agent: one that lives in a pod.
@@ -15,8 +16,12 @@ export function crewAgentRow(row: schema.AgentRow): CrewAgentRow | undefined {
 	return row.podId === null ? undefined : { ...row, podId: row.podId };
 }
 
-/** The row as the API returns it: timestamps as ISO strings, no internals. */
-export function toAgent(row: CrewAgentRow): Agent {
+/**
+ * The row as the API returns it: timestamps as ISO strings, no internals. An
+ * agent on somebody's computer is online while `lends` says that computer is
+ * connected and lends it.
+ */
+export function toAgent(row: CrewAgentRow, lends: DeviceLinks.Interface["lends"]): Agent {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
@@ -40,6 +45,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 						secretHeader: row.a2aSecretHeader,
 						hasSecret: row.a2aSecretEncrypted !== null,
 						deviceId: row.a2aDeviceId,
+						online: row.a2aDeviceId === null ? null : lends(row.a2aDeviceId, row.a2aUrl),
 					},
 		createdAt: row.createdAt.toISOString(),
 	};

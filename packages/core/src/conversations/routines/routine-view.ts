@@ -7,6 +7,7 @@ import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { agent, pod, routine, routineExecution } from "../../database/schema.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
@@ -27,6 +28,7 @@ export const makeView = Effect.gen(function* () {
 	const operation = yield* serviceOperations<ViewMethods>("Routines");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
+	const devices = yield* DeviceLinks.Service;
 
 	return {
 		listInWorkspace: (workspace) =>
@@ -58,7 +60,7 @@ export const makeView = Effect.gen(function* () {
 							? [
 									{
 										routine: toRoutine(row.routine, routineTriggers),
-										agent: toAgent(crew),
+										agent: toAgent(crew, devices.lends),
 										pod: row.pod,
 									},
 								]

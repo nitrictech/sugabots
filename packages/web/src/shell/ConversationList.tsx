@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Library, Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
+import { isOffline } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, artifactsLink, podSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -186,6 +187,7 @@ function ConversationRow({
 				shape={agent.shape}
 				size={26}
 				external={agent.a2a !== null}
+				offline={isOffline(agent)}
 				className="shrink-0"
 			/>
 			<span

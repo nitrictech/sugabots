@@ -182,7 +182,18 @@ type TurnFailure =
 	| TurnStoppedUnexpectedly
 	| ApprovalForUnknownTool
 	| ReplyWithoutAnswer
-	| A2A.RequestFailed;
+	| A2A.RequestFailed
+	| AgentOffline;
+
+/** The bot stands for an agent on somebody's computer, which isn't connected or doesn't lend it. */
+class AgentOffline extends Data.TaggedError("AgentOffline") implements UserFacing {
+	override get message() {
+		return "The device carrying this agent isn't connected or doesn't lend it";
+	}
+	get userMessage() {
+		return userText`This bot is offline: the computer it runs on isn't connected. Try again once the Sugabots desktop app is running there.`;
+	}
+}
 
 class TurnCancelled extends Data.TaggedError("TurnCancelled") {
 	override get message() {
@@ -293,6 +304,8 @@ const generateReply = (
 							userMessage: failure.userMessage,
 							mayRunAgain:
 								!(failure instanceof ReplyWithoutAnswer) &&
+								// Its computer coming back is for a person to notice, not a retry.
+								!(failure instanceof AgentOffline) &&
 								(request?.isRetryable ?? true) &&
 								!waitsTooLong,
 						}),
@@ -391,6 +404,7 @@ const streamReply = (
 	| ApprovalForUnknownTool
 	| ReplyWithoutAnswer
 	| A2A.RequestFailed
+	| AgentOffline
 	| TurnCancelled,
 	SegmentServices | Database
 > =>
@@ -464,6 +478,9 @@ const a2aReply = (
 		const a2a = yield* A2A.Service;
 		const events = yield* EventBus.Service;
 		if (endpoint.deviceId !== null) {
+			if (!(yield* DeviceLinks.Service).lends(endpoint.deviceId, endpoint.url)) {
+				return yield* new AgentOffline();
+			}
 			const offered = yield* turnTools(prepared, {
 				acceptsImages: false,
 				reply,

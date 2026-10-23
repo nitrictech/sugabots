@@ -29,8 +29,16 @@ interface AgentAvatarProps {
 	 * its face the way a chat app marks a person from outside the workspace.
 	 */
 	external?: boolean | undefined;
+	/**
+	 * Whether it stands for an agent on somebody's computer that isn't
+	 * connected now: drawn faded and grey, badge and all, at every size.
+	 */
+	offline?: boolean | undefined;
 	className?: string;
 }
+
+/** How an offline bot's face is drawn. */
+const OFFLINE = "opacity-55 grayscale";
 
 /** The surface colour round a face that overlaps something, following the head's shape. */
 const RING = { color: "var(--panel)", width: 3 };
@@ -45,8 +53,10 @@ export function AgentAvatar({
 	size = 32,
 	ringed = false,
 	external = false,
-	className,
+	offline = false,
+	className: givenClassName,
 }: AgentAvatarProps) {
+	const className = cn(offline && OFFLINE, givenClassName) || undefined;
 	const ring = ringed === true ? RING : ringed || undefined;
 	const botFace = (
 		<BotFace

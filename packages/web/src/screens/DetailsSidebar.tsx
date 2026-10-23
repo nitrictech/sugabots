@@ -10,7 +10,7 @@ import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
-import { useRunsOnLabel } from "@/lib/agents.ts";
+import { isOffline, useRunsOnLabel } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink, routineSettingsLink } from "@/lib/links.ts";
@@ -65,6 +65,7 @@ export function DetailsSidebar({
 						shape={agent.shape}
 						size={56}
 						external={agent.a2a !== null}
+						offline={isOffline(agent)}
 						className="shrink-0"
 					/>
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">

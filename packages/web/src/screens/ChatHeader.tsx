@@ -2,6 +2,8 @@ import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, Info } from "lucide-react";
 import type { ReactNode } from "react";
+import { isOffline } from "@/lib/agents.ts";
+import { useOfflineReason } from "@/lib/devices.ts";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar, BotTag } from "@/shell/Agent.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -40,6 +42,7 @@ export function ChatHeader({
 	staged: boolean;
 	onOpenDesktop: () => void;
 }) {
+	const offlineReason = useOfflineReason(agent);
 	const name = (
 		<>
 			<AgentAvatar
@@ -48,10 +51,12 @@ export function ChatHeader({
 				shape={agent.shape}
 				size={24}
 				external={agent.a2a !== null}
+				offline={isOffline(agent)}
 				className="shrink-0"
 			/>
 			<span className="truncate">{agent.name}</span>
 			{agent.a2a && <BotTag external />}
+			{offlineReason && <OfflineTag />}
 		</>
 	);
 	return (
@@ -70,7 +75,14 @@ export function ChatHeader({
 					<span className="flex min-w-0 items-center gap-3">{name}</span>
 				)}
 			</h1>
-			{agent.description ? (
+			{offlineReason ? (
+				<>
+					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
+					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
+						Offline: {offlineReason}
+					</p>
+				</>
+			) : agent.description ? (
 				<>
 					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
 					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
@@ -111,5 +123,14 @@ export function HeaderBack({ back }: { back: BackTo }) {
 		<Link {...activityLink()} aria-label="Back to Activity" className={className}>
 			{chevron}
 		</Link>
+	);
+}
+
+/** Beside an offline bot's name, where a phone has no room for why. */
+function OfflineTag() {
+	return (
+		<span className="shrink-0 rounded-[4px] border border-border-strong px-[5px] py-px font-semibold text-[10.5px] text-muted-foreground leading-[1.4]">
+			Offline
+		</span>
 	);
 }

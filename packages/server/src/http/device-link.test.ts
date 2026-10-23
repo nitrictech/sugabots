@@ -4,7 +4,7 @@ import type { DeviceToServer, ServerToDevice } from "@sugabots/contracts";
 import { DeviceLinks } from "@sugabots/core/devices/device-links";
 import { Devices } from "@sugabots/core/devices/devices";
 import { unimplemented } from "@sugabots/core/testing";
-import { Context, Effect, Exit, Layer, Scope } from "effect";
+import { Context, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testRoutes } from "./app.test-support.ts";
@@ -244,5 +244,24 @@ describe("a device's link", () => {
 		});
 		device.socket.close();
 		await until(() => links.agents(DEVICE_ID) === undefined);
+	});
+
+	it("says whether it lends an agent, and announces each change", async () => {
+		const announced: string[] = [];
+		const watching = Effect.runFork(
+			links.changes.pipe(
+				Stream.runForEach((deviceId) => Effect.sync(() => announced.push(deviceId))),
+			),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const device = await connectDevice();
+		expect(links.lends(DEVICE_ID, AGENT.url)).toBe(true);
+		expect(links.lends(DEVICE_ID, "http://other.agents.invalid")).toBe(false);
+		device.socket.close();
+		await until(() => !links.lends(DEVICE_ID, AGENT.url));
+		// Connecting, lending, and disconnecting.
+		await until(() => announced.length >= 3);
+		expect(new Set(announced)).toEqual(new Set([DEVICE_ID]));
+		await Effect.runPromise(Fiber.interrupt(watching));
 	});
 });

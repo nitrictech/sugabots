@@ -1,8 +1,9 @@
-import { DESKTOP_DEVICE_GLOBAL, type LocalAgentKind } from "@sugabots/contracts";
+import { type Agent, DESKTOP_DEVICE_GLOBAL, type LocalAgentKind } from "@sugabots/contracts";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
+import { isOffline } from "@/lib/agents.ts";
 
 /**
  * Which of the signed-in person's devices this page is running on: the id
@@ -96,4 +97,17 @@ export function useApprovePairing(code: string) {
 		mutationFn: () => Effect.runPromise(client.api.devices.approvePairing({ params: { code } })),
 		onSuccess: () => queries.invalidateQueries({ queryKey: devicesQuery.queryKey }),
 	});
+}
+
+/**
+ * Why `agent` can't answer, when it stands for an agent on a computer that
+ * isn't connected: the computer by name to its owner, who can see their
+ * devices, and in general to everyone else. Nothing while it can answer.
+ */
+export function useOfflineReason(agent: Pick<Agent, "a2a">): string | undefined {
+	const offline = isOffline(agent);
+	const devices = useDevices(offline);
+	if (!offline) return undefined;
+	const device = devices.data?.find(({ id }) => id === agent.a2a?.deviceId);
+	return device ? `${device.name} isn't connected` : "the computer it runs on isn't connected";
 }

@@ -1,4 +1,5 @@
 import {
+	type Agent,
 	type Message,
 	type MessagePart,
 	messagePartsFor,
@@ -323,6 +324,16 @@ async function applyWorkspaceEvent(
 		return;
 	}
 	const update = parsed.success;
+	// Live only, so never replayed: a client that missed one reads `online` again with the bot.
+	if (update.type === "agent.presence_changed") {
+		const { agentId, online } = update;
+		queries.setQueryData<readonly Agent[]>(["agents", workspaceId], (agents) =>
+			agents?.map((agent) =>
+				agent.id === agentId && agent.a2a ? { ...agent, a2a: { ...agent.a2a, online } } : agent,
+			),
+		);
+		return;
+	}
 	if (update.type === "chat.thread_changed") {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-messages", update.chatId] }),

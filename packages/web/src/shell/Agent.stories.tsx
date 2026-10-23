@@ -74,6 +74,29 @@ export const Sizes = meta.story({
 	),
 });
 
+/** An external bot whose computer isn't connected, beside one that is, from row size up to profile size; below the badge's smallest size only the fading says so. */
+export const Offline = meta.story({
+	render: () => (
+		<div className="flex flex-col gap-4">
+			{[false, true].map((offline) => (
+				<div key={String(offline)} className="flex items-end gap-4">
+					{[18, 24, 34, 44, 88].map((size) => (
+						<AgentAvatar
+							key={size}
+							color="orange"
+							face="pill"
+							shape="squircle"
+							size={size}
+							external
+							offline={offline}
+						/>
+					))}
+				</div>
+			))}
+		</div>
+	),
+});
+
 /** Shapes shows every head shape, each in the next colour round the palette, for checking outlines and eyes against the design. */
 export const Shapes = meta.story({
 	render: () => (

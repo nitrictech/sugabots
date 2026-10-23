@@ -10,7 +10,19 @@ import {
 	type ServerToDevice,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { Context, Data, Deferred, Effect, Layer, Option, Queue, Schema, type Scope } from "effect";
+import {
+	Context,
+	Data,
+	Deferred,
+	Effect,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+	Schema,
+	type Scope,
+	Stream,
+} from "effect";
 import type { Socket } from "effect/unstable/socket";
 import type { UserFacing } from "../user-message.ts";
 
@@ -34,6 +46,10 @@ export interface Interface {
 	readonly disconnect: (deviceId: string) => Effect.Effect<void>;
 	/** What the device lends and could, or nothing while it isn't connected. */
 	readonly agents: (deviceId: string) => DeviceAgents | undefined;
+	/** Whether the device is connected and lends the agent at `url`: whether that agent can answer now. */
+	readonly lends: (deviceId: string, url: string) => boolean;
+	/** The id of each device whose connection or agents lent changed, as it happens. */
+	readonly changes: Stream.Stream<string>;
 	/**
 	 * Asks the device's owner, on the device, to lend an agent of `kind` in a
 	 * folder they choose there, and waits for their answer.
@@ -63,8 +79,12 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/DeviceLinks") {}
 
-export const make = Effect.sync(() => {
+export const make = Effect.gen(function* () {
 	const links = new Map<string, Link>();
+	const changed = yield* PubSub.unbounded<string>();
+	const announce = (deviceId: string) => {
+		PubSub.publishUnsafe(changed, deviceId);
+	};
 	/** The toolboxes offered to each device's agents, by device then {@link askedInKey}. */
 	const toolboxes = new Map<string, Map<string, Toolbox>>();
 	const toolboxFor = (deviceId: string, asked: { agentUrl: string; contextId: string }) =>
@@ -121,10 +141,14 @@ export const make = Effect.sync(() => {
 				};
 				links.get(deviceId)?.end();
 				links.set(deviceId, link);
+				announce(deviceId);
 				link.send({ type: "hello", deviceId });
 				yield* Effect.addFinalizer(() =>
 					Effect.sync(() => {
-						if (links.get(deviceId) === link) links.delete(deviceId);
+						if (links.get(deviceId) === link) {
+							links.delete(deviceId);
+							announce(deviceId);
+						}
 						for (const request of link.pending.values()) request.fail("The device disconnected");
 						for (const answer of link.lendings.values()) answer(undefined);
 						for (const call of link.toolCalls) call.abort();
@@ -141,7 +165,10 @@ export const make = Effect.sync(() => {
 								);
 								if (Option.isNone(message)) continue;
 								if (isToolUse(message.value)) answerToolUse(deviceId, link, message.value);
-								else receive(link, message.value);
+								else if (message.value.type === "agents") {
+									link.agents = message.value.agents;
+									announce(deviceId);
+								} else receive(link, message.value);
 							}
 						}),
 					),
@@ -153,6 +180,11 @@ export const make = Effect.sync(() => {
 		disconnect: (deviceId) => Effect.sync(() => links.get(deviceId)?.end()),
 
 		agents: (deviceId) => links.get(deviceId)?.agents,
+
+		lends: (deviceId, url) =>
+			links.get(deviceId)?.agents.lent.some((agent) => agent.url === url) ?? false,
+
+		changes: Stream.fromPubSub(changed),
 
 		lend: (deviceId, kind) =>
 			Effect.flatMap(connected(deviceId), (link) =>
@@ -298,11 +330,8 @@ function askedInKey({ agentUrl, contextId }: { agentUrl: string; contextId: stri
 /** A device's message, or nothing for one that isn't: a device is not trusted to send well-formed ones. */
 const decodeMessage = Schema.decodeUnknownOption(Schema.fromJsonString(deviceToServerSchema));
 
-function receive(link: Link, message: DeviceToServer) {
-	if (message.type === "agents") {
-		link.agents = message.agents;
-		return;
-	}
+/** Answers to what was sent down the link: a lending, or a relayed response. */
+function receive(link: Link, message: Exclude<DeviceToServer, ToolUse | { type: "agents" }>) {
 	if (message.type === "lent") {
 		link.lendings.get(message.id)?.(message.agent);
 		return;
