@@ -267,7 +267,7 @@ type EgressRefusal =
 	| "notHttps";
 
 const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserText> = {
-	outsideBaseUrl: userText`That address isn't under the provider's address, so Sugabots won't send the provider's key there. Use an address that starts with the provider's address.`,
+	outsideBaseUrl: userText`That address isn't under the configured address, so Sugabots won't send its credentials there. Use an address that starts with the configured address.`,
 	unresolved: userText`Sugabots couldn't find a server with that name. Check the address is spelled correctly, and that the name can be looked up from wherever Sugabots runs.`,
 	invalidAddress: userText`That server's name points to an address Sugabots can't connect to. Check the address, or the server's DNS records.`,
 	privateNetwork: userText`That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
