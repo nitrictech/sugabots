@@ -17,6 +17,9 @@ export const MAX_EVERY_MONTHS = 12;
 const MINUTES_PER_DAY = 24 * 60;
 export const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
 export const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
+export const MAX_WEBHOOK_FILTER_CONDITIONS = 10;
+export const MAX_WEBHOOK_FILTER_VALUES = 20;
+export const MAX_WEBHOOK_FILTER_TEXT_CHARACTERS = 200;
 export const MIN_WEBHOOK_SECRET_CHARACTERS = 16;
 export const MAX_WEBHOOK_SECRET_CHARACTERS = 500;
 export const DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT = 20;
@@ -104,6 +107,34 @@ export const webhookAuthSchema = Schema.Union([
 ]);
 export type WebhookAuth = typeof webhookAuthSchema.Type;
 export type WebhookAuthKind = WebhookAuth["kind"];
+
+/**
+ * A test of a webhook call's JSON body: the text at `path`, keys joined by
+ * dots, is one of `oneOf`. Arrays on the way are searched, so
+ * `data.labels.name` is met by any label with the name. Numbers and
+ * booleans are compared as the text they print as.
+ */
+export const webhookConditionSchema = Schema.Struct({
+	path: Schema.Trim.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_WEBHOOK_FILTER_TEXT_CHARACTERS),
+		// No empty keys, as in `a..b` or `.a`.
+		Schema.isPattern(/^[^.]+(\.[^.]+)*$/),
+	),
+	oneOf: Schema.Array(
+		Schema.String.check(Schema.isMaxLength(MAX_WEBHOOK_FILTER_TEXT_CHARACTERS)),
+	).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_FILTER_VALUES)),
+});
+export type WebhookCondition = typeof webhookConditionSchema.Type;
+
+/**
+ * What a webhook trigger requires of a call before it starts a run: every
+ * condition must be met. A call that fails one is answered but runs nothing.
+ * None, as for a trigger made before filters, runs every call.
+ */
+const webhookFilterSchema = Schema.Array(webhookConditionSchema).check(
+	Schema.isMaxLength(MAX_WEBHOOK_FILTER_CONDITIONS),
+);
 
 /**
  * What marks the secrets made for each kind, so people can tell them apart.
@@ -226,7 +257,13 @@ export const routineTriggerSchema = Schema.Union([
 		/** Null while the routine is paused. */
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
-	Schema.Struct({ id: uuidSchema, kind: Schema.Literal("webhook"), auth: webhookAuthSchema }),
+	Schema.Struct({
+		id: uuidSchema,
+		kind: Schema.Literal("webhook"),
+		auth: webhookAuthSchema,
+		/** Left out while there is none. */
+		filter: Schema.optional(webhookFilterSchema),
+	}),
 	Schema.Struct({ id: uuidSchema, kind: Schema.Literal("github"), ...gitHubTriggerFields }),
 ]);
 
@@ -275,11 +312,13 @@ export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
  * token and a changed one keeps how it checks callers. A null `secret` leaves
  * it without one, so its address alone runs the routine. Without `secret`,
  * one is made when it first needs one or its auth kind changes, and is
- * returned then.
+ * returned then. Without `filter`, a new one runs every call and a changed
+ * one keeps its own; an empty one removes it.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
 	auth: Schema.optional(webhookAuthSchema),
+	filter: Schema.optional(webhookFilterSchema),
 	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 	schedule: Schema.optional(Schema.Never),
 	timezone: Schema.optional(Schema.Never),
@@ -505,6 +544,10 @@ export const acceptedRoutineWebhookSchema = Schema.Struct({
 	duplicate: Schema.Boolean,
 });
 export type AcceptedRoutineWebhook = typeof acceptedRoutineWebhookSchema.Type;
+
+/** The answer to a call the trigger's filter turned away: no run was started. */
+export const ignoredRoutineWebhookSchema = Schema.Struct({ ignored: Schema.Literal(true) });
+export type IgnoredRoutineWebhook = typeof ignoredRoutineWebhookSchema.Type;
 
 /** The answer to Slack's check that it may send events to the routine's address. */
 export const routineWebhookChallengeSchema = Schema.Struct({ challenge: Schema.String });

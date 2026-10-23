@@ -14,6 +14,7 @@ import type {
 	RoutineUpdate,
 	RoutineWebhookChallenge,
 	WebhookAuth,
+	WebhookCondition,
 	WorkspaceRoutine,
 } from "@sugabots/contracts";
 import { MAX_ROUTINE_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
@@ -224,15 +225,17 @@ export interface WebhooksInterface {
 	/**
 	 * Accepts a delivery's run, if it proves it holds the trigger's secret.
 	 * `undefined` when it does not, or there is no such webhook trigger of an
-	 * enabled routine: the caller is told the same either way. Slack's check
-	 * that the address answers to it is answered with its challenge instead
-	 * of a run.
+	 * enabled routine: the caller is told the same either way. A call that
+	 * does not meet the trigger's filter is `ignored`, and Slack's check that
+	 * the address answers to it is answered with its challenge: neither
+	 * starts a run.
 	 */
 	readonly accept: (input: {
 		triggerId: string;
 		delivery: Delivery;
 	}) => Effect.Effect<
 		| { kind: "run"; execution: AcceptedRoutineExecution }
+		| { kind: "ignored" }
 		| ({ kind: "challenge" } & RoutineWebhookChallenge)
 		| undefined,
 		RoutineTriggerConflict | RoutineTriggerRejected | RoutineDeliveryIdTooLong
@@ -316,7 +319,7 @@ export const make = Effect.gen(function* () {
 					);
 					return {
 						values: {
-							settings: { kind: "webhook", auth: checked.auth },
+							settings: { kind: "webhook", auth: checked.auth, filter: checked.filter },
 							secretEncrypted: checked.secretEncrypted,
 							secretDigest: checked.secretDigest,
 							nextScheduledAt: null,
@@ -695,14 +698,15 @@ const inPodsConnection = (
 const DEFAULT_WEBHOOK_AUTH: WebhookAuth = { kind: "bearer" };
 
 /**
- * How a webhook trigger written as `input` checks its callers, given how it
- * did before (`current`, absent for a new one). The secret, or the lack of
- * one, is kept whatever the auth becomes, unless one is brought; a null one
- * leaves it without. A new webhook without one brought gets one made, which
- * is returned, and so does one leaving bearer auth with only the hash of a
- * token made before secrets were kept. A secret brought for a generic
- * webhook must be long enough to be hard to guess; a source's is whatever its
- * sender made.
+ * How a webhook trigger written as `input` checks its callers, and which of
+ * their calls it runs, given how it did before (`current`, absent for a new
+ * one). The filter is kept unless one is brought, and none is `undefined`.
+ * The secret, or the lack of one, is kept whatever the auth becomes, unless
+ * one is brought; a null one leaves it without. A new webhook without one
+ * brought gets one made, which is returned, and so does one leaving bearer
+ * auth with only the hash of a token made before secrets were kept. A secret
+ * brought for a generic webhook must be long enough to be hard to guess; a
+ * source's is whatever its sender made.
  */
 function webhookCheck(
 	credentials: Credentials.Interface,
@@ -711,14 +715,17 @@ function webhookCheck(
 ): Effect.Effect<
 	{
 		auth: WebhookAuth;
+		filter: readonly WebhookCondition[] | undefined;
 		secretEncrypted: string | null;
 		secretDigest: string | null;
 		secret: string | null;
 	},
 	WebhookSecretTooShort
 > {
-	const currentAuth = current?.settings.kind === "webhook" ? current.settings.auth : undefined;
-	const auth = input.auth ?? currentAuth ?? DEFAULT_WEBHOOK_AUTH;
+	const currentSettings = current?.settings.kind === "webhook" ? current.settings : undefined;
+	const auth = input.auth ?? currentSettings?.auth ?? DEFAULT_WEBHOOK_AUTH;
+	const brought = input.filter ?? currentSettings?.filter;
+	const filter = brought?.length ? brought : undefined;
 	if (typeof input.secret === "string" && !webhookSecretLongEnough(auth.kind, input.secret)) {
 		return Effect.fail(new WebhookSecretTooShort());
 	}
@@ -726,17 +733,25 @@ function webhookCheck(
 	if (current && !hashOnly && input.secret === undefined) {
 		return Effect.succeed({
 			auth,
+			filter,
 			secretEncrypted: current.secretEncrypted,
 			secretDigest: current.secretDigest,
 			secret: null,
 		});
 	}
 	if (input.secret === null) {
-		return Effect.succeed({ auth, secretEncrypted: null, secretDigest: null, secret: null });
+		return Effect.succeed({
+			auth,
+			filter,
+			secretEncrypted: null,
+			secretDigest: null,
+			secret: null,
+		});
 	}
 	const secret = input.secret ?? generateSecret(auth.kind);
 	return Effect.succeed({
 		auth,
+		filter,
 		secretEncrypted: credentials.encrypt(secret),
 		secretDigest: null,
 		secret,
