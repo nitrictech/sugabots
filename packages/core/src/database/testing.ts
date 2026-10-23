@@ -1,6 +1,7 @@
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Credentials } from "../credentials/credentials.ts";
+import { DeviceLinks } from "../devices/device-links.ts";
 import { Ids } from "../ids/ids.ts";
 import { Installation } from "../installation/installation.ts";
 import { Egress } from "../providers/network/egress.ts";
@@ -29,13 +30,14 @@ import {
 
 /**
  * What the process provides every service once, as `index.ts` does: here the
- * test database, real ids, blobs kept in the database, and credentials sealed
- * under a fixed test key.
+ * test database, real ids, blobs kept in the database, credentials sealed
+ * under a fixed test key, and no devices connected.
  */
 export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
 	Egress.layer,
+	DeviceLinks.layer,
 ).pipe(
 	Layer.provideMerge(
 		Layer.succeed(

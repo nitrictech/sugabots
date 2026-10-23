@@ -91,6 +91,28 @@ export const session = pgTable(
 );
 
 /**
+ * A person's computer running the desktop app, paired to them. It holds a
+ * token of its own rather than a session, so it can do nothing as its owner
+ * but carry requests to the agents it lends; only the token's SHA-256 is kept.
+ */
+export const device = pgTable(
+	"device",
+	{
+		id: primaryKey(),
+		ownerId: uuid("owner_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		tokenDigest: text("token_digest").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		uniqueIndex("device_token_digest_idx").on(table.tokenDigest),
+		index("device_owner_id_idx").on(table.ownerId),
+	],
+);
+
+/**
  * How a user proves who they are. One row per credential: `password` for email
  * and password, or the tokens from an OAuth provider when we add one.
  */
@@ -373,6 +395,10 @@ export const agent = pgTable(
 		a2aUrl: text("a2a_url"),
 		a2aSecretHeader: text("a2a_secret_header"),
 		a2aSecretEncrypted: text("a2a_secret_encrypted"),
+		// The device that carries the A2A agent's requests, when it runs on
+		// somebody's computer: `a2a_url` is then an address on that computer.
+		// Forgetting the device leaves the address, which egress then refuses.
+		a2aDeviceId: uuid("a2a_device_id").references(() => device.id, { onDelete: "set null" }),
 		prompt: text("prompt").notNull().default(""),
 		// The built-in tools switched off for this agent, by key. What is off
 		// rather than what is on, so a new tool reaches every existing agent.
@@ -402,6 +428,10 @@ export const agent = pgTable(
 			"agent_placement_check",
 			sql`(${table.systemAgentKey} is null) = (${table.podId} is not null)`,
 		),
+		check(
+			"agent_a2a_device_check",
+			sql`${table.a2aDeviceId} is null or ${table.a2aUrl} is not null`,
+		),
 		// Scoped by pod, so they cover crew only; a system agent's null `pod_id`
 		// makes every row distinct in them. What keeps there being one Scribe and
 		// one Facilitator is `agent_system_agent_key_idx` below, and what keeps a
@@ -421,3 +451,4 @@ export const agent = pgTable(
 
 export type PodRow = typeof pod.$inferSelect;
 export type AgentRow = typeof agent.$inferSelect;
+export type DeviceRow = typeof device.$inferSelect;

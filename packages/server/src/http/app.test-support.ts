@@ -16,6 +16,8 @@ import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
+import { DeviceLinks } from "@sugabots/core/devices/device-links";
+import { Devices } from "@sugabots/core/devices/devices";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
@@ -124,6 +126,8 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(ConnectionSetup.Service),
 	unimplemented(ModelTrials.Service),
 	unimplemented(Usage.Service),
+	unimplemented(Devices.Service),
+	unimplemented(DeviceLinks.Service),
 	unimplemented(Chats.Service),
 	unimplemented(ChatFiles.Service),
 	unimplemented(ChatView.Service),

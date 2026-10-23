@@ -14,6 +14,7 @@ import { MessageCircle, Pencil, RefreshCw } from "lucide-react";
 import { type FormEvent, useId, useRef, useState } from "react";
 import { useAgents, useDeleteAgent, useRunsOnLabel, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
+import { useDevices, useThisDevice } from "@/lib/devices.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
@@ -26,7 +27,11 @@ import { PodTile } from "@/shell/PodTile.tsx";
 import {
 	type A2ADraft,
 	A2AEndpointFields,
+	type A2APlace,
+	A2APlaceControl,
+	A2ASecretFields,
 	a2aEndpointOf,
+	DeviceAgentPicker,
 	type RunsOn,
 	RunsOnControl,
 } from "@/shell/RunsOn.tsx";
@@ -183,7 +188,9 @@ function ContactCard({
 				label="About"
 				note={
 					agent.a2a &&
-					`Replies come from the external agent at ${hostOf(agent.a2a.url)}, which brings its own model, instructions and tools.`
+					(agent.a2a.deviceId
+						? "Replies come from an external agent on a computer in the workspace, which brings its own model, instructions and tools."
+						: `Replies come from the external agent at ${hostOf(agent.a2a.url)}, which brings its own model, instructions and tools.`)
 				}
 			>
 				<TextRow
@@ -465,7 +472,9 @@ function hostOf(url: string) {
  * list and saved as it is picked, or another service's agent over A2A, whose
  * address and secret are saved together. Choosing a model for a bot on an A2A
  * agent takes it off the agent. A saved secret is never shown; leaving the
- * field empty keeps it, as long as the header stays the same.
+ * field empty keeps it, as long as the header stays the same. An agent on
+ * somebody's computer is chosen from the agents their computers lend, so only
+ * that computer's owner can change it; anyone else sees where it is.
  */
 function RunsOnPage({
 	agent,
@@ -485,12 +494,21 @@ function RunsOnPage({
 	done: () => void;
 }) {
 	const [runsOn, setRunsOn] = useState<RunsOn>(agent.a2a ? "a2a" : "model");
+	const savedDeviceId = agent.a2a?.deviceId ?? undefined;
+	const [place, setPlace] = useState<A2APlace>(savedDeviceId ? "device" : "address");
 	const [draft, setDraft] = useState<A2ADraft>({
 		url: agent.a2a?.url ?? "",
 		secretHeader: agent.a2a?.secretHeader ?? "",
 		secret: "",
+		...(savedDeviceId ? { deviceId: savedDeviceId } : {}),
 	});
-	const endpoint = a2aEndpointOf(draft);
+	const devices = useDevices(savedDeviceId !== undefined);
+	const ownDevice = devices.data?.find((device) => device.id === savedDeviceId);
+	// A computer's agents are chosen from the desktop app on that computer, so
+	// an agent on any other one, the viewer's or a member's, shows as it is.
+	const thisDevice = useThisDevice();
+	const onAnotherComputer = savedDeviceId !== undefined && savedDeviceId !== thisDevice;
+	const endpoint = a2aEndpointOf(place === "device" ? draft : { ...draft, deviceId: undefined });
 	const keepsSecret =
 		agent.a2a?.hasSecret === true && draft.secretHeader.trim() === (agent.a2a.secretHeader ?? "");
 
@@ -526,9 +544,35 @@ function RunsOnPage({
 						void save({ model, ...(agent.a2a ? { a2a: null } : {}) }).catch(() => {});
 					}}
 				/>
-			) : editable ? (
+			) : editable && !onAnotherComputer ? (
 				<form onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-					<A2AEndpointFields draft={draft} onChange={setDraft} keepsSecret={keepsSecret} />
+					{thisDevice && (
+						<SettingsGroup>
+							<A2APlaceControl
+								value={place}
+								onChange={(next) => {
+									setPlace(next);
+									// Each place has its own kind of address, so one doesn't carry over to the other.
+									setDraft({ ...draft, url: "", deviceId: undefined });
+								}}
+							/>
+						</SettingsGroup>
+					)}
+					{place === "device" && thisDevice ? (
+						<>
+							<DeviceAgentPicker
+								chosen={draft.deviceId ? { deviceId: draft.deviceId, url: draft.url } : undefined}
+								onChoose={({ deviceId, agent: chosen }) =>
+									setDraft({ ...draft, url: chosen.url, deviceId })
+								}
+							/>
+							{draft.deviceId && (
+								<A2ASecretFields draft={draft} onChange={setDraft} keepsSecret={keepsSecret} />
+							)}
+						</>
+					) : (
+						<A2AEndpointFields draft={draft} onChange={setDraft} keepsSecret={keepsSecret} />
+					)}
 					<div className="flex justify-end">
 						<Button type="submit" disabled={!endpoint || savePending}>
 							{savePending ? "Saving…" : "Save"}
@@ -536,10 +580,25 @@ function RunsOnPage({
 					</div>
 				</form>
 			) : (
-				<SettingsGroup>
+				<SettingsGroup
+					note={
+						!savedDeviceId
+							? undefined
+							: ownDevice
+								? `Change it from the Sugabots desktop app on ${ownDevice.name}.`
+								: "Only they can change it, from the Sugabots desktop app on their computer."
+					}
+				>
 					<SettingsRow
 						label="External agent"
-						trailing={<SettingsValue>{agent.a2a?.url}</SettingsValue>}
+						sub={
+							ownDevice
+								? `On ${ownDevice.name}`
+								: savedDeviceId
+									? "On another member's computer"
+									: undefined
+						}
+						trailing={savedDeviceId ? undefined : <SettingsValue>{agent.a2a?.url}</SettingsValue>}
 					/>
 				</SettingsGroup>
 			)}

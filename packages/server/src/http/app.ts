@@ -20,6 +20,7 @@ import { agentRoutes } from "../routes/agents/routes.ts";
 import { artifactRoutes } from "../routes/artifacts/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
+import { devicePairingRequestRoutes, deviceRoutes } from "../routes/devices/routes.ts";
 import { eventRoutes } from "../routes/events/routes.ts";
 import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
@@ -40,6 +41,7 @@ import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
 import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
+import { deviceLinkRoutes } from "./device-link.ts";
 import { failureResponse } from "./errors.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
@@ -100,11 +102,14 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				threadRoutes,
 				usageRoutes,
 				referralRoutes,
+				deviceRoutes,
+				devicePairingRequestRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),
 	betterAuthRoutes,
 	desktopViewerRoutes,
+	deviceLinkRoutes,
 	contentPageRoutes,
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the

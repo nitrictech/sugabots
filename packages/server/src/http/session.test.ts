@@ -18,6 +18,8 @@ const OPEN_ENDPOINTS = new Set([
 	"POST /hooks/routines/:routineId",
 	"POST /hooks/triggers/:triggerId",
 	"POST /hooks/connections/:connectionId",
+	// A desktop asking to be paired, which does nothing until somebody signed in approves its code.
+	"POST /device-pairings",
 ]);
 
 const PLACEHOLDERS: Record<string, string> = {
@@ -47,6 +49,8 @@ const PLACEHOLDERS: Record<string, string> = {
 	emoji: "%F0%9F%91%8D",
 	fileId: "0199a3a0-0000-7000-8000-000000000010",
 	triggerId: "0199a3a0-0000-7000-8000-000000000011",
+	deviceId: "0199a3a0-0000-7000-8000-000000000012",
+	code: "ABCD-EFGH",
 };
 
 function fill(pattern: string): string {

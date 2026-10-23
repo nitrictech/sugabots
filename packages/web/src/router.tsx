@@ -1,6 +1,7 @@
 import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
 import {
 	CONNECTION_SIGN_IN_RETURN_PATH,
+	DEVICE_PAIRING_PAGE,
 	GITHUB_SETUP_RETURN_PATH,
 	type GitHubSetupFailure,
 } from "@sugabots/contracts";
@@ -54,6 +55,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
 const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
+const PairDevice = lazyNamed(() => import("@/screens/PairDevice.tsx"), "PairDevice");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
 const ResetPassword = lazyNamed(
 	// Only this export: the module's other screen would otherwise decide the props.
@@ -128,6 +130,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /reset-password           where a password reset email's link lands
  *   /join/$code               where a referral link lands
  *   /invite/$id
+ *   /pair-device?code=        where the desktop app sends somebody to approve pairing it
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
  *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
@@ -504,6 +507,23 @@ function InviteRoute() {
 			}}
 		/>
 	);
+}
+
+/** Where the desktop app opens the browser to have its pairing code approved. */
+const pairDeviceRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: DEVICE_PAIRING_PAGE,
+	validateSearch: (search: Record<string, unknown>): { code?: string } => ({
+		code: optionalString(search.code),
+	}),
+	beforeLoad: requireUser,
+	component: PairDeviceRoute,
+});
+
+function PairDeviceRoute() {
+	const { code = "" } = pairDeviceRoute.useSearch();
+	const navigate = useNavigate();
+	return <PairDevice code={code} onCancel={() => void navigate({ to: "/", replace: true })} />;
 }
 
 interface OnboardingSearch {
@@ -1323,6 +1343,7 @@ const routeTree = rootRoute.addChildren([
 	joinRoute,
 	resetPasswordRoute,
 	inviteRoute,
+	pairDeviceRoute,
 	signInReturnRoute,
 	gitHubSetupReturnRoute,
 	onboardingRoute,

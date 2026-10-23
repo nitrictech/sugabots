@@ -10,6 +10,7 @@ import {
 import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer, type Scope } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
+import { DeviceLinks } from "../../devices/device-links.ts";
 import { Ids } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
@@ -18,7 +19,8 @@ import { Egress, type EgressHttpClient } from "../network/egress.ts";
  * Agents run by other services, reached over the Agent2Agent protocol (A2A)
  * through the official SDK: v1.0 natively, and v0.3 for an agent whose card
  * is still in that shape. Every request, the card's included, goes through
- * the egress policy.
+ * the egress policy, or, for an agent on somebody's computer, through the
+ * link of the device that lends it.
  */
 export interface Interface {
 	/**
@@ -37,12 +39,16 @@ export const make = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	const credentials = yield* Credentials.Service;
 	const ids = yield* Ids.Service;
+	const devices = yield* DeviceLinks.Service;
 
 	/** The agent's card, and a client for it, sending `headers` with every request. */
-	const connect = (url: string, headers: Record<string, string>) =>
+	const connect = (url: string, deviceId: string | null, headers: Record<string, string>) =>
 		Effect.tryPromise({
 			try: async () => {
-				const fetchImpl = egressFetch(egress, headers);
+				const fetchImpl = withHeaders(
+					headers,
+					deviceId === null ? egressFetch(egress) : devices.fetchThrough(deviceId),
+				);
 				const card = await new DefaultAgentCardResolver({
 					fetchImpl,
 					legacyCompat: { enabled: true },
@@ -73,7 +79,7 @@ export const make = Effect.gen(function* () {
 								),
 							}
 						: {};
-				const { client } = yield* connect(endpoint.url, headers);
+				const { client } = yield* connect(endpoint.url, endpoint.deviceId, headers);
 				const messageId = yield* ids.next;
 				const events = client.sendMessageStream(
 					{
@@ -99,6 +105,7 @@ export const make = Effect.gen(function* () {
 			Effect.map(
 				connect(
 					endpoint.url,
+					endpoint.deviceId ?? null,
 					endpoint.secretHeader && endpoint.secret
 						? { [endpoint.secretHeader]: endpoint.secret }
 						: {},
@@ -113,9 +120,13 @@ export const layer = Layer.effect(Service, make);
 /** What `Credentials` seals an A2A agent's secret for, so it opens for nothing else. */
 export const SECRET_PURPOSE = "agent.a2a-secret";
 
-/** Where an agent is reached: its agent card's base URL, and the secret it expects, sealed. */
+/**
+ * Where an agent is reached: its agent card's base URL, and the secret it
+ * expects, sealed. With `deviceId`, the URL is an address on that device.
+ */
 export interface Endpoint {
 	url: string;
+	deviceId: string | null;
 	secretHeader: string | null;
 	secretEncrypted: string | null;
 }
@@ -123,6 +134,7 @@ export interface Endpoint {
 /** An address and secret somebody has typed, before they are saved and the secret sealed. */
 export interface UnsavedEndpoint {
 	url: string;
+	deviceId?: string | undefined;
 	secretHeader?: string | undefined;
 	secret?: string | undefined;
 }
@@ -160,20 +172,25 @@ export class RequestFailed
 	}
 }
 
-/**
- * The SDK's `fetch`: each request under the egress policy for its own host,
- * as the card may name another host than its own, with `headers` added.
- */
-function egressFetch(egress: Egress.Interface, headers: Record<string, string>): EgressHttpClient {
+/** Each request under the egress policy for its own host, as the card may name another host than its own. */
+function egressFetch(egress: Egress.Interface): EgressHttpClient {
+	return (input, init) => {
+		const url = input instanceof Request ? input.url : String(input);
+		return egress.providers.for({ baseUrl: new URL(url).origin })(url, init);
+	};
+}
+
+/** The SDK's `fetch`: `fetchImpl`, with `headers` added to every request. */
+function withHeaders(
+	headers: Record<string, string>,
+	fetchImpl: EgressHttpClient,
+): EgressHttpClient {
 	return (input, init) => {
 		const url = input instanceof Request ? input.url : String(input);
 		const merged = new Headers(input instanceof Request ? input.headers : undefined);
 		for (const [name, value] of new Headers(init?.headers)) merged.set(name, value);
 		for (const [name, value] of Object.entries(headers)) merged.set(name, value);
-		return egress.providers.for({ baseUrl: new URL(url).origin })(url, {
-			...init,
-			headers: merged,
-		});
+		return fetchImpl(url, { ...init, headers: merged });
 	};
 }
 

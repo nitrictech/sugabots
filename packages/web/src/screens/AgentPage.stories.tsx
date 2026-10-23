@@ -107,7 +107,12 @@ export const ExternalAgent = meta.story({
 						? {
 								...bot,
 								model: null,
-								a2a: { url: "http://localhost:8462", secretHeader: null, hasSecret: false },
+								a2a: {
+									url: "http://localhost:8462",
+									secretHeader: null,
+									hasSecret: false,
+									deviceId: null,
+								},
 							}
 						: bot,
 				),

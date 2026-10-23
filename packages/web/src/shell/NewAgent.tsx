@@ -11,6 +11,7 @@ import {
 import { Check, ChevronRight } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents, useCreateAgent, useModels, useReadA2ACard } from "@/lib/agents.ts";
+import { useThisDevice } from "@/lib/devices.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
@@ -18,7 +19,12 @@ import { PodTile } from "@/shell/PodTile.tsx";
 import {
 	type A2ADraft,
 	A2AEndpointFields,
+	type A2APlace,
+	A2APlaceControl,
+	A2ASecretFields,
 	a2aEndpointOf,
+	type DeviceAgentChoice,
+	DeviceAgentPicker,
 	emptyA2ADraft,
 	type RunsOn,
 	RunsOnControl,
@@ -52,7 +58,9 @@ const INSTRUCTIONS_STARTS = [
  * one until somebody chooses another on its page, it interviews its creator for
  * its instructions or is given them. On an external agent, its A2A card is read
  * once its address is typed, which shows the address works and names and
- * describes the bot after the agent, unless somebody has named it already.
+ * describes the bot after the agent, unless somebody has named it already. An
+ * agent on one of the creator's computers is chosen from those it lends, whose
+ * cards the desktop app has already read.
  */
 export function NewAgentDialog({
 	podId: fixedPodId,
@@ -81,9 +89,17 @@ export function NewAgentDialog({
 	const [chosenRunsOn, setChosenRunsOn] = useState<RunsOn>();
 	// With no model to run on, an external agent is the only thing a bot can be.
 	const runsOn = chosenRunsOn ?? (models.isSuccess && offered.length === 0 ? "a2a" : "model");
-	const [a2aDraft, setA2ADraft] = useState<A2ADraft>(emptyA2ADraft);
+	const [chosenPlace, setPlace] = useState<A2APlace>("address");
+	// Only the desktop app can lend this computer's agents, so a browser has only addresses.
+	const thisDevice = useThisDevice();
+	const place = thisDevice ? chosenPlace : "address";
+	const [addressDraft, setAddressDraft] = useState<A2ADraft>(emptyA2ADraft);
+	const [deviceDraft, setDeviceDraft] = useState<A2ADraft>(emptyA2ADraft);
+	const [deviceAgent, setDeviceAgent] = useState<DeviceAgentChoice>();
+	const a2aDraft = place === "address" ? addressDraft : deviceDraft;
 	const endpoint = a2aEndpointOf(a2aDraft);
-	const card = useAgentCard(podId, endpoint);
+	const card = useAgentCard(podId, place === "address" ? endpoint : undefined);
+	const found = place === "address" ? card.found : deviceAgent?.agent;
 	// The default goes unoffered while a failed test has its provider off.
 	const model =
 		offered.find((candidate) => candidate.modelId === models.data?.defaultModel)?.modelId ??
@@ -102,7 +118,7 @@ export function NewAgentDialog({
 					? {
 							...look,
 							a2a: endpoint,
-							...(card.found?.description ? { description: card.found.description } : {}),
+							...(found?.description ? { description: found.description } : {}),
 						}
 					: {
 							...look,
@@ -161,11 +177,41 @@ export function NewAgentDialog({
 					<RunsOnControl value={runsOn} onChange={setChosenRunsOn} />
 				</SettingsGroup>
 
-				{runsOn === "a2a" ? (
+				{runsOn === "a2a" && thisDevice && (
+					<SettingsGroup className="mt-2">
+						<A2APlaceControl value={place} onChange={setPlace} />
+					</SettingsGroup>
+				)}
+
+				{runsOn === "a2a" && place === "device" ? (
+					<>
+						<DeviceAgentPicker
+							chosen={
+								deviceDraft.deviceId
+									? { deviceId: deviceDraft.deviceId, url: deviceDraft.url }
+									: undefined
+							}
+							onChoose={(choice) => {
+								setDeviceAgent(choice);
+								setDeviceDraft({
+									...deviceDraft,
+									url: choice.agent.url,
+									deviceId: choice.deviceId,
+								});
+								// A name somebody typed stays; one taken from an earlier choice follows the new one.
+								if (trimmedName === "" || trimmedName === card.named) {
+									setName(choice.agent.name);
+									card.setNamed(choice.agent.name);
+								}
+							}}
+						/>
+						{deviceAgent && <A2ASecretFields draft={deviceDraft} onChange={setDeviceDraft} />}
+					</>
+				) : runsOn === "a2a" ? (
 					<>
 						<A2AEndpointFields
-							draft={a2aDraft}
-							onChange={setA2ADraft}
+							draft={addressDraft}
+							onChange={setAddressDraft}
 							onLeave={() => {
 								void card.lookUp().then((found) => {
 									// A name somebody typed stays; one taken from an earlier card follows the new one.

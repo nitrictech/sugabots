@@ -22,6 +22,8 @@ import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
+import { DeviceLinks } from "@sugabots/core/devices/device-links";
+import { Devices } from "@sugabots/core/devices/devices";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
@@ -58,13 +60,14 @@ import { Workflows } from "./workflows.ts";
  * What the process owns once and every service above builds on: the pools,
  * ids, blob storage, the cipher, the installation's settings and egress
  * policy, the durable events and the bus that fans them out, and the workflow
- * engine with its lanes. A service's `layer` never provides these, so there is one of each
+ * engine with its lanes, and the links of the devices connected. A service's `layer` never provides these, so there is one of each
  * however many services use them.
  */
 const Infrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Credentials.layer,
 	Egress.layer,
+	DeviceLinks.layer,
 	EventOutbox.layer,
 	ConversationWorkflows.lanes,
 ).pipe(
@@ -108,6 +111,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	ArtifactPages.layer,
 	ModelTrials.layer,
 	Usage.layer,
+	Devices.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));
 
 /**

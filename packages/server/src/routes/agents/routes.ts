@@ -48,4 +48,5 @@ const agentErrors = {
 	AgentNeedsModel: BadRequest,
 	EgressRefused: BadRequest,
 	A2ACardUnreadable: BadRequest,
+	DeviceNotFound: BadRequest,
 };

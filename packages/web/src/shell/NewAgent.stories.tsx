@@ -5,6 +5,12 @@ import { type ReactNode, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
+import {
+	inDesktopApp,
+	lendingLaptop,
+	lentInSugabots,
+	offlineDesktop,
+} from "./device-story-fixtures.ts";
 import { NewAgentDialog } from "./NewAgent.tsx";
 import { engineering, growthDesk, personal, podsWithBots, revenue } from "./story-fixtures.ts";
 
@@ -17,7 +23,9 @@ const createAgent = http.post(`${API}/pods/:podId/agents`, async ({ request }) =
 	const body = (await request.json()) as Record<string, unknown>;
 	created.push(body);
 	// An A2A endpoint comes back with its secret kept out, as the API returns it.
-	const a2a = body.a2a as { url: string; secretHeader?: string; secret?: string } | undefined;
+	const a2a = body.a2a as
+		| { url: string; deviceId?: string; secretHeader?: string; secret?: string }
+		| undefined;
 	return HttpResponse.json(
 		{
 			...growthDesk,
@@ -27,6 +35,7 @@ const createAgent = http.post(`${API}/pods/:podId/agents`, async ({ request }) =
 						url: a2a.url,
 						secretHeader: a2a.secretHeader ?? null,
 						hasSecret: a2a.secret !== undefined,
+						deviceId: a2a.deviceId ?? null,
 					}
 				: null,
 		},
@@ -179,6 +188,62 @@ export const OnAnExternalAgent = meta.story({
 				a2a: { url: "https://pets.example.com" },
 			},
 		]);
+	},
+});
+
+/**
+ * On an agent on the creator's own computer: chosen from the agents their
+ * paired computers lend, which names and describes the bot, and made with
+ * the agent's address there and the device that carries its requests.
+ */
+export const OnMyComputer = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	beforeEach({ msw }) {
+		created = [];
+		msw.use(
+			createAgent,
+			listAgents,
+			http.get(`${API}/devices`, () => HttpResponse.json([lendingLaptop, offlineDesktop])),
+		);
+		return inDesktopApp(lendingLaptop.id);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.click(within(dialog).getByRole("radio", { name: "External agent" }));
+		await userEvent.click(within(dialog).getByRole("radio", { name: "On my computer" }));
+		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+		await userEvent.click(
+			await within(dialog).findByRole("button", { name: /Claude Code in sugabots/ }),
+		);
+		await expect(within(dialog).getByLabelText("Name")).toHaveValue("Claude Code in sugabots");
+		// Only this computer: the other paired one lends from its own desktop app.
+		await expect(within(dialog).queryByText("Studio desktop")).toBeNull();
+		await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+		await waitFor(() => expect(args.onCreated).toHaveBeenCalled());
+		await expect(created).toEqual([
+			{
+				name: "Claude Code in sugabots",
+				description: lentInSugabots.description,
+				color: expect.any(String),
+				shape: "circle",
+				face: "pill",
+				a2a: { url: lentInSugabots.url, deviceId: lendingLaptop.id },
+			},
+		]);
+	},
+});
+
+/** In a plain browser an external agent is only at an address: computers lend from their desktop app. */
+export const ExternalAgentInBrowser = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	beforeEach({ msw }) {
+		msw.use(createAgent, listAgents);
+	},
+	play: async ({ userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.click(within(dialog).getByRole("radio", { name: "External agent" }));
+		await expect(within(dialog).getByLabelText("Address")).toBeInTheDocument();
+		await expect(within(dialog).queryByRole("radio", { name: "On my computer" })).toBeNull();
 	},
 });
 

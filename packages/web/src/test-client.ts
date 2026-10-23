@@ -60,6 +60,12 @@ export const client = {
 			link: vi.fn(),
 			resetLink: vi.fn(),
 		},
+		devices: {
+			list: vi.fn(),
+			pendingPairing: vi.fn(),
+			approvePairing: vi.fn(),
+			forget: vi.fn(),
+		},
 		onboarding: {
 			complete: vi.fn(),
 		},

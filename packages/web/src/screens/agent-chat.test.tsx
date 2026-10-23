@@ -555,6 +555,7 @@ describe("ongoing agent Chat", () => {
 			url: "http://localhost:8462",
 			secretHeader: "Authorization",
 			hasSecret: true,
+			deviceId: null,
 		};
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(

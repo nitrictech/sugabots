@@ -3,6 +3,7 @@ import { AgentsApi } from "./groups/agents.ts";
 import { ArtifactsApi } from "./groups/artifacts.ts";
 import { ChatsApi } from "./groups/chats.ts";
 import { ConnectionsApi } from "./groups/connections.ts";
+import { DevicePairingRequestsApi, DevicesApi } from "./groups/devices.ts";
 import { EventsApi } from "./groups/events.ts";
 import { GitHubConnectionsApi, GitHubWebhooksApi } from "./groups/github.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
@@ -55,4 +56,6 @@ export class Api extends HttpApi.make("sugabots")
 	.add(RoutinesApi)
 	.add(UsageApi)
 	.add(ReferralsApi)
+	.add(DevicesApi)
+	.add(DevicePairingRequestsApi)
 	.middleware(ValidateRequest) {}

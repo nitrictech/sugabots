@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import {
 	agent,
+	device,
 	modelProvider,
 	pod,
 	podMember,
@@ -18,6 +19,7 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { Devices } from "../../devices/devices.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
@@ -120,6 +122,40 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 			).toEqual([]);
 		},
 	);
+
+	it("lets a bot stand for an agent on its creator's own device, and nobody else's", async () => {
+		const [other] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Bo", email: `bo-${Date.now()}-${Math.random()}@example.com` })
+				.returning(),
+		);
+		if (!other) throw new Error("could not create the fixtures");
+		const [mine, theirs] = await onDatabase((db) =>
+			db
+				.insert(device)
+				.values([
+					{ ownerId: creatorId, name: "Mine", tokenDigest: `mine-${other.id}` },
+					{ ownerId: other.id, name: "Theirs", tokenDigest: `theirs-${other.id}` },
+				])
+				.returning(),
+		);
+		if (!mine || !theirs) throw new Error("could not create the fixtures");
+		const url = "http://localhost:41241";
+
+		await expect(
+			administration.create({
+				podId,
+				agent: { name: "Borrowed", a2a: { url, deviceId: theirs.id } },
+			}),
+		).rejects.toBeInstanceOf(Devices.DeviceNotFound);
+
+		const made = await administration.create({
+			podId,
+			agent: { name: "Local", a2a: { url, deviceId: mine.id } },
+		});
+		expect(made.a2a).toEqual({ url, secretHeader: null, hasSecret: false, deviceId: mine.id });
+	});
 
 	it("refuses to move an agent to a model the workspace does not offer, but lets it be cleared", async () => {
 		const made = await administration.create({

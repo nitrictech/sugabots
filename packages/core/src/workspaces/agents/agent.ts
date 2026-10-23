@@ -39,6 +39,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 						url: row.a2aUrl,
 						secretHeader: row.a2aSecretHeader,
 						hasSecret: row.a2aSecretEncrypted !== null,
+						deviceId: row.a2aDeviceId,
 					},
 		createdAt: row.createdAt.toISOString(),
 	};
@@ -49,6 +50,7 @@ export interface SealedA2AEndpoint {
 	a2aUrl: string;
 	a2aSecretHeader: string | null;
 	a2aSecretEncrypted: string | null;
+	a2aDeviceId: string | null;
 }
 
 /** The columns that make an agent one of ours, running on its model. */
@@ -56,4 +58,5 @@ export const NOT_A2A: { [K in keyof SealedA2AEndpoint]: null } = {
 	a2aUrl: null,
 	a2aSecretHeader: null,
 	a2aSecretEncrypted: null,
+	a2aDeviceId: null,
 };

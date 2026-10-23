@@ -28,6 +28,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { DevicesSettings } from "./DevicesSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
@@ -266,6 +267,7 @@ function ProfileSettings() {
 				/>
 				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
 			</SettingsGroup>
+			<DevicesSettings />
 			<ReferralLinkSettings />
 			<SettingsDanger onClick={() => void signOut()}>Sign out</SettingsDanger>
 		</SettingsPage>

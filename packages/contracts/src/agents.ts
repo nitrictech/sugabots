@@ -178,6 +178,8 @@ export const agentSchema = Schema.Struct({
 			url: Schema.String,
 			secretHeader: Schema.NullOr(Schema.String),
 			hasSecret: Schema.Boolean,
+			/** The device that carries its requests, when `url` is an address on somebody's computer. */
+			deviceId: Schema.NullOr(Schema.String),
 		}),
 	),
 	createdAt: isoTimestampSchema,
@@ -209,9 +211,14 @@ const a2aSecretHeaderSchema = Schema.Trim.check(
 	}),
 );
 
-/** The agent card's base URL, and the header and secret its service expects, if any. */
+/**
+ * The agent card's base URL, and the header and secret its service expects,
+ * if any. With `deviceId`, the URL is an address on that device, one of the
+ * agents it lends, and only the device's owner may choose it.
+ */
 export const a2aEndpointInputSchema = Schema.Struct({
 	url: a2aUrlSchema,
+	deviceId: Schema.optional(uuidSchema),
 	secretHeader: Schema.optional(a2aSecretHeaderSchema),
 	secret: Schema.optional(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096))),
 });

@@ -17,6 +17,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
+import { Devices } from "../../devices/devices.ts";
 import { A2A } from "../../providers/a2a/a2a.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
@@ -48,6 +49,7 @@ export interface Interface {
 		| ModelProviderRepository.ModelNotEnabled
 		| AgentNeedsModel
 		| Egress.EgressRefused
+		| Devices.DeviceNotFound
 		| AgentRepository.AgentNameTaken
 		| AgentRepository.PodOutsideWorkspace,
 		CurrentActor.Service
@@ -61,6 +63,7 @@ export interface Interface {
 		| EmptyAgentUpdate
 		| ModelProviderRepository.ModelNotEnabled
 		| Egress.EgressRefused
+		| Devices.DeviceNotFound
 		| AgentRepository.AgentNameTaken
 		| AgentRepository.AgentGone
 		| AgentRepository.SystemAgentImmutable,
@@ -79,7 +82,7 @@ export interface Interface {
 		endpoint: A2AEndpointInput;
 	}) => Effect.Effect<
 		A2ACard,
-		AuthorizationDenied | Egress.EgressRefused | A2ACardUnreadable,
+		AuthorizationDenied | Egress.EgressRefused | Devices.DeviceNotFound | A2ACardUnreadable,
 		CurrentActor.Service
 	>;
 	readonly systemAgents: (input: {
@@ -112,15 +115,25 @@ export const make = Effect.gen(function* () {
 	const credentials = yield* Credentials.Service;
 	const egress = yield* Egress.Service;
 	const a2a = yield* A2A.Service;
+	const devices = yield* Devices.Service;
 
 	/**
-	 * The endpoint checked against the egress policy, with its secret sealed.
+	 * Fails unless the actor may send the agent's requests where `endpoint`
+	 * says: through the egress policy, or through a device of their own.
+	 */
+	const checkReach = (endpoint: A2AEndpointInput) =>
+		endpoint.deviceId === undefined
+			? egress.validateProviderUrl(endpoint.url)
+			: Effect.asVoid(devices.owned(endpoint.deviceId));
+
+	/**
+	 * The endpoint checked with {@link checkReach}, with its secret sealed.
 	 * An update that leaves the secret out keeps the one stored, while the
 	 * header it is sent in stays the same.
 	 */
 	const sealA2A = (input: A2AEndpointInput, stored?: SealedA2AEndpoint) =>
 		Effect.gen(function* () {
-			yield* egress.validateProviderUrl(input.url);
+			yield* checkReach(input);
 			const secretHeader = input.secretHeader ?? null;
 			const keptSecret =
 				input.secret === undefined && stored?.a2aSecretHeader === secretHeader
@@ -128,6 +141,7 @@ export const make = Effect.gen(function* () {
 					: null;
 			return {
 				a2aUrl: input.url,
+				a2aDeviceId: input.deviceId ?? null,
 				a2aSecretHeader: secretHeader,
 				a2aSecretEncrypted:
 					input.secret === undefined
@@ -216,7 +230,7 @@ export const make = Effect.gen(function* () {
 				"readA2ACard",
 				Effect.gen(function* () {
 					yield* authorization.pod(podId, "agent.create");
-					yield* egress.validateProviderUrl(endpoint.url);
+					yield* checkReach(endpoint);
 					return yield* a2a
 						.readCard(endpoint)
 						.pipe(Effect.mapError((failure) => new A2ACardUnreadable({ reason: failure.reason })));
@@ -266,6 +280,7 @@ export const layer = layerNoDeps.pipe(
 		AgentRepository.layer,
 		ModelProviderRepository.layer,
 		A2A.layer,
+		Devices.layer,
 	]),
 );
 
@@ -291,6 +306,7 @@ export class AgentNeedsModel extends Data.TaggedError("AgentNeedsModel") impleme
 
 function sealedEndpointOf(row: {
 	a2aUrl: string | null;
+	a2aDeviceId: string | null;
 	a2aSecretHeader: string | null;
 	a2aSecretEncrypted: string | null;
 }): SealedA2AEndpoint | undefined {

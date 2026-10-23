@@ -275,6 +275,7 @@ export const ExternalAgentCard = meta.story({
 									url: "https://agents.example.com",
 									secretHeader: "Authorization",
 									hasSecret: true,
+									deviceId: null,
 								},
 							}
 						: bot,
@@ -309,6 +310,7 @@ export const ExternalAgentPage = meta.story({
 						url: change.a2a.url,
 						secretHeader: change.a2a.secretHeader ?? null,
 						hasSecret: true,
+						deviceId: null,
 					},
 				});
 			}),

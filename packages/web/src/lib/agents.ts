@@ -118,10 +118,14 @@ export function canAnswer(agent: Pick<Agent, "model" | "a2a">): boolean {
 	return agent.model !== null || agent.a2a !== null;
 }
 
-/** What the agent runs on, in a few words: its model's name, or the external agent's host. */
+/**
+ * What the agent runs on, in a few words: its model's name, or the external
+ * agent's host, which for one on somebody's computer would only be localhost.
+ */
 export function useRunsOnLabel(agent: Pick<Agent, "model" | "a2a">): string {
 	// Not asked for an external agent's model, which nothing reads while it stands for one.
 	const modelName = useModelName(agent.a2a ? null : agent.model);
+	if (agent.a2a?.deviceId) return "External agent · on a computer";
 	if (agent.a2a) {
 		const host = URL.canParse(agent.a2a.url) ? new URL(agent.a2a.url).host : agent.a2a.url;
 		return `External agent · ${host}`;

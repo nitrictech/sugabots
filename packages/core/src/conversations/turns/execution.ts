@@ -138,6 +138,7 @@ export const make = Effect.gen(function* () {
 										url: speaker.a2aUrl,
 										secretHeader: speaker.a2aSecretHeader,
 										secretEncrypted: speaker.a2aSecretEncrypted,
+										deviceId: speaker.a2aDeviceId,
 									};
 						const model = speaker.model;
 						const runsOn: RunsOn | undefined = endpoint
@@ -432,6 +433,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							a2aUrl: true,
 							a2aSecretHeader: true,
 							a2aSecretEncrypted: true,
+							a2aDeviceId: true,
 						},
 						orderBy: { name: "asc" },
 					},
