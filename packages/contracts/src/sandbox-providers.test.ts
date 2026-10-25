@@ -45,11 +45,11 @@ describe("sandbox images", () => {
 		}
 	});
 
-	it("refuses what isn't an image's name, such as a command to pull one", () => {
+	it("refuses what people paste by mistake: a command, or a web address", () => {
 		for (const image of [
 			"docker pull ghcr.io/nitrictech/sugabots-sandbox:edge",
 			"https://ghcr.io/nitrictech/sugabots-sandbox",
-			"GHCR.io/Nitric/Sandbox",
+			"HTTP://ghcr.io/nitrictech/sugabots-sandbox",
 		]) {
 			expect(saves(image), image).toBe(false);
 		}

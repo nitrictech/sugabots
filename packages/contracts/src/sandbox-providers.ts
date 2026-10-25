@@ -100,18 +100,20 @@ export type SandboxNetworkMode = typeof sandboxNetworkModeSchema.Type;
 export const SANDBOX_NETWORK_MODE_DEFAULT: SandboxNetworkMode = "open";
 
 /**
- * An image as Docker names it, such as `ghcr.io/nitrictech/sugabots-sandbox:edge`:
- * an optional registry, a lowercase path, then a tag, a digest or both. The
- * grammar is Docker's own (distribution's `reference` package), without
- * IPv6 registries.
- */
-const IMAGE_REFERENCE =
-	/^(?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(?:\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))*(?::[0-9]+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[\w][\w.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$/;
+ * An image's name as `docker pull` takes it, such as
+ * `ghcr.io/nitrictech/sugabots-sandbox:edge`. This only catches what people
+ * paste by mistake, a whole command or a web address, rather than every rule
+ * of Docker's: the provider says when it can't use an image, and names it.
 
+ */
 const imageSchema = Schema.Trim.check(
 	Schema.isMaxLength(512),
-	Schema.isPattern(IMAGE_REFERENCE, {
-		message: "Enter an image's name, such as ghcr.io/nitrictech/sugabots-sandbox:latest",
+	Schema.isPattern(/^\S+$/, {
+		message: "Enter just the image's name, such as ghcr.io/nitrictech/sugabots-sandbox:latest",
+	}),
+	Schema.isPattern(/^(?![a-z]+:\/\/)/i, {
+		message:
+			"Enter the image's name rather than a web address, such as ghcr.io/nitrictech/sugabots-sandbox:latest",
 	}),
 );
 
