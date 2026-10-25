@@ -9,6 +9,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { useSandboxNetwork } from "@/lib/sandbox-providers.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
@@ -93,7 +94,9 @@ export function SandboxNetworkGroups({
 
 /**
  * A row summing up a list of hosts, which opens to show them one a row, as
- * added hosts are: on one line, a long list is cut off before its end.
+ * added hosts are: on one line, a long list is cut off before its end. More
+ * than {@link HOSTS_BEFORE_SCROLLING} scroll in a box, so the page doesn't
+ * grow by the length of the list.
  */
 export function HostListRows({
 	label,
@@ -114,11 +117,22 @@ export function HostListRows({
 				onClick={() => setOpen((showing) => !showing)}
 			/>
 			{open &&
-				hosts.map((host) => (
-					<SettingsRow key={host} label={<span className="font-mono text-[13.5px]">{host}</span>} />
+				(hosts.length > HOSTS_BEFORE_SCROLLING ? (
+					// About six and a half rows tall, so the cut-off row shows there's more.
+					<ScrollArea className="h-72">{hostRows(hosts)}</ScrollArea>
+				) : (
+					hostRows(hosts)
 				))}
 		</>
 	);
+}
+
+const HOSTS_BEFORE_SCROLLING = 6;
+
+function hostRows(hosts: readonly string[]) {
+	return hosts.map((host) => (
+		<SettingsRow key={host} label={<span className="font-mono text-[13.5px]">{host}</span>} />
+	));
 }
 
 /**
