@@ -1,10 +1,9 @@
 import type { PodSandboxNetwork } from "@sugabots/contracts";
-import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { usePodSandboxNetwork } from "@/lib/pod-sandbox.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
-import { AddedHostRow, AddHostRow } from "./SandboxNetworkSettings.tsx";
+import { SettingsGroup } from "@/ui/settings-page.tsx";
+import { AddedHostRow, AddHostRow, HostListRows } from "./SandboxNetworkSettings.tsx";
 
 /**
  * What the pod's sandbox may connect to: the hosts the workspace allows every
@@ -48,7 +47,6 @@ export function PodNetworkGroup({
 	onAdd: (host: string) => Promise<unknown>;
 	onRemove: (host: string) => void;
 }) {
-	const [showingWorkspace, setShowingWorkspace] = useState(false);
 	const reachable = network.workspaceHosts.filter((entry) => entry.blockedBy === null);
 	return (
 		<>
@@ -70,15 +68,10 @@ export function PodNetworkGroup({
 					/>
 				))}
 				{canManage && <AddHostRow label="Add host" action="Add" disabled={pending} onAdd={onAdd} />}
-				<SettingsRow
+				<HostListRows
 					label="From the workspace"
-					sub={
-						showingWorkspace
-							? reachable.map((entry) => entry.host).join(", ")
-							: `${reachable.length} hosts every pod reaches: GitHub, package registries and the workspace's own`
-					}
-					chevron={!showingWorkspace}
-					onClick={() => setShowingWorkspace((showing) => !showing)}
+					summary={`${reachable.length} hosts every pod reaches: GitHub, package registries and the workspace's own`}
+					hosts={reachable.map((entry) => entry.host)}
 				/>
 			</SettingsGroup>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}

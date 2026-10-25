@@ -89,12 +89,15 @@ export const BlockedHosts = meta.story({
 	},
 });
 
-/** Only the trusted hosts, listed once asked for. */
+/** Only the trusted hosts, listed one a row once asked for, so the last isn't cut off. */
 export const TrustedOnly = meta.story({
 	args: { settings: { trustedHosts, addedHosts: [], blockedHosts: [] } },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByText("Trusted hosts"));
-		await expect(canvas.getByText(/registry\.npmjs\.org/)).toBeVisible();
+		for (const host of trustedHosts) await expect(canvas.getByText(host)).toBeVisible();
+
+		await userEvent.click(canvas.getByText("Trusted hosts"));
+		await expect(canvas.queryByText("deb.debian.org")).toBeNull();
 	},
 });
 

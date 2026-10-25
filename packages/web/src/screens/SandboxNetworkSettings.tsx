@@ -51,7 +51,6 @@ export function SandboxNetworkGroups({
 	onBlock: (host: string) => Promise<unknown>;
 	onUnblock: (host: string) => void;
 }) {
-	const [showingTrusted, setShowingTrusted] = useState(false);
 	return (
 		<>
 			<SettingsGroup
@@ -67,15 +66,10 @@ export function SandboxNetworkGroups({
 					/>
 				))}
 				<AddHostRow label="Add host" action="Add" disabled={pending} onAdd={onAdd} />
-				<SettingsRow
+				<HostListRows
 					label="Trusted hosts"
-					sub={
-						showingTrusted
-							? settings.trustedHosts.join(", ")
-							: `${settings.trustedHosts.length} hosts every workspace reaches: GitHub, package registries and Linux mirrors`
-					}
-					chevron={!showingTrusted}
-					onClick={() => setShowingTrusted((showing) => !showing)}
+					summary={`${settings.trustedHosts.length} hosts every workspace reaches: GitHub, package registries and Linux mirrors`}
+					hosts={settings.trustedHosts}
 				/>
 			</SettingsGroup>
 			<SettingsGroup
@@ -93,6 +87,36 @@ export function SandboxNetworkGroups({
 				<AddHostRow label="Block host" action="Block" disabled={pending} onAdd={onBlock} />
 			</SettingsGroup>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
+		</>
+	);
+}
+
+/**
+ * A row summing up a list of hosts, which opens to show them one a row, as
+ * added hosts are: on one line, a long list is cut off before its end.
+ */
+export function HostListRows({
+	label,
+	summary,
+	hosts,
+}: {
+	label: string;
+	summary: string;
+	hosts: readonly string[];
+}) {
+	const [open, setOpen] = useState(false);
+	return (
+		<>
+			<SettingsRow
+				label={label}
+				sub={summary}
+				chevron={!open}
+				onClick={() => setOpen((showing) => !showing)}
+			/>
+			{open &&
+				hosts.map((host) => (
+					<SettingsRow key={host} label={<span className="font-mono text-[13.5px]">{host}</span>} />
+				))}
 		</>
 	);
 }

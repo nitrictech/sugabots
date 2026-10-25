@@ -67,12 +67,13 @@ export const PodHosts = meta.story({
 	},
 });
 
-/** The workspace's hosts every pod reaches, less the blocked, listed once asked for. */
+/** The workspace's hosts every pod reaches, less the blocked, listed one a row once asked for. */
 export const FromTheWorkspace = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await expect(canvas.getByText(/2 hosts every pod reaches/)).toBeVisible();
 		await userEvent.click(canvas.getByText("From the workspace"));
-		await expect(canvas.getByText("github.com, registry.npmjs.org")).toBeVisible();
+		await expect(canvas.getByText("github.com")).toBeVisible();
+		await expect(canvas.getByText("registry.npmjs.org")).toBeVisible();
 	},
 });
 
