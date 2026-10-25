@@ -5,7 +5,12 @@ import type {
 	SandboxProviderSettings,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { SANDBOX_E2B_DEFAULT_SIZE, sandboxProviderPreset } from "@sugabots/contracts";
+import {
+	SANDBOX_E2B_DEFAULT_SIZE,
+	SANDBOX_E2B_TEMPLATE,
+	SANDBOX_IMAGE,
+	sandboxProviderPreset,
+} from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
@@ -89,7 +94,6 @@ export const make = Effect.gen(function* () {
 		if (!row.apiKeyEncrypted) return undefined;
 		const apiKey = Redacted.make(cipher.decrypt(row.apiKeyEncrypted));
 		const settings = row.settings;
-		const defaultImage = sandboxProviderPreset(settings.preset).defaultImage;
 		switch (settings.preset) {
 			case "opensandbox":
 				return settings.serverUrl
@@ -97,14 +101,15 @@ export const make = Effect.gen(function* () {
 							provider: "opensandbox",
 							baseUrl: settings.serverUrl,
 							apiKey,
-							image: settings.image ?? defaultImage,
+							image: settings.image ?? SANDBOX_IMAGE,
 						}
 					: undefined;
 			case "e2b":
 				return {
 					provider: "e2b",
 					apiKey,
-					template: settings.template ?? defaultImage,
+					template: settings.template ?? SANDBOX_E2B_TEMPLATE,
+					image: settings.image ?? SANDBOX_IMAGE,
 					size: {
 						cpuCount: settings.cpuCount ?? SANDBOX_E2B_DEFAULT_SIZE.cpuCount,
 						memoryGiB: settings.memoryGiB ?? SANDBOX_E2B_DEFAULT_SIZE.memoryGiB,
