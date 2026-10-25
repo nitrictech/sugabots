@@ -1,11 +1,11 @@
 import type { FilePart } from "@sugabots/contracts";
-import { expect, waitFor } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { MessageFiles } from "./MessageFiles.tsx";
 
 /*
  * The files attached to a sent message, under its words: images as pictures
- * that open full size in a new tab, and other files as chips to download.
+ * that open full size over the chat, and other files as chips to download.
  */
 
 /** A picture drawn as an SVG, so the stories need no server and look the same every run. */
@@ -64,12 +64,29 @@ const meta = preview.meta({
 	],
 });
 
-/** One image, fitted to a 4:3 frame, opening full size in a new tab. */
+/** One image, fitted to a 4:3 frame, with a download button over its corner. */
 export const OneImage = meta.story({
 	args: { files: [newPricing] },
 	play: async ({ canvas }) => {
-		const link = canvas.getByRole("link", { name: "Open pricing-page-new.png" });
-		await expect(link).toHaveAttribute("target", "_blank");
+		await expect(
+			canvas.getByRole("link", { name: "Download pricing-page-new.png" }),
+		).toHaveAttribute("download", "pricing-page-new.png");
+	},
+});
+
+/** An image opened over the chat, as large as the window allows, to download or close. */
+export const ImageOpened = meta.story({
+	args: { files: [newPricing] },
+	play: async ({ canvas, canvasElement }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Open pricing-page-new.png" }));
+		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(within(viewer).getByRole("img", { name: "pricing-page-new.png" })).toBeVisible();
+		await expect(
+			within(viewer).getByRole("link", { name: "Download pricing-page-new.png" }),
+		).toHaveAttribute("download", "pricing-page-new.png");
+
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(viewer).not.toBeInTheDocument());
 	},
 });
 
@@ -80,7 +97,7 @@ export const TwoImages = meta.story({ args: { files: [oldPricing, newPricing] } 
 export const ImagesAndAFile = meta.story({
 	args: { files: [oldPricing, newPricing, acmeEmail, acmeRequest] },
 	play: async ({ canvas }) => {
-		await expect(canvas.getAllByRole("link", { name: /^Open / })).toHaveLength(3);
+		await expect(canvas.getAllByRole("button", { name: /^Open / })).toHaveLength(3);
 		await expect(
 			canvas.getByRole("link", { name: "Download acme-retail-request.pdf" }),
 		).toHaveAttribute("download", "acme-retail-request.pdf");
@@ -102,11 +119,15 @@ export const OnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 });
 
-/** An image the browser can't draw shows its name and an icon, still opening the file. */
+/** An image the browser can't draw shows its name and an icon, and opens to be downloaded. */
 export const ImageThatWontDraw = meta.story({
 	args: { files: [holidayPhoto] },
-	play: async ({ canvas }) => {
-		const link = canvas.getByRole("link", { name: "Open holiday.heic" });
-		await waitFor(() => expect(link.querySelector("img")).toBeNull());
+	play: async ({ canvas, canvasElement }) => {
+		const open = canvas.getByRole("button", { name: "Open holiday.heic" });
+		await waitFor(() => expect(open.querySelector("img")).toBeNull());
+
+		await userEvent.click(open);
+		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(within(viewer).getByText(/can't be shown here/)).toBeVisible();
 	},
 });

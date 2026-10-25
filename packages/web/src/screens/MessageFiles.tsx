@@ -1,8 +1,10 @@
 import type { FilePart } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Download, FileIcon, FileSpreadsheet, FileText } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
+import { CloseButton } from "@/ui/close-button.tsx";
+import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 
@@ -14,7 +16,7 @@ export type FileUrlOf = (fileId: string) => string | undefined;
 
 /**
  * The files on a message, a person's or a bot's reply, under its words: its
- * images as pictures, each opening full size in a new tab, then every other
+ * images as pictures, each opening full size over the chat, then every other
  * file as a chip to download. A file not served yet shows without a link.
  */
 export function MessageFiles({ files, urlOf }: { files: readonly FilePart[]; urlOf: FileUrlOf }) {
@@ -43,9 +45,9 @@ function lookOf(file: FilePart): FileLook {
 /**
  * One image in a 4:3 frame up to 360 by 270, two side by side, or three to a
  * row, each tile 4:3 and the grid no wider than the chat it is in. Every image
- * is shown: with no viewer to step through them, one hidden behind a count
- * could not be opened. Tiles keep their size before their images load, so
- * the thread doesn't move as they arrive.
+ * is shown: the viewer opens one at a time, so one hidden behind a count could
+ * not be opened. Tiles keep their size before their images load, so the
+ * thread doesn't move as they arrive.
  */
 function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {
 	const [only] = images;
@@ -73,8 +75,10 @@ function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: File
 }
 
 /**
- * An image filling its frame, opening full size in a new tab. One the browser
- * can't draw, or not served yet, shows its name and a file icon instead.
+ * An image filling its frame, opening full size over the chat, with a
+ * download button over its corner while it's hovered or focused. One the
+ * browser can't draw, or not served yet, shows its name and a file icon
+ * instead.
  */
 function ImageTile({
 	file,
@@ -96,26 +100,100 @@ function ImageTile({
 	);
 	if (!url) return <div className={frame}>{standIn}</div>;
 	return (
-		<a
-			href={url}
-			target="_blank"
-			rel="noopener noreferrer"
-			aria-label={`Open ${file.name}`}
-			className={cn(frame, "focus-ring cursor-zoom-in")}
+		<div className="group relative size-full">
+			<Dialog>
+				<DialogTrigger
+					aria-label={`Open ${file.name}`}
+					className={cn(frame, "focus-ring cursor-zoom-in")}
+				>
+					{undrawable ? (
+						standIn
+					) : (
+						<img
+							src={url}
+							// The button names the image, so the picture isn't named twice.
+							alt=""
+							loading="lazy"
+							onError={() => setUndrawable(true)}
+							className={cn("block size-full", fit === "cover" ? "object-cover" : "object-contain")}
+						/>
+					)}
+				</DialogTrigger>
+				<ImageViewer file={file} url={url} drawable={!undrawable} />
+			</Dialog>
+			<DownloadButton
+				file={file}
+				url={url}
+				variant="round"
+				className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+			/>
+		</div>
+	);
+}
+
+/**
+ * The image as large as the window allows, over the chat, with its name and
+ * a way to download it. One the browser can't draw says so, and can still be
+ * downloaded.
+ */
+function ImageViewer({ file, url, drawable }: { file: FilePart; url: string; drawable: boolean }) {
+	// Focus starts on the picture, not the first button, whose tooltip would
+	// otherwise open and take the first Escape.
+	const picture = useRef<HTMLDivElement>(null);
+	return (
+		<DialogContent
+			initialFocus={picture}
+			showCloseButton={false}
+			className="inset-4 flex w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none"
 		>
-			{undrawable ? (
-				standIn
-			) : (
-				<img
-					src={url}
-					// The link names the image, so the picture isn't named twice.
-					alt=""
-					loading="lazy"
-					onError={() => setUndrawable(true)}
-					className={cn("block size-full", fit === "cover" ? "object-cover" : "object-contain")}
-				/>
-			)}
-		</a>
+			<div className="flex items-center gap-2 pl-1">
+				<DialogTitle className="min-w-0 flex-1">
+					<MiddleTruncated text={file.name} />
+				</DialogTitle>
+				<DownloadButton file={file} url={url} variant="round" />
+				<CloseButton render={<DialogClose />} />
+			</div>
+			<div
+				ref={picture}
+				tabIndex={-1}
+				className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none"
+			>
+				{drawable ? (
+					<img src={url} alt={file.name} className="block max-h-full max-w-full object-contain" />
+				) : (
+					<p className="m-0 px-4 text-center text-muted-foreground text-sm">
+						This picture can't be shown here. Download it to open it.
+					</p>
+				)}
+			</div>
+		</DialogContent>
+	);
+}
+
+/** Downloads the file under its own name. */
+function DownloadButton({
+	file,
+	url,
+	variant,
+	size,
+	className,
+}: {
+	file: FilePart;
+	url: string;
+	variant?: "quiet" | "round";
+	size?: "default" | "lg";
+	className?: string;
+}) {
+	return (
+		<IconButton
+			label={`Download ${file.name}`}
+			variant={variant}
+			size={size}
+			className={className}
+			render={<a href={url} download={file.name} />}
+		>
+			<Download aria-hidden />
+		</IconButton>
 	);
 }
 
@@ -134,15 +212,7 @@ function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
 					{fileSizeLabel(file.size)}
 				</span>
 			</span>
-			{url && (
-				<IconButton
-					label={`Download ${file.name}`}
-					size="lg"
-					render={<a href={url} download={file.name} />}
-				>
-					<Download aria-hidden />
-				</IconButton>
-			)}
+			{url && <DownloadButton file={file} url={url} size="lg" />}
 		</div>
 	);
 }
