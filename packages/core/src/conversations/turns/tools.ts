@@ -190,6 +190,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		catalogTools[key] = recorded(key, offered.tool, {
 			...recording,
 			mutating: offered.mutating || approvalBound,
+			connection: { binding: bindingOf(offered), appResourceUri: offered.appResourceUri },
 			...(offered.access === "ask" || approvalBound
 				? {
 						approval: { approvals: deps.approvals, binding: bindingOf(offered) },

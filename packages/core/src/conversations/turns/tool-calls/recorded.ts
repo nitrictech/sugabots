@@ -29,6 +29,11 @@ export interface RecordingOptions {
 	markActed?: () => Effect.Effect<void>;
 	/** Whether the tool may change something at the other end. Built-in tools do not. */
 	mutating?: boolean;
+	/** The connection a connection's tool runs through, and the MCP App its results are shown in. */
+	connection?: {
+		binding: ToolCallRepository.ApprovalBinding;
+		appResourceUri: string | undefined;
+	};
 	approval?: {
 		approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 		binding: ToolCallRepository.ApprovalBinding;
@@ -80,6 +85,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		noteToolCall,
 		markActed,
 		mutating = false,
+		connection,
 		approval,
 	} = options;
 	return {
@@ -104,7 +110,14 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 								),
 							),
 						)
-				: calls.open({ ...from, tool: key, input, atOffset, mutating });
+				: calls.open({
+						...from,
+						tool: key,
+						input,
+						atOffset,
+						mutating,
+						binding: connection?.binding,
+					});
 			const opened = await run(opening);
 			if (!opened) {
 				return { status: "failed", error: APPROVAL_NO_LONGER_APPLIES } satisfies ToolFailedResult;
@@ -114,7 +127,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 			try {
 				if (mutating && markActed) await run(markActed());
 				output = await execute(input, callOptions);
-				await run(calls.close(opened.id, { output }));
+				await run(calls.close(opened.id, { output, appResourceUri: connection?.appResourceUri }));
 			} catch (cause) {
 				// A tool with a failure worth explaining returns it as its result. A
 				// throw is a fault in the tool or its connection: what was thrown

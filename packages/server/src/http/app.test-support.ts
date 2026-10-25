@@ -12,6 +12,7 @@ import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
+import { McpApps } from "@sugabots/core/conversations/tools/mcp-apps";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
@@ -122,6 +123,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(GitHubApps.Service),
 	unimplemented(GitHubConnections.Service),
 	unimplemented(ConnectionSetup.Service),
+	unimplemented(McpApps.Service),
 	unimplemented(ModelTrials.Service),
 	unimplemented(Usage.Service),
 	unimplemented(Chats.Service),

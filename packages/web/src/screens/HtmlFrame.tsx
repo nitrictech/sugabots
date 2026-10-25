@@ -245,7 +245,7 @@ export const FRAME_TOKENS = [
  * The app's colour scheme and tokens, read from the root element and read
  * again when the theme there changes.
  */
-function useAppTheme(): PageTheme {
+export function useAppTheme(): PageTheme {
 	const colorScheme = useSyncExternalStore(onRootThemeChange, rootColorScheme);
 	const [tokens] = useState(rootTokens);
 	return { colorScheme, tokens };

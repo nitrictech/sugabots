@@ -256,6 +256,8 @@ export const toolCallPartSchema = Schema.Struct({
 	error: Schema.NullOr(Schema.String),
 	/** Whether the tool may have changed something at the other end. */
 	mutating: Schema.Boolean,
+	/** Whether the output is shown in its connection's MCP App, which `GET /tool-calls/:id/app` serves. */
+	hasApp: Schema.optional(Schema.Boolean),
 	/** How many characters of the reply's text had been written when the call was made. */
 	atOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	startedAt: isoTimestampSchema,

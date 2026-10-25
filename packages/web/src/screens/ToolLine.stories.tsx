@@ -1,10 +1,15 @@
 import type { MessagePart, ToolCallPart } from "@sugabots/contracts";
-import { expect } from "storybook/test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
+import { expect, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { ToolLine } from "./ToolLine.tsx";
 
+const API = import.meta.env.VITE_API_URL as string;
+
 const looks = new Map<string, ConnectionLook>([
+	["weather", { name: "Weather" }],
 	["hubspot", { name: "HubSpot" }],
 	["sentry", { name: "Sentry", presetId: "sentry" }],
 	["linear", { name: "Linear", presetId: "linear" }],
@@ -303,3 +308,86 @@ export const AConnectionsAnswer = meta.story({
 		await expect(canvas.getByText("2 results")).toBeVisible();
 	},
 });
+
+/**
+ * A stand-in MCP App that speaks the protocol by hand. Given the call's
+ * result, it shows it, asks its server for a fresh one through the host,
+ * and grows to `REFRESHED_HEIGHT_PX` once that arrives, which is what the
+ * story can see of a frame whose insides are another origin's.
+ */
+const REFRESHED_HEIGHT_PX = 200;
+
+const WEATHER_APP_HTML = `<!doctype html><html><body style="margin:0;padding:12px;font-family:sans-serif">
+<p id="forecast" style="margin:0">Waiting for the forecast</p>
+<script>
+let lastId = 0;
+const waiting = new Map();
+const send = (message) => parent.postMessage({ jsonrpc: "2.0", ...message }, "*");
+const request = (method, params) => new Promise((resolve) => {
+	lastId += 1;
+	waiting.set(lastId, resolve);
+	send({ id: lastId, method, params });
+});
+const show = (result) => { forecast.textContent = "Forecast: " + result.content[0].text; };
+addEventListener("message", ({ data }) => {
+	if (data.id !== undefined && waiting.has(data.id)) {
+		waiting.get(data.id)(data.result);
+		waiting.delete(data.id);
+	} else if (data.method === "ui/notifications/tool-result") {
+		show(data.params);
+		request("tools/call", { name: "refresh", arguments: {} }).then((fresh) => {
+			show(fresh);
+			send({ method: "ui/notifications/size-changed", params: { height: ${REFRESHED_HEIGHT_PX} } });
+		});
+	}
+});
+request("ui/initialize", { appInfo: { name: "weather", version: "1" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
+	.then(() => send({ method: "ui/notifications/initialized" }));
+</script></body></html>`;
+
+const forecast = call("weather__forecast", {
+	input: { city: "Wellington" },
+	output: { content: [{ type: "text", text: "sunny, 18°C" }] },
+	hasApp: true,
+});
+
+/**
+ * A call made with an MCP App's tool shows its app under the line, without
+ * opening it. The app is given the call's result and can call its server
+ * back through the API.
+ */
+export const WithMcpApp = meta.story({
+	args: { parts: [forecast] },
+	decorators: [
+		(Story) => (
+			<QueryClientProvider client={new QueryClient()}>
+				<Story />
+			</QueryClientProvider>
+		),
+	],
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/tool-calls/${forecast.id}/app`, () =>
+				HttpResponse.json({
+					html: WEATHER_APP_HTML,
+					csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
+					prefersBorder: true,
+				}),
+			),
+			http.post(`${API}/tool-calls/${forecast.id}/app/calls`, async ({ request }) => {
+				appCalls.push(await request.json());
+				return HttpResponse.json({ content: [{ type: "text", text: "windy, 14°C" }] });
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		appCalls.length = 0;
+		const frame = await canvas.findByTitle("weather__forecast app");
+		await waitFor(() => expect(frame).toHaveStyle({ height: `${REFRESHED_HEIGHT_PX}px` }), {
+			timeout: 5_000,
+		});
+		await expect(appCalls).toEqual([{ name: "refresh", arguments: {} }]);
+	},
+});
+
+const appCalls: unknown[] = [];

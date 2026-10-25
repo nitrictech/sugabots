@@ -1,7 +1,11 @@
 import {
+	type CallToolResult,
 	createMCPClient,
 	type ListToolsResult,
+	type MCPAppResource,
+	mcpAppClientCapabilities,
 	type OAuthClientProvider,
+	readMCPAppResource,
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
@@ -38,6 +42,10 @@ interface ServerTool {
 	described: ConnectionTool;
 	inputSchema: JSONSchema7;
 	tool: Tool;
+	/** The `ui://` resource the server shows the tool's results in, when it is an MCP App's. */
+	appResourceUri: string | undefined;
+	/** Who may call it, as the server's `_meta.ui.visibility` says: the model, the tool's app, or both. */
+	visibility: { model: boolean; app: boolean };
 }
 
 /** A server's tool list, which any later session can run its tools from. */
@@ -57,6 +65,10 @@ export interface ServerSession {
 		input: unknown,
 		options: ToolExecutionOptions<unknown>,
 	): Promise<unknown>;
+	/** readApp reads the HTML an MCP App is shown with, from its `ui://` resource. */
+	readApp(uri: string): Promise<MCPAppResource>;
+	/** callForApp calls `name` as an MCP App asked to, answering with the server's result unchanged. */
+	callForApp(name: string, input: Record<string, unknown>): Promise<CallToolResult>;
 	close(): Promise<void>;
 }
 
@@ -84,6 +96,7 @@ export async function connectServer(
 			},
 			initializationOptions: { timeout: timeoutMs },
 			protocolVersionDiscovery,
+			capabilities: mcpAppClientCapabilities,
 		});
 	// The SDK first asks for the newest protocol, and gives up when a server on an
 	// older one says so rather than ignoring the request. Such a server still
@@ -110,6 +123,7 @@ export async function connectServer(
 								},
 								inputSchema: definition.inputSchema as JSONSchema7,
 								tool,
+								...appOf(definition),
 							},
 						]
 					: [];
@@ -132,7 +146,31 @@ export async function connectServer(
 				return { isError: true, content: [{ type: "text", text: cause.message }] };
 			}
 		},
+		readApp: (uri) => readMCPAppResource({ client, uri, options: { timeout: timeoutMs } }),
+		callForApp: async (name, input) => {
+			try {
+				return await client.callTool({ name, arguments: input, options: { timeout: timeoutMs } });
+			} catch (cause) {
+				// The app is told why, as the model would be.
+				if (!isServerError(cause)) throw cause;
+				return { isError: true, content: [{ type: "text", text: cause.message }] };
+			}
+		},
 		close: () => client.close().catch(() => undefined),
+	};
+}
+
+/** appOf reads a tool's MCP App from its `_meta.ui`; a tool that names no visibility is anyone's to call. */
+function appOf(
+	definition: ListToolsResult["tools"][number],
+): Pick<ServerTool, "appResourceUri" | "visibility"> {
+	const ui = definition._meta?.ui;
+	const meta = typeof ui === "object" && ui !== null ? (ui as Record<string, unknown>) : {};
+	const uri = meta.resourceUri;
+	const visibility = Array.isArray(meta.visibility) ? meta.visibility : ["model", "app"];
+	return {
+		appResourceUri: typeof uri === "string" && uri.startsWith("ui://") ? uri : undefined,
+		visibility: { model: visibility.includes("model"), app: visibility.includes("app") },
 	};
 }
 

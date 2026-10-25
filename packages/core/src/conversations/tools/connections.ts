@@ -64,6 +64,8 @@ export interface OfferedTool {
 	connectionId: string;
 	connectionRevision: number;
 	remoteToolName: string;
+	/** The `ui://` resource the call's result is shown in, for a tool that is an MCP App's. */
+	appResourceUri?: string;
 }
 
 export interface ConnectionToolSet {
@@ -296,7 +298,8 @@ function buildOfferedTools(
 	openSession: (target: ConnectionTarget) => Promise<ServerSession>,
 ): Record<string, OfferedTool> {
 	const tools: Record<string, OfferedTool> = {};
-	for (const { described, inputSchema, tool } of listing.tools) {
+	for (const { described, inputSchema, tool, appResourceUri, visibility } of listing.tools) {
+		if (!visibility.model) continue;
 		tools[connectionToolKey(target.handle, described.name)] = {
 			tool: {
 				...tool,
@@ -311,6 +314,7 @@ function buildOfferedTools(
 			connectionId: target.connectionId,
 			connectionRevision: target.configurationRevision,
 			remoteToolName: described.name,
+			appResourceUri,
 		};
 	}
 	return tools;

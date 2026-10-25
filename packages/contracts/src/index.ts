@@ -12,6 +12,7 @@ export * from "./chats.ts";
 export * from "./connections.ts";
 export * from "./events.ts";
 export * from "./github.ts";
+export * from "./mcp-apps.ts";
 export * from "./me.ts";
 export * from "./membership.ts";
 export * from "./model-providers.ts";

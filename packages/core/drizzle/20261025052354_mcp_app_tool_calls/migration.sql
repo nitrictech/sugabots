@@ -1,0 +1,1 @@
+ALTER TABLE "tool_call" ADD COLUMN "app_resource_uri" text;

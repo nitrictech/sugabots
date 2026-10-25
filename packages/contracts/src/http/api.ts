@@ -5,6 +5,7 @@ import { ChatsApi } from "./groups/chats.ts";
 import { ConnectionsApi } from "./groups/connections.ts";
 import { EventsApi } from "./groups/events.ts";
 import { GitHubConnectionsApi, GitHubWebhooksApi } from "./groups/github.ts";
+import { McpAppsApi } from "./groups/mcp-apps.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
@@ -52,6 +53,7 @@ export class Api extends HttpApi.make("sugabots")
 	.add(ChatsApi)
 	.add(ThreadsApi)
 	.add(ToolApprovalsApi)
+	.add(McpAppsApi)
 	.add(RoutinesApi)
 	.add(UsageApi)
 	.add(ReferralsApi)

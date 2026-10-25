@@ -58,6 +58,7 @@ export function toToolCallPart(
 			: null,
 		error: row.error,
 		mutating: row.mutating,
+		...(row.appResourceUri ? { hasApp: true } : {}),
 		atOffset: row.atOffset,
 		startedAt: row.startedAt.toISOString(),
 		finishedAt: row.finishedAt?.toISOString() ?? null,

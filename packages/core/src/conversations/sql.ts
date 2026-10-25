@@ -568,6 +568,8 @@ export const toolCall = pgTable(
 		connectionId: uuid("connection_id"),
 		connectionRevision: integer("connection_revision"),
 		remoteToolName: text("remote_tool_name"),
+		/** The MCP App's `ui://` resource the output is shown in, read from the connection when shown. */
+		appResourceUri: text("app_resource_uri"),
 		/** The complete input used for continuation; `input` below is display-bounded. */
 		executionInput: jsonb("execution_input").$type<JsonValue>(),
 		input: jsonb("input").$type<JsonValue>().notNull(),

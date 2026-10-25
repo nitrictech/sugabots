@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { listServerTools } from "./mcp.ts";
+import { connectServer, listServerTools } from "./mcp.ts";
 
 /**
  * The tool lister against a real MCP server in this process, so the whole
@@ -38,6 +38,38 @@ function fixtureServer(): McpServer {
 	return mcp;
 }
 
+const WEATHER_APP = "ui://weather/view";
+
+/** A server with an MCP App: a tool shown in it, and one only the app may call. */
+function appServer(): McpServer {
+	const mcp = new McpServer({ name: "weather", version: "1.0.0" });
+	mcp.registerTool(
+		"forecast",
+		{ description: "Shows the forecast.", _meta: { ui: { resourceUri: WEATHER_APP } } },
+		async () => ({ content: [{ type: "text", text: "sunny" }] }),
+	);
+	mcp.registerTool(
+		"refresh",
+		{ description: "Refreshes the view.", _meta: { ui: { visibility: ["app"] } } },
+		async () => ({ content: [{ type: "text", text: "fresh" }] }),
+	);
+	mcp.registerResource(
+		"weather view",
+		WEATHER_APP,
+		{ mimeType: "text/html;profile=mcp-app" },
+		async () => ({
+			contents: [
+				{
+					uri: WEATHER_APP,
+					mimeType: "text/html;profile=mcp-app",
+					text: "<p>weather</p>",
+					_meta: { ui: { csp: { connectDomains: ["https://api.weather.test"] } } },
+				},
+			],
+		}),
+	);
+	return mcp;
+}
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
 		seen.push(request.headers["x-fixture-key"] as string | undefined);
@@ -60,7 +92,7 @@ beforeAll(async () => {
 		}
 		// Stateless: a transport per request, which is all a tool listing needs.
 		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-		await fixtureServer().connect(transport);
+		await (request.url === "/apps-mcp" ? appServer() : fixtureServer()).connect(transport);
 		await transport.handleRequest(request, response, body);
 		response.on("close", () => void transport.close());
 	});
@@ -121,5 +153,48 @@ describe("listing a server's tools", () => {
 			reason:
 				"The server could not be reached. Check the address and port, and that the server is running",
 		});
+	});
+});
+
+describe("a server's MCP App", () => {
+	const appsTarget = () => ({
+		url: url.replace(/\/mcp$/, "/apps-mcp"),
+		headers: { "x-fixture-key": "open-sesame" },
+	});
+
+	it("names the app a tool is shown in, and which tools only the app may call", async () => {
+		const session = await connectServer(appsTarget(), fetch);
+		try {
+			const { tools } = await session.list();
+
+			expect(
+				tools.map(({ described, appResourceUri, visibility }) => ({
+					name: described.name,
+					appResourceUri,
+					visibility,
+				})),
+			).toEqual([
+				{ name: "forecast", appResourceUri: WEATHER_APP, visibility: { model: true, app: true } },
+				{ name: "refresh", appResourceUri: undefined, visibility: { model: false, app: true } },
+			]);
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("reads the app's HTML with the origins it reaches, and runs the calls it makes", async () => {
+		const session = await connectServer(appsTarget(), fetch);
+		try {
+			const app = await session.readApp(WEATHER_APP);
+			const refreshed = await session.callForApp("refresh", {});
+
+			expect(app).toMatchObject({
+				html: "<p>weather</p>",
+				meta: { csp: { connectDomains: ["https://api.weather.test"] } },
+			});
+			expect(refreshed).toMatchObject({ content: [{ type: "text", text: "fresh" }] });
+		} finally {
+			await session.close();
+		}
 	});
 });

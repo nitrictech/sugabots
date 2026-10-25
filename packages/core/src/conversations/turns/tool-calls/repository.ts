@@ -62,6 +62,8 @@ export interface Interface {
 		atOffset: number;
 		/** Whether the tool may change something at the other end. Off when left out. */
 		mutating?: boolean;
+		/** The connection a connection's tool runs through. Built-in when left out. */
+		binding?: ApprovalBinding;
 	}) => Effect.Effect<ToolCallPart>;
 	/** Records what the tool returned or how it failed. `undefined` if the call is not running. */
 	readonly close: (
@@ -128,6 +130,8 @@ export const make = Effect.gen(function* () {
 	const apply = Effect.fn("ToolCallRepository.apply")(function* (
 		row: ToolCallRow,
 		event: ToolCallEvent,
+		/** Columns outside the call's lifecycle, written only if the event applies. */
+		alongside: Pick<Partial<ToolCallRow>, "appResourceUri"> = {},
 	) {
 		const decided = transition(stateOf(row), event);
 		if (decided._tag === "Refused") return undefined;
@@ -137,6 +141,7 @@ export const make = Effect.gen(function* () {
 			db
 				.update(toolCall)
 				.set({
+					...alongside,
 					status: next.status,
 					approvalStatus: next.approvalStatus,
 					decidedById: next.decidedById,
@@ -169,6 +174,7 @@ export const make = Effect.gen(function* () {
 									input: boundedJson(input.input),
 									atOffset: input.atOffset,
 									mutating: input.mutating ?? false,
+									...bindingColumns(input.binding ?? { kind: "built-in" }),
 									startedAt,
 								})
 								.returning(),
@@ -194,6 +200,9 @@ export const make = Effect.gen(function* () {
 										? outcome
 										: { output: boundedJson(withImagesCounted(outcome.output)) },
 							}),
+							"output" in outcome && outcome.appResourceUri
+								? { appResourceUri: outcome.appResourceUri }
+								: {},
 						);
 						if (!closed) return undefined;
 						yield* emit([ConversationEvent.ToolCallFinished(toolCallChange(closed))]);
@@ -418,7 +427,8 @@ export const layer = Layer.effect(Service, make);
 /** Stored inputs and outputs are cut at this many characters of JSON. */
 export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
-export type ToolCallOutcome = { output: unknown } | { error: UserText };
+/** `appResourceUri` is the MCP App the output is shown in, for a tool that has one. */
+export type ToolCallOutcome = { output: unknown; appResourceUri?: string } | { error: UserText };
 
 /**
  * What an approved call must still match when it runs, beyond its tool and

@@ -13,6 +13,7 @@ import { UnsentUploads } from "@sugabots/core/conversations/thread-files/unsent-
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import { McpApps } from "@sugabots/core/conversations/tools/mcp-apps";
 import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
@@ -102,6 +103,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	GitHubApps.layer,
 	GitHubConnections.layer,
 	ConnectionSetup.layer,
+	McpApps.layer,
 	Artifacts.layer,
 	ArtifactPages.layer,
 	ModelTrials.layer,

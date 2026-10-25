@@ -10,6 +10,7 @@ import type { Reactions } from "@sugabots/core/conversations/reactions/reactions
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/thread-view";
 import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
+import type { McpApps } from "@sugabots/core/conversations/tools/mcp-apps";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
@@ -53,6 +54,7 @@ export type HttpServices =
 	| GitHubApps.Service
 	| GitHubConnections.Service
 	| ConnectionSetup.Service
+	| McpApps.Service
 	| Artifacts.Service
 	| ArtifactPages.Service
 	| ModelTrials.Service
