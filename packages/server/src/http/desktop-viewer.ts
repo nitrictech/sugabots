@@ -69,8 +69,9 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 );
 
 /**
- * The desktop's VNC server as a WebSocket, which x11vnc accepts on its VNC
- * port, reached through the sandbox provider.
+ * The desktop's VNC server as a WebSocket, reached through the sandbox
+ * provider: websockify in front of Xvnc, or x11vnc itself in sandboxes made
+ * from images before Xvnc.
  */
 function upstream(desktop: Sandboxes.Endpoint) {
 	const url = desktop.url.replace(/^http/, "ws");
@@ -230,8 +231,11 @@ const NO_AUTHENTICATION = 1;
 const VNC_AUTHENTICATION = 2;
 const SECURITY_RESULT_BYTES = 4;
 
-/** Asks x11vnc for VNC's bytes as they are rather than as base64 text. */
+/** Asks for VNC's bytes as they are rather than as base64 text. */
 const VNC_SUBPROTOCOL = "binary";
 
-/** Any origin satisfies x11vnc, which only checks that one is given. */
+/**
+ * Any origin satisfies x11vnc, which only checks that one is given, and
+ * websockify, which doesn't check.
+ */
 const RELAY_ORIGIN = "http://sugabots-desktop-relay";

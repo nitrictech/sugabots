@@ -48,7 +48,7 @@ RUN apt-get update \
 		build-essential pkg-config \
 		python3 python3-pip python3-venv \
 		nodejs npm \
-		xvfb x11vnc x11-utils openbox plank dconf-gsettings-backend dconf-cli xcompmgr xterm \
+		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox plank dconf-gsettings-backend dconf-cli xcompmgr xterm \
 		xfonts-base dbus-x11 hsetroot \
 		lxterminal pcmanfm adwaita-icon-theme librsvg2-common \
 		nix-bin \
