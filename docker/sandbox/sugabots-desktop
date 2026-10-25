@@ -25,13 +25,12 @@
 # it if the agent hasn't. Programs that stopped, as they do when a paused
 # sandbox comes back, start again on the same display.
 #
-# Display N is served on port 5900+N to a VNC viewer, over plain VNC or a
-# WebSocket, which x11vnc accepts on the same port, and on port 6900+N to one
-# that may only watch: that server ignores the viewer's mouse and keys. Each
-# server takes its own password, made when the desktop starts, so nothing
-# else in the sandbox can use them, such as a page in the browser, which
-# can't read the files they're kept in. Sugabots reads them from what
-# `desktop` and `session` print. Its
+# Display N is served to VNC viewers over a WebSocket on port 5900+N, which
+# `watch` reports too. It takes two passwords, made when the desktop starts:
+# one to use the desktop, and one to only watch it, which logs in a viewer
+# whose mouse and keys are ignored. Nothing else in the sandbox can use them,
+# such as a page in the browser, which can't read the files they're kept in.
+# Sugabots reads them from what `desktop` and `session` print. Its
 # browser's MCP server is on port 8930+N, and the browser's DevTools on port
 # 9230+N.
 set -euo pipefail
@@ -61,13 +60,31 @@ running() {
 desktop() {
 	local n="$1" log="$state/$1.log" pids="$state/$1.desktop.pids"
 	export DISPLAY=":$n"
-	rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n"
-	# -ac: any program in this sandbox may draw on it. -s 0: no screensaver,
-	# which would blank the screen after ten minutes without keyboard or mouse
-	# input, and agents drive the browser through Playwright, not the X server.
-	Xvfb "$DISPLAY" -screen 0 1280x800x24 -ac -s 0 -nolisten tcp >>"$log" 2>&1 &
+	rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n" "$state/$n.vnc"
+	local password watch_password
+	password="$(new_password)"
+	watch_password="$(new_password)"
+	(
+		umask 077
+		printf '%s\n%s\n' "$password" "$watch_password" >"$state/$n.passwords"
+		# The second password logs in a viewer whose mouse and keys are ignored.
+		vncpasswd -f <"$state/$n.passwords" >"$state/$n.passwd"
+	)
+	# The display and its VNC server in one, which sends viewers changes as
+	# they happen rather than waiting for each to ask for the next, so a slow
+	# connection delays frames rather than dropping most of them. It takes
+	# viewers only on a socket nothing else in the sandbox can open, which
+	# websockify serves. -ac: any program in this sandbox may draw on it. -s 0:
+	# no screensaver, which would blank the screen after ten minutes without
+	# keyboard or mouse input, and agents drive the browser through
+	# Playwright, not the X server.
+	Xvnc "$DISPLAY" -geometry 1280x800 -depth 24 -ac -s 0 -nolisten tcp \
+		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
+		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
 	echo $! >"$pids"
-	for _ in $(seq 50); do [ -e "/tmp/.X11-unix/X$n" ] && break; sleep 0.1; done
+	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
+	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &
+	echo $! >>"$pids"
 	# The dock matches windows to its apps through a service on the session bus.
 	eval "$(dbus-launch --sh-syntax)"
 	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
@@ -81,19 +98,6 @@ desktop() {
 	mkdir -p "$HOME/.config/plank/dock1/launchers"
 	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
 	plank >>"$log" 2>&1 &
-	echo $! >>"$pids"
-	local password watch_password
-	password="$(new_password)"
-	watch_password="$(new_password)"
-	(
-		umask 077
-		printf '%s\n%s\n' "$password" "$watch_password" >"$state/$n.passwords"
-		x11vnc -storepasswd "$password" "$state/$n.passwd" >/dev/null 2>&1
-		x11vnc -storepasswd "$watch_password" "$state/$n.watch.passwd" >/dev/null 2>&1
-	)
-	x11vnc -display "$DISPLAY" -rfbauth "$state/$n.passwd" -forever -shared -quiet -rfbport $((5900 + n)) >>"$log" 2>&1 &
-	echo $! >>"$pids"
-	x11vnc -display "$DISPLAY" -rfbauth "$state/$n.watch.passwd" -forever -shared -quiet -viewonly -rfbport $((6900 + n)) >>"$log" 2>&1 &
 	echo $! >>"$pids"
 }
 
@@ -222,7 +226,7 @@ named_desktop() {
 
 desktop_only() {
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
-	echo "display=$n viewer=$((5900 + n)) watch=$((6900 + n)) started=$desktop_started $(passwords "$n")"
+	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
@@ -233,7 +237,7 @@ session() {
 		browser "$n" "$2" "$3"
 		started=yes
 	fi
-	echo "display=$n viewer=$((5900 + n)) watch=$((6900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
+	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
 }
 
 viewer() {
