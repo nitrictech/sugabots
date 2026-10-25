@@ -40,7 +40,7 @@ export function mcpAppContentPolicy(csp: McpAppResource["csp"]): string {
 	const frames = csp.frameDomains.filter(isDeclaredOrigin).join(" ");
 	return [
 		"default-src 'none'",
-		`script-src 'unsafe-inline' blob: ${resources}`,
+		`script-src 'unsafe-inline' 'unsafe-eval' blob: ${resources}`,
 		`style-src 'unsafe-inline' ${resources}`,
 		`img-src data: blob: ${resources}`,
 		`font-src data: ${resources}`,
