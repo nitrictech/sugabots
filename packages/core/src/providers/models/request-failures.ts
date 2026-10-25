@@ -1,5 +1,11 @@
 import { DisplayName, type DomainError, type UserText, userText } from "@sugabots/errors";
-import { APICallError, InvalidResponseDataError, JSONParseError, TypeValidationError } from "ai";
+import {
+	APICallError,
+	InvalidResponseDataError,
+	JSONParseError,
+	StreamProviderError,
+	TypeValidationError,
+} from "ai";
 import { Duration, ErrorReporter, Schema } from "effect";
 import { EgressRefused } from "../network/egress.ts";
 
@@ -11,7 +17,7 @@ export interface RequestContext {
 
 /** The parts of a provider's error that a dialect uses to classify it. */
 export interface FailureReport {
-	/** HTTP status. Undefined for an error sent mid-stream. */
+	/** HTTP status. Undefined when the provider gave none, as with many errors sent mid-stream. */
 	status: number | undefined;
 	/** The error's `code`, or its `type` if it has no code. */
 	code: string | undefined;
@@ -415,10 +421,29 @@ export function classifyRequestFailure(cause: unknown, request: FailedRequest): 
 			code: errorCode(body),
 			message: providerSaid(body) ?? shortText(cause.responseBody),
 		});
-		return classifyStatus(cause.statusCode, recognized, { ...fields, stage }, cause);
+		return classifyStatus(
+			cause.statusCode,
+			recognized,
+			{ ...fields, stage },
+			cause.responseHeaders,
+		);
 	}
-	// Providers send mid-stream errors as plain objects. An `Error` comes from our
-	// code or the SDK, so the dialect doesn't see it.
+	// The SDK wraps an error a provider sends mid-stream, with the status when
+	// the provider gave one.
+	if (StreamProviderError.isInstance(cause)) {
+		const recognized = recognize?.({
+			status: cause.statusCode,
+			code: typeof cause.code === "string" ? cause.code : cause.type,
+			message: cause.message,
+		});
+		if (cause.statusCode !== undefined) {
+			return classifyStatus(cause.statusCode, recognized, { ...fields, stage }, undefined);
+		}
+		if (recognized) return recognizedFailure(recognized, fields);
+	}
+	// A mid-stream error without a message, which the SDK leaves unwrapped, is a
+	// plain object. Any other `Error` comes from our code or the SDK, so the
+	// dialect doesn't see it.
 	if (!(cause instanceof Error)) {
 		const recognized = recognize?.({
 			status: undefined,
@@ -446,7 +471,7 @@ function classifyStatus(
 	status: number,
 	recognized: RecognizedFailure | undefined,
 	fields: RequestContext & { cause: unknown; stage: RequestStage },
-	cause: APICallError,
+	headers: Record<string, string> | undefined,
 ): RequestFailure {
 	if (status === 401) return new ProviderCredentialsRejected(fields);
 	if (status === 403) return new ProviderAccessDenied(fields);
@@ -456,7 +481,7 @@ function classifyStatus(
 	if (status === 429) {
 		return new ProviderRateLimited({
 			...fields,
-			retryAfter: parseRetryAfter(cause.responseHeaders),
+			retryAfter: parseRetryAfter(headers),
 		});
 	}
 	if (status === 404) return new ProviderModelNotFound(fields);
@@ -541,6 +566,9 @@ function describe(cause: unknown): string {
 			shortText(cause.responseBody) ??
 			cause.message;
 		return cause.statusCode ? `Provider returned ${cause.statusCode}: ${said}` : said;
+	}
+	if (StreamProviderError.isInstance(cause) && cause.statusCode) {
+		return `Provider returned ${cause.statusCode}: ${cause.message}`;
 	}
 	if (cause instanceof Error) return cause.message;
 	// An error reported mid-stream is often a plain object, such as `{ type: "overloaded_error" }`.

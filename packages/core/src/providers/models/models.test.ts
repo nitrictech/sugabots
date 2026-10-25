@@ -43,6 +43,7 @@ vi.mock("ai", async (importOriginal) => {
 		APICallError: ai.APICallError,
 		InvalidResponseDataError: ai.InvalidResponseDataError,
 		JSONParseError: ai.JSONParseError,
+		StreamProviderError: ai.StreamProviderError,
 		TypeValidationError: ai.TypeValidationError,
 		stepCountIs: vi.fn(),
 		streamText: sdk.streamText,
