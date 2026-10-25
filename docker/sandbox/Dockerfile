@@ -52,7 +52,7 @@ RUN apt-get update \
 		xfonts-base dbus-x11 hsetroot \
 		lxterminal pcmanfm adwaita-icon-theme librsvg2-common \
 		nix-bin \
-		chromium xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
+		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
 	&& rm -rf /var/lib/apt/lists/*
 

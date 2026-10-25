@@ -119,10 +119,27 @@ chromium_sandbox_flags() {
 	fi
 }
 
+# Chromium trusts the certificate authority a sandbox provider intercepts
+# HTTPS with, as the other programs here do. OpenSandbox's credential proxy
+# signs every site's certificate with its own, and names it in
+# NODE_EXTRA_CA_CERTS; the rest find it in SSL_CERT_FILE's bundle, but
+# Chromium only trusts the system's authorities and those in its own store in
+# the home. Without it, every site fails with ERR_CERT_AUTHORITY_INVALID.
+trust_provider_authority() {
+	local authority="${NODE_EXTRA_CA_CERTS:-}"
+	[ -f "$authority" ] || return 0
+	local store="$HOME/.pki/nssdb"
+	mkdir -p "$store"
+	[ -f "$store/cert9.db" ] || certutil -d "sql:$store" -N --empty-password
+	# Adding it again replaces it, so a provider's new authority takes over.
+	certutil -d "sql:$store" -A -t "C,," -n sandbox-provider -i "$authority"
+}
+
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
+	trust_provider_authority >>"$log" 2>&1
 	# Started here rather than by Playwright MCP, which closes a browser it
 	# launched when its last client disconnects: at the end of every turn.
 	# Maximized, so it stops at the dock. The profile is
