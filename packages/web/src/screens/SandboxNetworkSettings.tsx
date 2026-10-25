@@ -92,6 +92,11 @@ export function SandboxNetworkGroups({
 	);
 }
 
+/** A host's name as the network settings show it, set in code type. */
+export function HostName({ host }: { host: string }) {
+	return <span className="font-mono text-[13.5px]">{host}</span>;
+}
+
 /**
  * A row summing up a list of hosts, which opens to show them one a row, as
  * added hosts are: on one line, a long list is cut off before its end. More
@@ -130,9 +135,7 @@ export function HostListRows({
 const HOSTS_BEFORE_SCROLLING = 6;
 
 function hostRows(hosts: readonly string[]) {
-	return hosts.map((host) => (
-		<SettingsRow key={host} label={<span className="font-mono text-[13.5px]">{host}</span>} />
-	));
+	return hosts.map((host) => <SettingsRow key={host} label={<HostName host={host} />} />);
 }
 
 /**
@@ -153,7 +156,7 @@ export function AddedHostRow({
 	const by = added.addedByName ?? "someone who has left";
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13.5px]">{added.host}</span>}
+			label={<HostName host={added.host} />}
 			sub={
 				blockedBy ? `Blocked for the workspace by ${blockedBy}. Added by ${by}` : `Added by ${by}`
 			}
@@ -179,7 +182,7 @@ function BlockedHostRow({
 }) {
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13.5px]">{blocked.host}</span>}
+			label={<HostName host={blocked.host} />}
 			sub={`Blocked by ${blocked.blockedByName ?? "someone who has left"}`}
 			trailing={
 				<IconButton label={`Unblock ${blocked.host}`} disabled={disabled} onClick={onUnblock}>
