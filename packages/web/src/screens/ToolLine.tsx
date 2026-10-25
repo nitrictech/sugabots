@@ -12,7 +12,6 @@ import {
 	wordsFromKey,
 } from "@/lib/tool-names.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { McpAppFrame } from "./McpAppFrame.tsx";
 import { ToolCallValue } from "./ToolCallValue.tsx";
 import { awaitsApproval, durationOf, formatDuration, formatTotal } from "./tool-activity.ts";
 import {
@@ -97,11 +96,6 @@ export function ToolLine({
 					])}
 				</ul>
 			)}
-			{calls
-				.filter((call) => call.hasApp && call.status === "completed")
-				.map((call) => (
-					<McpAppFrame key={call.id} call={call} className="mb-2 max-w-[560px]" />
-				))}
 		</div>
 	);
 }

@@ -34,6 +34,7 @@ import {
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
+import { useConnectionLooks } from "@/lib/connections.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
@@ -58,6 +59,7 @@ import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
+import { type AppIdentity, appCallsIn, appIdentityOf, McpAppStage } from "./McpAppFrame.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import {
@@ -80,11 +82,13 @@ const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
- * `version` is absent, or the bot's sandbox desktop.
+ * `version` is absent, the bot's sandbox desktop, or the MCP App a tool call
+ * was shown in.
  */
 export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
-	| { kind: "desktop" };
+	| { kind: "desktop" }
+	| { kind: "app"; toolCallId: string };
 
 export function AgentChat({
 	agent,
@@ -111,6 +115,8 @@ export function AgentChat({
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
+	const openApp = (toolCallId: string) => onStagedChange({ kind: "app", toolCallId });
+	const looks = useConnectionLooks(pod.id);
 	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
@@ -154,6 +160,9 @@ export function AgentChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
+	const appCalls = shownMessages.flatMap((message) => appCallsIn(message.parts));
+	const stagedAppCall =
+		staged?.kind === "app" ? appCalls.find((call) => call.id === staged.toolCallId) : undefined;
 
 	useLayoutEffect(() => {
 		if (!chat.data || !details) return;
@@ -232,6 +241,18 @@ export function AgentChat({
 			setReplyingTo((current) => current ?? answering);
 			files.putBack(failure);
 		}
+	}
+
+	/** Asks the bot, in the chat, to put into words what an app that didn't open would have shown. */
+	function askToDescribe(app: AppIdentity) {
+		followingLatest.current = true;
+		void send
+			.mutateAsync({
+				id: uuidv4(),
+				message: `${app.name} didn't open for me. Can you describe what you showed there in words?`,
+				peopleOnly: false,
+			})
+			.then(scrollToLatest, () => undefined);
 	}
 
 	function replyTo(message: Message) {
@@ -371,6 +392,13 @@ export function AgentChat({
 											onOpenDesktop={openDesktop}
 											fileUrlOf={(fileId) => chatFileUrl(chat.data.id, fileId)}
 											previews={!staged}
+											apps={{
+												// One app runs in the chat, the latest, unless something is open beside it.
+												liveCallId: staged ? undefined : appCalls.at(-1)?.id,
+												stagedCallId: staged?.kind === "app" ? staged.toolCallId : undefined,
+												onOpen: openApp,
+												onAskToDescribe: askToDescribe,
+											}}
 											podId={pod.id}
 											approvalCapabilities={details.capabilities}
 											queued={queued}
@@ -444,6 +472,13 @@ export function AgentChat({
 					version={staged.version}
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
 					onClose={() => onStagedChange(undefined)}
+				/>
+			) : staged?.kind === "app" ? (
+				<McpAppStage
+					call={stagedAppCall}
+					app={stagedAppCall && appIdentityOf(stagedAppCall, looks, agent.name)}
+					onClose={() => onStagedChange(undefined)}
+					onAskToDescribe={askToDescribe}
 				/>
 			) : staged?.kind === "desktop" ? (
 				<DesktopStage

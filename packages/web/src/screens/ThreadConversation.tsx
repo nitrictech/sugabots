@@ -27,6 +27,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
+import { type AppsShown, appCallsIn, McpApps } from "./McpAppFrame.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
@@ -71,6 +72,7 @@ export function ThreadConversation({
 	onOpenArtifact,
 	onOpenDesktop,
 	previews = true,
+	apps,
 	podId,
 	approvalCapabilities,
 	compact = false,
@@ -116,6 +118,8 @@ export function ThreadConversation({
 	 * desktop live. Off while one is open large beside the conversation.
 	 */
 	previews?: boolean;
+	/** Which of the replies' MCP Apps run, and how one opens beside the conversation. Without it, all of them run. */
+	apps?: AppsShown;
 	podId: string;
 	/** What the person may decide of the approvals the thread raises. */
 	approvalCapabilities?: ApprovalCapabilities;
@@ -211,6 +215,7 @@ export function ThreadConversation({
 								onOpenArtifact={onOpenArtifact}
 								onOpenDesktop={onOpenDesktop}
 								previews={previews}
+								apps={apps}
 							/>
 						)}
 						{showsTyping && message.author.kind === "agent" && isTyping(message) && (
@@ -420,6 +425,7 @@ function MessageRow({
 	onOpenArtifact,
 	onOpenDesktop,
 	previews,
+	apps,
 }: {
 	message: Message;
 	/** Whether it heads its author's group, so it carries their face and name. */
@@ -453,6 +459,7 @@ function MessageRow({
 	onOpenArtifact?: (artifactId: string) => void;
 	onOpenDesktop?: () => void;
 	previews: boolean;
+	apps: AppsShown | undefined;
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
@@ -605,6 +612,15 @@ function MessageRow({
 				})}
 				{files.length > 0 && (
 					<MessageFiles files={files} urlOf={sending ? notServedYet : fileUrlOf} />
+				)}
+				{agent && (
+					<McpApps
+						calls={appCallsIn(message.parts)}
+						looks={looks}
+						botName={agent.name}
+						shown={apps}
+						className="pt-2 pb-1"
+					/>
 				)}
 				{agent &&
 					previews &&

@@ -1077,7 +1077,11 @@ const podRoute = createRoute({
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const { agent: handle } = useParams({ strict: false });
-	const { artifact: stagedArtifact, desktop: stagedDesktop } = useSearch({ strict: false });
+	const {
+		artifact: stagedArtifact,
+		desktop: stagedDesktop,
+		app: stagedApp,
+	} = useSearch({ strict: false });
 	const matchRoute = useMatchRoute();
 	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const { data: pods, isPending, error } = usePods();
@@ -1100,7 +1104,9 @@ function PodRoute() {
 			pod={pod}
 			selectedAgentId={found?.agent.id}
 			artifactsOpen={artifactsOpen}
-			listTuckedAway={stagedArtifact !== undefined || stagedDesktop !== undefined}
+			listTuckedAway={
+				stagedArtifact !== undefined || stagedDesktop !== undefined || stagedApp !== undefined
+			}
 		>
 			<Outlet />
 		</ConversationLayout>
@@ -1181,6 +1187,8 @@ interface AgentSearch {
 	version?: number;
 	/** The bot's sandbox desktop open large beside the chat, when no artifact is. */
 	desktop?: true;
+	/** The tool call whose MCP App is open large beside the chat, when nothing else is. */
+	app?: string;
 }
 
 const validateAgentSearch = (search: Record<string, unknown>): AgentSearch => {
@@ -1191,7 +1199,7 @@ const validateAgentSearch = (search: Record<string, unknown>): AgentSearch => {
 			? { artifact, ...validateArtifactSearch(search) }
 			: search.desktop === true
 				? { desktop: true }
-				: {}),
+				: idParam(search, "app")),
 	};
 };
 
@@ -1201,12 +1209,15 @@ const stagedOf = (search: AgentSearch): Staged | undefined =>
 		? { kind: "artifact", artifactId: search.artifact, version: search.version }
 		: search.desktop
 			? { kind: "desktop" }
-			: undefined;
+			: search.app
+				? { kind: "app", toolCallId: search.app }
+				: undefined;
 
 const stagedSearchOf = (staged: Staged | undefined): AgentSearch => ({
 	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
 	version: staged?.kind === "artifact" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
+	app: staged?.kind === "app" ? staged.toolCallId : undefined,
 });
 
 /**
