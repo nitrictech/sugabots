@@ -55,5 +55,15 @@ export function failureFromResponse(body: unknown, status: number): ApiFailure {
 		return decoded.success;
 	}
 	// Not ours: a proxy's error page, or a body that never arrived.
-	return failureForStatus(status, userText`Request failed with status ${status}`);
+	return failureForStatus(status, refusedBeforeTheApi(status));
+}
+
+/** What a refusal that never reached the API means, for the person who made the request. */
+function refusedBeforeTheApi(status: number): UserText {
+	// The API says when something is over its own limits, so a bare 413 is
+	// the web server in front of it, such as nginx at its 1 MB default.
+	if (status === 413) {
+		return userText`Too large for this server to accept. Whoever runs your Sugabots can raise the upload limit on the web server in front of it`;
+	}
+	return userText`Request failed with status ${status}`;
 }
