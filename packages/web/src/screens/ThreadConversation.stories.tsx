@@ -174,7 +174,7 @@ export const WithFiles = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(/Can you check the numbers/)).toBeInTheDocument();
 		await expect(
-			canvas.getByRole("link", { name: "Open pricing-page-old.png" }),
+			canvas.getByRole("button", { name: "Open pricing-page-old.png" }),
 		).toBeInTheDocument();
 		await expect(
 			canvas.getByRole("link", { name: "Download acme-retail-request.pdf" }),
