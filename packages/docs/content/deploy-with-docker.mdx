@@ -229,6 +229,20 @@ Resend is the first provider built in, and more are on the way. Each one is a
 in the Sugabots repository, so if yours isn't supported yet, adding it is a
 welcome contribution.
 
+## Sandboxes
+
+To run your bots' sandboxes on your own server with Docker, the server needs
+Linux 5.9 or later. Check which version it runs with:
+
+```sh
+uname -r
+```
+
+On an older version, sandboxes start and bots can run commands in them, but
+nothing opens from the dock on a sandbox's desktop: its apps bounce and never
+appear. Ubuntu 20.04, for example, comes with 5.4. Install a newer kernel, or a
+newer release of your operating system, and restart the server.
+
 ## Updating
 
 Back up first, then pull the new image and restart:
