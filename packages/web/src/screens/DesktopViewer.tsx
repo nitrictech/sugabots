@@ -184,6 +184,30 @@ export function DesktopScreen({
 		};
 		// Captured before noVNC's own handlers, which stop keys from bubbling.
 		for (const event of INPUT_EVENTS) element.addEventListener(event, used, { capture: true });
+		// noVNC sends the paste shortcut to the desktop as keys, which pastes the
+		// desktop's own clipboard, not the person's. Kept from noVNC, the
+		// shortcut pastes in this page instead, and the text goes to the
+		// desktop's clipboard and is pasted there with Ctrl+V, the shortcut its
+		// Linux apps know, Command on a Mac included.
+		let pasting = false;
+		const keepPasteShortcut = (event: KeyboardEvent) => {
+			if (viewOnlyNow.current || !isPasteShortcut(event)) return;
+			pasting = true;
+			event.stopPropagation();
+		};
+		const pasteIntoDesktop = (event: ClipboardEvent) => {
+			if (!pasting || !viewer) return;
+			pasting = false;
+			event.preventDefault();
+			const text = event.clipboardData?.getData("text/plain");
+			if (!text) return;
+			viewer.clipboardPasteFrom(text);
+			viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
+			viewer.sendKey(XK_V, "KeyV");
+			viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
+		};
+		element.addEventListener("keydown", keepPasteShortcut, { capture: true });
+		document.addEventListener("paste", pasteIntoDesktop);
 		const idleCheck = setInterval(() => {
 			if (agentUsingNow.current) used();
 			if (!viewer || Date.now() - lastUsedAt.current < IDLE_TIMEOUT_MINUTES * 60_000) return;
@@ -210,6 +234,8 @@ export function DesktopScreen({
 			unmounted = true;
 			clearInterval(idleCheck);
 			for (const event of INPUT_EVENTS) element.removeEventListener(event, used, { capture: true });
+			element.removeEventListener("keydown", keepPasteShortcut, { capture: true });
+			document.removeEventListener("paste", pasteIntoDesktop);
 			viewer?.disconnect();
 			connected.current = undefined;
 		};
@@ -230,6 +256,16 @@ export function DesktopScreen({
 			)}
 		</div>
 	);
+}
+
+/** X11's keysyms for the left Control key and `v`, which noVNC sends as they are. */
+const XK_CONTROL_L = 0xffe3;
+const XK_V = 0x0076;
+
+/** ⌘V on a Mac, Ctrl+V elsewhere, without the Shift or Alt of a different shortcut. */
+function isPasteShortcut(event: KeyboardEvent): boolean {
+	const command = navigator.userAgent.includes("Mac") ? event.metaKey : event.ctrlKey;
+	return command && !event.shiftKey && !event.altKey && event.code === "KeyV";
 }
 
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
