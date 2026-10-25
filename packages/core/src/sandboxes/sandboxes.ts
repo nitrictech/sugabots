@@ -121,8 +121,10 @@ export interface E2bConnection {
 	 * answers over plain HTTP at its own address, so it gives both URLs.
 	 */
 	readonly endpoints?: { readonly apiUrl: string; readonly sandboxUrl: string };
-	/** The template sandboxes are made from. */
+	/** The name of the template sandboxes are made from. */
 	readonly template: string;
+	/** The image the template is built from. */
+	readonly image: string;
 	/** What the template is built with, so every sandbox made from it has. */
 	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
 }

@@ -1,4 +1,4 @@
-import { SANDBOX_E2B_DEFAULT_SIZE } from "@sugabots/contracts";
+import { SANDBOX_E2B_DEFAULT_SIZE, SANDBOX_IMAGE } from "@sugabots/contracts";
 import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Ids } from "../ids/ids.ts";
@@ -34,6 +34,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					provider: "e2b",
 					apiKey: Redacted.make(env.E2B_API_KEY),
 					template: "base",
+					image: SANDBOX_IMAGE,
 					size: SANDBOX_E2B_DEFAULT_SIZE,
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
@@ -349,6 +350,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 			provider: "e2b",
 			apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 			template: `sugabots-test-${Date.now()}`,
+			image: "python:3.13-slim",
 			size: { cpuCount: 2, memoryGiB: 2 },
 			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
@@ -358,7 +360,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 		const templates = provider.templates;
 		if (!templates) throw new Error("E2B builds templates");
 
-		const build = await run(templates.build("python:3.13-slim"));
+		const build = await run(templates.build(connection.image));
 		let status = await run(templates.status(build));
 		while (status === "building") {
 			await new Promise((resolve) => setTimeout(resolve, 3_000));
@@ -385,6 +387,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 					provider: "e2b",
 					apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 					template: "sugabots-never-built",
+					image: SANDBOX_IMAGE,
 					size: SANDBOX_E2B_DEFAULT_SIZE,
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }

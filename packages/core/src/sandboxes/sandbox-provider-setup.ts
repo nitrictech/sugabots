@@ -7,7 +7,6 @@ import type {
 	SandboxProviderTestResult,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { SANDBOX_IMAGE } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
@@ -83,7 +82,7 @@ export interface Interface {
 		AuthorizationDenied | SandboxProviderNotFound | Sandboxes.Unavailable,
 		CurrentActor.Service
 	>;
-	/** Starts building the provider's template from Sugabots' sandbox image, in the workspace's own account. */
+	/** Starts building the provider's template from its image, in the workspace's own account. */
 	readonly prepareTemplate: (input: {
 		workspace: string;
 		providerId: string;
@@ -220,10 +219,11 @@ export const make = Effect.gen(function* () {
 					const configured = yield* providers.connection(workspaceId, providerId);
 					const templates = configured && sandboxes.forConnection(configured.connection).templates;
 					if (!templates) return yield* new NoTemplates();
-					const image = yield* Effect.promise(() =>
-						pinnedToDigest(SANDBOX_IMAGE, egress.providers).catch(() => SANDBOX_IMAGE),
+					const { image } = configured.connection;
+					const pinned = yield* Effect.promise(() =>
+						pinnedToDigest(image, egress.providers).catch(() => image),
 					);
-					const build = yield* templates.build(image);
+					const build = yield* templates.build(pinned);
 					yield* providers.recordTemplateBuild(workspaceId, providerId, build);
 					return yield* templates.status(build);
 				}),

@@ -1,5 +1,7 @@
 import {
 	SANDBOX_E2B_DEFAULT_SIZE,
+	SANDBOX_E2B_TEMPLATE,
+	SANDBOX_IMAGE,
 	type SandboxProvider,
 	type SandboxProviderPresetId,
 	type SandboxProviderSettings,
@@ -254,22 +256,20 @@ function ProviderSettings({
 				onSave={(apiKey) => onConfigure({ apiKey })}
 				onRemove={hasKey ? () => setRemovingKey(true) : undefined}
 			/>
-			{settings.preset === "opensandbox" && (
-				<TextEntryRow
-					label={preset.imageLabel}
-					saved={settings.image}
-					placeholder={preset.defaultImage}
-					disabled={pending}
-					clearable
-					onSave={(image) => onConfigure({ settings: { ...settings, image: image || undefined } })}
-				/>
-			)}
+			<TextEntryRow
+				label="Image"
+				saved={settings.image}
+				placeholder={SANDBOX_IMAGE}
+				disabled={pending}
+				clearable
+				onSave={(image) => onConfigure({ settings: { ...settings, image: image || undefined } })}
+			/>
 			{settings.preset === "e2b" && (
 				<>
 					<TextEntryRow
-						label={preset.imageLabel}
+						label="Template name"
 						saved={settings.template}
-						placeholder={preset.defaultImage}
+						placeholder={SANDBOX_E2B_TEMPLATE}
 						disabled={pending}
 						clearable
 						onSave={(template) =>
@@ -383,7 +383,7 @@ function ProviderSettings({
 
 /**
  * E2B makes sandboxes from a template, built in the workspace's own E2B
- * account from Sugabots' sandbox image. Until it is, sandboxes can't be made;
+ * account from the provider's image. Until it is, sandboxes can't be made;
  * once it is, it can be rebuilt to take a newer image.
  */
 function TemplateRow({ providerId }: { providerId: string }) {
@@ -406,12 +406,12 @@ function TemplateRow({ providerId }: { providerId: string }) {
 					: template.error
 						? failureMessage(template.error)
 						: state === "ready"
-							? "Ready. Rebuilding takes Sugabots' latest image, which pods' sandboxes move to when upgraded."
+							? "Ready. Rebuilding takes the image's latest version, which pods' sandboxes move to when upgraded."
 							: state === "building"
 								? "Building in your E2B account. This takes a few minutes."
 								: state === "failed"
 									? "The last build failed. Try again."
-									: "Builds Sugabots' sandbox image into a template in your E2B account."
+									: "Builds the image into a template in your E2B account."
 			}
 			trailing={
 				state === "ready" || state === "building" ? (
@@ -426,7 +426,7 @@ function TemplateRow({ providerId }: { providerId: string }) {
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
 		? "The server's own API key, from its configuration. Leave the image empty to use the default."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's sandbox is reset.";
+		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new image or size takes effect once the template is prepared again and a pod's sandbox is reset.";
 }
 
 /** A number typed into a row, or undefined when the row was emptied. */

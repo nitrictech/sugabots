@@ -148,7 +148,7 @@ export const SwitchingProvider = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("radio", { name: /E2B/ }));
-		await expect(canvas.getByLabelText("Template")).toHaveAttribute(
+		await expect(canvas.getByLabelText("Template name")).toHaveAttribute(
 			"placeholder",
 			"sugabots-sandbox",
 		);
@@ -183,7 +183,7 @@ export const E2bTemplateMissing = meta.story({
 	},
 });
 
-/** E2B with its template built: rebuilding takes a newer Sugabots image. */
+/** E2B with its template built: rebuilding takes the image's latest version. */
 export const E2bTemplateReady = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -202,7 +202,7 @@ export const E2bTemplateReady = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: /Rebuild template/ })).toBeVisible();
-		await expect(canvas.getByText(/Sugabots' latest image/)).toBeVisible();
+		await expect(canvas.getByText(/the image's latest version/)).toBeVisible();
 	},
 });
 

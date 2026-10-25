@@ -19,7 +19,7 @@ import { uuidSchema } from "./uuid.ts";
 export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 
 /**
- * The E2B template Sugabots builds from {@link SANDBOX_IMAGE} in a
+ * The name of the E2B template Sugabots builds from the provider's image in a
  * workspace's E2B account. E2B makes sandboxes from templates, not images.
  */
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
@@ -52,9 +52,6 @@ export interface SandboxProviderPreset {
 	hosting: "remote" | "local";
 	/** The address a local preset is usually at. */
 	baseUrl?: string;
-	/** What sandboxes are made from: an image for OpenSandbox, a template for E2B. */
-	imageLabel: string;
-	defaultImage: string;
 }
 
 export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
@@ -63,15 +60,11 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		name: "OpenSandbox",
 		hosting: "local",
 		baseUrl: "http://localhost:8090",
-		imageLabel: "Image",
-		defaultImage: SANDBOX_IMAGE,
 	},
 	{
 		id: "e2b",
 		name: "E2B",
 		hosting: "remote",
-		imageLabel: "Template",
-		defaultImage: SANDBOX_E2B_TEMPLATE,
 	},
 ];
 
@@ -103,7 +96,10 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		/** E2B Embed's API and its address for reaching sandboxes; both left out for E2B Cloud. */
 		apiUrl: Schema.optional(providerUrlSchema),
 		sandboxUrl: Schema.optional(providerUrlSchema),
+		/** The name of the template sandboxes are made from, in the workspace's E2B account. */
 		template: Schema.optional(imageSchema),
+		/** The image the template is built from. */
+		image: Schema.optional(imageSchema),
 		/** What the template is built with, so every sandbox made from it has. */
 		cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
 		memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
