@@ -53,6 +53,16 @@ function appServer(): McpServer {
 		{ description: "Refreshes the view.", _meta: { ui: { visibility: ["app"] } } },
 		async () => ({ content: [{ type: "text", text: "fresh" }] }),
 	);
+	mcp.registerTool(
+		"radar",
+		{ description: "Shows the radar.", _meta: { "ui/resourceUri": WEATHER_APP } },
+		async () => ({ content: [{ type: "text", text: "clear" }] }),
+	);
+	mcp.registerTool(
+		"tides",
+		{ description: "Shows the tides.", _meta: { ui: { resourceUri: "https://tides.test/view" } } },
+		async () => ({ content: [{ type: "text", text: "high" }] }),
+	);
 	mcp.registerResource(
 		"weather view",
 		WEATHER_APP,
@@ -176,7 +186,26 @@ describe("a server's MCP App", () => {
 			).toEqual([
 				{ name: "forecast", appResourceUri: WEATHER_APP, visibility: { model: true, app: true } },
 				{ name: "refresh", appResourceUri: undefined, visibility: { model: false, app: true } },
+				{ name: "radar", appResourceUri: WEATHER_APP, visibility: { model: true, app: true } },
+				{ name: "tides", appResourceUri: undefined, visibility: { model: true, app: true } },
 			]);
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("offers a tool whose app address is not a ui:// one without its app, and still runs it", async () => {
+		const session = await connectServer(appsTarget(), fetch);
+		try {
+			const listing = await session.list();
+			const ran = await session.run(
+				listing,
+				"tides",
+				{},
+				{ toolCallId: "1", messages: [], context: {} },
+			);
+
+			expect(ran).toMatchObject({ content: [{ type: "text", text: "high" }] });
 		} finally {
 			await session.close();
 		}

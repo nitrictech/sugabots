@@ -108,7 +108,9 @@ export async function connectServer(
 	const runnable = new WeakMap<ServerListing, Record<string, Tool>>();
 	return {
 		list: async () => {
-			const listed = await client.listTools({ options: { timeout: timeoutMs } });
+			const listed = withoutBadAppAddresses(
+				await client.listTools({ options: { timeout: timeoutMs } }),
+			);
 			const callable = client.toolsFromDefinitions(listed);
 			const tools = listed.tools.flatMap((definition) => {
 				const tool = callable[definition.name];
@@ -160,18 +162,51 @@ export async function connectServer(
 	};
 }
 
-/** appOf reads a tool's MCP App from its `_meta.ui`; a tool that names no visibility is anyone's to call. */
-function appOf(
-	definition: ListToolsResult["tools"][number],
-): Pick<ServerTool, "appResourceUri" | "visibility"> {
-	const ui = definition._meta?.ui;
-	const meta = typeof ui === "object" && ui !== null ? (ui as Record<string, unknown>) : {};
-	const uri = meta.resourceUri;
-	const visibility = Array.isArray(meta.visibility) ? meta.visibility : ["model", "app"];
+type ToolDefinition = ListToolsResult["tools"][number];
+
+/** Where servers written before `_meta.ui` name a tool's app. */
+const LEGACY_APP_ADDRESS_KEY = "ui/resourceUri";
+
+/** appOf reads a tool's MCP App from its `_meta`; a tool that names no visibility is anyone's to call. */
+function appOf(definition: ToolDefinition): Pick<ServerTool, "appResourceUri" | "visibility"> {
+	const ui = uiMetaOf(definition);
+	const address = appAddressOf(definition);
+	const visibility = Array.isArray(ui.visibility) ? ui.visibility : ["model", "app"];
 	return {
-		appResourceUri: typeof uri === "string" && uri.startsWith("ui://") ? uri : undefined,
+		appResourceUri: isAppAddress(address) ? address : undefined,
 		visibility: { model: visibility.includes("model"), app: visibility.includes("app") },
 	};
+}
+
+/**
+ * The listing with every app address that is not a `ui://` one taken out, so
+ * the tool is offered without an app. The AI SDK fails the whole listing on
+ * such an address, which would leave the server's every tool out of the turn.
+ */
+function withoutBadAppAddresses(listed: ListToolsResult): ListToolsResult {
+	return {
+		...listed,
+		tools: listed.tools.map((definition) => {
+			const address = appAddressOf(definition);
+			if (address === undefined || isAppAddress(address)) return definition;
+			const { resourceUri: _dropped, ...ui } = uiMetaOf(definition);
+			const { [LEGACY_APP_ADDRESS_KEY]: _droppedLegacy, ...meta } = definition._meta ?? {};
+			return { ...definition, _meta: { ...meta, ui } };
+		}),
+	};
+}
+
+function uiMetaOf(definition: ToolDefinition): Record<string, unknown> {
+	const ui = definition._meta?.ui;
+	return typeof ui === "object" && ui !== null ? (ui as Record<string, unknown>) : {};
+}
+
+function appAddressOf(definition: ToolDefinition): unknown {
+	return uiMetaOf(definition).resourceUri ?? definition._meta?.[LEGACY_APP_ADDRESS_KEY];
+}
+
+function isAppAddress(address: unknown): address is string {
+	return typeof address === "string" && address.startsWith("ui://");
 }
 
 /** Asks the server what it offers, in one short session. */
