@@ -145,10 +145,24 @@ trust_provider_authority() {
 }
 PROVIDER_AUTHORITY=sandbox-provider
 
+# Chromium locks its profile with a link naming the machine and process using
+# it. The profile is kept with the work, and a sandbox made again with the
+# same work, as an upgrade makes, is another machine to Chromium, so it asks
+# whether that machine still uses the profile instead of starting. Only this
+# sandbox's own browser uses the profile, so a lock naming another machine is
+# left over; one naming this machine is Chromium's to sort out.
+unlock_profile() {
+	local dir="$1/chromium" lock
+	lock="$(readlink "$dir/SingletonLock" 2>/dev/null)" || return 0
+	[ "${lock%-*}" = "$(hostname)" ] && return 0
+	rm -f "$dir/SingletonLock" "$dir/SingletonSocket" "$dir/SingletonCookie"
+}
+
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
+	unlock_profile "$profile"
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
 		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
