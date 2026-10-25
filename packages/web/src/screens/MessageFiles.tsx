@@ -1,7 +1,14 @@
 import type { FilePart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Download, FileIcon, FileSpreadsheet, FileText } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import {
+	ChevronLeft,
+	ChevronRight,
+	Download,
+	FileIcon,
+	FileSpreadsheet,
+	FileText,
+} from "lucide-react";
+import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
@@ -50,44 +57,62 @@ function lookOf(file: FilePart): FileLook {
  * thread doesn't move as they arrive.
  */
 function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {
-	const [only] = images;
-	if (images.length === 1 && only) {
+	// The viewer steps through the images that are served, in the order shown.
+	const served = images.flatMap((file) => {
+		const url = urlOf(file.id);
+		return url ? [{ file, url }] : [];
+	});
+	const [openedIndex, setOpenedIndex] = useState(0);
+	const tileFor = (file: FilePart, fit: "cover" | "contain") => {
+		const index = served.findIndex((image) => image.file.id === file.id);
 		return (
-			<div className="aspect-[4/3] w-full max-w-[360px]">
-				<ImageTile file={only} url={urlOf(only.id)} fit="contain" />
-			</div>
+			<ImageTile
+				file={file}
+				url={served[index]?.url}
+				fit={fit}
+				onOpen={() => setOpenedIndex(index)}
+			/>
 		);
-	}
+	};
+	const [only] = images;
 	return (
-		<ul
-			className={cn(
-				"m-0 grid w-full list-none gap-1 p-0",
-				images.length === 2 ? "max-w-[320px] grid-cols-2" : "max-w-[482px] grid-cols-3",
+		<Dialog>
+			{images.length === 1 && only ? (
+				<div className="aspect-[4/3] w-full max-w-[360px]">{tileFor(only, "contain")}</div>
+			) : (
+				<ul
+					className={cn(
+						"m-0 grid w-full list-none gap-1 p-0",
+						images.length === 2 ? "max-w-[320px] grid-cols-2" : "max-w-[482px] grid-cols-3",
+					)}
+				>
+					{images.map((file) => (
+						<li key={file.id} className="aspect-[4/3]">
+							{tileFor(file, "cover")}
+						</li>
+					))}
+				</ul>
 			)}
-		>
-			{images.map((file) => (
-				<li key={file.id} className="aspect-[4/3]">
-					<ImageTile file={file} url={urlOf(file.id)} fit="cover" />
-				</li>
-			))}
-		</ul>
+			<ImageViewer images={served} index={openedIndex} onStep={setOpenedIndex} />
+		</Dialog>
 	);
 }
 
 /**
- * An image filling its frame, opening full size over the chat, with a
- * download button over its corner while it's hovered or focused. One the
- * browser can't draw, or not served yet, shows its name and a file icon
- * instead.
+ * An image filling its frame, opening the viewer at it, with a download
+ * button over its corner while it's hovered or focused. One the browser can't
+ * draw, or not served yet, shows its name and a file icon instead.
  */
 function ImageTile({
 	file,
 	url,
 	fit,
+	onOpen,
 }: {
 	file: FilePart;
 	url: string | undefined;
 	fit: "cover" | "contain";
+	onOpen: () => void;
 }) {
 	const [undrawable, setUndrawable] = useState(false);
 	const frame =
@@ -101,26 +126,24 @@ function ImageTile({
 	if (!url) return <div className={frame}>{standIn}</div>;
 	return (
 		<div className="group relative size-full">
-			<Dialog>
-				<DialogTrigger
-					aria-label={`Open ${file.name}`}
-					className={cn(frame, "focus-ring cursor-zoom-in")}
-				>
-					{undrawable ? (
-						standIn
-					) : (
-						<img
-							src={url}
-							// The button names the image, so the picture isn't named twice.
-							alt=""
-							loading="lazy"
-							onError={() => setUndrawable(true)}
-							className={cn("block size-full", fit === "cover" ? "object-cover" : "object-contain")}
-						/>
-					)}
-				</DialogTrigger>
-				<ImageViewer file={file} url={url} drawable={!undrawable} />
-			</Dialog>
+			<DialogTrigger
+				aria-label={`Open ${file.name}`}
+				onClick={onOpen}
+				className={cn(frame, "focus-ring cursor-zoom-in")}
+			>
+				{undrawable ? (
+					standIn
+				) : (
+					<img
+						src={url}
+						// The button names the image, so the picture isn't named twice.
+						alt=""
+						loading="lazy"
+						onError={() => setUndrawable(true)}
+						className={cn("block size-full", fit === "cover" ? "object-cover" : "object-contain")}
+					/>
+				)}
+			</DialogTrigger>
 			<DownloadButton
 				file={file}
 				url={url}
@@ -132,27 +155,53 @@ function ImageTile({
 }
 
 /**
- * The image as large as the window allows, over the chat, with its name and
- * a way to download it. One the browser can't draw says so, and can still be
- * downloaded.
+ * One of the message's images as large as the window allows, over the chat,
+ * with its name and a way to download it. With more than one, arrows and the
+ * left and right keys step through them, from the last back round to the first.
  */
-function ImageViewer({ file, url, drawable }: { file: FilePart; url: string; drawable: boolean }) {
+function ImageViewer({
+	images,
+	index,
+	onStep,
+}: {
+	images: readonly { file: FilePart; url: string }[];
+	index: number;
+	onStep: (index: number) => void;
+}) {
 	// Focus starts on the picture, not the first button, whose tooltip would
 	// otherwise open and take the first Escape.
 	const picture = useRef<HTMLDivElement>(null);
+	const shown = images[index];
+	if (!shown) return null;
+	const { file, url } = shown;
+	const showPrevious = () => onStep((index - 1 + images.length) % images.length);
+	const showNext = () => onStep((index + 1) % images.length);
+	const stepWithArrowKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+		event.preventDefault();
+		if (event.key === "ArrowLeft") showPrevious();
+		else showNext();
+	};
 	return (
 		<DialogContent
 			initialFocus={picture}
 			showCloseButton={false}
+			onKeyDown={stepWithArrowKeys}
 			// Stretched to its insets, rather than as tall as the picture: on a phone, the picture
 			// alone on black across the whole screen, as a phone's own photos open.
 			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
+
 		>
 			{/* On a phone, × at the left and Download at the right, the name between them. */}
 			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">
 				<DialogTitle className="min-w-0 flex-1 max-md:order-2 max-md:text-center max-md:text-[15px]">
 					<MiddleTruncated text={file.name} className="max-md:justify-center" />
 				</DialogTitle>
+				{images.length > 1 && (
+					<span className="shrink-0 text-muted-foreground tabular-nums max-md:hidden">
+						{index + 1} of {images.length}
+					</span>
+				)}
 				<DownloadButton
 					file={file}
 					url={url}
@@ -160,21 +209,63 @@ function ImageViewer({ file, url, drawable }: { file: FilePart; url: string; dra
 					className={cn(FLOATING_ON_PHONE, "max-md:order-3")}
 				/>
 				<CloseButton render={<DialogClose />} className="max-md:order-1" />
+
 			</div>
+			{images.length > 1 && (
+				<span className="pt-2 text-center text-muted-foreground text-sm tabular-nums md:hidden">
+					{index + 1} of {images.length}
+				</span>
+			)}
 			<div
 				ref={picture}
 				tabIndex={-1}
-				className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none max-md:mt-3 max-md:rounded-none max-md:bg-transparent"
+				className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none max-md:mt-3 max-md:rounded-none max-md:bg-transparent"
+
 			>
-				{drawable ? (
-					<img src={url} alt={file.name} className="block max-h-full max-w-full object-contain" />
-				) : (
-					<p className="m-0 px-4 text-center text-muted-foreground text-sm">
-						This picture can't be shown here. Download it to open it.
-					</p>
+				{/* Keyed so an image that couldn't be drawn doesn't mark the next one. */}
+				<ViewerPicture key={file.id} file={file} url={url} />
+				{images.length > 1 && (
+					<>
+						<IconButton
+							label="Previous image"
+							variant="round"
+							onClick={showPrevious}
+							className={cn("absolute left-3", FLOATING_ON_PHONE)}
+						>
+							<ChevronLeft aria-hidden />
+						</IconButton>
+						<IconButton
+							label="Next image"
+							variant="round"
+							onClick={showNext}
+							className={cn("absolute right-3", FLOATING_ON_PHONE)}
+						>
+							<ChevronRight aria-hidden />
+						</IconButton>
+					</>
 				)}
 			</div>
 		</DialogContent>
+	);
+}
+
+/** The image itself, or, if the browser can't draw it, a note to download it instead. */
+function ViewerPicture({ file, url }: { file: FilePart; url: string }) {
+	const [undrawable, setUndrawable] = useState(false);
+	if (undrawable) {
+		return (
+			<p className="m-0 px-4 text-center text-muted-foreground text-sm">
+				This picture can't be shown here. Download it to open it.
+			</p>
+		);
+	}
+	return (
+		<img
+			src={url}
+			alt={file.name}
+			onError={() => setUndrawable(true)}
+			className="block max-h-full max-w-full object-contain"
+		/>
 	);
 }
 

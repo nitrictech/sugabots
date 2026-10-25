@@ -104,6 +104,24 @@ export const ImagesAndAFile = meta.story({
 	},
 });
 
+/** An image opened from several, stepped through with the arrows and the arrow keys, round from the last to the first. */
+export const ImagesSteppedThrough = meta.story({
+	args: { files: [oldPricing, newPricing, acmeEmail] },
+	play: async ({ canvas, canvasElement }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Open pricing-page-new.png" }));
+		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(within(viewer).getByText("2 of 3")).toBeVisible();
+
+		await userEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
+		await expect(within(viewer).getByRole("img", { name: "acme-email.png" })).toBeVisible();
+		await userEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
+		await expect(within(viewer).getByText("1 of 3")).toBeVisible();
+
+		await userEvent.keyboard("{ArrowLeft}");
+		await expect(within(viewer).getByRole("img", { name: "acme-email.png" })).toBeVisible();
+	},
+});
+
 /** Files only: a sheet, and a file with a long name cut in its middle so its end stays. */
 export const FilesOnly = meta.story({
 	args: { files: [pipeline, brandGuide] },
@@ -128,6 +146,6 @@ export const ImageThatWontDraw = meta.story({
 
 		await userEvent.click(open);
 		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(within(viewer).getByText(/can't be shown here/)).toBeVisible();
+		await expect(await within(viewer).findByText(/can't be shown here/)).toBeVisible();
 	},
 });
