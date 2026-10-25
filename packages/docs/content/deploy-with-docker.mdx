@@ -118,6 +118,48 @@ both the web app and the API. It stores everything in PostgreSQL 18.
    Your domain's DNS must already point at the server for Caddy to get a
    certificate.
 
+   Another reverse proxy works too, as long as it:
+
+   - passes WebSocket connections, which a bot's live desktop uses
+   - accepts uploads up to 30 MB, the largest file people can attach
+
+   Caddy does both by default. nginx does neither until it's told to: without
+   these settings, a bot's desktop never connects, and most phone photos are
+   refused as too large. Add this to `/etc/nginx/sites-available/sugabots`,
+   and link it into `/etc/nginx/sites-enabled/`:
+
+   ```nginx title="/etc/nginx/sites-available/sugabots"
+   map $http_upgrade $connection_upgrade {
+   	default upgrade;
+   	''      close;
+   }
+
+   server {
+   	listen 80;
+   	server_name sugabots.example.com;
+   	# Room for a 30 MB attachment. nginx's default is 1 MB.
+   	client_max_body_size 32m;
+
+   	location / {
+   		proxy_pass http://127.0.0.1:3000;
+   		proxy_http_version 1.1;
+   		# Passes WebSocket connections on to Sugabots.
+   		proxy_set_header Upgrade $http_upgrade;
+   		proxy_set_header Connection $connection_upgrade;
+   		proxy_set_header Host $host;
+   	}
+   }
+   ```
+
+   Check the configuration and reload nginx, then add HTTPS with
+   [Certbot](https://certbot.eff.org), which adds the certificate to this
+   server block:
+
+   ```sh
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo certbot --nginx -d sugabots.example.com
+   ```
+
 5. Create your account
 
    Open `https://sugabots.example.com` and sign up. A new installation lets its
