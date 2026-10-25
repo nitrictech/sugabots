@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { answerChallenge } from "@sugabots/core/conversations/tools/browser/vnc-authentication";
+import { unimplemented } from "@sugabots/core/testing";
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import {
 	HttpRouter,
@@ -101,7 +102,7 @@ beforeAll(async () => {
 		testRoutes(
 			Layer.mergeAll(
 				identifiedBy(resolveUser),
-				Layer.succeed(DesktopViewer.Service, {
+				unimplemented(DesktopViewer.Service, {
 					open: () =>
 						Effect.succeed({
 							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },

@@ -9,7 +9,7 @@ import {
 	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
-import { allowedHostsOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
+import { allowedHostsOf, isAllowed, TRUSTED_HOSTS, unallowedHosts } from "./allowed-hosts.ts";
 
 /** What a pod's sandbox may reach, from the workspace's lists and the pod's own, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", () => {
@@ -116,5 +116,35 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 
 		expect(hosts).not.toContain("www.pastebin.com");
 		expect(hosts).not.toContain("*.pastebin.com");
+	});
+});
+
+describe("whether a host is allowed", () => {
+	const allowed = ["woolworths.com.au", "*.woolworths.com.au"];
+
+	it("takes a listed name and the subdomains a wildcard covers", () => {
+		expect(isAllowed("woolworths.com.au", allowed)).toBe(true);
+		expect(isAllowed("www.woolworths.com.au", allowed)).toBe(true);
+	});
+
+	it("leaves out a wildcard's own domain and other sites", () => {
+		expect(isAllowed("woolworths.com.au", ["*.woolworths.com.au"])).toBe(false);
+		expect(isAllowed("cdn0.woolworths.media", allowed)).toBe(false);
+		expect(isAllowed("notwoolworths.com.au", allowed)).toBe(false);
+	});
+});
+
+describe("hosts a page couldn't reach", () => {
+	it("leaves out the allowed, and names the block that keeps out the rest", () => {
+		expect(
+			unallowedHosts(
+				["www.woolworths.com.au", "cdn0.woolworths.media", "ads.tracker.example"],
+				["*.woolworths.com.au"],
+				["tracker.example"],
+			),
+		).toEqual([
+			{ host: "cdn0.woolworths.media", blockedBy: null },
+			{ host: "ads.tracker.example", blockedBy: "tracker.example" },
+		]);
 	});
 });

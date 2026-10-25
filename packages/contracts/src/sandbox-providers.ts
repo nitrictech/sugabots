@@ -311,3 +311,15 @@ export const newSandboxHostsSchema = Schema.Struct({
 		Schema.isMaxLength(MOST_HOSTS_AT_ONCE),
 	),
 });
+
+/**
+ * A site the pages open in an agent's desktop browser tried to reach but the
+ * pod's sandbox doesn't allow, such as `cdn0.example.media`. `blockedBy` is
+ * the workspace's block that keeps it out, which no pod can allow past.
+ */
+export const desktopUnreachedSiteSchema = Schema.Struct({
+	host: sandboxHostSchema,
+	blockedBy: Schema.NullOr(Schema.String),
+});
+
+export type DesktopUnreachedSite = typeof desktopUnreachedSiteSchema.Type;

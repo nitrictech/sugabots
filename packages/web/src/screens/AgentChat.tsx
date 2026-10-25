@@ -450,6 +450,7 @@ export function AgentChat({
 					threadId={details.thread.id}
 					agent={agent}
 					podId={pod.id}
+					podName={pod.name}
 					mayUse={pod.permissions.useDesktops}
 					mayAllowSites={pod.permissions.manageSandbox}
 					onClose={() => onStagedChange(undefined)}

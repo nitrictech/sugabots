@@ -1,6 +1,7 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
+import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
@@ -14,6 +15,7 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 		const threads = yield* ThreadView.Service;
 		const turns = yield* Turns.Controls;
 		const reactions = yield* Reactions.Service;
+		const desktops = yield* DesktopViewer.Service;
 		return handlers
 			.handle("list", ({ params }) =>
 				threads.list(params.workspace).pipe(asSessionUser, asHttpError(threadErrors)),
@@ -25,6 +27,16 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 			)
 			.handle("activity", ({ params }) =>
 				threads.activity(params.threadId).pipe(asSessionUser, asHttpError(threadErrors)),
+			)
+			.handle("desktopUnreachedSites", ({ params }) =>
+				desktops
+					.unreachedSites(params)
+					.pipe(asSessionUser, asHttpError({ ...threadErrors, ...desktopErrors })),
+			)
+			.handle("reloadDesktopUnreachedSites", ({ params, payload }) =>
+				desktops
+					.reloadUnreachedSites({ ...params, hosts: payload.hosts })
+					.pipe(asSessionUser, asHttpError({ ...threadErrors, ...desktopErrors })),
 			)
 			.handle("react", ({ params }) =>
 				reactions
@@ -48,6 +60,8 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 			);
 	}),
 );
+
+const desktopErrors = { DesktopUnavailable: NotFound, SandboxUnavailable: Conflict };
 
 const threadErrors = {
 	...refusals,

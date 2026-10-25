@@ -7,6 +7,8 @@
 #   sugabots-desktop desktop name profile output   the desktop for `name`, without a browser
 #   sugabots-desktop session name profile output   the desktop for `name`, with its browser
 #   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
+#   sugabots-desktop unreached-sites name [reload host...]
+#                                                  sites `name`'s browser couldn't reach, or reload the pages that failed on `host`s
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
 # `desktop` is what Sugabots runs when a person opens an agent's desktop, and
@@ -97,6 +99,11 @@ desktop() {
 	echo $! >>"$pids"
 }
 
+# Display N's browser's DevTools port.
+devtools_port() {
+	echo $((9230 + $1))
+}
+
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
 new_password() {
 	head -c 6 /dev/urandom | base64 | tr '+/' '-_'
@@ -147,7 +154,8 @@ PROVIDER_AUTHORITY=sandbox-provider
 
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
-	local devtools=$((9230 + n))
+	local devtools
+	devtools="$(devtools_port "$n")"
 	mkdir -p "$profile" "$output"
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
@@ -231,6 +239,23 @@ viewer() {
 	echo $((5900 + n))
 }
 
+# The sites the pages open in the named desktop's browser tried and failed to
+# reach, a host a line, or nothing when it has no browser running. Sugabots
+# asks while a person has control, to offer to allow them, and with `reload`
+# and the hosts allowed, loads the pages that failed on them again.
+unreached_sites() {
+	local file="$state/sessions/${1:?name}"
+	shift
+	[ -f "$file" ] || return 0
+	local n
+	n="$(cat "$file")"
+	# Anything in the sandbox can write the file, so it must be a display number.
+	[[ "$n" =~ ^[0-9]+$ ]] || return 0
+	running "$n" browser || return 0
+	node /usr/local/lib/sugabots-desktop/unreached-sites.mjs \
+		/usr/local/lib/sugabots-desktop/playwright-mcp "http://127.0.0.1:$(devtools_port "$n")" "$@"
+}
+
 # What the dock opens on the desktop it runs on.
 open() {
 	local n="${DISPLAY#:}"
@@ -266,9 +291,10 @@ stop) stop "${2:-}" ;;
 desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" ;;
 session) session "${2:-}" "${3:-}" "${4:-}" ;;
 viewer) viewer "${2:-}" ;;
+unreached-sites) shift; unreached_sites "$@" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | unreached-sites name [reload host...] | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac

@@ -1,16 +1,18 @@
 import type RFB from "@novnc/novnc";
-import type { Agent } from "@sugabots/contracts";
+import type { Agent, DesktopUnreachedSite } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
-import { useDesktopInUse } from "@/lib/desktop.ts";
+import { useDesktopInUse, useUnreachedSites } from "@/lib/desktop.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
 import { Button } from "@/ui/button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { InfoTip } from "@/ui/info-tip.tsx";
 import { AllowSiteDialog } from "./AllowSiteDialog.tsx";
+import { AllowUnreachedSitesDialog } from "./AllowUnreachedSitesDialog.tsx";
 
 /**
  * An agent's desktop opened beside its chat, live: where the browser it
@@ -18,13 +20,18 @@ import { AllowSiteDialog } from "./AllowSiteDialog.tsx";
  * paused, so the first connection can take a few seconds; it comes over a
  * WebSocket the API relays from the sandbox. The person watches until they
  * take over, if the pod lets them use desktops, and can hand control back.
- * While they have control, the bar says the sandbox only reaches allowed
- * sites, since a site it can't reach looks like a broken connection in its
- * browser, and lets those who may change the pod's sites allow one.
+ *
+ * A site the sandbox can't reach looks like a broken connection in its
+ * browser, and a page often loads its pictures and styles from other sites
+ * nobody could guess. So while the person has control, the bar says the
+ * sandbox only reaches allowed sites, and a banner over the desktop says when
+ * pages in its browser tried to reach others, for those who may change the
+ * pod's sites to review and allow.
  */
 export function DesktopStage({
 	threadId,
 	podId,
+	podName,
 	agent,
 	mayUse,
 	mayAllowSites,
@@ -32,6 +39,7 @@ export function DesktopStage({
 }: {
 	threadId: string;
 	podId: string;
+	podName: string;
 	agent: Agent;
 	/** Whether the person holds the pod's `useDesktops`, and so may take over. */
 	mayUse: boolean;
@@ -40,8 +48,15 @@ export function DesktopStage({
 	onClose: () => void;
 }) {
 	const [inControl, setInControl] = useState(false);
+	const [connected, setConnected] = useState(false);
 	const [allowingSite, setAllowingSite] = useState(false);
+	const [reviewing, setReviewing] = useState<readonly string[]>();
+	const [hiddenFor, setHiddenFor] = useState<string>();
 	const agentUsing = useDesktopInUse(threadId, agent.id);
+	// Only while it's in use: a desktop left alone disconnects, so its sandbox can pause.
+	const unreachedSites = useUnreachedSites(threadId, agent.id, inControl && connected);
+	const unreached = inControl && connected ? (unreachedSites.data ?? []) : [];
+	const shown = unreached.map((site) => site.host).join(" ");
 	return (
 		<Stage
 			label={`${agent.name}'s desktop`}
@@ -57,7 +72,24 @@ export function DesktopStage({
 			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
 				{/* As large as the room allows, keeping the desktop's 16:10 shape, up to its own 1280 pixels across. */}
 				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*1.6))]">
-					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+					<DesktopScreen
+						threadId={threadId}
+						agentId={agent.id}
+						viewOnly={!inControl}
+						onConnectedChange={setConnected}
+						overlay={
+							unreached.length > 0 &&
+							hiddenFor !== shown && (
+								<UnreachedSitesBanner
+									agentName={agent.name}
+									unreached={unreached}
+									mayAllowSites={mayAllowSites}
+									onReview={(hosts) => setReviewing(hosts)}
+									onHide={() => setHiddenFor(shown)}
+								/>
+							)
+						}
+					/>
 				</div>
 				<div
 					className={cn(
@@ -113,8 +145,80 @@ export function DesktopStage({
 			<Dialog open={allowingSite} onOpenChange={setAllowingSite}>
 				{allowingSite && <AllowSiteDialog podId={podId} onDone={() => setAllowingSite(false)} />}
 			</Dialog>
+			<Dialog
+				open={reviewing !== undefined}
+				onOpenChange={(open) => !open && setReviewing(undefined)}
+			>
+				{reviewing && (
+					<AllowUnreachedSitesDialog
+						threadId={threadId}
+						agentId={agent.id}
+						agentName={agent.name}
+						podId={podId}
+						podName={podName}
+						hosts={reviewing}
+						onDone={() => {
+							setReviewing(undefined);
+							void unreachedSites.refetch();
+						}}
+					/>
+				)}
+			</Dialog>
 		</Stage>
 	);
+}
+
+/**
+ * Across the bottom of the desktop, near the bar: that pages in the agent's
+ * browser tried to reach sites the sandbox doesn't allow, to review, or why
+ * they can't be allowed. Hiding it hides those sites until others turn up.
+ */
+export function UnreachedSitesBanner({
+	agentName,
+	unreached,
+	mayAllowSites,
+	onReview,
+	onHide,
+}: {
+	agentName: string;
+	unreached: readonly DesktopUnreachedSite[];
+	mayAllowSites: boolean;
+	/** Opens the review of `hosts`, the allowable sites as they are now. */
+	onReview: (hosts: readonly string[]) => void;
+	onHide: () => void;
+}) {
+	const allowable = unreached.filter((site) => site.blockedBy === null).map((site) => site.host);
+	const blocked = unreached.length - allowable.length;
+	return (
+		<div
+			role="status"
+			className="absolute inset-x-3 bottom-3 flex items-center gap-3 rounded-xl bg-primary py-2.5 pr-2 pl-4 text-primary-foreground text-sm shadow-dialog"
+		>
+			<p className="m-0 min-w-0 flex-1">
+				{allowable.length > 0 ? (
+					<>
+						Pages in {agentName}'s browser tried to reach {siteCount(allowable.length)} that{" "}
+						{allowable.length === 1 ? "isn't" : "aren't"} allowed.
+						{!mayAllowSites && " An admin of this pod can allow them."}
+					</>
+				) : (
+					<>
+						Pages in {agentName}'s browser tried to reach {siteCount(blocked)} the workspace blocks.
+					</>
+				)}
+			</p>
+			{mayAllowSites && allowable.length > 0 && (
+				<Button size="sm" variant="secondary" onClick={() => onReview(allowable)}>
+					Review sites
+				</Button>
+			)}
+			<CloseButton label="Hide" onClick={onHide} />
+		</div>
+	);
+}
+
+function siteCount(count: number) {
+	return count === 1 ? "a site" : `${count} sites`;
 }
 
 const SITES_EXPLAINED =
@@ -181,16 +285,25 @@ export function DesktopScreen({
 	threadId,
 	agentId,
 	viewOnly,
+	onConnectedChange,
+	overlay,
 }: {
 	threadId: string;
 	agentId: string;
 	/** Shows the desktop without sending input. The API enforces it either way. */
 	viewOnly: boolean;
+	/** Told whenever the desktop connects or stops being connected. */
+	onConnectedChange?: (connected: boolean) => void;
+	/** Shown over the top of the desktop. */
+	overlay?: ReactNode;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
 	const viewOnlyNow = useRef(viewOnly);
 	const [standing, setStanding] = useState<Standing>("connecting");
+	useEffect(() => {
+		onConnectedChange?.(standing === "connected");
+	}, [standing, onConnectedChange]);
 	const [attempt, setAttempt] = useState(0);
 	const lastUsedAt = useRef(Date.now());
 	const agentUsing = useDesktopInUse(threadId, agentId);
@@ -261,6 +374,7 @@ export function DesktopScreen({
 					)}
 				</div>
 			)}
+			{overlay}
 		</div>
 	);
 }

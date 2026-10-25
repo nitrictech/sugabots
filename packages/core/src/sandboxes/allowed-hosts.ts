@@ -99,6 +99,34 @@ export const allowedHostsOf = (pod: { workspaceId: string; podId: string }) =>
 	);
 
 /**
+ * Whether `allowed` lets the sandbox reach the name `host`: it is listed, or
+ * a wildcard covers it, `*.example.com` covering `api.example.com` but not
+ * `example.com`.
+ */
+export function isAllowed(host: string, allowed: readonly string[]): boolean {
+	return allowed.some((entry) =>
+		isWildcard(entry)
+			? host !== domainOf(entry) && isWithin(host, domainOf(entry))
+			: host === entry,
+	);
+}
+
+/**
+ * Of `hosts`, those `allowed` doesn't let the sandbox reach, each with the
+ * block among `blocks` that keeps it out anyway, or null if the pod may
+ * allow it.
+ */
+export function unallowedHosts(
+	hosts: readonly string[],
+	allowed: readonly string[],
+	blocks: readonly string[],
+): { host: string; blockedBy: string | null }[] {
+	return hosts
+		.filter((host) => !isAllowed(host, allowed))
+		.map((host) => ({ host, blockedBy: blockOn(host, blocks) ?? null }));
+}
+
+/**
  * The block among `blocks` that keeps `host` out, if any: one that blocks a
  * name `host` reaches. Blocking `example.com` blocks its subdomains too, and
  * `*.example.com` its subdomains alone. A wildcard that reaches a blocked name

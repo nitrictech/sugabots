@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import { desktopUnreachedSiteSchema, sandboxHostSchema } from "../../sandbox-providers.ts";
 import {
 	messageReactionsSchema,
 	reactionEmojiSchema,
@@ -9,7 +10,7 @@ import {
 	threadSchema,
 } from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Conflict, refused } from "../errors.ts";
+import { Conflict, NotFound, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 export class ThreadsApi extends HttpApiGroup.make("threads")
@@ -32,6 +33,28 @@ export class ThreadsApi extends HttpApiGroup.make("threads")
 			success: threadActivitySchema,
 			error: refused,
 		}),
+		// For a person in control of the agent's desktop, to offer the sites its
+		// pages need. The desktop itself is a WebSocket outside this API.
+		HttpApiEndpoint.get(
+			"desktopUnreachedSites",
+			"/threads/:threadId/agents/:agentId/desktop/unreached-sites",
+			{
+				params: { threadId: Schema.String, agentId: Schema.String },
+				success: Schema.Array(desktopUnreachedSiteSchema),
+				error: [NotFound, Conflict, ...refused],
+			},
+		),
+		// Once some are allowed: loads again the pages that couldn't reach them.
+		HttpApiEndpoint.post(
+			"reloadDesktopUnreachedSites",
+			"/threads/:threadId/agents/:agentId/desktop/unreached-sites/reload",
+			{
+				params: { threadId: Schema.String, agentId: Schema.String },
+				payload: Schema.Struct({ hosts: Schema.Array(sandboxHostSchema) }),
+				success: HttpApiSchema.Empty(204),
+				error: [NotFound, Conflict, ...refused],
+			},
+		),
 		// Adding a reaction already there, or taking back one that is not, changes
 		// nothing, so a retried request is safe. Both answer with what the message has now.
 		HttpApiEndpoint.put("react", "/messages/:messageId/reactions/:emoji", {

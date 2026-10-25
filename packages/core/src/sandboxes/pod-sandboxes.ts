@@ -44,6 +44,16 @@ export interface Interface {
 		holder: Holder,
 	) => Effect.Effect<Opened, Sandboxes.Unavailable>;
 	/**
+	 * The pod's sandbox at `provider` if it is running now, for a quick look
+	 * that mustn't change it: it isn't made, resumed, leased or brought up to
+	 * date, so the pod still pauses when nobody uses it. Undefined otherwise,
+	 * or when the provider can't say.
+	 */
+	readonly running: (
+		pod: Pod,
+		provider: SandboxProviderRepository.Configured,
+	) => Effect.Effect<Sandboxes.Sandbox | undefined>;
+	/**
 	 * Extends `holder`'s leases, and signs their sandboxes in afresh when their
 	 * credentials are about to expire. Nothing happens if it has none.
 	 */
@@ -428,6 +438,26 @@ export const make = Effect.gen(function* () {
 						),
 						Effect.tap(() => lease(pod, holder)),
 					),
+				),
+			),
+
+		running: (pod, provider) =>
+			operation(
+				"running",
+				Effect.gen(function* () {
+					const row = yield* recorded(pod);
+					if (!row || row.sandboxProviderId !== provider.id) return undefined;
+					const at = sandboxes.forConnection(provider.connection);
+					const info = yield* at.info(row.providerSandboxId);
+					if (info.state !== "running") return undefined;
+					const { sandbox } = yield* at.open(row.providerSandboxId);
+					return sandbox;
+				}).pipe(
+					Effect.catchTags({
+						SandboxMissing: () => Effect.succeed(undefined),
+						SandboxStopped: () => Effect.succeed(undefined),
+						SandboxUnavailable: () => Effect.succeed(undefined),
+					}),
 				),
 			),
 

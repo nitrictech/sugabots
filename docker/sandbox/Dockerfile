@@ -93,6 +93,13 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
+# What `sugabots-desktop unreached-sites` runs, with the Playwright that
+# Playwright MCP brings, found where npm installed it. The build fails if a
+# new Playwright MCP no longer brings it, rather than the script failing
+# quietly in every sandbox.
+COPY unreached-sites.mjs /usr/local/lib/sugabots-desktop/unreached-sites.mjs
+RUN ln -s "$(npm root --global)/@playwright/mcp" /usr/local/lib/sugabots-desktop/playwright-mcp \
+	&& node -e 'const { chromium } = require("module").createRequire("/usr/local/lib/sugabots-desktop/playwright-mcp/package.json")("playwright-core"); if (typeof chromium.connectOverCDP !== "function") process.exit(1)'
 
 RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop
 

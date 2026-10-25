@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { sandboxHostSchema } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import { type Image, withImages } from "../images.ts";
@@ -111,6 +112,61 @@ export const startBrowser = (
 					started: ports.started,
 				}),
 	);
+
+/**
+ * The sites the pages open in the agent's browser in the thread tried and
+ * failed to reach, by name, at most {@link MOST_UNREACHED_SITES}. None when
+ * its browser isn't running, or the sandbox's image is from before
+ * `sugabots-desktop` could tell. What comes back is the sandbox's word, so
+ * anything that isn't a host Sugabots would allow is dropped.
+ */
+export const findUnreachedSites = (
+	sandbox: Sandboxes.Sandbox,
+	place: Place,
+	turn: { threadId: string; agentId: string },
+) =>
+	Effect.map(
+		sandbox.exec(`sugabots-desktop unreached-sites ${Sandboxes.shellQuoted(sessionName(turn))}`, {
+			env: { HOME: place.home },
+			timeout: "20 seconds",
+			maxOutputCharacters: UNREACHED_SITES_OUTPUT_CHARACTERS,
+		}),
+		(ran) =>
+			ran.exitCode !== 0
+				? []
+				: [...new Set(ran.stdout.text.split("\n"))]
+						.filter(isSandboxHost)
+						.slice(0, MOST_UNREACHED_SITES),
+	);
+
+/**
+ * Loads again the pages open in the agent's browser in the thread that
+ * failed to reach any of `hosts`, once they are allowed. Pages that failed on
+ * other sites are left as they are, form input and all.
+ */
+export const reloadPagesThatFailedOn = (
+	sandbox: Sandboxes.Sandbox,
+	place: Place,
+	turn: { threadId: string; agentId: string },
+	hosts: readonly string[],
+) =>
+	Effect.asVoid(
+		sandbox.exec(
+			[
+				"sugabots-desktop unreached-sites",
+				Sandboxes.shellQuoted(sessionName(turn)),
+				"reload",
+				...hosts.map(Sandboxes.shellQuoted),
+			].join(" "),
+			{ env: { HOME: place.home }, timeout: "30 seconds", maxOutputCharacters: 1_000 },
+		),
+	);
+
+/** More than a page's own sites come to; `sugabots-desktop` prints no more. */
+const MOST_UNREACHED_SITES = 50;
+/** Room for {@link MOST_UNREACHED_SITES} of the longest names, so none is cut off. */
+const UNREACHED_SITES_OUTPUT_CHARACTERS = MOST_UNREACHED_SITES * 254;
+const isSandboxHost = Schema.is(sandboxHostSchema);
 
 /**
  * Runs `sugabots-desktop desktop` or `session` for the agent in the thread,
