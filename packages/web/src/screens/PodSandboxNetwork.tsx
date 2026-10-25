@@ -17,16 +17,16 @@ export function PodSandboxNetworkSettings({
 	podId: string;
 	canManage: boolean;
 }) {
-	const { network, addHost, removeHost } = usePodSandboxNetwork(podId);
+	const { network, addHosts, removeHost } = usePodSandboxNetwork(podId);
 	if (network.isPending) return null;
 	if (network.isError) return <Alert>{failureMessage(network.error)}</Alert>;
 	return (
 		<PodNetworkGroup
 			network={network.data}
 			canManage={canManage}
-			pending={addHost.isPending || removeHost.isPending}
-			error={addHost.error ?? removeHost.error ?? undefined}
-			onAdd={(host) => addHost.mutateAsync(host)}
+			pending={addHosts.isPending || removeHost.isPending}
+			error={addHosts.error ?? removeHost.error ?? undefined}
+			onAdd={(host) => addHosts.mutateAsync([host])}
 			onRemove={(host) => removeHost.mutate(host)}
 		/>
 	);

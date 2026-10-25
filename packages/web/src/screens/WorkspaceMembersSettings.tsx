@@ -34,6 +34,7 @@ import {
 	DialogFormBody,
 	DialogFormFooter,
 	DialogFormHeader,
+	DialogFormInput,
 } from "@/ui/dialog-form.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -534,14 +535,12 @@ function InviteDialog({
 				<label htmlFor={emailsId} className="sr-only">
 					Email addresses
 				</label>
-				<input
+				<DialogFormInput
 					id={emailsId}
 					value={text}
 					onChange={(event) => setText(event.target.value)}
 					placeholder="Email addresses, separated by commas"
 					disabled={sending}
-					autoComplete="off"
-					className="focus-ring w-full rounded-panel bg-list px-4 py-3.5 text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground"
 				/>
 				<SettingsGroup note={workspaceRoleDescription(role)}>
 					<SettingsRow

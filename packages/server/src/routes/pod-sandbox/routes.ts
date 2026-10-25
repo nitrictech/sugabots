@@ -24,9 +24,9 @@ export const podSandboxRoutes = HttpApiBuilder.group(ServerApi, "podSandbox", (h
 			.handle("network", ({ params }) =>
 				network.podSettings(params.podId).pipe(asSessionUser, asHttpError(refusals)),
 			)
-			.handle("addHost", ({ params, payload }) =>
+			.handle("addHosts", ({ params, payload }) =>
 				network
-					.addPodHost({ podId: params.podId, host: payload.host })
+					.addPodHosts({ podId: params.podId, hosts: payload.hosts })
 					.pipe(asSessionUser, asHttpError({ ...refusals, SandboxHostBlocked: BadRequest })),
 			)
 			.handle("removeHost", ({ params }) =>

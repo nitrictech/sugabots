@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { getPublicSuffix } from "tldts";
 import { providerStatusSchema, providerUrlSchema } from "./model-providers.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -282,4 +283,31 @@ export const podSandboxNetworkSchema = Schema.Struct({
 
 export type PodSandboxNetwork = typeof podSandboxNetworkSchema.Type;
 
-export const newSandboxHostSchema = Schema.Struct({ host: sandboxHostSchema });
+/**
+ * A host being allowed. A wildcard over a domain anyone can register names
+ * under, such as `*.co.uk` or `*.github.io`, would let the sandbox reach
+ * sites nobody chose, so it is refused. Hosts already allowed are read back
+ * as {@link sandboxHostSchema}, so one from before this was checked still
+ * shows, to remove.
+ */
+export const sandboxHostToAllowSchema = sandboxHostSchema.check(
+	Schema.makeFilter(
+		(host: string) =>
+			!host.startsWith("*.") ||
+			getPublicSuffix(host.slice(2), { allowPrivateDomains: true }) !== host.slice(2),
+		{ message: "Anyone can make sites under that name, so allow a site under it instead" },
+	),
+);
+
+export const newSandboxHostSchema = Schema.Struct({ host: sandboxHostToAllowSchema });
+
+/** Most hosts allowed in one request, more than a page's unreached sites come to. */
+const MOST_HOSTS_AT_ONCE = 50;
+
+/** Hosts allowed together: all of them, or none if any is refused. */
+export const newSandboxHostsSchema = Schema.Struct({
+	hosts: Schema.Array(sandboxHostToAllowSchema).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MOST_HOSTS_AT_ONCE),
+	),
+});

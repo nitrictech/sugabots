@@ -62,10 +62,14 @@ export interface Interface {
 	readonly podSettings: (
 		podId: string,
 	) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
-	/** Adding a host the workspace blocked fails with {@link HostBlocked}. */
-	readonly addPodHost: (input: {
+	/**
+	 * Adds `hosts` to the pod's own, all of them or, if the workspace blocked
+	 * any, none, failing with {@link HostBlocked} for the first. Ones already
+	 * allowed change nothing.
+	 */
+	readonly addPodHosts: (input: {
 		podId: string;
-		host: string;
+		hosts: readonly string[];
 	}) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied | HostBlocked, CurrentActor.Service>;
 	/** Removing a host the pod never added changes nothing. */
 	readonly removePodHost: (input: {
@@ -159,10 +163,16 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
-	const addToPod = (row: typeof sandboxPodAllowedHost.$inferInsert) =>
-		query((db) => db.insert(sandboxPodAllowedHost).values(row).onConflictDoNothing()).pipe(
-			Effect.andThen(podSandboxes.applyNetwork({ workspaceId: row.workspaceId, podId: row.podId })),
-		);
+	/** Adds `hosts` to the pod's own, then brings its running sandbox up to date once. */
+	const addToPod = (pod: Pod, hosts: readonly string[], addedById: string | null) =>
+		hosts.length === 0
+			? Effect.void
+			: query((db) =>
+					db
+						.insert(sandboxPodAllowedHost)
+						.values(hosts.map((host) => ({ ...pod, host, addedById })))
+						.onConflictDoNothing(),
+				).pipe(Effect.andThen(podSandboxes.applyNetwork(pod)));
 
 	const podOf = (standing: { pod: { id: string; workspaceId: string } }): Pod => ({
 		workspaceId: standing.pod.workspaceId,
@@ -261,17 +271,22 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		addPodHost: ({ podId, host }) =>
+		addPodHosts: ({ podId, hosts }) =>
 			operation(
-				"addPodHost",
+				"addPodHosts",
 				Effect.gen(function* () {
 					const standing = yield* authorization.pod(podId, "sandbox.manage");
 					const pod = podOf(standing);
-					const by = yield* blockFor(pod.workspaceId, host);
-					if (by !== undefined) return yield* new HostBlocked({ host, by });
-					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToPod({ ...pod, host, addedById: standing.actor.userId });
+					const blocks = (yield* blockedHostsOf(pod.workspaceId)).map((row) => row.host);
+					for (const host of hosts) {
+						const by = blockOn(host, blocks);
+						if (by !== undefined) return yield* new HostBlocked({ host, by });
 					}
+					yield* addToPod(
+						pod,
+						hosts.filter((host) => !TRUSTED_HOSTS.includes(host)),
+						standing.actor.userId,
+					);
 					return yield* podSettingsOf(pod);
 				}),
 			),
@@ -321,12 +336,11 @@ export const make = Effect.gen(function* () {
 					const by = yield* blockFor(call.workspaceId, host);
 					if (by !== undefined) return { kind: "blocked", by };
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToPod({
-							workspaceId: call.workspaceId,
-							podId: call.podId,
-							host,
-							addedById: call.decidedById,
-						});
+						yield* addToPod(
+							{ workspaceId: call.workspaceId, podId: call.podId },
+							[host],
+							call.decidedById,
+						);
 					}
 					return { kind: "added" };
 				}),

@@ -449,7 +449,9 @@ export function AgentChat({
 				<DesktopStage
 					threadId={details.thread.id}
 					agent={agent}
+					podId={pod.id}
 					mayUse={pod.permissions.useDesktops}
+					mayAllowSites={pod.permissions.manageSandbox}
 					onClose={() => onStagedChange(undefined)}
 				/>
 			) : threadId ? (

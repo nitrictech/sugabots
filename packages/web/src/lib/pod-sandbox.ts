@@ -35,7 +35,7 @@ export function usePodSandboxActions(podId: string) {
 /** What the pod's sandbox may connect to beyond what the workspace allows, and changing it. */
 export function usePodSandboxNetwork(podId: string) {
 	const queryClient = useQueryClient();
-	const queryKey = ["pod-sandbox-network", podId];
+	const queryKey = networkQueryKey(podId);
 	const store = { onSuccess: (data: unknown) => queryClient.setQueryData(queryKey, data) };
 	return {
 		network: useQuery({
@@ -43,15 +43,30 @@ export function usePodSandboxNetwork(podId: string) {
 			queryFn: ({ signal }) =>
 				Effect.runPromise(client.api.podSandbox.network({ params: { podId } }), { signal }),
 		}),
-		addHost: useMutation({
-			mutationFn: (host: string) =>
-				Effect.runPromise(client.api.podSandbox.addHost({ params: { podId }, payload: { host } })),
-			...store,
-		}),
+		addHosts: useAddPodSandboxHosts(podId),
 		removeHost: useMutation({
 			mutationFn: (host: string) =>
 				Effect.runPromise(client.api.podSandbox.removeHost({ params: { podId, host } })),
 			...store,
 		}),
 	};
+}
+
+/**
+ * Lets the pod's sandbox reach `hosts`, all of them or none if any is
+ * refused, without loading the pod's network settings first.
+ */
+export function useAddPodSandboxHosts(podId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (hosts: readonly string[]) =>
+			Effect.runPromise(
+				client.api.podSandbox.addHosts({ params: { podId }, payload: { hosts: [...hosts] } }),
+			),
+		onSuccess: (data: unknown) => queryClient.setQueryData(networkQueryKey(podId), data),
+	});
+}
+
+function networkQueryKey(podId: string) {
+	return ["pod-sandbox-network", podId];
 }

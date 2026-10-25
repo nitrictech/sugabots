@@ -1,6 +1,6 @@
 import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
-import type { FormEvent, ReactNode } from "react";
+import type { ComponentProps, FormEvent, ReactNode } from "react";
 import { Button } from "@/ui/button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 
@@ -176,5 +176,19 @@ export function DialogFormBody({
 		>
 			{children}
 		</div>
+	);
+}
+
+/** A text box filling a dialog form's body, such as for email addresses or a site's name. */
+export function DialogFormInput({ className, ...props }: ComponentProps<"input">) {
+	return (
+		<input
+			autoComplete="off"
+			{...props}
+			className={cn(
+				"focus-ring w-full rounded-panel bg-list px-4 py-3.5 text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground",
+				className,
+			)}
+		/>
 	);
 }

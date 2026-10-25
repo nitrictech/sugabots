@@ -557,6 +557,56 @@ export const SandboxInUse = meta.story({
 	},
 });
 
+/**
+ * In control of the desktop, the bar says the computer only reaches allowed
+ * sites, and a site pasted as an address is allowed with its subdomains.
+ */
+const allowedInStory: string[] = [];
+export const SandboxAllowASite = meta.story({
+	beforeEach({ msw }) {
+		allowedInStory.length = 0;
+		const added = allowedInStory;
+		msw.use(
+			...sandboxHandlers(conversation),
+			http.post(
+				`${import.meta.env.VITE_API_URL}/pods/:podId/sandbox/network/hosts`,
+				async ({ request }) => {
+					const { hosts } = (await request.json()) as { hosts: string[] };
+					added.push(...hosts);
+					return HttpResponse.json({
+						workspaceHosts: [],
+						addedHosts: added.map((one) => ({
+							host: one,
+							addedByName: "Ada",
+							addedAt: "2026-09-14T09:20:00.000Z",
+							blockedBy: null,
+						})),
+					});
+				},
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Sandbox desktop" }, { timeout: 10_000 }),
+		);
+		const desktop = await canvas.findByRole("region", { name: `${growthDesk.name}'s desktop` });
+		await userEvent.click(within(desktop).getByRole("button", { name: "Take over" }));
+		await expect(within(desktop).getByText(/only reaches sites that are allowed/)).toBeVisible();
+
+		await userEvent.click(within(desktop).getByRole("button", { name: "Allow a site" }));
+		const dialog = await screen.findByRole("dialog", { name: "Allow a site" });
+		await userEvent.type(
+			within(dialog).getByRole("textbox"),
+			"https://www.woolworths.com.au/shop/search",
+		);
+		await expect(within(dialog).getByText(/www\.woolworths\.com\.au/)).toBeVisible();
+		await userEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
+		await waitFor(() => expect(dialog).not.toBeInTheDocument());
+		await expect(allowedInStory).toEqual(["woolworths.com.au", "*.woolworths.com.au"]);
+	},
+});
+
 /** The same on a phone: the pulse and a screen, at the right of the centred header. */
 export const SandboxInUseOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },

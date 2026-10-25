@@ -17,6 +17,7 @@
 		"effect": "catalog:",
 		"mdast-util-from-markdown": "^2.0.3",
 		"mdast-util-to-string": "^4.0.0",
+		"tldts": "7.4.19",
 		"validator": "^13.15.35"
 	},
 	"devDependencies": {

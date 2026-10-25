@@ -1,5 +1,6 @@
 import type RFB from "@novnc/novnc";
 import type { Agent } from "@sugabots/contracts";
+import { cn } from "cn";
 import { Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
@@ -7,6 +8,9 @@ import { useDesktopInUse } from "@/lib/desktop.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
 import { Button } from "@/ui/button.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
+import { InfoTip } from "@/ui/info-tip.tsx";
+import { AllowSiteDialog } from "./AllowSiteDialog.tsx";
 
 /**
  * An agent's desktop opened beside its chat, live: where the browser it
@@ -14,20 +18,29 @@ import { Button } from "@/ui/button.tsx";
  * paused, so the first connection can take a few seconds; it comes over a
  * WebSocket the API relays from the sandbox. The person watches until they
  * take over, if the pod lets them use desktops, and can hand control back.
+ * While they have control, the bar says the sandbox only reaches allowed
+ * sites, since a site it can't reach looks like a broken connection in its
+ * browser, and lets those who may change the pod's sites allow one.
  */
 export function DesktopStage({
 	threadId,
+	podId,
 	agent,
 	mayUse,
+	mayAllowSites,
 	onClose,
 }: {
 	threadId: string;
+	podId: string;
 	agent: Agent;
 	/** Whether the person holds the pod's `useDesktops`, and so may take over. */
 	mayUse: boolean;
+	/** Whether the person holds the pod's `manageSandbox`, and so may allow a site. */
+	mayAllowSites: boolean;
 	onClose: () => void;
 }) {
 	const [inControl, setInControl] = useState(false);
+	const [allowingSite, setAllowingSite] = useState(false);
 	const agentUsing = useDesktopInUse(threadId, agent.id);
 	return (
 		<Stage
@@ -46,7 +59,12 @@ export function DesktopStage({
 				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*1.6))]">
 					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
 				</div>
-				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
+				<div
+					className={cn(
+						"flex max-w-full items-center gap-2.5 border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm",
+						inControl ? "rounded-2xl" : "rounded-full",
+					)}
+				>
 					<AgentAvatar
 						color={agent.color}
 						face={agent.face}
@@ -61,6 +79,12 @@ export function DesktopStage({
 							<>
 								<b className="font-semibold text-foreground">You</b> have control. What you do here
 								is real.
+								<span className="flex items-center gap-1 text-muted-foreground">
+									This computer only reaches sites that are allowed.
+									<InfoTip label="About allowed sites" title="Allowed sites">
+										{SITES_EXPLAINED}
+									</InfoTip>
+								</span>
 							</>
 						) : agentUsing ? (
 							<>
@@ -70,6 +94,11 @@ export function DesktopStage({
 							<>Watching</>
 						)}
 					</span>
+					{inControl && mayAllowSites && (
+						<Button size="sm" variant="secondary" onClick={() => setAllowingSite(true)}>
+							Allow a site
+						</Button>
+					)}
 					{mayUse && (
 						<Button
 							size="sm"
@@ -81,9 +110,15 @@ export function DesktopStage({
 					)}
 				</div>
 			</div>
+			<Dialog open={allowingSite} onOpenChange={setAllowingSite}>
+				{allowingSite && <AllowSiteDialog podId={podId} onDone={() => setAllowingSite(false)} />}
+			</Dialog>
 		</Stage>
 	);
 }
+
+const SITES_EXPLAINED =
+	"A bot's computer only connects to sites its workspace or pod allows, so what's on it can't be sent anywhere else. Any other site shows as “This site can't be reached”, and pages that load parts of themselves from other sites look broken until those are allowed too.";
 
 /**
  * The agent's screen in the reply that is using it, watch-only, so people see

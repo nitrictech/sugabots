@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import {
-	newSandboxHostSchema,
+	newSandboxHostsSchema,
 	podSandboxNetworkSchema,
 	podSandboxSchema,
 	sandboxHostSchema,
@@ -34,9 +34,10 @@ export class PodSandboxApi extends HttpApiGroup.make("podSandbox")
 			success: podSandboxNetworkSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.post("addHost", `${root}/network/hosts`, {
+		// Several at once, as from a desktop's unreached sites: all, or none if any is refused.
+		HttpApiEndpoint.post("addHosts", `${root}/network/hosts`, {
 			params,
-			payload: newSandboxHostSchema,
+			payload: newSandboxHostsSchema,
 			success: podSandboxNetworkSchema,
 			error: [BadRequest, ...refused],
 		}),
