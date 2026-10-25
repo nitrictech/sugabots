@@ -92,6 +92,8 @@ export interface ToolDependencies {
 		}) => Effect.Effect<void>;
 		markActed: () => Effect.Effect<void>;
 	};
+	/** The row id chosen for a call while the model wrote it, by the SDK's id for the call. */
+	rowIdFor?: (sdkToolCallId: string) => string | undefined;
 	/** The turn's own abort signal, so a cancelled turn stops its tools too. */
 	signal: AbortSignal;
 }
@@ -130,6 +132,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		},
 		replyLength: deps.reply.length,
 		noteToolCall: deps.reply.noteToolCall,
+		rowIdFor: deps.rowIdFor,
 		markActed: deps.reply.markActed,
 	};
 	for (const [key, tool] of Object.entries(deps.builtIn.tools)) {

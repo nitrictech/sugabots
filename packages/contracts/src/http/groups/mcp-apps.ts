@@ -17,6 +17,13 @@ export class McpAppsApi extends HttpApiGroup.make("mcpApps")
 			success: mcpAppResourceSchema,
 			error: refused,
 		}),
+		// For a call still being written, whose row doesn't exist yet.
+		HttpApiEndpoint.get("pendingResource", "/threads/:threadId/apps", {
+			params: { threadId: Schema.String },
+			query: { connectionId: Schema.String, resourceUri: Schema.String },
+			success: mcpAppResourceSchema,
+			error: refused,
+		}),
 		HttpApiEndpoint.post("callTool", "/tool-calls/:toolCallId/app/calls", {
 			params: { toolCallId: Schema.String },
 			payload: mcpAppToolCallSchema,

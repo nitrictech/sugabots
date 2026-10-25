@@ -25,6 +25,8 @@ export interface RecordingOptions {
 	replyLength: () => number;
 	/** Tells the running turn a call was made, so the reply's parts include it from now on. */
 	noteToolCall: (call: { id: string; atOffset: number; mutating: boolean }) => Effect.Effect<void>;
+	/** The row id chosen for a call while the model wrote it, by the SDK's id for the call. */
+	rowIdFor?: (sdkToolCallId: string) => string | undefined;
 	/** Marks the external mutation boundary, after approval and before dispatch. */
 	markActed?: () => Effect.Effect<void>;
 	/** Whether the tool may change something at the other end. Built-in tools do not. */
@@ -83,6 +85,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		from,
 		replyLength,
 		noteToolCall,
+		rowIdFor,
 		markActed,
 		mutating = false,
 		connection,
@@ -117,6 +120,8 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 						atOffset,
 						mutating,
 						binding: connection?.binding,
+						id: rowIdFor?.(callOptions.toolCallId),
+						appResourceUri: connection?.appResourceUri,
 					});
 			const opened = await run(opening);
 			if (!opened) {

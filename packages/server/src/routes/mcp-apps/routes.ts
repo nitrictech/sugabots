@@ -13,6 +13,9 @@ export const mcpAppRoutes = HttpApiBuilder.group(ServerApi, "mcpApps", (handlers
 			.handle("resource", ({ params }) =>
 				apps.resource(params.toolCallId).pipe(asSessionUser, asHttpError(appErrors)),
 			)
+			.handle("pendingResource", ({ params, query }) =>
+				apps.pendingResource(params.threadId, query).pipe(asSessionUser, asHttpError(appErrors)),
+			)
 			.handle("callTool", ({ params, payload }) =>
 				apps.callTool(params.toolCallId, payload).pipe(asSessionUser, asHttpError(appErrors)),
 			);

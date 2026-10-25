@@ -64,6 +64,10 @@ export interface Interface {
 		mutating?: boolean;
 		/** The connection a connection's tool runs through. Built-in when left out. */
 		binding?: ApprovalBinding;
+		/** The row's id, when it was chosen while the model wrote the call. The database mints one when left out. */
+		id?: string;
+		/** The MCP App the call is shown in, for a tool that has one. */
+		appResourceUri?: string;
 	}) => Effect.Effect<ToolCallPart>;
 	/** Records what the tool returned or how it failed. `undefined` if the call is not running. */
 	readonly close: (
@@ -167,6 +171,8 @@ export const make = Effect.gen(function* () {
 							db
 								.insert(toolCall)
 								.values({
+									...(input.id ? { id: input.id } : {}),
+									...(input.appResourceUri ? { appResourceUri: input.appResourceUri } : {}),
 									threadId: input.threadId,
 									messageId: input.messageId,
 									turnId: input.turnId,

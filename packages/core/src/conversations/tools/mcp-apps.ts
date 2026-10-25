@@ -31,6 +31,11 @@ export interface Interface {
 	readonly resource: (
 		toolCallId: string,
 	) => Effect.Effect<Resource, ResourceHidden | McpAppUnavailable, CurrentActor.Service>;
+	/** The app for a call the model is still writing, before its row exists. */
+	readonly pendingResource: (
+		threadId: string,
+		app: { connectionId: string; resourceUri: string },
+	) => Effect.Effect<Resource, ResourceHidden | McpAppUnavailable, CurrentActor.Service>;
 	readonly callTool: (
 		toolCallId: string,
 		call: { name: string; arguments: Record<string, unknown> },
@@ -104,24 +109,48 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
+	const readResource = (workspaceId: string, target: ConnectionTarget, resourceUri: string) =>
+		Effect.map(
+			withSession(workspaceId, target, (session) => session.readApp(resourceUri)),
+			(read): Resource => ({
+				html: read.html,
+				csp: {
+					connectDomains: read.meta?.csp?.connectDomains ?? [],
+					resourceDomains: read.meta?.csp?.resourceDomains ?? [],
+					frameDomains: read.meta?.csp?.frameDomains ?? [],
+				},
+				prefersBorder: read.meta?.prefersBorder ?? null,
+			}),
+		);
+
 	return Service.of({
 		resource: (toolCallId) =>
 			operation(
 				"resource",
+				Effect.flatMap(appOf(toolCallId), ({ workspaceId, target, resourceUri }) =>
+					readResource(workspaceId, target, resourceUri),
+				),
+			),
+
+		pendingResource: (threadId, app) =>
+			operation(
+				"pendingResource",
 				Effect.gen(function* () {
-					const { workspaceId, target, resourceUri } = yield* appOf(toolCallId);
-					const read = yield* withSession(workspaceId, target, (session) =>
-						session.readApp(resourceUri),
+					if (
+						!isUuid(threadId) ||
+						!isUuid(app.connectionId) ||
+						!app.resourceUri.startsWith("ui://")
+					) {
+						return yield* new McpAppUnavailable();
+					}
+					const { thread } = yield* visibility.thread(threadId);
+					const target = yield* connections.target(
+						thread.workspaceId,
+						thread.podId,
+						app.connectionId,
 					);
-					return {
-						html: read.html,
-						csp: {
-							connectDomains: read.meta?.csp?.connectDomains ?? [],
-							resourceDomains: read.meta?.csp?.resourceDomains ?? [],
-							frameDomains: read.meta?.csp?.frameDomains ?? [],
-						},
-						prefersBorder: read.meta?.prefersBorder ?? null,
-					};
+					if (target?.kind !== "mcp") return yield* new McpAppUnavailable();
+					return yield* readResource(thread.workspaceId, target, app.resourceUri);
 				}),
 			),
 

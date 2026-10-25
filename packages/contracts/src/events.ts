@@ -79,6 +79,21 @@ export const eventPayloadSchemas = {
 	/** The tool returned or failed; the part carries its output or error. */
 	"tool_call.completed": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
 	"tool_call.updated": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
+	/**
+	 * More of the input the model is writing for a call to an MCP App's tool,
+	 * before the call runs. `text` continues the raw JSON of the `call_tool`
+	 * input at `offset`. `toolCallId` is the id the call's row will have, so
+	 * the app opened for the input is the one its result goes to.
+	 */
+	"tool_call.input_delta": Schema.Struct({
+		threadId,
+		messageId,
+		toolCallId: uuidSchema,
+		tool: Schema.String,
+		app: Schema.Struct({ connectionId: uuidSchema, resourceUri: Schema.String }),
+		offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		text: Schema.String,
+	}),
 	"turn.started": Schema.Struct({
 		threadId,
 		turnId: uuidSchema,
@@ -178,6 +193,7 @@ export type DurableEventType = typeof durableEventTypeSchema.Type;
  */
 export const ephemeralEventTypeSchema = Schema.Literals([
 	"message.delta",
+	"tool_call.input_delta",
 	"person.typing",
 ] satisfies KnownEventType[]);
 
@@ -274,6 +290,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("tool_call.started", P["tool_call.started"]),
 	withEnvelope("tool_call.completed", P["tool_call.completed"]),
 	withEnvelope("tool_call.updated", P["tool_call.updated"]),
+	withEnvelope("tool_call.input_delta", P["tool_call.input_delta"]),
 	withEnvelope("turn.started", P["turn.started"]),
 	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),

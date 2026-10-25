@@ -84,6 +84,11 @@ export interface PromptMessage {
 	cacheBreakpoint?: true;
 }
 
+/** Part of a tool call's input as the model writes it: more of its JSON, or that it is written. */
+export type ToolInputPiece =
+	| { kind: "delta"; sdkToolCallId: string; toolName: string; text: string }
+	| { kind: "end"; sdkToolCallId: string };
+
 /** A response streamed as it arrives, with tools the model may call along the way. */
 export interface StreamRequest extends Prompt {
 	/** What the request is for, which the ledger records as whose spend it is. */
@@ -93,6 +98,8 @@ export interface StreamRequest extends Prompt {
 	/** What the model may call. The SDK executes them as it streams. */
 	tools?: ToolSet;
 	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
+	/** Told each piece of a tool call's input as the model writes it, before the call runs. */
+	onToolInput?: (piece: ToolInputPiece) => void;
 	/**
 	 * How many model calls the response may take, counting one per round of
 	 * tool calls. The last is told to answer rather than call more tools.
@@ -306,6 +313,24 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			const services = yield* Effect.context<never>();
 			const runLog = Effect.runForkWith(services);
 			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
+			// Deltas name only the call; its tool is named when it starts.
+			const toolNames = new Map<string, string>();
+			const reportToolInput = (
+				chunk: { type: string; id?: string; toolName?: string; delta?: string },
+				report: (piece: ToolInputPiece) => void,
+			) => {
+				if (chunk.type === "tool-input-start" && chunk.id && chunk.toolName) {
+					toolNames.set(chunk.id, chunk.toolName);
+				} else if (chunk.type === "tool-input-delta" && chunk.id && chunk.delta) {
+					const toolName = toolNames.get(chunk.id);
+					if (toolName) {
+						report({ kind: "delta", sdkToolCallId: chunk.id, toolName, text: chunk.delta });
+					}
+				} else if (chunk.type === "tool-input-end" && chunk.id) {
+					toolNames.delete(chunk.id);
+					report({ kind: "end", sdkToolCallId: chunk.id });
+				}
+			};
 			const result = streamText({
 				model: wrapLanguageModel({
 					model: dialect.languageModel(
@@ -332,6 +357,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				toolApproval: input.toolApproval,
 				abortSignal: signal,
 				onChunk: ({ chunk }) => {
+					if (input.onToolInput) reportToolInput(chunk, input.onToolInput);
 					if (chunk.type === "text-delta") stage = "answering";
 					if (chunk.type === "tool-input-start" || chunk.type === "tool-call") {
 						stage = "calling-tool";

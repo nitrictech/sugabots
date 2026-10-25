@@ -1,9 +1,10 @@
 import {
 	AppBridge,
+	type McpUiDisplayMode,
 	type McpUiTheme,
 	PostMessageTransport,
 } from "@modelcontextprotocol/ext-apps/app-bridge";
-import type { McpAppResource, MessagePart, ToolCallPart } from "@sugabots/contracts";
+import type { McpAppResource, Message, ToolCallPart } from "@sugabots/contracts";
 import { withLeadingTags } from "@sugabots/contracts/artifact-pages";
 import { cn } from "cn";
 import { Maximize2 } from "lucide-react";
@@ -13,7 +14,10 @@ import {
 	callMcpAppTool,
 	isCallToolResult,
 	mcpAppContentPolicy,
+	type PendingAppInput,
+	partialArguments,
 	useMcpAppResource,
+	usePendingAppInputs,
 } from "@/lib/mcp-apps.ts";
 import { connectionLabel, splitToolKey } from "@/lib/tool-names.ts";
 import { Stage } from "@/shell/Stage.tsx";
@@ -45,7 +49,7 @@ export interface AppIdentity {
 }
 
 export function appIdentityOf(
-	call: ToolCallPart,
+	call: Pick<AppCall, "tool">,
 	looks: ReadonlyMap<string, ConnectionLook>,
 	botName: string,
 ): AppIdentity {
@@ -54,12 +58,42 @@ export function appIdentityOf(
 	return { name: connectionLabel(handle, look?.name), presetId: look?.presetId, botName };
 }
 
-/** The calls among `parts` that have an app to show: made with an MCP App's tool, and finished. */
-export function appCallsIn(parts: readonly MessagePart[]): ToolCallPart[] {
-	return parts.filter(
-		(part): part is ToolCallPart =>
-			part.type === "tool_call" && part.hasApp === true && part.status === "completed",
-	);
+/**
+ * A call made with an MCP App's tool. `part` is its row, which exists once
+ * the model has finished writing its input; before then the app is shown
+ * the input as far as it has been written.
+ */
+export interface AppCall {
+	id: string;
+	tool: string;
+	part?: ToolCallPart;
+}
+
+/**
+ * The calls in `message` that have an app to show: those made with an MCP
+ * App's tool, running or finished, and while the reply streams, those whose
+ * input is still being written.
+ */
+export function appCallsIn(
+	message: Pick<Message, "id" | "parts" | "status">,
+	pendingInputs: ReadonlyMap<string, PendingAppInput>,
+): AppCall[] {
+	const made: AppCall[] = message.parts
+		.filter(
+			(part): part is ToolCallPart =>
+				part.type === "tool_call" &&
+				part.hasApp === true &&
+				(part.status === "completed" || part.status === "running"),
+		)
+		.map((part) => ({ id: part.id, tool: part.tool, part }));
+	if (message.status !== "streaming") return made;
+	const writing = [...pendingInputs.values()]
+		.filter(
+			(input) =>
+				input.messageId === message.id && !made.some((call) => call.id === input.toolCallId),
+		)
+		.map((input) => ({ id: input.toolCallId, tool: input.tool }));
+	return [...made, ...writing];
 }
 
 /** A reply's apps: the live one as a card, the rest as rows. */
@@ -70,7 +104,7 @@ export function McpApps({
 	shown,
 	className,
 }: {
-	calls: readonly ToolCallPart[];
+	calls: readonly AppCall[];
 	looks: ReadonlyMap<string, ConnectionLook>;
 	botName: string;
 	/** Without it, every app runs, as in a side thread that cannot open one beside it. */
@@ -113,7 +147,7 @@ function McpAppCard({
 	onOpen,
 	onAskToDescribe,
 }: {
-	call: ToolCallPart;
+	call: AppCall;
 	app: AppIdentity;
 	onOpen?: () => void;
 	onAskToDescribe?: (app: AppIdentity) => void;
@@ -132,7 +166,12 @@ function McpAppCard({
 					</Button>
 				)}
 			</div>
-			<McpAppBody call={call} app={app} onAskToDescribe={onAskToDescribe} />
+			<McpAppBody
+				call={call}
+				app={app}
+				onAskToDescribe={onAskToDescribe}
+				onRequestFullscreen={onOpen}
+			/>
 		</article>
 	);
 }
@@ -186,7 +225,7 @@ export function McpAppStage({
 	onAskToDescribe,
 }: {
 	/** Undefined when the call is not among the messages loaded. */
-	call: ToolCallPart | undefined;
+	call: AppCall | undefined;
 	app: AppIdentity | undefined;
 	onClose: () => void;
 	onAskToDescribe?: (app: AppIdentity) => void;
@@ -210,7 +249,13 @@ export function McpAppStage({
 			onClose={onClose}
 		>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-border">
-				<McpAppBody call={call} app={app} fill onAskToDescribe={onAskToDescribe} />
+				<McpAppBody
+					call={call}
+					app={app}
+					fill
+					onAskToDescribe={onAskToDescribe}
+					onRequestInline={onClose}
+				/>
 			</div>
 		</Stage>
 	);
@@ -232,14 +277,21 @@ function McpAppBody({
 	app,
 	fill = false,
 	onAskToDescribe,
+	onRequestFullscreen,
+	onRequestInline,
 }: {
-	call: ToolCallPart;
+	call: AppCall;
 	app: AppIdentity;
 	/** Fills its container, as beside the chat, rather than taking the height the app asks for. */
 	fill?: boolean;
 	onAskToDescribe?: (app: AppIdentity) => void;
+	/** Opens the app beside the chat, the fullscreen an app asks for, as when it is edited. */
+	onRequestFullscreen?: () => void;
+	/** Closes the app beside the chat, when it asks to go back inline. */
+	onRequestInline?: () => void;
 }) {
-	const resource = useMcpAppResource(call.id);
+	const pending = usePendingAppInputs().get(call.id);
+	const resource = useMcpAppResource(call.id, pending);
 	// Each try is a fresh frame; what it reached is kept against the try it belongs to.
 	const [attempt, setAttempt] = useState(0);
 	const [reached, setReached] = useState<{ attempt: number; standing: Standing }>({
@@ -280,8 +332,10 @@ function McpAppBody({
 				<BridgedFrame
 					key={attempt}
 					call={call}
+					partialInput={pending?.text}
 					resource={resource.data}
 					fill={fill}
+					onSwitchDisplayMode={fill ? onRequestInline : onRequestFullscreen}
 					hidden={standing === "opening"}
 					onStarted={() => setReached({ attempt, standing: "running" })}
 				/>
@@ -329,23 +383,32 @@ function McpAppBody({
  * as hostile, as a bot's page is (see `HtmlFrame`): it is written into a
  * frame sandboxed without `allow-same-origin`, under a policy that lets it
  * reach only the origins its server declared. It talks to the app over
- * `postMessage`, through `AppBridge`. It is given the call's input and
- * result, may call its server's tools back through the API, as whoever is
+ * `postMessage`, through `AppBridge`. It is given the call's input as the
+ * model writes it, then whole, then its result, may call its server's tools back through the API, as whoever is
  * viewing, and may ask for links to be opened.
  */
 function BridgedFrame({
 	call,
+	partialInput,
 	resource,
 	fill,
 	hidden,
 	onStarted,
+	onSwitchDisplayMode,
 }: {
-	call: ToolCallPart;
+	call: AppCall;
+	/** The raw `call_tool` input so far, while the model is writing it. */
+	partialInput: string | undefined;
 	resource: McpAppResource;
 	fill: boolean;
 	/** Kept laid out but unseen while the app starts, so it can measure itself. */
 	hidden: boolean;
 	onStarted: () => void;
+	/**
+	 * Moves the app to the other display mode: beside the chat is its
+	 * fullscreen. That is a new frame, so this one keeps its mode.
+	 */
+	onSwitchDisplayMode?: () => void;
 }) {
 	const frame = useRef<HTMLIFrameElement>(null);
 	const [height, setHeight] = useState<number>(FIT_HEIGHT_PX.min);
@@ -354,11 +417,35 @@ function BridgedFrame({
 	const bridge = useRef<AppBridge | null>(null);
 	const startingTheme = useRef(theme);
 	const started = useEffectEvent(onStarted);
-	// Read as the app starts, so a refetched copy of the same call doesn't start it again.
-	const sendCall = useEffectEvent((host: AppBridge) => {
-		void host.sendToolInput({ arguments: argumentsOf(call.input) });
-		if (isCallToolResult(call.output)) void host.sendToolResult(call.output);
+	const displayMode: McpUiDisplayMode = fill ? "fullscreen" : "inline";
+	const switchDisplayMode = useEffectEvent((mode: McpUiDisplayMode) => {
+		if (mode !== displayMode) onSwitchDisplayMode?.();
 	});
+	const canSwitch = onSwitchDisplayMode !== undefined;
+	const [initialized, setInitialized] = useState(false);
+	// What the app has been given, so a refetched copy of the same call isn't given again.
+	const sent = useRef({ partialLength: 0, input: false, result: false });
+
+	useEffect(() => {
+		const host = bridge.current;
+		if (!initialized || !host) return;
+		const { part } = call;
+		if (!part) {
+			if (!partialInput || partialInput.length <= sent.current.partialLength) return;
+			sent.current.partialLength = partialInput.length;
+			const args = partialArguments(partialInput);
+			if (args) void host.sendToolInputPartial({ arguments: args }).catch(() => undefined);
+			return;
+		}
+		if (!sent.current.input) {
+			sent.current.input = true;
+			void host.sendToolInput({ arguments: argumentsOf(part.input) }).catch(() => undefined);
+		}
+		if (!sent.current.result && isCallToolResult(part.output)) {
+			sent.current.result = true;
+			void host.sendToolResult(part.output).catch(() => undefined);
+		}
+	}, [initialized, call, partialInput]);
 
 	// Connected before the HTML is written in, so the app's first message is heard.
 	useEffect(() => {
@@ -373,17 +460,27 @@ function BridgedFrame({
 				hostContext: {
 					theme: startingTheme.current,
 					platform: "web",
-					displayMode: "inline",
-					availableDisplayModes: ["inline"],
-					containerDimensions: { maxHeight: FIT_HEIGHT_PX.max },
+					displayMode,
+					availableDisplayModes: canSwitch ? ["inline", "fullscreen"] : [displayMode],
+					...(displayMode === "inline"
+						? { containerDimensions: { maxHeight: FIT_HEIGHT_PX.max } }
+						: {}),
 					locale: navigator.language,
 					timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 				},
 			},
 		);
 		host.oninitialized = () => {
-			sendCall(host);
+			setInitialized(true);
 			started();
+			// Apps start inline whatever they are told, so one opened fullscreen is told again.
+			if (displayMode === "fullscreen") {
+				Promise.resolve(host.sendHostContextChange({ displayMode })).catch(() => undefined);
+			}
+		};
+		host.onrequestdisplaymode = async ({ mode }) => {
+			switchDisplayMode(mode);
+			return { mode: displayMode };
 		};
 		host.onsizechange = ({ height: reported }) => {
 			if (reported !== undefined) setHeight(Math.max(FIT_HEIGHT_PX.min, Math.ceil(reported)));
@@ -414,7 +511,7 @@ function BridgedFrame({
 			void host.teardownResource({}).catch(() => undefined);
 			void host.close();
 		};
-	}, [call.id, resource]);
+	}, [call.id, resource, displayMode, canSwitch]);
 
 	useEffect(() => {
 		// Before the app has initialized there is nobody to tell; it is given the theme it starts with.

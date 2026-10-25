@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { refreshArtifactsAfter } from "@/lib/artifacts.ts";
 import { refreshAfterThreadChange } from "@/lib/chats.ts";
+import { addAppInput } from "@/lib/mcp-apps.ts";
 import { changeReactions } from "@/lib/reactions.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
@@ -225,6 +226,10 @@ async function applyThreadEvent(
 				typing?.filter((entry) => entry.person.id !== author.id),
 			);
 		}
+	}
+	if (update.type === "tool_call.input_delta") {
+		addAppInput(queries, update);
+		return;
 	}
 	if (update.type === "message.reactions_changed") {
 		changeReactions(queries, { id: update.messageId, threadId }, update.reactions);

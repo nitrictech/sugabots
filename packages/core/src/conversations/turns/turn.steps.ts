@@ -36,6 +36,7 @@ import {
 	findApprovalTarget,
 	toolCatalogNote,
 } from "../tools/tool-search/tool.ts";
+import { appInputStreams } from "./app-inputs.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
@@ -477,7 +478,18 @@ const streamReply = (
 					]),
 				),
 			};
+			const ids = yield* Ids.Service;
+			const appInputs = appInputStreams({
+				from: { threadId: prepared.context.thread.id, messageId: prepared.responseMessage.id },
+				connections: connections.tools,
+				events,
+				newRowId: () => Effect.runSyncWith(context)(ids.next),
+				publishIntervalMs: Duration.toMillis(DELTA_PUBLISH_INTERVAL),
+				onPublishFailed: (cause) =>
+					Effect.runForkWith(context)(Effect.logError("Publishing an app's input failed", cause)),
+			});
 			const { tools, catalog } = toolsForTurn(prepared, {
+				rowIdFor: appInputs.rowIdFor,
 				collaborations,
 				artifacts,
 				calls: toolCalls,
@@ -560,6 +572,7 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval,
+				onToolInput: appInputs.onToolInput,
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 

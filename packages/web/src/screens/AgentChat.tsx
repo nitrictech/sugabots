@@ -37,6 +37,7 @@ import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attach
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
+import { usePendingAppInputs } from "@/lib/mcp-apps.ts";
 import { listNames } from "@/lib/name-list.ts";
 import { useReactions } from "@/lib/reactions.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -160,7 +161,8 @@ export function AgentChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	const appCalls = shownMessages.flatMap((message) => appCallsIn(message.parts));
+	const pendingAppInputs = usePendingAppInputs();
+	const appCalls = shownMessages.flatMap((message) => appCallsIn(message, pendingAppInputs));
 	const stagedAppCall =
 		staged?.kind === "app" ? appCalls.find((call) => call.id === staged.toolCallId) : undefined;
 

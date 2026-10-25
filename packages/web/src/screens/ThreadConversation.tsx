@@ -18,6 +18,7 @@ import { Fragment, type MouseEvent, type ReactNode, useMemo, useRef, useState } 
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
+import { usePendingAppInputs } from "@/lib/mcp-apps.ts";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -463,6 +464,7 @@ function MessageRow({
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
+	const pendingAppInputs = usePendingAppInputs();
 	// The toolbar stays up while its emoji picker is open, as the pointer has left the row for it.
 	const [picking, setPicking] = useState(false);
 	const { author } = message;
@@ -615,7 +617,7 @@ function MessageRow({
 				)}
 				{agent && (
 					<McpApps
-						calls={appCallsIn(message.parts)}
+						calls={appCallsIn(message, pendingAppInputs)}
 						looks={looks}
 						botName={agent.name}
 						shown={apps}
