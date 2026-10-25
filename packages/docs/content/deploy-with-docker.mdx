@@ -243,6 +243,18 @@ nothing opens from the dock on a sandbox's desktop: its apps bounce and never
 appear. Ubuntu 20.04, for example, comes with 5.4. Install a newer kernel, or a
 newer release of your operating system, and restart the server.
 
+### What OpenSandbox can see
+
+OpenSandbox adds your connections' credentials to a sandbox's requests as
+they leave it. For secure (HTTPS) connections, it decrypts each one beside the
+sandbox, adds the credentials, and encrypts it again before it goes on to the
+site. So OpenSandbox can read the sandbox's connections, the browser's on its
+desktop included, and whoever runs your OpenSandbox can see what's sent
+through them, such as a password typed into a site.
+
+If you run OpenSandbox yourself, that's you. Otherwise, choose someone you'd
+trust with it.
+
 ## Updating
 
 Back up first, then pull the new image and restart:
