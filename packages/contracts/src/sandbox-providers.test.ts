@@ -72,6 +72,8 @@ describe("sandbox images", () => {
 			lastTestError: null,
 			createdAt: "2026-10-25T08:00:00.000Z",
 		};
-		expect(Result.isSuccess(Schema.decodeResult(sandboxProviderSchema)(provider))).toBe(true);
+		expect(Result.isSuccess(Schema.decodeUnknownResult(sandboxProviderSchema)(provider))).toBe(
+			true,
+		);
 	});
 });
