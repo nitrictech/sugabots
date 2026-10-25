@@ -119,10 +119,39 @@ chromium_sandbox_flags() {
 	fi
 }
 
+# Chromium trusts the certificate authority the sandbox provider intercepts
+# HTTPS with. OpenSandbox's credential proxy signs every site's certificate
+# with its own, named in NODE_EXTRA_CA_CERTS, and Chromium trusts an added
+# authority only from its store in the home, $HOME/.pki/nssdb. Without it,
+# every site fails with ERR_CERT_AUTHORITY_INVALID.
+#
+# The home outlives the sandbox, so the authority of an earlier sandbox is
+# removed first, and with no proxy none is left trusted: adding a certificate
+# under a name already in the store keeps the old one beside it. Only the
+# file's first certificate is added; OpenSandbox's holds one. Desktops for
+# the same agent share the store, so they take turns.
+trust_provider_authority() {
+	local store="$HOME/.pki/nssdb" authority="${NODE_EXTRA_CA_CERTS:-}"
+	mkdir -p "$store"
+	(
+		flock 9
+		if [ -f "$store/cert9.db" ]; then
+			while certutil -d "sql:$store" -D -n "$PROVIDER_AUTHORITY" 2>/dev/null; do :; done
+		fi
+		[ -r "$authority" ] || exit 0
+		[ -f "$store/cert9.db" ] || certutil -d "sql:$store" -N --empty-password
+		certutil -d "sql:$store" -A -t "C,," -n "$PROVIDER_AUTHORITY" -i "$authority"
+	) 9>"$store/.sugabots-desktop.lock"
+}
+PROVIDER_AUTHORITY=sandbox-provider
+
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
+	# A browser that warns about every site is better than none.
+	trust_provider_authority >>"$log" 2>&1 ||
+		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
 	# Started here rather than by Playwright MCP, which closes a browser it
 	# launched when its last client disconnects: at the end of every turn.
 	# Maximized, so it stops at the dock. The profile is
