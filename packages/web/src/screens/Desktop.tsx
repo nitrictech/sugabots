@@ -179,6 +179,11 @@ function DesktopSurface({
 		};
 	}, [threadId, agentId]);
 
+	/** Sizes a window's display to the window, whoever is viewing: the desktop server does it, not VNC. */
+	const resizeDisplay = (id: string) => (width: number, height: number) => {
+		if (socket.current?.readyState !== WebSocket.OPEN) return;
+		socket.current.send(JSON.stringify({ type: "resize", id, width, height }));
+	};
 	const closeDisplay = (id: string) => {
 		if (viewOnly || socket.current?.readyState !== WebSocket.OPEN) return;
 		socket.current.send(JSON.stringify({ type: "close", id }));
@@ -273,6 +278,7 @@ function DesktopSurface({
 									url={windowUrl(threadId, agentId, window.id)}
 									viewOnly={viewOnly}
 									what="browser"
+									onResize={resizeDisplay(window.id)}
 								/>
 							}
 						/>
@@ -308,6 +314,7 @@ function DesktopSurface({
 							url={windowUrl(threadId, agentId, window.id)}
 							viewOnly={viewOnly}
 							what="window"
+							onResize={resizeDisplay(window.id)}
 						/>
 					</DesktopWindow>
 				);
@@ -364,27 +371,45 @@ function themeMessage(scheme: "light" | "dark") {
 	return JSON.stringify({ type: "theme", scheme });
 }
 
-/** A window's display, saying so while it connects or if it can't be reached. */
+/**
+ * A window's display, saying so while it connects or if it can't be reached,
+ * and saying how big it's shown, in pixels, as that changes, so the display
+ * can be sized to match.
+ */
 function WindowDisplay({
 	url,
 	viewOnly,
 	what,
+	onResize,
 }: {
 	url: string;
 	viewOnly: boolean;
 	what: "browser" | "window";
+	onResize: (width: number, height: number) => void;
 }) {
 	const [standing, setStanding] = useState<Standing>("connecting");
 	const [attempt, setAttempt] = useState(0);
+	const room = useRef<HTMLDivElement>(null);
+	const onResizeNow = useRef(onResize);
+	onResizeNow.current = onResize;
+	useEffect(() => {
+		const element = room.current;
+		if (!element) return;
+		const sized = new ResizeObserver(() =>
+			onResizeNow.current(Math.round(element.clientWidth), Math.round(element.clientHeight)),
+		);
+		sized.observe(element);
+		return () => sized.disconnect();
+	}, []);
 	return (
-		<>
+		<div ref={room} className="absolute inset-0">
 			<VncView key={attempt} url={url} viewOnly={viewOnly} onStanding={setStanding} />
 			<StandingOverlay
 				standing={standing}
 				what={what}
 				onReconnect={() => setAttempt((count) => count + 1)}
 			/>
-		</>
+		</div>
 	);
 }
 

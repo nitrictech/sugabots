@@ -12,8 +12,6 @@ declare module "@novnc/novnc" {
 		constructor(target: HTMLElement, url: string);
 		viewOnly: boolean;
 		scaleViewport: boolean;
-		/** Asks the server to resize its display to the viewer's size, which view-only viewers can't. */
-		resizeSession: boolean;
 		background: string;
 		disconnect(): void;
 	}

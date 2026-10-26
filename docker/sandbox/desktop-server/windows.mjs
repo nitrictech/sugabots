@@ -2,12 +2,14 @@
 // agent started, each on a display of its own, as `sugabots-desktop windows`
 // says. Viewers are told when they change, and a viewer in control can close
 // an app's window, which stops its display. Any viewer says which look, light
-// or dark, it shows the desktop in.
+// or dark, it shows the desktop in, and how big it shows each window, which
+// its display is sized to: the last to say wins.
 //
 // To the viewer, as JSON text:
 //   {type:"windows", windows:[{id, kind:"browser"|"app", title}]}
 // From any viewer:
 //   {type:"theme", scheme:"light"|"dark"}
+//   {type:"resize", id, width, height}    in pixels
 // From a viewer in control:
 //   {type:"close", id}
 
@@ -19,6 +21,11 @@ const run = promisify(execFile);
 
 /** How often the desktop's displays are looked at for windows that opened, closed or changed title. */
 const WINDOWS_CHECK_MS = 1000;
+/**
+ * How long a window's size must hold before its display takes it, so a window
+ * being dragged bigger resizes its display once rather than at every step.
+ */
+const RESIZE_SETTLE_MS = 150;
 
 /** The windows of the desktop of `session`. */
 export function makeWindows(session, theme) {
@@ -26,6 +33,21 @@ export function makeWindows(session, theme) {
 	let windows = [];
 	let lastSent = "";
 	let checking;
+	const resizing = new Map();
+
+	/** Sizes the window's display once the size asked for has settled. */
+	const resize = ({ id, width, height }) => {
+		const size = [Math.round(Number(width)), Math.round(Number(height))];
+		if (typeof id !== "string" || !size.every((pixels) => pixels > 0)) return;
+		clearTimeout(resizing.get(id));
+		resizing.set(
+			id,
+			setTimeout(() => {
+				resizing.delete(id);
+				run("sugabots-desktop", ["resize", session, id, ...size.map(String)]).catch(report);
+			}, RESIZE_SETTLE_MS),
+		);
+	};
 
 	const list = async () => {
 		const { stdout } = await run("sugabots-desktop", ["windows", session]);
@@ -87,6 +109,7 @@ export function makeWindows(session, theme) {
 					return;
 				}
 				if (message?.type === "theme") return theme.set(message.scheme);
+				if (message?.type === "resize") return resize(message);
 				if (!mayUse) return;
 				act(message)
 					?.then(() => check())

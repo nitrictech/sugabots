@@ -119,6 +119,12 @@ export const Watching = meta.story({
 		await waitFor(() =>
 			expect(sentToWindows).toHaveBeenCalledWith({ type: "theme", scheme: "dark" }),
 		);
+		// Each display is sized to its window even while only watching.
+		await waitFor(() =>
+			expect(sentToWindows).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "resize", id: "browser" }),
+			),
+		);
 	},
 });
 

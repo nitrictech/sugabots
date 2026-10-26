@@ -9,8 +9,8 @@ export type Standing = "connecting" | "connected" | "ended" | "idle";
 /**
  * A display over VNC from the API's WebSocket at `url`, filling its parent,
  * scaled to fit, connected for as long as it's mounted. Unless `viewOnly`, it
- * takes the person's mouse and keys and resizes the display to fit, so the
- * app lays out for the room it's shown in.
+ * takes the person's mouse and keys. The desktop server, not VNC, sizes the
+ * display to its window, so it fits whether the person is in control or not.
  */
 export function VncView({
 	url,
@@ -32,7 +32,6 @@ export function VncView({
 		viewOnlyNow.current = viewOnly;
 		if (!connected.current) return;
 		connected.current.viewOnly = viewOnly;
-		connected.current.resizeSession = !viewOnly;
 	}, [viewOnly]);
 
 	useEffect(() => {
@@ -47,7 +46,6 @@ export function VncView({
 			connected.current = opened;
 			opened.scaleViewport = true;
 			opened.viewOnly = viewOnlyNow.current;
-			opened.resizeSession = !viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => onStandingNow.current?.("connected"));
 			opened.addEventListener("disconnect", () => {

@@ -33,7 +33,7 @@ RUN apt-get update \
 		xfonts-base dbus-x11 \
 		adwaita-icon-theme librsvg2-common \
 		nix-bin \
-		chromium libnss3-tools xdotool wmctrl xsettingsd scrot xclip fonts-dejavu fonts-noto-color-emoji \
+		chromium libnss3-tools xdotool wmctrl xsettingsd x11-xserver-utils scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
 	&& rm -rf /var/lib/apt/lists/*
 

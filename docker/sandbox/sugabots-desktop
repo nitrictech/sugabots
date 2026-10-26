@@ -9,6 +9,7 @@
 #   sugabots-desktop session name profile output folder   the browser and desktop server for `name`
 #   sugabots-desktop windows name                         the windows of `name`'s desktop, one a line
 #   sugabots-desktop display name id                      where viewers reach one of those windows
+#   sugabots-desktop resize name id width height          size that window's display, in pixels
 #
 # `session` is what Sugabots runs when the agent uses its browser or a person
 # opens its desktop. It starts the browser's display, the browser and the
@@ -309,6 +310,30 @@ display_viewer() {
 	echo "viewer=$((5900 + n)) $(passwords "$n")"
 }
 
+# Sizes the display of the window `id` of `name`'s desktop to the window
+# the web app shows it in, so the app lays out for that room whoever is
+# viewing, where VNC lets only a viewer in control resize it. Xvnc takes any
+# size as a mode of its own; modes made for earlier sizes are removed.
+resize() {
+	local n width="${3:?width}" height="${4:?height}" mode old
+	n="$(display_of "${1:?name}" "${2:?window}")" || exit 3
+	running "$n" display || exit 3
+	case "$width$height" in *[!0-9]*) exit 2 ;; esac
+	width=$((width < MIN_WIDTH ? MIN_WIDTH : width > MAX_WIDTH ? MAX_WIDTH : width))
+	height=$((height < MIN_HEIGHT ? MIN_HEIGHT : height > MAX_HEIGHT ? MAX_HEIGHT : height))
+	mode="sugabots-${width}x${height}"
+	export DISPLAY=":$n"
+	xrandr --newmode "$mode" 0 "$width" 0 0 0 "$height" 0 0 0 2>/dev/null || true
+	xrandr --addmode VNC-0 "$mode" 2>/dev/null || true
+	xrandr --output VNC-0 --mode "$mode"
+	for old in $(xrandr | grep -o "sugabots-[0-9]*x[0-9]*" | sort -u); do
+		[ "$old" = "$mode" ] && continue
+		xrandr --delmode VNC-0 "$old" 2>/dev/null || true
+		xrandr --rmmode "$old" 2>/dev/null || true
+	done
+}
+MIN_WIDTH=320 MIN_HEIGHT=200 MAX_WIDTH=3840 MAX_HEIGHT=2160
+
 # One command at a time starts or stops what runs: a desktop opened by
 # several viewers at once, as the web app opens it, would otherwise be
 # started by each of them, on the same display. The command runs again under
@@ -336,8 +361,9 @@ stop) stop "${2:-}" ;;
 session) session "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
 windows) windows "${2:-}" ;;
 display) display_viewer "${2:-}" "${3:-}" ;;
+resize) resize "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | windows name | display name window" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | windows name | display name window | resize name window width height" >&2
 	exit 2
 	;;
 esac
