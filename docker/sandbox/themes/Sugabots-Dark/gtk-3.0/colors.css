@@ -1,0 +1,9 @@
+/* The dark theme's colours: the web app's dark surfaces. */
+@define-color sugabots_ground #111216;
+@define-color sugabots_panel #15161a;
+@define-color sugabots_chip #1d1f25;
+@define-color sugabots_hover #262830;
+@define-color sugabots_border #2a2c33;
+@define-color sugabots_foreground #dcdee3;
+@define-color sugabots_muted #7d838e;
+@define-color sugabots_accent #4757c9;

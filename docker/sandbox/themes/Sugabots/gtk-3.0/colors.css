@@ -1,0 +1,9 @@
+/* The light theme's colours: the web app's light surfaces. */
+@define-color sugabots_ground #ffffff;
+@define-color sugabots_panel #f6f7f9;
+@define-color sugabots_chip #eeeef1;
+@define-color sugabots_hover #e4e4e8;
+@define-color sugabots_border #e3e6ea;
+@define-color sugabots_foreground #26282e;
+@define-color sugabots_muted #8b9099;
+@define-color sugabots_accent #4f5bd5;

@@ -1,0 +1,45 @@
+/* The dock's layout, in the colours its light and dark themes define before
+   importing it: a flat bar with a hairline edge, 11px of bar above and below
+   each 46px icon, 8px between icons and at the ends, a dot under each running
+   app inside the bar's padding, so the bar is even whether or not anything
+   runs, and an icon lifted and brightened under the pointer instead of a
+   label. The panel is 68px tall: 11 + 46 + 11. */
+
+.xfce4-panel.background {
+	background-color: @dock_bar;
+	border-radius: 14px;
+	border: 1px solid @dock_edge;
+}
+
+/* The plugin makes each button 7px wider than its icon, on the right, so
+   the margins even out every gap at 8px. */
+.xfce4-panel button {
+	padding: 11px 0;
+	margin: 0 1px 0 0;
+	border: none;
+	border-radius: 12px;
+	background: none;
+	box-shadow: none;
+}
+.xfce4-panel button:first-child { margin-left: 9px; }
+.xfce4-panel button:last-child { margin-right: 9px; }
+
+/* The plugin's own indicators sit on the bar's very edge, so the dot is
+   drawn here, as an image so it is antialiased. sugabots-desktop gives each
+   agent's desktop a dot in the agent's colour. */
+.xfce4-panel button.open_group,
+.xfce4-panel button.active_group {
+	background-image: url("dot.svg");
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+	background-position: 50% 59px;
+}
+
+.xfce4-panel button.hover_group image {
+	-gtk-icon-effect: highlight;
+	-gtk-icon-transform: translateY(-2px);
+}
+
+/* The plugin labels each icon on hover, and GTK can't switch that off, so
+   the label is drawn invisible. */
+tooltip { opacity: 0; }

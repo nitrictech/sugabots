@@ -1,3 +1,0 @@
-/* The dark variant GTK asks for, as settings.ini prefers dark: the theme is
-   dark already. Without it GTK falls back to stock Adwaita. */
-@import url("gtk.css");

@@ -1,26 +1,39 @@
 #!/bin/bash
-# Draws the Sugabots window theme for xfwm4 into `directory`/xfwm4: dark title
-# bars, corners rounded at picom's radius, a 2px edge in `accent` round the focused
-# window, and macOS-style traffic lights on the left that show their glyph
-# under the pointer. Drawn as SVG and rendered to PNG so the curves are
-# antialiased.
+# Draws the Sugabots window theme for xfwm4 into `directory`/xfwm4: light or
+# dark title bars, corners rounded at picom's radius, a 2px edge round the
+# focused window in `accent` or, without one, the theme's own, and
+# macOS-style traffic lights on the left that show their glyph under the
+# pointer. Drawn as SVG and rendered to PNG so the curves are antialiased.
 #
-#   sugabots-window-theme accent directory
+#   sugabots-window-theme light|dark [accent] directory
 #
-# The image draws the default theme with it, and `sugabots-desktop` a copy for
-# each desktop given its own accent.
+# The image draws both default themes with it, and `sugabots-desktop` a copy
+# for each desktop given its own accent.
 set -euo pipefail
 
-accent="${1:?accent colour, #RRGGBB}"
-out="${2:?theme directory}/xfwm4"
+mode="${1:?light or dark}"
+case "$mode" in
+light)
+	active_title="#f6f7f9" inactive_title="#eef0f3"
+	default_edge="#d5d8de" inactive_edge="#e3e6ea"
+	active_text="#16171b" inactive_text="#8b9099" unlit="#d5d8de"
+	;;
+dark)
+	active_title="#15161a" inactive_title="#111216"
+	default_edge="#2a2c33" inactive_edge="#23252c"
+	active_text="#eceef2" inactive_text="#7d838e" unlit="#3a3d45"
+	;;
+*)
+	echo "mode must be light or dark: $mode" >&2
+	exit 2
+	;;
+esac
+if [ $# -ge 3 ]; then accent="${2:-$default_edge}" out="$3/xfwm4"; else accent="$default_edge" out="${2:?theme directory}/xfwm4"; fi
 mkdir -p "$out"
 
 title_px=32
 radius_px=10
 edge_px=2
-inactive_edge="#23252c"
-active_title="#15161a"
-inactive_title="#111216"
 
 render() {
 	local name="$1" width="$2" height="$3" content="$4"
@@ -63,7 +76,7 @@ button() {
 	local active="<rect width=\"20\" height=\"$title_px\" fill=\"$active_title\"/><rect width=\"20\" height=\"$edge_px\" fill=\"$accent\"/>"
 	local inactive="<rect width=\"20\" height=\"$title_px\" fill=\"$inactive_title\"/><rect width=\"20\" height=\"$edge_px\" fill=\"$inactive_edge\"/>"
 	render "$name-active" 20 "$title_px" "$active$light fill=\"$colour\"/>"
-	render "$name-inactive" 20 "$title_px" "$inactive$light fill=\"#3a3d45\"/>"
+	render "$name-inactive" 20 "$title_px" "$inactive$light fill=\"$unlit\"/>"
 	render "$name-prelight" 20 "$title_px" "$active$light fill=\"$colour\"/>$mark"
 	render "$name-pressed" 20 "$title_px" "$active$light fill=\"$pressed\"/>$mark"
 }
@@ -76,8 +89,8 @@ button maximize "#28c840" "#1ea533" '<path d="M-3 0H3M0 -3V3"/>'
 button maximize-toggled "#28c840" "#1ea533" '<path d="M-3 0H3M0 -3V3"/>'
 
 cat >"$out/themerc" <<EOF
-active_text_color=#eceef2
-inactive_text_color=#7d838e
+active_text_color=$active_text
+inactive_text_color=$inactive_text
 button_offset=6
 button_spacing=0
 full_width_title=true

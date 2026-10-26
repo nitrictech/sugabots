@@ -1,0 +1,3 @@
+/* The light dock's colours. */
+@define-color dock_bar alpha(#ffffff, 0.96);
+@define-color dock_edge #d5d8de;

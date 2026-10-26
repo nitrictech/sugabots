@@ -1,17 +1,8 @@
-/* The terminal's and file manager's look: GTK's own dark Adwaita, on the web
-   app's surfaces and accent rather than Adwaita's greys and blue. Each rule
-   covers :backdrop too, the state of a window without focus, or Adwaita's
-   greys come back whenever another window is in front. */
-@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
-
-@define-color sugabots_ground #111216;
-@define-color sugabots_panel #15161a;
-@define-color sugabots_chip #1d1f25;
-@define-color sugabots_hover #262830;
-@define-color sugabots_border #2a2c33;
-@define-color sugabots_foreground #dcdee3;
-@define-color sugabots_muted #7d838e;
-@define-color sugabots_accent #4757c9;
+/* The Sugabots look for GTK apps, in the colours its light and dark themes
+   define before importing it: the web app's surfaces and accent rather than
+   Adwaita's. Each rule covers :backdrop too, the state of a window without
+   focus, or Adwaita's own colours come back whenever another window is in
+   front. */
 
 window, .background, window:backdrop, .background:backdrop {
 	background-color: @sugabots_panel;
@@ -65,3 +56,62 @@ menu, .menu, .context-menu, popover.background {
 scrollbar, scrollbar:backdrop { background-color: transparent; border: none; }
 scrollbar slider { background-color: alpha(#ffffff, 0.18); min-width: 6px; min-height: 6px; border: none; }
 scrollbar slider:hover { background-color: alpha(#ffffff, 0.3); }
+
+tooltip.background {
+	background-color: @sugabots_panel;
+	border: 1px solid @sugabots_border;
+	border-radius: 8px;
+	box-shadow: none;
+}
+/* Adwaita's tooltip text is white with a dark shadow, for its dark card. */
+tooltip.background * {
+	color: @sugabots_foreground;
+	text-shadow: none;
+}
+
+/* Nemo, the file manager, closer to Nautilus: no frames round the sidebar
+   and the files, a hairline between them, a sidebar of roomy rows without
+   the tree's arrows, flat toolbar buttons, and its selection summary as a
+   card. */
+.nemo-window scrolledwindow,
+.nemo-window scrolledwindow:backdrop {
+	border: none;
+	box-shadow: none;
+}
+.nemo-window paned > separator {
+	background-color: @sugabots_border;
+	background-image: none;
+	min-width: 1px;
+	min-height: 1px;
+}
+.nemo-window .sidebar .view,
+.nemo-window .sidebar .view:backdrop {
+	background-color: @sugabots_panel;
+	-GtkTreeView-expander-size: 0;
+	-GtkTreeView-vertical-separator: 12px;
+	-GtkTreeView-horizontal-separator: 6px;
+	/* No disk usage bar under each drive. */
+	-NemoPlacesTreeView-disk-full-bar-width: 0;
+}
+.nemo-window .sidebar .view:selected,
+.nemo-window .sidebar .view:selected:backdrop {
+	background-color: @sugabots_hover;
+	color: @sugabots_foreground;
+}
+.nemo-window toolbar button,
+.nemo-window toolbar button:backdrop {
+	background: none;
+	border-color: transparent;
+}
+.nemo-window toolbar button:hover,
+.nemo-window toolbar button:checked {
+	background-color: @sugabots_hover;
+}
+.nemo-window .floating-bar {
+	background-color: @sugabots_panel;
+	border: 1px solid @sugabots_border;
+	border-radius: 8px;
+	margin: 8px;
+	padding: 2px 6px;
+	color: @sugabots_muted;
+}

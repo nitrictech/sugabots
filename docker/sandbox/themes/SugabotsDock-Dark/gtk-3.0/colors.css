@@ -1,0 +1,3 @@
+/* The dark dock's colours. */
+@define-color dock_bar alpha(#111216, 0.96);
+@define-color dock_edge #2a2c33;

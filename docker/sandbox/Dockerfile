@@ -14,6 +14,17 @@
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 
+# The dock's icons, from Papirus, without the rest of its 380 MB.
+FROM debian:trixie-slim AS dock-icons
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends papirus-icon-theme \
+	&& rm -rf /var/lib/apt/lists/*
+RUN mkdir /icons \
+	&& cd /usr/share/icons/Papirus/64x64/apps \
+	&& cp -L chromium.svg /icons/browser.svg \
+	&& cp -L utilities-terminal.svg /icons/terminal.svg \
+	&& cp -L system-file-manager.svg /icons/files.svg
+
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
@@ -31,7 +42,7 @@ RUN apt-get update \
 		tigervnc-standalone-server tigervnc-tools websockify x11-utils x11-xserver-utils \
 		xfwm4 xfce4-panel xfce4-docklike-plugin picom xterm \
 		xfonts-base dbus-x11 hsetroot fonts-inter fonts-jetbrains-mono \
-		lxterminal pcmanfm adwaita-icon-theme librsvg2-common librsvg2-bin \
+		lxterminal nemo libglib2.0-bin adwaita-icon-theme librsvg2-common librsvg2-bin \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -52,23 +63,29 @@ RUN rsvg-convert --width 1280 --height 800 /usr/share/sugabots-desktop/wallpaper
 # in for the apps' own, so the dock matches their windows to them. The
 # plugin reads its settings only from the user's home, where sugabots-desktop
 # puts them.
-COPY dock/icons/ /usr/share/sugabots-desktop/icons/
+COPY --from=dock-icons /icons /usr/share/sugabots-desktop/icons
 COPY dock/*.desktop /usr/share/applications/
 COPY dock/xfce4-panel.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 COPY dock/docklike.rc /usr/share/sugabots-desktop/docklike.rc
-COPY dock/theme/ /usr/share/themes/SugabotsDock/
-# The windows' look: xfwm4's frames, drawn by sugabots-window-theme with the
-# theme's own edge round the focused window until a desktop is given an
-# accent, GTK's for the terminal and file manager, the terminal's colours,
-# and the compositor's shadows.
-COPY theme/ /usr/share/themes/Sugabots/
+# The desktop's look, light unless a desktop is started dark: the GTK
+# themes of the apps and of the dock, xfwm4's frames, drawn by
+# sugabots-window-theme with each theme's own edge round the focused window
+# until a desktop is given an accent, the terminal's colours, and the
+# compositor's shadows.
+COPY themes/ /usr/share/themes/
 COPY sugabots-window-theme /usr/local/bin/sugabots-window-theme
-RUN sugabots-window-theme '#2a2c33' /usr/share/themes/Sugabots
+RUN sugabots-window-theme light /usr/share/themes/Sugabots \
+	&& sugabots-window-theme dark /usr/share/themes/Sugabots-Dark
 COPY xfwm4/xfwm4.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
 COPY picom.conf /usr/share/sugabots-desktop/picom.conf
 # GTK reads its system settings from /etc/gtk-3.0; it ignores /etc/xdg here.
 COPY gtk/settings.ini /etc/gtk-3.0/settings.ini
 COPY lxterminal/lxterminal.conf /usr/share/lxterminal/lxterminal.conf
+COPY lxterminal/dark/lxterminal.conf /usr/share/sugabots-desktop/dark/lxterminal/lxterminal.conf
+# Nemo's defaults are GSettings schema defaults, overridden here: with no
+# settings backend, they're all it reads.
+COPY nemo/90_sugabots.gschema.override /usr/share/glib-2.0/schemas/
+RUN glib-compile-schemas /usr/share/glib-2.0/schemas/
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
 # or `nix shell nixpkgs#ffmpeg` for one command. The agents' user owns the
 # store, so it installs without root. `nixpkgs` follows a NixOS release and

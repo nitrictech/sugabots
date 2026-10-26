@@ -1,0 +1,4 @@
+/* The dark theme, for a desktop started with `--theme dark`. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+@import url("colors.css");
+@import url("../../Sugabots/gtk-3.0/sugabots.css");

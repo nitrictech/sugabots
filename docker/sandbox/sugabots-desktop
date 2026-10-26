@@ -17,9 +17,12 @@
 # password=P watch-password=P`, where `started` says whether the browser had
 # to start; `desktop` prints the same without `browser`.
 #
-# `look` is whose desktop it is: `--wallpaper FILE`, an SVG drawn over the
-# whole screen, and `--accent #RRGGBB`, the edge of the focused window. Each
-# applies to the running desktop and to it from then on, across restarts.
+# `look` is how the desktop looks and whose it is: `--theme light|dark`, the
+# windows', dock's and apps' theme, light until given; `--wallpaper FILE`, an
+# SVG drawn over the whole screen; and `--accent #RRGGBB`, the edge of the
+# focused window and the dots under running apps in the dock. Each applies to
+# the running desktop, apps already open aside, and to it from then on,
+# across restarts.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
 # people watching see what the agent does, in Chromium's own sandbox where the
@@ -54,11 +57,16 @@ free_display() {
 	echo "$n"
 }
 
-# Whether every program of display N's `part`, desktop or browser, is running.
+# Whether every program of display N's `part`, desktop, dock or browser, is
+# running: not gone, nor exited and waiting to be reaped, as programs whose
+# parent exited are where nothing reaps them.
 running() {
-	local pids="$state/$1.$2.pids"
+	local pids="$state/$1.$2.pids" pid process_state
 	[ -f "$pids" ] || return 1
-	while read -r pid; do kill -0 "$pid" 2>/dev/null || return 1; done <"$pids"
+	while read -r pid; do
+		process_state="$(ps -o stat= -p "$pid")" || return 1
+		[[ "$process_state" != Z* ]] || return 1
+	done <"$pids"
 }
 
 desktop() {
@@ -92,7 +100,7 @@ desktop() {
 	# The dock matches windows to its apps through a service on the session bus.
 	eval "$(dbus-launch --sh-syntax)"
 	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
-	# Where the window manager's settings are, for `set_look` to reload its theme.
+	# Where the window manager's settings are, for `restyle` to reload its theme.
 	echo "$DBUS_SESSION_BUS_ADDRESS" >"$state/$n.bus"
 	# Adwaita's cursors for every program on it, and an arrow over the desktop
 	# rather than the X server's own cross. Before the wallpaper: xsetroot
@@ -110,38 +118,58 @@ desktop() {
 	echo $! >>"$pids"
 	picom --config /usr/share/sugabots-desktop/picom.conf >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	dock "$n"
+}
+
+# Starts display N's dock, kept apart from the rest of the desktop so it can
+# restart, with a new process, when the display's look changes.
+dock() {
+	local n="$1" log="$state/$1.log"
 	# The dock's plugin reads its settings only from the home it runs with.
-	# It runs with a theme of its own; the apps it opens drop it.
 	mkdir -p "$HOME/.config/xfce4/panel"
 	cp /usr/share/sugabots-desktop/docklike.rc "$HOME/.config/xfce4/panel/docklike-1.rc"
-	XDG_DATA_DIRS="$state/$n.share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" GTK_THEME=SugabotsDock \
+	# It runs with a theme of its own, this display's copy; the apps it opens
+	# take the display's instead.
+	DISPLAY=":$n" DBUS_SESSION_BUS_ADDRESS="$(cat "$state/$n.bus")" \
+		XDG_DATA_DIRS="$state/$n.share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" GTK_THEME=SugabotsDock \
 		xfce4-panel >>"$log" 2>&1 &
-	echo $! >>"$pids"
+	echo $! >"$state/$n.dock.pids"
 }
 
-# Display N's copies of the window and dock themes, its focused window
-# edged and its running apps ringed in the display's accent, if it was given
-# one.
+# Display N's theme, light or dark.
+display_theme() {
+	cat "$state/$1.theme" 2>/dev/null || echo light
+}
+
+# Display N's copies of the window and dock themes, found before the image's:
+# the dock's in the display's theme, its dots in the display's accent if it
+# was given one, and the windows' when either differs from the image's
+# default, light with the theme's own edge.
 write_theme() {
-	local themes="$state/$1.share/themes"
+	local themes="$state/$1.share/themes" theme accent=""
+	theme="$(display_theme "$1")"
+	[ -f "$state/$1.accent" ] && accent="$(cat "$state/$1.accent")"
 	rm -rf "$themes"
-	[ -f "$state/$1.accent" ] || return 0
-	local accent
-	accent="$(cat "$state/$1.accent")"
-	sugabots-window-theme "$accent" "$themes/Sugabots"
-	mkdir -p "$themes/SugabotsDock/gtk-3.0"
-	cat >"$themes/SugabotsDock/gtk-3.0/gtk.css" <<-EOF
-		@import url("/usr/share/themes/SugabotsDock/gtk-3.0/gtk.css");
-		.xfce4-panel button.open_group, .xfce4-panel button.active_group { box-shadow: 0 0 0 2px $accent; }
-	EOF
+	local dock="$themes/SugabotsDock/gtk-3.0" dock_theme=SugabotsDock
+	[ "$theme" = dark ] && dock_theme=SugabotsDock-Dark
+	mkdir -p "$dock"
+	echo "@import url(\"/usr/share/themes/$dock_theme/gtk-3.0/gtk.css\");" >"$dock/gtk.css"
+	if [ -n "$accent" ]; then
+		printf '<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><circle cx="2.5" cy="2.5" r="2.5" fill="%s"/></svg>\n' "$accent" >"$dock/dot.svg"
+		echo '.xfce4-panel button.open_group, .xfce4-panel button.active_group { background-image: url("dot.svg"); }' >>"$dock/gtk.css"
+	fi
+	if [ "$theme" = dark ] || [ -n "$accent" ]; then
+		sugabots-window-theme "$theme" "$accent" "$themes/Sugabots"
+	fi
 }
 
-# Reads `desktop` and `session`'s look into `wallpaper` and `accent`, empty
-# for what it leaves as it is.
+# Reads `desktop` and `session`'s look into `theme`, `wallpaper` and
+# `accent`, empty for what it leaves as it is.
 look_options() {
-	wallpaper="" accent=""
+	theme="" wallpaper="" accent=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
+		--theme) theme="${2:?light or dark}" ;;
 		--wallpaper) wallpaper="${2:?wallpaper file}" ;;
 		--accent) accent="${2:?accent colour}" ;;
 		*)
@@ -151,33 +179,54 @@ look_options() {
 		esac
 		shift 2
 	done
-	# It goes into the theme through sed, so nothing but a colour may.
+	if [ -n "$theme" ] && [ "$theme" != light ] && [ "$theme" != dark ]; then
+		echo "theme must be light or dark: $theme" >&2
+		exit 2
+	fi
+	# It goes into the themes' SVG and CSS, so nothing but a colour may.
 	if [ -n "$accent" ] && ! [[ "$accent" =~ ^#[0-9a-fA-F]{6}$ ]]; then
 		echo "accent must be #RRGGBB: $accent" >&2
 		exit 2
 	fi
 }
 
-# Gives display N the look read by `look_options`, kept for when it restarts.
-# Each part is redrawn only when it changed.
-set_look() {
-	local n="$1" log="$state/$1.log"
+# Records the look read by `look_options` for the display of the desktop
+# named `name`, before it starts, so a new desktop starts in it and one
+# already running is restyled by `restyle`. Sets `n` and `look_changed`.
+record_look() {
+	local file="$state/sessions/${1:?name}"
+	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
+	wallpaper_changed=no look_changed=no
 	if [ -n "$wallpaper" ] && ! cmp -s "$wallpaper" "$state/$n.wallpaper.svg"; then
 		rsvg-convert --width 1280 --height 800 "$wallpaper" --output "$state/$n.wallpaper.png"
 		cp "$wallpaper" "$state/$n.wallpaper.svg"
-		DISPLAY=":$n" hsetroot -fill "$state/$n.wallpaper.png" >>"$log" 2>&1
+		wallpaper_changed=yes
+	fi
+	if [ -n "$theme" ] && [ "$theme" != "$(display_theme "$n")" ]; then
+		echo "$theme" >"$state/$n.theme"
+		look_changed=yes
 	fi
 	if [ -n "$accent" ] && [ "$accent" != "$(cat "$state/$n.accent" 2>/dev/null)" ]; then
 		echo "$accent" >"$state/$n.accent"
-		write_theme "$n"
-		# xfwm4 reloads its theme only when its name changes, so it changes
-		# twice. The dock reads its theme when it starts, so it restarts.
-		local bus
-		bus="$(cat "$state/$n.bus")"
-		DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Default
-		DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Sugabots
-		DISPLAY=":$n" DBUS_SESSION_BUS_ADDRESS="$bus" xfce4-panel --restart >>"$log" 2>&1
+		look_changed=yes
 	fi
+}
+
+# Shows display N, running from before, in the look `record_look` changed.
+restyle() {
+	local n="$1" log="$state/$1.log"
+	[ "$wallpaper_changed" = yes ] && DISPLAY=":$n" hsetroot -fill "$state/$n.wallpaper.png" >>"$log" 2>&1
+	[ "$look_changed" = yes ] || return 0
+	# xfwm4 reloads its theme only when its name changes, so it moves to its
+	# own while this display's is drawn again, and back. The dock reads its
+	# theme when it starts, so it starts again.
+	local bus
+	bus="$(cat "$state/$n.bus")"
+	DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Default
+	write_theme "$n"
+	DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Sugabots
+	stop_part "$n" dock
+	dock "$n"
 }
 
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
@@ -286,6 +335,7 @@ stop_part() {
 stop() {
 	local n="${1:?which display}"
 	stop_part "$n" browser
+	stop_part "$n" dock
 	stop_part "$n" desktop
 }
 
@@ -302,20 +352,25 @@ named_desktop() {
 		stop "$n"
 		desktop "$n"
 		desktop_started=yes
+	elif ! running "$n" dock; then
+		stop_part "$n" dock
+		dock "$n"
 	fi
 }
 
 desktop_only() {
 	look_options "${@:4}"
+	record_look "${1:?name}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
-	set_look "$n"
+	[ "$desktop_started" = yes ] || restyle "$n"
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
 	look_options "${@:4}"
+	record_look "${1:?name}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
-	set_look "$n"
+	[ "$desktop_started" = yes ] || restyle "$n"
 	local started=no
 	if ! running "$n" browser; then
 		stop_part "$n" browser
@@ -349,9 +404,19 @@ open() {
 		browser "$n" "$profile" "$output"
 		;;
 	terminal)
-		exec env -u GTK_THEME lxterminal --working-directory=/workspace
+		if [ "$(display_theme "$n")" = dark ]; then
+			# lxterminal reads its colours from its config folder, so it runs
+			# with the dark one, and its shell without.
+			GTK_THEME=Sugabots-Dark XDG_CONFIG_HOME=/usr/share/sugabots-desktop/dark \
+				exec lxterminal --working-directory=/workspace --title=LXTerminal -e "env -u XDG_CONFIG_HOME ${SHELL:-bash}"
+		fi
+		GTK_THEME=Sugabots exec lxterminal --working-directory=/workspace
 		;;
-	files) exec env -u GTK_THEME pcmanfm /workspace ;;
+	files)
+		local gtk_theme=Sugabots
+		[ "$(display_theme "$n")" = dark ] && gtk_theme=Sugabots-Dark
+		GTK_THEME="$gtk_theme" exec nemo /workspace
+		;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2
 		exit 2

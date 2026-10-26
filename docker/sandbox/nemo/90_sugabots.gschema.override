@@ -1,0 +1,5 @@
+# Nemo's defaults, closer to Nautilus: no menu bar or status bar, the
+# toolbar's view switcher and menus standing in for them.
+[org.nemo.window-state]
+start-with-menu-bar=false
+start-with-status-bar=false

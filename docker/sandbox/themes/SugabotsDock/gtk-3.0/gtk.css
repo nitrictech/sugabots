@@ -1,0 +1,5 @@
+/* The dock's light theme, which only the dock's panel runs with, so its rules
+   reach no other window. */
+@import url("../../Sugabots/gtk-3.0/gtk.css");
+@import url("colors.css");
+@import url("dock.css");

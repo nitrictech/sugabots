@@ -1,0 +1,4 @@
+/* The light theme, the desktop's default. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained.css");
+@import url("colors.css");
+@import url("sugabots.css");

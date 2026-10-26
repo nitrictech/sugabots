@@ -1,0 +1,7 @@
+/* The dock's dark theme, for a desktop started with `--theme dark`. Its dot
+   is its own, a url being relative to the file that names it. */
+@import url("../../Sugabots-Dark/gtk-3.0/gtk.css");
+@import url("colors.css");
+@import url("../../SugabotsDock/gtk-3.0/dock.css");
+
+.xfce4-panel button.open_group, .xfce4-panel button.active_group { background-image: url("dot.svg"); }
