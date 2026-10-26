@@ -49,10 +49,17 @@ interface Place {
 	path: string;
 }
 
+/** The disk a folder is on. */
+interface Disk {
+	/** What the agents' user can still fill. */
+	freeBytes: number;
+	totalBytes: number;
+}
+
 /** What the desktop server says about files. */
 type FilesMessage =
 	| { type: "places"; places: Place[] }
-	| { type: "listing"; path: string; entries: FolderEntry[] }
+	| { type: "listing"; path: string; entries: FolderEntry[]; disk?: Disk }
 	| { type: "file"; path: string; mediaType: string; data: string; truncated: boolean }
 	| { type: "refused"; path: string; reason: string }
 	| UploadReply;
@@ -216,6 +223,7 @@ export function FilesWindow({
 				{places.length > 0 && (
 					<Sidebar
 						places={places}
+						disk={files.disk}
 						current={showing.kind === "folder" ? showing.path : undefined}
 						onOpen={(path) => files.visit({ kind: "folder", path })}
 					/>
@@ -277,6 +285,8 @@ function useFiles(threadId: string, agentId: string, viewOnly: boolean) {
 	const socket = useRef<WebSocket | undefined>(undefined);
 	const [showing, setShowing] = useState<Showing>({ kind: "loading" });
 	const [places, setPlaces] = useState<Place[]>([]);
+	/** The disk of the folder last shown, kept while a file is. */
+	const [disk, setDisk] = useState<Disk>();
 	const [history, setHistory] = useState({ locations: [START] as Location[], index: 0 });
 	const here = useRef<Location>(START);
 	here.current = history.locations[history.index] ?? START;
@@ -304,6 +314,7 @@ function useFiles(threadId: string, agentId: string, viewOnly: boolean) {
 			const message = JSON.parse(String(event.data)) as FilesMessage;
 			if (message.type === "places") return setPlaces(message.places);
 			if (message.type === "listing") {
+				setDisk(message.disk);
 				return setShowing({ kind: "folder", path: message.path, entries: message.entries });
 			}
 			if (message.type === "file") return setShowing({ ...message, kind: "file" });
@@ -380,6 +391,7 @@ function useFiles(threadId: string, agentId: string, viewOnly: boolean) {
 	return {
 		showing,
 		places,
+		disk,
 		uploading,
 		canGoBack: history.index > 0,
 		canGoForward: history.index < history.locations.length - 1,
@@ -499,10 +511,12 @@ function PathBar({
 
 function Sidebar({
 	places,
+	disk,
 	current,
 	onOpen,
 }: {
 	places: Place[];
+	disk: Disk | undefined;
 	current: string | undefined;
 	onOpen: (path: string) => void;
 }) {
@@ -528,7 +542,26 @@ function Sidebar({
 					<span className="truncate">{PLACE_NAMES[place.kind]}</span>
 				</button>
 			))}
+			{disk && <DiskSpace disk={disk} />}
 		</nav>
+	);
+}
+
+/** How full the disk of the folder shown is, at the foot of the sidebar. */
+function DiskSpace({ disk }: { disk: Disk }) {
+	const usedFraction = disk.totalBytes === 0 ? 0 : 1 - disk.freeBytes / disk.totalBytes;
+	return (
+		<div className="mt-auto flex flex-col gap-1.5 px-2.5 pb-1 text-[11.5px] text-muted-foreground">
+			<span className="h-1 overflow-hidden rounded-full bg-chip">
+				<span
+					className="block h-full rounded-full bg-meter"
+					style={{ width: `${Math.round(usedFraction * 100)}%` }}
+				/>
+			</span>
+			<span>
+				{formattedSize(disk.freeBytes)} free of {formattedSize(disk.totalBytes)}
+			</span>
+		</div>
 	);
 }
 

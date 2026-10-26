@@ -41,6 +41,8 @@ const FOLDERS: Record<string, FolderEntry[]> = {
 	"/home/agent": [file(".bashrc", 3526), folder("notes")],
 	"/": [folder("home"), folder("workspace"), folder("usr")],
 };
+const GIGABYTE = 1024 ** 3;
+const DISK = { freeBytes: 12.4 * GIGABYTE, totalBytes: 50 * GIGABYTE };
 const REPORT = "# Pricing review\n\nThe three plans, compared.\n";
 const sentToFiles = fn();
 
@@ -73,7 +75,7 @@ const filesServer = ({ inControl }: { inControl: boolean }) =>
 			}
 			if (message.type === "places") return sendPlaces();
 			if (message.type === "list") {
-				return send({ type: "listing", path, entries: folders[path] ?? [] });
+				return send({ type: "listing", path, entries: folders[path] ?? [], disk: DISK });
 			}
 			if (message.type === "read") {
 				const data = btoa(REPORT);
@@ -96,7 +98,7 @@ const filesServer = ({ inControl }: { inControl: boolean }) =>
 					file(upload.name, upload.size),
 				];
 				send({ type: "uploaded", id: message.id, path: `${upload.folder}/${upload.name}` });
-				send({ type: "listing", path: upload.folder, entries: folders[upload.folder] });
+				send({ type: "listing", path: upload.folder, entries: folders[upload.folder], disk: DISK });
 			}
 		});
 	});
@@ -163,6 +165,7 @@ export const Browsing = meta.story({
 			"aria-current",
 			"location",
 		);
+		await expect(within(places).getByText("12.4 GB free of 50.0 GB")).toBeVisible();
 	},
 });
 

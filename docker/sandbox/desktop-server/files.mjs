@@ -9,7 +9,8 @@
 //   {type:"upload-chunk", id, data:<base64>}   each answered with upload-received
 // To the viewer:
 //   {type:"places", places:[{kind:"thread"|"workspace"|"home"|"computer", path}]}
-//   {type:"listing", path, entries:[{name, kind:"folder"|"file", size, modified}]}
+//   {type:"listing", path, entries:[{name, kind:"folder"|"file", size, modified}],
+//    disk:{freeBytes, totalBytes}}    the disk the folder is on, if it can be told
 //       again whenever the folder last listed changes, until a file is read
 //   {type:"file", path, mediaType, data:<base64>, truncated}
 //   {type:"refused", path, reason}
@@ -17,7 +18,7 @@
 //   {type:"uploaded", id, path} | {type:"upload-failed", id, reason}
 
 import { watch } from "node:fs";
-import { open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { open, readdir, realpath, rename, rm, stat, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, resolve } from "node:path";
 import { WebSocket } from "ws";
@@ -225,7 +226,17 @@ async function listing(path) {
 			};
 		}),
 	);
-	return { type: "listing", path: real, entries };
+	return { type: "listing", path: real, entries, disk: await diskOf(real) };
+}
+
+/** How much of the disk `path` is on the agents' user can still fill, and its size. */
+async function diskOf(path) {
+	try {
+		const { bavail, blocks, bsize } = await statfs(path);
+		return { freeBytes: bavail * bsize, totalBytes: blocks * bsize };
+	} catch {
+		return undefined;
+	}
 }
 
 async function contents(path) {
