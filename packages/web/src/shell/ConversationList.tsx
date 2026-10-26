@@ -9,10 +9,11 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
+	ChevronDown,
 	ChevronRight,
+	CircleCheck,
 	Library,
 	ListFilter,
-	MessageSquare,
 	Plus,
 	RefreshCw,
 	Settings2,
@@ -188,6 +189,8 @@ export function ConversationListView({
 	// The open thread when the viewer folded the section holding it, which stays folded until another opens.
 	const [foldedOver, setFoldedOver] = useState<string>();
 	const selectedId = selected?.kind === "conversation" ? selected.conversationId : undefined;
+	// Bot sections showing all their rows, after Show more, until the page is left.
+	const [unclippedBots, setUnclippedBots] = useState<ReadonlySet<string>>(new Set());
 	// Folded until opened, unless a routine has failed, which opens it.
 	const [routinesChosen, setRoutinesShown] = useState<boolean>();
 	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
@@ -302,6 +305,17 @@ export function ConversationListView({
 								toggleBot(group.key);
 								if (holdsSelected) setFoldedOver(folded ? undefined : selectedId);
 							};
+							// The first few rows, and the open one wherever it is.
+							const shownRows = unclippedBots.has(group.key) ? Infinity : ROWS_BEFORE_SHOW_MORE;
+							const threads = group.threads.filter(
+								(row, index) => index < shownRows || isSelected(row.conversation.id),
+							);
+							const routines = group.routines.filter(
+								(row, index) =>
+									group.threads.length + index < shownRows || isSelected(row.conversation?.id),
+							);
+							const hidden =
+								group.threads.length + group.routines.length - threads.length - routines.length;
 							return (
 								<BotSection
 									key={group.key}
@@ -310,7 +324,7 @@ export function ConversationListView({
 									folded={folded}
 									onToggle={toggle}
 								>
-									{group.threads.map((row) => (
+									{threads.map((row) => (
 										<li key={row.conversation.id}>
 											<ConversationRow
 												row={row}
@@ -320,7 +334,7 @@ export function ConversationListView({
 											/>
 										</li>
 									))}
-									{group.routines.map((row) => (
+									{routines.map((row) => (
 										<li key={row.routine.id}>
 											<RoutineRow
 												row={row}
@@ -330,6 +344,17 @@ export function ConversationListView({
 											/>
 										</li>
 									))}
+									{hidden > 0 && (
+										<li>
+											<button
+												type="button"
+												onClick={() => setUnclippedBots(new Set(unclippedBots).add(group.key))}
+												className="focus-ring flex min-h-8 w-full items-center rounded-tail pl-12 text-left font-medium text-[13px] text-subtle-foreground hover:text-muted-foreground"
+											>
+												Show {hidden} more
+											</button>
+										</li>
+									)}
 								</BotSection>
 							);
 						})}
@@ -356,16 +381,29 @@ export function ConversationListView({
 								<RoutineRow row={row} pod={pod} selected={isSelected(row.conversation?.id)} />
 							</li>
 						))}
-					{done.length > 0 && (
-						<li className="pt-3.5">
-							<SectionToggle
+					{done.length > 0 &&
+						(byBot ? (
+							<GroupHeading
+								icon={<CircleCheck aria-hidden size={17} strokeWidth={2} />}
 								label="Done"
-								count={done.length}
-								open={doneShown}
-								onOpenChange={setDoneShown}
+								folded={!doneShown}
+								onToggle={() => setDoneShown(!doneShown)}
+								end={
+									<span className="w-5 text-center font-medium text-[13px] text-subtle-foreground">
+										{done.length}
+									</span>
+								}
 							/>
-						</li>
-					)}
+						) : (
+							<li className="pt-3.5">
+								<SectionToggle
+									label="Done"
+									count={done.length}
+									open={doneShown}
+									onOpenChange={setDoneShown}
+								/>
+							</li>
+						))}
 					{doneShown &&
 						done.map((row) => (
 							<li key={row.conversation.id}>
@@ -443,19 +481,15 @@ function ConversationRow({
 		<Link
 			{...conversationLink({ pod, conversationId: row.conversation.id })}
 			aria-current={selected ? "page" : undefined}
-			className={rowClassName(selected)}
+			className={cn(rowClassName(selected), grouped && GROUPED_ROW_INDENT)}
 		>
-			{grouped ? (
-				<RowIcon>
-					<MessageSquare />
-				</RowIcon>
-			) : agent ? (
+			{grouped ? null : agent ? (
 				<AgentAvatar
 					color={agent.color}
 					face={agent.face}
 					shape={agent.shape}
 					size={26}
-					className="shrink-0"
+					className={cn("shrink-0", done && "opacity-50")}
 				/>
 			) : (
 				<PeopleTile />
@@ -473,6 +507,12 @@ function ConversationRow({
 		</Link>
 	);
 }
+
+/** Lines a row under its bot's heading up with the bot's name, past the column of faces. */
+const GROUPED_ROW_INDENT = "pl-12";
+
+/** How many of a bot's rows show before Show more. */
+const ROWS_BEFORE_SHOW_MORE = 4;
 
 /** A list row, shaded while it is the one open. */
 function rowClassName(selected: boolean): string {
@@ -515,8 +555,8 @@ function SectionToggle({
 
 /**
  * A routine on one line: the bot that runs it, its name, and at the end a red
- * dot when its latest run failed, that it is paused, or a dot when a message
- * in its thread mentions the viewer.
+ * dot when its latest run failed, or a dot when a message in its thread
+ * mentions the viewer. Only a screen reader says it is paused.
  */
 function RoutineRow({
 	row,
@@ -527,23 +567,20 @@ function RoutineRow({
 	row: ListedRoutine;
 	pod: Pod;
 	selected: boolean;
-	/** Under its bot's heading, so marked as a routine rather than by whose it is. */
+	/** Under its bot's heading, so marked as a routine at its end rather than by whose it is. */
 	grouped?: boolean;
 }) {
 	const { agent, routine } = row;
+	const paused = routine.state === "paused";
 	return (
 		<Link
 			{...(row.conversation
 				? conversationLink({ pod, conversationId: row.conversation.id })
 				: routineThreadLink(pod, routine.id))}
 			aria-current={selected ? "page" : undefined}
-			className={rowClassName(selected)}
+			className={cn(rowClassName(selected), grouped && GROUPED_ROW_INDENT)}
 		>
-			{grouped ? (
-				<RowIcon>
-					<RefreshCw />
-				</RowIcon>
-			) : (
+			{!grouped && (
 				<AgentAvatar
 					color={agent.color}
 					face={agent.face}
@@ -561,29 +598,24 @@ function RoutineRow({
 				)}
 			>
 				{routine.name}
+				{paused && <span className="sr-only"> Paused</span>}
 			</span>
+			{grouped && (
+				<RefreshCw
+					aria-hidden
+					size={14}
+					strokeWidth={2}
+					className="shrink-0 text-subtle-foreground"
+				/>
+			)}
 			{routine.failed ? (
 				<span className="mr-1.5 size-2 shrink-0 rounded-full bg-destructive-text">
 					<span className="sr-only">Failed</span>
 				</span>
-			) : routine.state === "paused" ? (
-				<span className="shrink-0 text-[12px] text-subtle-foreground">Paused</span>
-			) : (
+			) : paused ? null : (
 				<ChatMarker needsYou={row.mentionsYou} unreadMessages={0} />
 			)}
 		</Link>
-	);
-}
-
-/** What a row is, in the place of the face its bot's heading already shows. */
-function RowIcon({ children }: { children: ReactNode }) {
-	return (
-		<span
-			aria-hidden
-			className="grid size-[26px] shrink-0 place-items-center text-subtle-foreground [&_svg]:size-[15px]"
-		>
-			{children}
-		</span>
 	);
 }
 
@@ -652,8 +684,7 @@ function groupByBot(
 
 /**
  * A bot's heading, with its face and name, that folds its rows away, and a +
- * that starts a new thread with the bot. Folded, it says how many rows there
- * are, and with a dot whether a routine failed or a thread needs the viewer.
+ * that starts a new thread with the bot.
  */
 function BotSection({
 	pod,
@@ -669,68 +700,78 @@ function BotSection({
 	children: ReactNode;
 }) {
 	const { agent } = group;
-	const count = group.threads.length + group.routines.length;
-	const failed = group.routines.some((row) => row.routine.failed);
-	const needsYou =
-		group.threads.some((row) => row.needsApproval || row.mentionsYou) ||
-		group.routines.some((row) => row.mentionsYou);
 	return (
 		<>
-			<li className="flex items-center gap-1 pt-3.5 pr-1.5 pb-0.5">
-				<button
-					type="button"
-					aria-expanded={!folded}
-					onClick={onToggle}
-					className="focus-ring flex min-w-0 flex-1 items-center gap-2 rounded-tail py-1 pl-2.5 text-left font-semibold text-[13px] text-muted-foreground hover:text-foreground"
-				>
-					{agent ? (
-						<AgentAvatar
-							color={agent.color}
-							face={agent.face}
-							shape={agent.shape}
-							size={18}
-							className="shrink-0"
-						/>
+			<GroupHeading
+				icon={
+					agent ? (
+						<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
 					) : (
-						<Users aria-hidden size={15} strokeWidth={2} className="shrink-0" />
-					)}
-					<span className="min-w-0 flex-1 truncate">{agent ? agent.name : "People"}</span>
-					{folded && (
-						<span className="flex shrink-0 items-center gap-2 font-medium text-[12px] text-subtle-foreground">
-							{count}
-							{failed ? (
-								<span className="size-2 rounded-full bg-destructive-text">
-									<span className="sr-only">Failed</span>
-								</span>
-							) : (
-								needsYou && (
-									<span className="size-2 rounded-full bg-primary">
-										<span className="sr-only">Needs you</span>
-									</span>
-								)
-							)}
+						<span className="grid size-5 place-items-center rounded-[6px] bg-chip-strong">
+							<Users aria-hidden size={12} strokeWidth={2} />
 						</span>
-					)}
-					<ChevronRight
-						aria-hidden
-						size={12}
-						strokeWidth={2.6}
-						className={cn(
-							"shrink-0 text-subtle-foreground transition-transform duration-150",
-							!folded && "rotate-90",
-						)}
-					/>
-				</button>
-				<IconButton
-					label={agent ? `New thread with ${agent.name}` : "New thread with people"}
-					size="sm"
-					render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
-				>
-					<Plus strokeWidth={2.4} />
-				</IconButton>
-			</li>
+					)
+				}
+				label={agent ? agent.name : "People"}
+				folded={folded}
+				onToggle={onToggle}
+				end={
+					<IconButton
+						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
+						size="sm"
+						render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+					>
+						<Plus strokeWidth={2.4} />
+					</IconButton>
+				}
+			/>
 			{!folded && children}
 		</>
+	);
+}
+
+/**
+ * A section's heading in the list by bot: its icon in the column of faces, a
+ * muted name that folds the section, with a chevron beside it, and `end` at
+ * the far side.
+ */
+function GroupHeading({
+	icon,
+	label,
+	folded,
+	onToggle,
+	end,
+}: {
+	icon: ReactNode;
+	label: string;
+	folded: boolean;
+	onToggle: () => void;
+	end: ReactNode;
+}) {
+	return (
+		<li className="flex items-center gap-1 pt-3.5 pr-1.5 pb-0.5">
+			<button
+				type="button"
+				aria-expanded={!folded}
+				onClick={onToggle}
+				className="focus-ring group/heading flex min-h-8 min-w-0 flex-1 items-center gap-3 rounded-tail pl-2.5 text-left font-medium text-[13.5px] text-muted-foreground"
+			>
+				<span className="grid size-[26px] shrink-0 place-items-center text-subtle-foreground">
+					{icon}
+				</span>
+				<span className="min-w-0 truncate group-hover/heading:text-foreground">{label}</span>
+				<ChevronDown
+					aria-hidden
+					size={13}
+					strokeWidth={2.4}
+					className={cn(
+						"-ml-1 shrink-0 text-subtle-foreground transition-transform duration-150",
+						folded && "-rotate-90",
+					)}
+				/>
+			</button>
+			{end}
+		</li>
 	);
 }
 

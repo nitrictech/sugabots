@@ -277,7 +277,7 @@ export const DoneAndMentioned = meta.story({
 	},
 });
 
-/** A pod's routines fold away under their own heading; one paused says so when it is opened. */
+/** A pod's routines fold away under their own heading; one paused looks the same, and says so to a screen reader. */
 export const Routines = meta.story({
 	args: {
 		grouping: "recent",
@@ -374,9 +374,9 @@ const groupingChange = fn();
 
 /**
  * By bot puts each bot's open threads under its face and name, then its
- * routines, with threads between people last. A bot's heading folds its rows
- * away, saying how many there are and whether one needs you, the one holding
- * the open thread too; its + starts a thread with it.
+ * routines, marked at their end, with threads between people last. A bot's
+ * heading folds its rows away, the one holding the open thread too; its +
+ * starts a thread with it.
  */
 export const ByBot = meta.story({
 	// The sections it folds are remembered, so each run starts with them all open.
@@ -442,8 +442,9 @@ export const ByBot = meta.story({
 
 		await userEvent.click(canvas.getByRole("button", { name: growthDesk.name }));
 		await expect(canvas.queryByRole("link", { name: /Overnight outbound/ })).toBeNull();
-		await expect(canvas.getByRole("button", { name: /Growth Desk/ })).toHaveTextContent(
-			"3Needs you",
+		await expect(canvas.getByRole("button", { name: growthDesk.name })).toHaveAttribute(
+			"aria-expanded",
+			"false",
 		);
 		await userEvent.click(canvas.getByRole("button", { name: leadResearcher.name }));
 		await expect(canvas.getByRole("button", { name: /Lead Researcher/ })).toHaveAttribute(
@@ -492,6 +493,59 @@ export const ByBotOpenThreadInAFoldedSection = meta.story({
 		await expect(
 			canvas.queryByRole("link", { name: /Conversation with Lead Researcher/ }),
 		).toBeNull();
+	},
+});
+
+const accountManagerThreads: ChatListItem[] = [
+	"Halcyon renewal notes",
+	"Northwind pricing",
+	"Q4 forecast",
+	"Churn interviews summary",
+	"Onboarding email audit",
+	"Pricing page teardown",
+].map((title, index) => ({
+	...(revenueRows[1] as ChatListItem),
+	conversation: {
+		...(revenueRows[1] as ChatListItem).conversation,
+		id: `0199a3a0-0000-7000-8000-00000000d${String(index).padStart(3, "0")}`,
+		title,
+	},
+	unreadMessages: 0,
+}));
+
+/**
+ * A bot's section shows its first four rows, and the open one wherever it is,
+ * then how many more there are. Done threads sit last under their own
+ * heading, with their bots' faces faded.
+ */
+export const ByBotShowMore = meta.story({
+	args: {
+		grouping: "bot",
+		selected: {
+			kind: "conversation",
+			conversationId: (accountManagerThreads[5] as ChatListItem).conversation.id,
+		},
+		rows: [
+			...accountManagerThreads,
+			{
+				...(revenueRows[0] as ChatListItem),
+				conversation: {
+					...(revenueRows[0] as ChatListItem).conversation,
+					doneAt: "2026-09-18T07:00:00.000Z",
+				},
+			},
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByRole("link", { name: /Churn interviews summary/ })).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: /Onboarding email audit/ })).toBeNull();
+		await expect(canvas.getByRole("link", { name: /Pricing page teardown/ })).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Show 1 more" }));
+		await expect(canvas.getByRole("link", { name: /Onboarding email audit/ })).toBeVisible();
+
+		await expect(canvas.queryByRole("link", { name: /Growth Desk/ })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: /Done/ }));
+		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).toBeVisible();
 	},
 });
 
