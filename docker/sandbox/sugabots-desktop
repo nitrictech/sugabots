@@ -99,6 +99,28 @@ display() {
 	echo $! >>"$pids"
 	openbox --config-file /usr/share/sugabots-desktop/openbox.xml >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	keep_maximized "$n" >>"$log" 2>&1 &
+	echo $! >>"$pids"
+}
+
+# Keeps every app window on display N maximized, which openbox then keeps
+# filling the display as viewers resize it. Openbox maximizes a window when it
+# appears, but apps such as GIMP restore a size of their own straight after.
+# Dialogs and other windows that belong to another are left as they are.
+keep_maximized() {
+	export DISPLAY=":$1"
+	local window properties
+	while sleep 1; do
+		for window in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -o '0x[0-9a-f]*'); do
+			properties="$(xprop -id "$window" _NET_WM_WINDOW_TYPE WM_TRANSIENT_FOR _NET_WM_STATE 2>/dev/null)" || continue
+			case "$properties" in
+			*_NET_WM_STATE_MAXIMIZED_HORZ* | *_NET_WM_STATE_FULLSCREEN* | *"WM_TRANSIENT_FOR(WINDOW)"*) continue ;;
+			*_NET_WM_WINDOW_TYPE_NORMAL* | *"_NET_WM_WINDOW_TYPE:  not found"*) ;;
+			*) continue ;;
+			esac
+			wmctrl -i -r "$window" -b add,maximized_vert,maximized_horz
+		done
+	done
 }
 
 # Eight characters, all VNC authentication reads of a password: 48 random bits.

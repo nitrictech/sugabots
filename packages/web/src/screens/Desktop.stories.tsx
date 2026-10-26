@@ -63,7 +63,12 @@ const meta = preview.meta({
 	title: "Product/AgentDesktop",
 	component: AgentDesktop,
 	tags: ["ai-generated"],
-	args: { threadId, agentId, viewOnly: true },
+	args: {
+		threadId,
+		agent: { id: agentId, name: "Reviewer", color: "orange", face: "pill", shape: "circle" },
+		viewOnly: true,
+		driver: "agent",
+	},
 	beforeEach({ msw }) {
 		msw.use(...desktopServerHandlers());
 	},
@@ -79,30 +84,34 @@ const meta = preview.meta({
 });
 
 /**
- * The agent's desktop being watched: a window for each app on a display, the
- * browser's with its tabs, and a dock. The windows' pages come over VNC,
+ * The agent's desktop being watched while the agent works: a window for each
+ * app on a display, the front one ringed in the agent's colour, the browser's
+ * with its address bar, and a dock. The windows' pages come over VNC,
  * which a preview has no sandbox for, so each says it couldn't be reached.
  */
 export const Watching = meta.story({
 	play: async ({ canvas }) => {
 		const browser = await canvas.findByRole("region", { name: "Browser" });
-		await expect(
-			await within(browser).findByRole("tab", { name: "Pricing · Example" }),
-		).toBeVisible();
+		await expect(await within(browser).findByRole("textbox", { name: "Address" })).toHaveValue(
+			"https://example.com/pricing",
+		);
 		await expect(canvas.getByRole("region", { name: "Chart preview" })).toBeVisible();
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await expect(within(dock).getByRole("button", { name: "Chart preview" })).toBeVisible();
-		await expect(canvas.queryByRole("button", { name: "Close" })).toBeNull();
+		for (const close of canvas.getAllByRole("button", { name: "Close" })) {
+			await expect(close).toBeDisabled();
+		}
 	},
 });
 
 /**
- * A person in control: they open the terminal and the files from the dock,
+ * A person in control, the front window ringed neutrally: they open the
+ * terminal and the files from the dock,
  * and close the app the agent started, which the desktop server is asked to
  * do.
  */
 export const InControl = meta.story({
-	args: { viewOnly: false },
+	args: { viewOnly: false, driver: "person" },
 	play: async ({ canvas, userEvent }) => {
 		const dock = await canvas.findByRole("navigation", { name: "Dock" });
 		await userEvent.click(within(dock).getByRole("button", { name: "Terminal" }));

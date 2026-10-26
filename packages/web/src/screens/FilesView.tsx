@@ -58,6 +58,14 @@ export function FilesView({ threadId, agentId }: { threadId: string; agentId: st
 				setShowing({ kind: "refused", path: message.path, reason: message.reason });
 			}
 		};
+		opened.onclose = () => {
+			if (socket.current !== opened) return;
+			setShowing({
+				kind: "refused",
+				path: folderNow.current,
+				reason: "The files couldn't be reached. Close the window and open it again to retry.",
+			});
+		};
 		return () => {
 			socket.current = undefined;
 			opened.close();

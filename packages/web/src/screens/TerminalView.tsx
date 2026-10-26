@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
+import { type ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { desktopServerUrl } from "./VncView.tsx";
@@ -30,16 +30,19 @@ export function TerminalView({
 	useEffect(() => {
 		const host = element.current;
 		if (!host) return;
-		const colors = getComputedStyle(host);
+		const background = resolvedColor(host, "var(--color-panel)");
+		const foreground = resolvedColor(host, "var(--color-foreground)");
 		const opened = new Terminal({
 			cursorBlink: true,
 			disableStdin: viewOnlyNow.current,
-			fontFamily: colors.getPropertyValue("--font-mono"),
+			fontFamily: getComputedStyle(host).getPropertyValue("--font-mono"),
 			fontSize: 13,
 			theme: {
-				background: colors.getPropertyValue("--color-panel"),
-				foreground: colors.getPropertyValue("--color-foreground"),
-				cursor: colors.getPropertyValue("--color-foreground"),
+				...(isDark(background) ? DARK_COLORS : LIGHT_COLORS),
+				background,
+				foreground,
+				cursor: foreground,
+				selectionBackground: resolvedColor(host, "var(--color-hover)"),
 			},
 		});
 		terminal.current = opened;
@@ -79,4 +82,57 @@ export function TerminalView({
 			)}
 		</>
 	);
+}
+
+/**
+ * The terminal's 16 colours, matching the app's palette. Black and white
+ * trade places between the themes, so neither ends up the colour of the
+ * window behind it.
+ */
+const ANSI_COLORS = {
+	red: "#f43f5e",
+	green: "#22c55e",
+	yellow: "#facc15",
+	blue: "#7c8cff",
+	magenta: "#a78bfa",
+	cyan: "#2dd4bf",
+	brightRed: "#fb7185",
+	brightGreen: "#4ade80",
+	brightYellow: "#fde047",
+	brightBlue: "#aebbff",
+	brightMagenta: "#c4b5fd",
+	brightCyan: "#5eead4",
+} satisfies ITheme;
+const DARK_COLORS: ITheme = {
+	...ANSI_COLORS,
+	black: "#15161a",
+	white: "#dfe1e6",
+	brightBlack: "#5b616c",
+	brightWhite: "#ffffff",
+};
+const LIGHT_COLORS: ITheme = {
+	...ANSI_COLORS,
+	black: "#16171b",
+	white: "#5f646e",
+	brightBlack: "#9096a1",
+	brightWhite: "#16171b",
+};
+
+/**
+ * `color` as the browser draws it, in the element's theme: xterm can't read
+ * the app's colour tokens, which pick between their light and dark values.
+ */
+function resolvedColor(element: HTMLElement, color: string) {
+	const probe = document.createElement("span");
+	probe.style.color = color;
+	element.append(probe);
+	const resolved = getComputedStyle(probe).color;
+	probe.remove();
+	return resolved;
+}
+
+/** Whether an `rgb(…)` colour is a dark one. */
+function isDark(rgb: string) {
+	const [red = 0, green = 0, blue = 0] = rgb.match(/\d+(\.\d+)?/g)?.map(Number) ?? [];
+	return red * 0.299 + green * 0.587 + blue * 0.114 < 128;
 }

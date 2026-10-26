@@ -43,7 +43,12 @@ export function DesktopStage({
 			onClose={onClose}
 		>
 			<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
-				<AgentDesktop threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+				<AgentDesktop
+					threadId={threadId}
+					agent={agent}
+					viewOnly={!inControl}
+					driver={inControl ? "person" : agentUsing ? "agent" : undefined}
+				/>
 				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
 					<AgentAvatar
 						color={agent.color}

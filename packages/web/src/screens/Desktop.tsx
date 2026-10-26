@@ -1,17 +1,20 @@
+import { botColors, botColorVariables } from "@sugabots/avatars";
+import type { Agent, AgentColor } from "@sugabots/contracts";
 import { cn } from "cn";
-import { AppWindow, Folder, Globe, Minus, SquareTerminal, X } from "lucide-react";
-import {
-	type ReactNode,
-	type PointerEvent as ReactPointerEvent,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { AppWindow, Folder, Globe, SquareTerminal } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useViewerIdle } from "@/lib/desktop.ts";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { BrowserBar } from "./BrowserBar.tsx";
-import wallpaper from "./desktop-wallpaper.svg";
+import { BrowserWindow } from "./BrowserWindow.tsx";
+import {
+	DesktopWindow,
+	MIN_WINDOW_HEIGHT,
+	MIN_WINDOW_WIDTH,
+	type Placement,
+	type WindowFrame,
+	WindowTitle,
+} from "./DesktopWindow.tsx";
 import { FilesView } from "./FilesView.tsx";
 import { TerminalView } from "./TerminalView.tsx";
 import {
@@ -43,54 +46,78 @@ interface ShownWindow {
 	title: string;
 }
 
-/** Where a window is on the desktop, in pixels from its top left, and whether it's tucked into the dock. */
-interface Placement {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-	/** Higher is in front. */
-	order: number;
-	minimized: boolean;
-}
-
 /** What the desktop server sends about the desktop's windows. */
 interface WindowsMessage {
 	type: "windows";
 	windows: DisplayWindow[];
 }
 
-const MIN_WINDOW_WIDTH = 320;
-const MIN_WINDOW_HEIGHT = 200;
+/** Who is driving the desktop: the agent, at work in its browser, or a person who took over. */
+export type Driver = "agent" | "person";
+
+/** The agent whose desktop it is, as much of it as the desktop shows. */
+type DesktopAgent = Pick<Agent, "id" | "name" | "color" | "face" | "shape">;
+
 /** How far each window opens below and to the right of the one before, in pixels. */
 const CASCADE_STEP = 28;
+/** The agent's face in the wallpaper, in pixels, and how faintly it shows. */
+const WALLPAPER_FACE_SIZE = 620;
+const WALLPAPER_FACE_OPACITY = 0.16;
+
+/** The tint of each app's dock tile, from the bot palette; the terminal's is neutral. */
+const DOCK_TINTS: Record<DesktopWindowKind, AgentColor | undefined> = {
+	browser: "indigo",
+	terminal: undefined,
+	files: "teal",
+	app: "purple",
+};
 
 /**
- * The agent's desktop, drawn here rather than in the sandbox: a wallpaper,
- * a dock, and a window for each of its apps, each app on a display of its
- * own and shown over VNC, sized to its window; its terminal and file browser
- * are drawn here. Unless `viewOnly`, the person's mouse and keys go to the
- * windows' apps, and they can close the windows of apps the agent started. It
- * lets go of every connection after the idle time a single screen does.
+ * The agent's desktop, drawn here rather than in the sandbox: a wallpaper
+ * with the agent's face in it, so it's plain whose desktop it is, a dock,
+ * and a window for each of its apps, each app on a display of its own and
+ * shown over VNC, sized to its window; its terminal and file browser are
+ * drawn here. The window in front, and the dock's dots, take the colour of
+ * whoever is driving: the agent's own, or neutral for a person. Unless
+ * `viewOnly`, the person's mouse and keys go to the windows' apps, and they
+ * can close the windows of apps the agent started. It lets go of every
+ * connection after the idle time a single screen does.
  */
 export function AgentDesktop({
 	threadId,
-	agentId,
+	agent,
 	viewOnly,
+	driver,
 }: {
 	threadId: string;
-	agentId: string;
+	agent: DesktopAgent;
 	viewOnly: boolean;
+	driver: Driver | undefined;
 }) {
 	const root = useRef<HTMLDivElement>(null);
 	const [attempt, setAttempt] = useState(0);
-	const idle = useViewerIdle(root, threadId, agentId, attempt);
+	const idle = useViewerIdle(root, threadId, agent.id, attempt);
 	return (
 		<div
 			ref={root}
-			className="relative min-h-0 w-full flex-1 overflow-hidden rounded-panel bg-center bg-cover bg-list"
-			style={{ backgroundImage: `url(${wallpaper})` }}
+			className="relative min-h-0 w-full flex-1 overflow-hidden rounded-panel border border-border bg-rail"
 		>
+			<div
+				aria-hidden
+				className="pointer-events-none absolute"
+				style={{
+					right: -WALLPAPER_FACE_SIZE / 4,
+					bottom: -WALLPAPER_FACE_SIZE / 3,
+					opacity: WALLPAPER_FACE_OPACITY,
+				}}
+			>
+				<AgentAvatar
+					color={agent.color}
+					face={agent.face}
+					shape={agent.shape}
+					size={WALLPAPER_FACE_SIZE}
+				/>
+			</div>
 			{idle ? (
 				<StandingOverlay
 					standing="idle"
@@ -98,7 +125,19 @@ export function AgentDesktop({
 					onReconnect={() => setAttempt((count) => count + 1)}
 				/>
 			) : (
-				<DesktopSurface key={attempt} threadId={threadId} agentId={agentId} viewOnly={viewOnly} />
+				<DesktopSurface
+					key={attempt}
+					threadId={threadId}
+					agentId={agent.id}
+					viewOnly={viewOnly}
+					ringColor={
+						driver === "agent"
+							? botColors[agent.color].face
+							: driver === "person"
+								? "var(--foreground)"
+								: undefined
+					}
+				/>
 			)}
 		</div>
 	);
@@ -109,10 +148,12 @@ function DesktopSurface({
 	threadId,
 	agentId,
 	viewOnly,
+	ringColor,
 }: {
 	threadId: string;
 	agentId: string;
 	viewOnly: boolean;
+	ringColor: string | undefined;
 }) {
 	const surface = useRef<HTMLDivElement>(null);
 	const socket = useRef<WebSocket | undefined>(undefined);
@@ -135,9 +176,9 @@ function DesktopSurface({
 		};
 	}, [threadId, agentId]);
 
-	const send = (message: { type: "close"; id: string }) => {
+	const closeDisplay = (id: string) => {
 		if (viewOnly || socket.current?.readyState !== WebSocket.OPEN) return;
-		socket.current.send(JSON.stringify(message));
+		socket.current.send(JSON.stringify({ type: "close", id }));
 	};
 
 	const windows: ShownWindow[] = [
@@ -176,51 +217,93 @@ function DesktopSurface({
 			return new Map(current).set(id, { ...placement, order: front + 1, minimized: false });
 		});
 
+	const shown = windows.filter((window) => {
+		const placement = placements.get(window.id);
+		return placement && !placement.minimized;
+	});
+	const frontId = shown.reduce<string | undefined>((front, window) => {
+		const order = placements.get(window.id)?.order ?? 0;
+		return front === undefined || order > (placements.get(front)?.order ?? 0) ? window.id : front;
+	}, undefined);
+
 	/** What a dock item does: opens its window, brings it forward, or tucks it away if it's already in front. */
 	const toggle = (id: string, open: () => void) => {
 		const placement = placements.get(id);
-		const shown = windows.some((window) => window.id === id);
-		if (!shown || !placement) return open();
-		if (!placement.minimized && placement.order === frontOrder(placements)) {
-			return place(id, { minimized: true });
-		}
+		if (!windows.some((window) => window.id === id) || !placement) return open();
+		if (!placement.minimized && id === frontId) return place(id, { minimized: true });
 		focus(id);
 	};
-	const close = (window: ShownWindow) => {
-		if (window.kind === "terminal" || window.kind === "files") {
-			const kind = window.kind;
-			setLocalOpen((current) => new Set([...current].filter((open) => open !== kind)));
-		} else {
-			send({ type: "close", id: window.id });
-		}
-	};
-
 	const openLocal = (kind: LocalWindowKind) => () =>
 		setLocalOpen((current) => new Set([...current, kind]));
+	const closeLocal = (kind: LocalWindowKind) =>
+		setLocalOpen((current) => new Set([...current].filter((open) => open !== kind)));
+
+	const isOpen = (kind: DesktopWindowKind) => windows.some((window) => window.kind === kind);
 	const appWindows = windows.filter((window) => window.kind === "app");
 
 	return (
 		<div ref={surface} className="absolute inset-0">
-			{windows.map((window) => {
+			{shown.map((window) => {
 				const placement = placements.get(window.id);
-				if (!placement || placement.minimized) return null;
-				return (
-					<DesktopWindow
-						key={window.id}
-						title={windowTitle(window)}
-						icon={<WindowIcon kind={window.kind} />}
-						placement={placement}
-						surface={surface}
-						onFocus={() => focus(window.id)}
-						onPlace={(change) => place(window.id, change)}
-						onMinimize={() => place(window.id, { minimized: true })}
-						onClose={window.kind === "browser" || viewOnly ? undefined : () => close(window)}
-					>
-						<WindowContent
-							window={window}
+				if (!placement) return null;
+				const frame: WindowFrame = {
+					placement,
+					front: window.id === frontId,
+					ringColor,
+					surface,
+					onFocus: () => focus(window.id),
+					onPlace: (change) => place(window.id, change),
+					onMinimize: () => place(window.id, { minimized: true }),
+				};
+				const closable = !viewOnly;
+				if (window.kind === "browser") {
+					return (
+						<BrowserWindow
+							key={window.id}
+							{...frame}
 							threadId={threadId}
 							agentId={agentId}
 							viewOnly={viewOnly}
+							display={
+								<WindowDisplay
+									url={windowUrl(threadId, agentId, window.id)}
+									viewOnly={viewOnly}
+									what="browser"
+								/>
+							}
+						/>
+					);
+				}
+				if (window.kind === "terminal" || window.kind === "files") {
+					const kind = window.kind;
+					return (
+						<DesktopWindow
+							key={window.id}
+							{...frame}
+							label={windowTitle(window)}
+							title={<WindowTitle>{windowTitle(window)}</WindowTitle>}
+							onClose={() => closeLocal(kind)}
+						>
+							{kind === "terminal" ? (
+								<TerminalView threadId={threadId} agentId={agentId} viewOnly={viewOnly} />
+							) : (
+								<FilesView threadId={threadId} agentId={agentId} />
+							)}
+						</DesktopWindow>
+					);
+				}
+				return (
+					<DesktopWindow
+						key={window.id}
+						{...frame}
+						label={windowTitle(window)}
+						title={<WindowTitle>{windowTitle(window)}</WindowTitle>}
+						onClose={closable ? () => closeDisplay(window.id) : undefined}
+					>
+						<WindowDisplay
+							url={windowUrl(threadId, agentId, window.id)}
+							viewOnly={viewOnly}
+							what="window"
 						/>
 					</DesktopWindow>
 				);
@@ -234,72 +317,40 @@ function DesktopSurface({
 			)}
 			<nav
 				aria-label="Dock"
-				className="absolute bottom-3 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-1 rounded-[14px] border border-border bg-panel/90 p-1.5 shadow-lg backdrop-blur"
+				className="absolute bottom-3 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-1.5 rounded-[16px] border border-border-strong bg-panel/85 p-1.5 shadow-lg backdrop-blur"
 			>
 				<DockItem
 					label="Browser"
-					open={windows.some((window) => window.kind === "browser")}
+					kind="browser"
+					open={isOpen("browser")}
+					dotColor={ringColor}
 					onClick={() => toggle("browser", () => {})}
-				>
-					<Globe />
-				</DockItem>
+				/>
 				<DockItem
 					label="Terminal"
-					open={localOpen.has("terminal")}
+					kind="terminal"
+					open={isOpen("terminal")}
+					dotColor={ringColor}
 					onClick={() => toggle("terminal", openLocal("terminal"))}
-				>
-					<SquareTerminal />
-				</DockItem>
+				/>
 				<DockItem
 					label="Files"
-					open={localOpen.has("files")}
+					kind="files"
+					open={isOpen("files")}
+					dotColor={ringColor}
 					onClick={() => toggle("files", openLocal("files"))}
-				>
-					<Folder />
-				</DockItem>
+				/>
 				{appWindows.map((window) => (
 					<DockItem
 						key={window.id}
 						label={windowTitle(window)}
+						kind="app"
 						open
+						dotColor={ringColor}
 						onClick={() => toggle(window.id, () => {})}
-					>
-						<AppWindow />
-					</DockItem>
+					/>
 				))}
 			</nav>
-		</div>
-	);
-}
-
-/** What a window shows: its app's display over VNC, with the browser's bar over the browser, or the terminal or files. */
-function WindowContent({
-	window,
-	threadId,
-	agentId,
-	viewOnly,
-}: {
-	window: ShownWindow;
-	threadId: string;
-	agentId: string;
-	viewOnly: boolean;
-}) {
-	if (window.kind === "terminal") {
-		return <TerminalView threadId={threadId} agentId={agentId} viewOnly={viewOnly} />;
-	}
-	if (window.kind === "files") return <FilesView threadId={threadId} agentId={agentId} />;
-	const display = (
-		<WindowDisplay
-			url={windowUrl(threadId, agentId, window.id)}
-			viewOnly={viewOnly}
-			what={window.kind === "browser" ? "browser" : "window"}
-		/>
-	);
-	if (window.kind !== "browser") return display;
-	return (
-		<div className="absolute inset-0 flex flex-col">
-			<BrowserBar threadId={threadId} agentId={agentId} viewOnly={viewOnly} />
-			<div className="relative min-h-0 flex-1">{display}</div>
 		</div>
 	);
 }
@@ -329,134 +380,54 @@ function WindowDisplay({
 }
 
 /**
- * A window on the desktop: a title bar to drag it by, with buttons to tuck it
- * into the dock and, given `onClose`, close it, and a corner to resize it by.
- * Clicking anywhere in it brings it to the front.
+ * A dock item: an app to open, or a window open on the desktop, on a tile
+ * tinted from the bot palette, with a dot in the driver's colour while open.
  */
-function DesktopWindow({
-	title,
-	icon,
-	placement,
-	surface,
-	onFocus,
-	onPlace,
-	onMinimize,
-	onClose,
-	children,
-}: {
-	title: string;
-	icon: ReactNode;
-	placement: Placement;
-	surface: React.RefObject<HTMLDivElement | null>;
-	onFocus: () => void;
-	onPlace: (change: Partial<Placement>) => void;
-	onMinimize: () => void;
-	onClose?: () => void;
-	children: ReactNode;
-}) {
-	/** Follows the pointer from where it went down until it comes up, with `change` saying how the window moves. */
-	const track =
-		(change: (dx: number, dy: number, from: Placement) => Partial<Placement>) =>
-		(event: ReactPointerEvent<HTMLElement>) => {
-			if (event.button !== 0) return;
-			event.preventDefault();
-			const handle = event.currentTarget;
-			handle.setPointerCapture(event.pointerId);
-			const from = placement;
-			const start = { x: event.clientX, y: event.clientY };
-			const bounds = surface.current?.getBoundingClientRect();
-			const move = (moved: PointerEvent) => {
-				const next = change(moved.clientX - start.x, moved.clientY - start.y, from);
-				onPlace(bounds ? keptInside(next, from, bounds) : next);
-			};
-			const up = () => {
-				handle.removeEventListener("pointermove", move);
-				handle.removeEventListener("pointerup", up);
-			};
-			handle.addEventListener("pointermove", move);
-			handle.addEventListener("pointerup", up);
-		};
-
-	return (
-		<section
-			aria-label={title}
-			onPointerDownCapture={onFocus}
-			className="absolute flex flex-col overflow-hidden rounded-[10px] border border-border-strong bg-panel shadow-2xl"
-			style={{
-				left: placement.x,
-				top: placement.y,
-				width: placement.width,
-				height: placement.height,
-				zIndex: placement.order,
-			}}
-		>
-			<header
-				onPointerDown={track((dx, dy, from) => ({ x: from.x + dx, y: from.y + dy }))}
-				className="flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-border border-b pr-1.5 pl-3 active:cursor-grabbing"
-			>
-				<span aria-hidden className="text-muted-foreground [&_svg]:size-3.5">
-					{icon}
-				</span>
-				<h3 className="m-0 min-w-0 flex-1 truncate font-medium text-[13px] text-soft-foreground">
-					{title}
-				</h3>
-				<IconButton label="Minimize" onPointerDown={stopPropagation} onClick={onMinimize}>
-					<Minus />
-				</IconButton>
-				{onClose && (
-					<IconButton label="Close" onPointerDown={stopPropagation} onClick={onClose}>
-						<X />
-					</IconButton>
-				)}
-			</header>
-			<div className="relative min-h-0 flex-1">{children}</div>
-			<div
-				aria-hidden
-				onPointerDown={track((dx, dy, from) => ({
-					width: Math.max(MIN_WINDOW_WIDTH, from.width + dx),
-					height: Math.max(MIN_WINDOW_HEIGHT, from.height + dy),
-				}))}
-				className="absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none"
-			/>
-		</section>
-	);
-}
-
-/** A dock item: an app to open, or a window open on the desktop, marked when open. */
 function DockItem({
 	label,
+	kind,
 	open,
-	disabled,
+	dotColor,
 	onClick,
-	children,
 }: {
 	label: string;
+	kind: DesktopWindowKind;
 	open: boolean;
-	disabled?: boolean;
+	dotColor: string | undefined;
 	onClick: () => void;
-	children: ReactNode;
 }) {
+	const tint = DOCK_TINTS[kind];
 	return (
 		<Tooltip label={label} side="top">
 			<button
 				type="button"
 				aria-label={label}
 				aria-pressed={open}
-				disabled={disabled}
 				onClick={onClick}
-				className={cn(
-					"focus-ring relative grid size-10 place-items-center rounded-[10px] text-soft-foreground transition-colors hover:bg-hover disabled:opacity-50 [&_svg]:size-5",
-					open &&
-						"after:absolute after:bottom-0.5 after:size-1 after:rounded-full after:bg-foreground",
-				)}
+				className="focus-ring group relative grid size-11 place-items-center rounded-[11px]"
 			>
-				{children}
+				<span
+					style={tint ? botColorVariables(tint) : undefined}
+					className={cn(
+						"grid size-9 place-items-center rounded-[9px] transition-transform group-hover:-translate-y-0.5 [&_svg]:size-[18px]",
+						tint ? "bg-bot-tint text-bot-mono" : "bg-[light-dark(#16171b,#262830)] text-white",
+					)}
+				>
+					<WindowIcon kind={kind} />
+				</span>
+				{open && (
+					<span
+						aria-hidden
+						className="absolute -bottom-0.5 size-1 rounded-full bg-muted-foreground"
+						style={dotColor ? { backgroundColor: dotColor } : undefined}
+					/>
+				)}
 			</button>
 		</Tooltip>
 	);
 }
 
-function WindowIcon({ kind }: { kind: DesktopWindowKind }) {
+function WindowIcon({ kind }: { kind: DesktopWindowKind }): ReactNode {
 	if (kind === "browser") return <Globe />;
 	if (kind === "terminal") return <SquareTerminal />;
 	if (kind === "files") return <Folder />;
@@ -484,8 +455,8 @@ function initialPlacement(
 	const { clientWidth: width, clientHeight: height } = surface;
 	const share =
 		kind === "browser"
-			? { x: 0.03, y: 0.03, width: 0.72, height: 0.8 }
-			: { x: 0.25, y: 0.1, width: 0.55, height: 0.6 };
+			? { x: 0.04, y: 0.05, width: 0.66, height: 0.74 }
+			: { x: 0.36, y: 0.24, width: 0.5, height: 0.56 };
 	const offset = kind === "browser" ? 0 : index * CASCADE_STEP;
 	return {
 		x: Math.round(width * share.x) + offset,
@@ -494,28 +465,6 @@ function initialPlacement(
 		height: Math.max(MIN_WINDOW_HEIGHT, Math.round(height * share.height)),
 		order,
 		minimized: false,
+		maximized: false,
 	};
-}
-
-/** `next`, moved so the window's title bar stays on the desktop. */
-function keptInside(
-	next: Partial<Placement>,
-	from: Placement,
-	bounds: DOMRect,
-): Partial<Placement> {
-	const width = next.width ?? from.width;
-	const x = next.x ?? from.x;
-	const y = next.y ?? from.y;
-	const visible = Math.min(width, 80);
-	return {
-		...next,
-		...(next.x === undefined
-			? {}
-			: { x: Math.min(Math.max(x, visible - width), bounds.width - visible) }),
-		...(next.y === undefined ? {} : { y: Math.min(Math.max(y, 0), bounds.height - 36) }),
-	};
-}
-
-function stopPropagation(event: ReactPointerEvent) {
-	event.stopPropagation();
 }

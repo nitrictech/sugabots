@@ -113,6 +113,8 @@ beforeAll(async () => {
 						if (request.headers.authorization !== `Bearer ${PASSWORD}`) {
 							return HttpServerResponse.empty({ status: 401 });
 						}
+						// Slower to answer than the person is to send, as a sandbox across a network is.
+						yield* Effect.sleep("300 millis");
 						const socket = yield* request.upgrade;
 						yield* Effect.scoped(
 							Effect.gen(function* () {
