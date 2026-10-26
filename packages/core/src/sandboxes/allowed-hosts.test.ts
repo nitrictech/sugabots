@@ -9,7 +9,14 @@ import {
 	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
-import { allowedHostsOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
+import { allowedHostsOf, reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
+import type { Sandboxes } from "./sandboxes.ts";
+
+const BLOCKS_HOSTS: Sandboxes.Capabilities = {
+	pauseKeeps: "disk",
+	credentials: "host",
+	blocksHosts: true,
+};
 
 /** What a pod's sandbox may reach, from the workspace's lists and the pod's own, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", () => {
@@ -116,5 +123,46 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 
 		expect(hosts).not.toContain("www.pastebin.com");
 		expect(hosts).not.toContain("*.pastebin.com");
+	});
+
+	it("gives a pod on the allowlist the hosts allowed it", async () => {
+		await allowForPod(builders, "builders.example.com");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, { networkMode: "allowlist", capabilities: BLOCKS_HOSTS }),
+		);
+
+		expect(reach).toEqual({
+			kind: "allowlist",
+			hosts: expect.arrayContaining([...TRUSTED_HOSTS, "builders.example.com"]),
+		});
+	});
+
+	it("opens every host but the blocked ones, with a blocked domain's subdomains", async () => {
+		await allowForPod(builders, "builders.example.com");
+		await block("pastebin.com");
+		await block("*.example.org");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, { networkMode: "open", capabilities: BLOCKS_HOSTS }),
+		);
+
+		expect(reach).toEqual({
+			kind: "open",
+			blockedHosts: ["pastebin.com", "*.pastebin.com", "*.example.org"],
+		});
+	});
+
+	it("opens every host, blocked or not, at a provider that can't block hosts", async () => {
+		await block("pastebin.com");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, {
+				networkMode: "open",
+				capabilities: { ...BLOCKS_HOSTS, blocksHosts: false },
+			}),
+		);
+
+		expect(reach).toEqual({ kind: "open", blockedHosts: [] });
 	});
 });

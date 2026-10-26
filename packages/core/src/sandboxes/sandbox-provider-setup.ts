@@ -169,8 +169,14 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireAllowedUrls(changes.settings);
+					const before = yield* requireProvider(workspaceId, providerId);
 					const updated = yield* providers.update(workspaceId, providerId, changes);
 					if (!updated) return yield* new SandboxProviderNotFound();
+					const modeOf = (row: typeof before) =>
+						SandboxProviderRepository.networkModeIn(row.settings);
+					if (modeOf(updated) !== modeOf(before)) {
+						yield* podSandboxes.applyNetwork({ workspaceId });
+					}
 					return toSandboxProvider(updated);
 				}),
 			),

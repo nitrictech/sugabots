@@ -35,6 +35,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		baseUrl: env.OPENSANDBOX_URL ?? "",
 		apiKey: Redacted.make(env.OPENSANDBOX_API_KEY ?? ""),
 		image: IMAGE,
+		networkMode: "allowlist",
 	};
 	let podSandboxes: PodSandboxes.Interface;
 	// What the pod's sandbox is signed in with, and how often it was asked.

@@ -7,7 +7,7 @@ import { Database, query, serviceOperations } from "../database/database.ts";
 import { sandboxLease, sandbox as sandboxTable } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
-import { allowedHostsOf } from "./allowed-hosts.ts";
+import { reachOf } from "./allowed-hosts.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
@@ -124,12 +124,9 @@ export const make = Effect.gen(function* () {
 	 */
 	const applyNetwork = (pod: Pod, sandbox: Sandboxes.Sandbox, at: Sandboxes.Provider) =>
 		Effect.gen(function* () {
-			const [allowedHosts, signedIn] = yield* Effect.all([
-				allowedHostsOf(pod),
-				signIns.forPod(pod),
-			]);
+			const [reach, signedIn] = yield* Effect.all([reachOf(pod, at), signIns.forPod(pod)]);
 			yield* sandbox.setNetwork({
-				allowedHosts,
+				reach,
 				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
 				environment: at.capabilities.credentials === "none" ? {} : signedIn.environment,
 			});
@@ -183,12 +180,12 @@ export const make = Effect.gen(function* () {
 	 * record, which a replacement or an upgrade keeps and a reset doesn't, so
 	 * a reset starts from empty.
 	 */
-	const specFor = (pod: Pod, recordId: string) =>
+	const specFor = (pod: Pod, recordId: string, at: Sandboxes.Provider) =>
 		Effect.map(
-			allowedHostsOf(pod),
-			(allowedHosts): Sandboxes.Spec => ({
+			reachOf(pod, at),
+			(reach): Sandboxes.Spec => ({
 				labels: { "sugabots.workspace": pod.workspaceId, "sugabots.pod": pod.podId },
-				allowedHosts,
+				reach,
 				workName: recordId,
 			}),
 		);
@@ -213,19 +210,17 @@ export const make = Effect.gen(function* () {
 	const made = (pod: Pod, provider: SandboxProviderRepository.Configured) =>
 		Effect.gen(function* () {
 			const id = yield* ids.next;
-			return yield* madeAndRecorded(
-				sandboxes.forConnection(provider.connection),
-				yield* specFor(pod, id),
-				(sandbox) =>
-					query((db) =>
-						db.insert(sandboxTable).values({
-							id,
-							workspaceId: pod.workspaceId,
-							podId: pod.podId,
-							sandboxProviderId: provider.id,
-							providerSandboxId: sandbox.id,
-						}),
-					),
+			const at = sandboxes.forConnection(provider.connection);
+			return yield* madeAndRecorded(at, yield* specFor(pod, id, at), (sandbox) =>
+				query((db) =>
+					db.insert(sandboxTable).values({
+						id,
+						workspaceId: pod.workspaceId,
+						podId: pod.podId,
+						sandboxProviderId: provider.id,
+						providerSandboxId: sandbox.id,
+					}),
+				),
 			);
 		});
 
@@ -292,7 +287,7 @@ export const make = Effect.gen(function* () {
 	 */
 	const restarted = (pod: Pod, row: SandboxRow, at: Sandboxes.Provider) =>
 		Effect.gen(function* () {
-			const fresh = yield* madeAndRecorded(at, yield* specFor(pod, row.id), (sandbox) =>
+			const fresh = yield* madeAndRecorded(at, yield* specFor(pod, row.id, at), (sandbox) =>
 				moveRecord(row.id, row.sandboxProviderId, sandbox.id),
 			);
 			yield* at
@@ -655,7 +650,7 @@ export const make = Effect.gen(function* () {
 								.info(row.providerSandboxId)
 								.pipe(Effect.catchTag("SandboxMissing", () => Effect.fail(new NoSandbox())));
 							if (workKeptApart && provider.id === row.sandboxProviderId) {
-								yield* madeAndRecorded(to, yield* specFor(pod, row.id), (fresh) =>
+								yield* madeAndRecorded(to, yield* specFor(pod, row.id, to), (fresh) =>
 									moveRecord(row.id, provider.id, fresh.id),
 								);
 								return yield* destroyOld;
@@ -691,7 +686,7 @@ export const make = Effect.gen(function* () {
 									),
 								),
 							);
-							yield* madeAndRecorded(to, yield* specFor(pod, row.id), (fresh) =>
+							yield* madeAndRecorded(to, yield* specFor(pod, row.id, to), (fresh) =>
 								fresh.uploadFile(archivePath, archive).pipe(
 									Effect.andThen(
 										fresh.exec(

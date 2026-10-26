@@ -1,5 +1,7 @@
 import {
 	SANDBOX_E2B_DEFAULT_SIZE,
+	SANDBOX_NETWORK_MODE_DEFAULT,
+	type SandboxNetworkMode,
 	type SandboxProvider,
 	type SandboxProviderPresetId,
 	type SandboxProviderSettings,
@@ -23,6 +25,7 @@ import {
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Note } from "@/ui/note.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon, SettingsValue } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
@@ -35,6 +38,11 @@ import { TextEntryRow } from "./text-entry-row.tsx";
  * configured for each preset; the switch enables the chosen one, which
  * disables any other.
  */
+
+const networkModes: readonly { value: SandboxNetworkMode; label: string }[] = [
+	{ value: "open", label: "Open" },
+	{ value: "allowlist", label: "Allowlist" },
+];
 
 /** What each provider is good for, in the line under its name. */
 const providerDescriptions: Record<SandboxProviderPresetId, string> = {
@@ -328,6 +336,19 @@ function ProviderSettings({
 					/>
 				</>
 			)}
+			<SettingsRow
+				label="Network"
+				sub={networkSummary(settings)}
+				trailing={
+					<SegmentedControl
+						label="Network"
+						options={networkModes}
+						value={settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT}
+						disabled={pending}
+						onChange={(networkMode) => void onConfigure({ settings: { ...settings, networkMode } })}
+					/>
+				}
+			/>
 			{chosen === "e2b" && provider && hasKey && <TemplateRow providerId={provider.id} />}
 			{provider && hasKey && (
 				<SettingsRow
@@ -421,6 +442,16 @@ function TemplateRow({ providerId }: { providerId: string }) {
 			onClick={canPrepare && !prepare.isPending ? () => prepare.mutate() : undefined}
 		/>
 	);
+}
+
+/** What the provider's sandboxes reach. E2B can't refuse hosts by name, so open, it blocks nothing. */
+function networkSummary(settings: SandboxProviderSettings): string {
+	if ((settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT) === "allowlist") {
+		return "Only the hosts allowed";
+	}
+	return settings.preset === "e2b"
+		? "Any host. E2B can't block hosts"
+		: "Any host but the blocked ones";
 }
 
 function hint(preset: SandboxProviderPresetId): string {

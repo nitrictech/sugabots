@@ -62,7 +62,9 @@ export const fromE2b = (
 			// E2B Cloud adds headers by host. E2B Embed, at its own endpoints,
 			// leaves resolving them to E2B's enterprise orchestrator.
 			credentials: connection.endpoints ? "none" : "host",
+			blocksHosts: false,
 		},
+		networkMode: connection.networkMode,
 		templates: {
 			build: (image) =>
 				Effect.tryPromise({
@@ -104,7 +106,7 @@ export const fromE2b = (
 						// E2B serves a sandbox's ports to anyone with its address unless
 						// told otherwise; private, they need the sandbox's traffic token.
 						// Set only here: updating the network leaves it as it is.
-						network: { ...allowOnly(spec.allowedHosts), allowPublicTraffic: false },
+						network: { ...egressOf(spec.reach), allowPublicTraffic: false },
 					});
 					await sandbox.commands.run(
 						`mkdir -p ${Sandboxes.WORKSPACE_DIRECTORY} && chown ${AGENT_USER}: ${Sandboxes.WORKSPACE_DIRECTORY}`,
@@ -206,7 +208,7 @@ export const fromE2b = (
 						// One update replaces both the hosts and the rules, so they are
 						// always set together.
 						await sandbox.updateNetwork({
-							...allowOnly(network.allowedHosts),
+							...egressOf(network.reach),
 							rules: credentialRules(network.credentials),
 						});
 						await sandbox.files.write(
@@ -268,9 +270,16 @@ function credentialRules(credentials: readonly Sandboxes.Credential[]) {
 	);
 }
 
-/** E2B's rules for refusing every connection but those to `hosts`: what's allowed wins over what's denied. */
-function allowOnly(hosts: readonly string[]) {
-	return { allowOut: [...hosts], denyOut: [ALL_ADDRESSES] };
+/**
+ * E2B's rules for what the sandbox may connect to. On an allowlist it refuses
+ * every address but the hosts', since what's allowed wins over what's denied.
+ * Open, it has no rules: E2B denies addresses but never names, so it can't
+ * keep blocked hosts out.
+ */
+function egressOf(reach: Sandboxes.Reach) {
+	if (reach.kind === "allowlist") return { allowOut: [...reach.hosts], denyOut: [ALL_ADDRESSES] };
+	if (reach.blockedHosts.length > 0) throw new Error("E2B can't refuse hosts by name");
+	return {};
 }
 
 const ALL_ADDRESSES = "0.0.0.0/0";

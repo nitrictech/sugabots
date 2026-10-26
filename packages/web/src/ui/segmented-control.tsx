@@ -11,6 +11,7 @@ export function SegmentedControl<Value extends string>({
 	options,
 	value,
 	onChange,
+	disabled = false,
 	className,
 }: {
 	/** Names the group for assistive technology. */
@@ -19,18 +20,25 @@ export function SegmentedControl<Value extends string>({
 	/** Undefined when none of the options describes the current state, so none is shown chosen. */
 	value: Value | undefined;
 	onChange: (value: Value) => void;
+	disabled?: boolean;
 	className?: string;
 }) {
 	const name = useId();
 
 	return (
-		<fieldset className={cn("m-0 flex shrink-0 rounded-[10px] border-0 bg-chip p-0.5", className)}>
+		<fieldset
+			disabled={disabled}
+			className={cn(
+				"m-0 flex shrink-0 rounded-[10px] border-0 bg-chip p-0.5 disabled:opacity-50",
+				className,
+			)}
+		>
 			<legend className="sr-only">{label}</legend>
 			{options.map((option) => (
 				<label
 					key={option.value}
 					className={cn(
-						"cursor-pointer rounded-[8px] px-[11px] py-[5px] font-medium text-sm transition-colors has-checked:bg-person-avatar has-checked:text-foreground",
+						"cursor-pointer rounded-[8px] has-disabled:cursor-default px-[11px] py-[5px] font-medium text-sm transition-colors has-checked:bg-person-avatar has-checked:text-foreground",
 						"text-muted-foreground has-focus-visible:shadow-(--ring-shadow)",
 					)}
 				>

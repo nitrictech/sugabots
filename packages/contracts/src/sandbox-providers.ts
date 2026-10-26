@@ -87,6 +87,19 @@ const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength
 const imageSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512));
 
 /**
+ * How a provider's sandboxes reach the internet: `allowlist`, only the
+ * trusted hosts and those the workspace and each pod add; or `open`, every
+ * host but those the workspace blocks, as far as the provider can refuse
+ * hosts by name. E2B can't, so its open sandboxes reach every host.
+ */
+export const sandboxNetworkModeSchema = Schema.Literals(["allowlist", "open"]);
+
+export type SandboxNetworkMode = typeof sandboxNetworkModeSchema.Type;
+
+/** A provider whose settings leave out its network mode is open. */
+export const SANDBOX_NETWORK_MODE_DEFAULT: SandboxNetworkMode = "open";
+
+/**
  * A provider's settings, by preset. A provider may be saved before it has
  * every address it needs; it can't be enabled until it has. An image,
  * template or size left out follows the default, so a new default reaches
@@ -97,6 +110,8 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		preset: Schema.Literal("opensandbox"),
 		serverUrl: Schema.optional(providerUrlSchema),
 		image: Schema.optional(imageSchema),
+		/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
+		networkMode: Schema.optional(sandboxNetworkModeSchema),
 	}),
 	Schema.Struct({
 		preset: Schema.Literal("e2b"),
@@ -107,6 +122,8 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		/** What the template is built with, so every sandbox made from it has. */
 		cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
 		memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+		/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
+		networkMode: Schema.optional(sandboxNetworkModeSchema),
 	}),
 ]);
 
@@ -256,6 +273,13 @@ export type SandboxBlockedHost = typeof sandboxBlockedHostSchema.Type;
  * a command that reaches for another host fails as if it weren't there.
  */
 export const sandboxNetworkSettingsSchema = Schema.Struct({
+	/** The enabled provider's; {@link SANDBOX_NETWORK_MODE_DEFAULT} while none is enabled. */
+	mode: sandboxNetworkModeSchema,
+	/**
+	 * Whether the blocked hosts are kept out: false while the sandboxes are
+	 * open at a provider that can't refuse hosts by name.
+	 */
+	blocking: Schema.Boolean,
 	/** What every workspace's sandboxes reach: package registries and where source code is hosted. */
 	trustedHosts: Schema.Array(sandboxHostSchema),
 	addedHosts: Schema.Array(sandboxAddedHostSchema),
@@ -274,6 +298,10 @@ const blockedBy = Schema.NullOr(sandboxHostSchema);
 
 /** Where one pod's sandbox may connect to: what the workspace allows every pod, and its own. */
 export const podSandboxNetworkSchema = Schema.Struct({
+	/** The workspace's enabled provider's; open, the sandbox reaches every host the workspace didn't block. */
+	mode: sandboxNetworkModeSchema,
+	/** Whether the workspace's blocked hosts are kept out of the sandbox. */
+	blocking: Schema.Boolean,
 	/** The trusted hosts and the workspace's, which every pod's sandbox is allowed. */
 	workspaceHosts: Schema.Array(Schema.Struct({ host: sandboxHostSchema, blockedBy })),
 	/** What the pod added for its own sandbox. */

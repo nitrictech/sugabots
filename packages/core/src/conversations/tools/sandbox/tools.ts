@@ -415,10 +415,18 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
 }
 
 /**
- * The hosts the sandbox reaches, for the turn's note rather than
+ * What the sandbox reaches, for the turn's note rather than
  * `run_command`'s description: they change between turns, and the tools lead
  * the provider's cached prompt.
  */
-export function allowedHostsNote(allowedHosts: readonly string[]): string {
-	return `The pod's sandbox, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+export function networkNote(reach: Sandboxes.Reach): string {
+	const unreachable =
+		"fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply";
+	if (reach.kind === "allowlist") {
+		return `The pod's sandbox, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${reach.hosts.join(", ")}. A connection to any other host ${unreachable}. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+	}
+	if (reach.blockedHosts.length === 0) {
+		return "The pod's sandbox, its browser included, connects to any host on the internet.";
+	}
+	return `The pod's sandbox, its browser included, connects to any host on the internet except these, which the workspace blocked (*. covers a domain's subdomains): ${reach.blockedHosts.join(", ")}. A connection to one ${unreachable}.`;
 }

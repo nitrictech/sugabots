@@ -12,9 +12,11 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
- * What every pod's sandbox may connect to: the trusted hosts every workspace
- * has, and the ones this workspace added. Each pod adds its own in its
- * settings. The workspace's blocked hosts are out of every pod's reach.
+ * What every pod's sandbox may connect to. On the allowlist, the trusted
+ * hosts every workspace has, and the ones this workspace added, and each pod
+ * adds its own in its settings; open, every host. The workspace's blocked
+ * hosts are out of every pod's reach, unless the sandboxes are open at a
+ * provider that can't block hosts.
  */
 export function SandboxNetworkSection() {
 	const { settings, addHost, removeHost, blockHost, unblockHost } = useSandboxNetwork();
@@ -52,46 +54,69 @@ export function SandboxNetworkGroups({
 	onUnblock: (host: string) => void;
 }) {
 	const [showingTrusted, setShowingTrusted] = useState(false);
+	const open = settings.mode === "open";
 	return (
 		<>
-			<SettingsGroup
-				label="Network"
-				note="Every pod's sandbox connects to these hosts, and each pod adds its own under Sandbox in its settings. When a bot needs another, it asks in its thread, and the pod decides."
-			>
-				{settings.addedHosts.map((added) => (
-					<AddedHostRow
-						key={added.host}
-						added={added}
-						disabled={pending}
-						onRemove={() => onRemove(added.host)}
-					/>
-				))}
-				<AddHostRow label="Add host" action="Add" disabled={pending} onAdd={onAdd} />
-				<SettingsRow
-					label="Trusted hosts"
-					sub={
-						showingTrusted
-							? settings.trustedHosts.join(", ")
-							: `${settings.trustedHosts.length} hosts every workspace reaches: GitHub, package registries and Linux mirrors`
+			{open ? (
+				<SettingsGroup
+					label="Network"
+					note={
+						settings.blocking
+							? "Set under the provider. The allowed hosts are kept, and apply again if it goes back to the allowlist."
+							: "Set under the provider, which can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to the allowlist."
 					}
-					chevron={!showingTrusted}
-					onClick={() => setShowingTrusted((showing) => !showing)}
-				/>
-			</SettingsGroup>
-			<SettingsGroup
-				label="Blocked hosts"
-				note="No pod's sandbox connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
-			>
-				{settings.blockedHosts.map((blocked) => (
-					<BlockedHostRow
-						key={blocked.host}
-						blocked={blocked}
-						disabled={pending}
-						onUnblock={() => onUnblock(blocked.host)}
+				>
+					<SettingsRow
+						label="Open"
+						sub={settings.blocking ? "Any host but the blocked ones below" : "Any host"}
 					/>
-				))}
-				<AddHostRow label="Block host" action="Block" disabled={pending} onAdd={onBlock} />
-			</SettingsGroup>
+				</SettingsGroup>
+			) : (
+				<SettingsGroup
+					label="Network"
+					note="Every pod's sandbox connects to these hosts, and each pod adds its own under Sandbox in its settings. When a bot needs another, it asks in its thread, and the pod decides."
+				>
+					{settings.addedHosts.map((added) => (
+						<AddedHostRow
+							key={added.host}
+							added={added}
+							disabled={pending}
+							onRemove={() => onRemove(added.host)}
+						/>
+					))}
+					<AddHostRow label="Add host" action="Add" disabled={pending} onAdd={onAdd} />
+					<SettingsRow
+						label="Trusted hosts"
+						sub={
+							showingTrusted
+								? settings.trustedHosts.join(", ")
+								: `${settings.trustedHosts.length} hosts every workspace reaches: GitHub, package registries and Linux mirrors`
+						}
+						chevron={!showingTrusted}
+						onClick={() => setShowingTrusted((showing) => !showing)}
+					/>
+				</SettingsGroup>
+			)}
+			{settings.blocking && (
+				<SettingsGroup
+					label="Blocked hosts"
+					note={
+						open
+							? "No pod's sandbox connects to these, or to their subdomains."
+							: "No pod's sandbox connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
+					}
+				>
+					{settings.blockedHosts.map((blocked) => (
+						<BlockedHostRow
+							key={blocked.host}
+							blocked={blocked}
+							disabled={pending}
+							onUnblock={() => onUnblock(blocked.host)}
+						/>
+					))}
+					<AddHostRow label="Block host" action="Block" disabled={pending} onAdd={onBlock} />
+				</SettingsGroup>
+			)}
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 		</>
 	);

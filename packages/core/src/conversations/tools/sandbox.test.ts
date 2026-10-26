@@ -89,6 +89,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 						serverUrl: env.OPENSANDBOX_URL,
 						// The default image, for its browser: `bun run build:sandbox` first.
 						image: "ghcr.io/nitrictech/sugabots-sandbox:latest",
+						networkMode: "allowlist",
 					},
 					enabled: true,
 					apiKey: env.OPENSANDBOX_API_KEY,

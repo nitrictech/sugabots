@@ -5,7 +5,7 @@ import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
 import { Ids } from "../../ids/ids.ts";
-import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
+import { blockedHostsOf, reachOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
@@ -15,9 +15,9 @@ import { type BrowserSession, browserSession, browserTools } from "./browser/bro
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	type AttachToReply,
-	allowedHostsNote,
 	COPY_FILE_TO_SANDBOX_TOOL,
 	copyFileToSandboxTool,
+	networkNote,
 	type OpenSandbox,
 	openOncePerTurn,
 	type Place,
@@ -95,8 +95,9 @@ export const make = Effect.gen(function* () {
 		browser,
 		run,
 		blocked,
+		allowlisted,
 		attach,
-	}: Behind) => ({
+	}: Behind): Pick<Offered, "tools" | "requests"> => ({
 		tools: {
 			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
 			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
@@ -112,9 +113,9 @@ export const make = Effect.gen(function* () {
 			...(attach ? { [SHARE_FILE_TOOL]: shareFileTool(openSandbox, place, attach) } : {}),
 			...browserTools(browser, acceptsImages),
 		},
-		requests: {
-			[REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }),
-		},
+		requests: allowlisted
+			? { [REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }) }
+			: {},
 	});
 	return Service.of({
 		forTurn: ({ pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach }) =>
@@ -133,6 +134,7 @@ export const make = Effect.gen(function* () {
 							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
 							run: NEVER_RUN,
 							blocked: [],
+							allowlisted: true,
 						}),
 						usable: false,
 						note: NO_SANDBOX_NOTE,
@@ -140,9 +142,12 @@ export const make = Effect.gen(function* () {
 						signsIn: false,
 					};
 				}
-				const [allowedHosts, blocked] = yield* operation(
+				const [reach, blocked] = yield* operation(
 					"forTurn",
-					Effect.all([allowedHostsOf(pod), blockedHostsOf(pod.workspaceId)]),
+					Effect.all([
+						reachOf(pod, sandboxes.forConnection(provider.connection)),
+						blockedHostsOf(pod.workspaceId),
+					]),
 				);
 				const holder: PodSandboxes.Holder = { kind: "turn", id: turnId };
 				yield* Effect.addFinalizer(() => podSandboxes.release(holder));
@@ -184,9 +189,10 @@ export const make = Effect.gen(function* () {
 						browser,
 						run,
 						blocked: blocked.map((row) => row.host),
+						allowlisted: reach.kind === "allowlist",
 					}),
 					usable: true,
-					note: allowedHostsNote(allowedHosts),
+					note: networkNote(reach),
 					workspace: { open: openSandbox, place },
 					signsIn: sandboxes.forConnection(provider.connection).capabilities.credentials !== "none",
 				};
@@ -217,6 +223,8 @@ interface Behind {
 	readonly run: RunEffect<never>;
 	/** Hosts a request is refused for without asking anyone. */
 	readonly blocked: readonly string[];
+	/** Whether the sandbox reaches only the hosts allowed it, so the agent may ask for more. */
+	readonly allowlisted: boolean;
 	readonly attach: AttachToReply | undefined;
 }
 

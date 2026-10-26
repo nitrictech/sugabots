@@ -5,6 +5,8 @@ import { SettingsPage } from "@/ui/settings-page.tsx";
 import { PodNetworkGroup } from "./PodSandboxNetwork.tsx";
 
 const network: PodSandboxNetwork = {
+	mode: "allowlist",
+	blocking: true,
 	workspaceHosts: [
 		{ host: "github.com", blockedBy: null },
 		{ host: "registry.npmjs.org", blockedBy: null },
@@ -84,5 +86,23 @@ export const ReadOnly = meta.story({
 		await expect(canvas.queryByLabelText("Add host")).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Remove api.stripe.com" })).toBeNull();
 		await expect(canvas.getByText(/an admin of this pod decides/)).toBeVisible();
+	},
+});
+
+/** The workspace's sandboxes are open: the pod has no hosts of its own to add. */
+export const Open = meta.story({
+	args: { network: { ...network, mode: "open" } },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/Any host the workspace hasn't blocked/)).toBeVisible();
+		await expect(canvas.queryByLabelText("Add host")).toBeNull();
+		await expect(canvas.queryByText("api.stripe.com")).toBeNull();
+	},
+});
+
+/** Open at a provider that can't block hosts: every host. */
+export const OpenWithoutBlocking = meta.story({
+	args: { network: { ...network, mode: "open", blocking: false } },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Any host")).toBeVisible();
 	},
 });

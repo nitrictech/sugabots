@@ -1,6 +1,10 @@
 export * as SandboxNetwork from "./sandbox-network.ts";
 
-import type { PodSandboxNetwork, SandboxNetworkSettings } from "@sugabots/contracts";
+import {
+	type PodSandboxNetwork,
+	SANDBOX_NETWORK_MODE_DEFAULT,
+	type SandboxNetworkSettings,
+} from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -25,6 +29,8 @@ import {
 	TRUSTED_HOSTS,
 } from "./allowed-hosts.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
+import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
+import { Sandboxes } from "./sandboxes.ts";
 
 /**
  * Where sandboxes may connect to. Every pod's sandbox reaches
@@ -100,13 +106,30 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SandboxNetwork");
 	const authorization = yield* Authorization.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
+	const providers = yield* SandboxProviderRepository.Service;
+	const sandboxes = yield* Sandboxes.Service;
 
 	const manage = (workspace: string) =>
 		authorization.workspace(workspace, "workspace.providers.manage");
 
+	/**
+	 * How the workspace's sandboxes reach the internet, by its enabled
+	 * provider, and whether its blocks keep hosts out.
+	 */
+	const networkOf = (workspaceId: string) =>
+		Effect.map(providers.enabled(workspaceId), (enabled) => {
+			if (!enabled) return { mode: SANDBOX_NETWORK_MODE_DEFAULT, blocking: true };
+			const { networkMode, capabilities } = sandboxes.forConnection(enabled.connection);
+			return {
+				mode: networkMode,
+				blocking: networkMode === "allowlist" || capabilities.blocksHosts,
+			};
+		});
+
 	const settingsOf = (workspaceId: string) =>
 		Effect.gen(function* () {
-			const [added, blocked] = yield* Effect.all([
+			const [network, added, blocked] = yield* Effect.all([
+				networkOf(workspaceId),
 				addedHostsOf(workspaceId),
 				blockedHostsOf(workspaceId),
 			]);
@@ -115,6 +138,7 @@ export const make = Effect.gen(function* () {
 				...blocked.map((row) => row.blockedById),
 			]);
 			return {
+				...network,
 				trustedHosts: TRUSTED_HOSTS,
 				addedHosts: added.map((row) => ({
 					host: row.host,
@@ -131,7 +155,8 @@ export const make = Effect.gen(function* () {
 
 	const podSettingsOf = (pod: Pod) =>
 		Effect.gen(function* () {
-			const [workspaceAdded, podAdded, blocked] = yield* Effect.all([
+			const [network, workspaceAdded, podAdded, blocked] = yield* Effect.all([
+				networkOf(pod.workspaceId),
 				addedHostsOf(pod.workspaceId),
 				podAddedHostsOf(pod),
 				blockedHostsOf(pod.workspaceId),
@@ -139,6 +164,7 @@ export const make = Effect.gen(function* () {
 			const blocks = blocked.map((row) => row.host);
 			const names = yield* namesOf(podAdded.map((row) => row.addedById));
 			return {
+				...network,
 				workspaceHosts: [...TRUSTED_HOSTS, ...workspaceAdded.map((row) => row.host)].map(
 					(host) => ({ host, blockedBy: blockOn(host, blocks) ?? null }),
 				),
@@ -336,7 +362,14 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, PodSandboxes.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([
+		Authorization.layer,
+		PodSandboxes.layer,
+		SandboxProviderRepository.layer,
+		Sandboxes.layer,
+	]),
+);
 
 interface Pod {
 	readonly workspaceId: string;

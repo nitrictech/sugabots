@@ -24,6 +24,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					apiKey: Redacted.make(env.OPENSANDBOX_API_KEY),
 					// Debian with Python, for a web server to reach.
 					image: "python:3.13-slim",
+					networkMode: "allowlist",
 				}
 			: undefined,
 	],
@@ -35,6 +36,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					apiKey: Redacted.make(env.E2B_API_KEY),
 					template: "base",
 					size: SANDBOX_E2B_DEFAULT_SIZE,
+					networkMode: "allowlist",
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 						: {}),
@@ -45,7 +47,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 
 const SPEC: Sandboxes.Spec = {
 	labels: { "sugabots.test": "sandboxes.test.ts" },
-	allowedHosts: ["example.com"],
+	reach: { kind: "allowlist", hosts: ["example.com"] },
 	// One name for every run, so a provider that keeps work apart reuses one volume.
 	workName: "provider-tests",
 };
@@ -82,6 +84,8 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 			sandboxes.forConnection(connection as Sandboxes.Connection),
 		);
 		let sandbox: Sandboxes.Sandbox;
+		const reaches = async (host: string) =>
+			(await run(sandbox.exec(reachScript(host), EXEC))).exitCode === 0;
 
 		beforeAll(async () => {
 			sandbox = await run(Effect.flatMap(provider, (p) => p.create(SPEC)));
@@ -98,17 +102,37 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 		it(
 			"reaches only the hosts it is allowed, and changes them while it runs",
 			async () => {
-				const reaches = async (host: string) =>
-					(await run(sandbox.exec(reachScript(host), EXEC))).exitCode === 0;
-
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([true, false]);
 				await run(
-					sandbox.setNetwork({ allowedHosts: ["github.com"], credentials: [], environment: {} }),
+					sandbox.setNetwork({
+						reach: { kind: "allowlist", hosts: ["github.com"] },
+						credentials: [],
+						environment: {},
+					}),
 				);
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([false, true]);
+				await run(sandbox.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
+			},
+			SLOW,
+		);
+
+		it(
+			"reaches every host when open, but the blocked ones where it can block, and goes back to its allowlist",
+			async () => {
+				const { blocksHosts } = (await run(provider)).capabilities;
 				await run(
-					sandbox.setNetwork({ allowedHosts: SPEC.allowedHosts, credentials: [], environment: {} }),
+					sandbox.setNetwork({
+						reach: { kind: "open", blockedHosts: blocksHosts ? ["github.com"] : [] },
+						credentials: [],
+						environment: {},
+					}),
 				);
+				const open = [await reaches("example.com"), await reaches("github.com")];
+				await run(sandbox.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
+				const allowlisted = [await reaches("example.com"), await reaches("github.com")];
+
+				expect(open).toEqual([true, !blocksHosts]);
+				expect(allowlisted).toEqual([true, false]);
 			},
 			SLOW,
 		);
@@ -124,7 +148,7 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 
 				await run(
 					sandbox.setNetwork({
-						allowedHosts: ["httpbin.org"],
+						reach: { kind: "allowlist", hosts: ["httpbin.org"] },
 						credentials: [
 							{
 								host: "httpbin.org",
@@ -139,9 +163,7 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 				const signed = await echoed("/anything/signed/repository");
 				const elsewhere = await echoed("/anything/other/repository");
 				const shell = await run(sandbox.exec("bash -lc 'env'", EXEC));
-				await run(
-					sandbox.setNetwork({ allowedHosts: SPEC.allowedHosts, credentials: [], environment: {} }),
-				);
+				await run(sandbox.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
 
 				expect(signed).toContain("the-credential");
 				if (scope === "host-and-path") expect(elsewhere).not.toContain("the-credential");
@@ -350,6 +372,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 			apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 			template: `sugabots-test-${Date.now()}`,
 			size: { cpuCount: 2, memoryGiB: 2 },
+			networkMode: "allowlist",
 			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 				: {}),
@@ -385,6 +408,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 					provider: "e2b",
 					apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 					template: "sugabots-never-built",
+					networkMode: "allowlist",
 					size: SANDBOX_E2B_DEFAULT_SIZE,
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
