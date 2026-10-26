@@ -1,7 +1,5 @@
-import { botColors, botColorVariables } from "@sugabots/avatars";
-import type { Agent, AgentColor } from "@sugabots/contracts";
-import { cn } from "cn";
-import { AppWindow, Folder, Globe, SquareTerminal } from "lucide-react";
+import { botColors } from "@sugabots/avatars";
+import type { Agent } from "@sugabots/contracts";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useViewerIdle } from "@/lib/desktop.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -15,6 +13,7 @@ import {
 	type WindowFrame,
 	WindowTitle,
 } from "./DesktopWindow.tsx";
+import { AppIcon, BrowserIcon, FilesIcon, TerminalIcon } from "./DockIcons.tsx";
 import { FilesView } from "./FilesView.tsx";
 import { TerminalView } from "./TerminalView.tsx";
 import {
@@ -63,14 +62,6 @@ const CASCADE_STEP = 28;
 /** The agent's face in the wallpaper, in pixels, and how faintly it shows. */
 const WALLPAPER_FACE_SIZE = 620;
 const WALLPAPER_FACE_OPACITY = 0.16;
-
-/** The tint of each app's dock tile, from the bot palette; the terminal's is neutral. */
-const DOCK_TINTS: Record<DesktopWindowKind, AgentColor | undefined> = {
-	browser: "indigo",
-	terminal: undefined,
-	files: "teal",
-	app: "purple",
-};
 
 /**
  * The agent's desktop, drawn here rather than in the sandbox: a wallpaper
@@ -318,7 +309,7 @@ function DesktopSurface({
 			)}
 			<nav
 				aria-label="Dock"
-				className="absolute bottom-3 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-1.5 rounded-[16px] border border-border-strong bg-panel/85 p-1.5 shadow-lg backdrop-blur"
+				className="absolute bottom-3 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-1 rounded-[18px] border border-white/15 bg-white/10 px-2 pt-1.5 pb-2 shadow-lg backdrop-blur-md"
 			>
 				<DockItem
 					label="Browser"
@@ -381,8 +372,8 @@ function WindowDisplay({
 }
 
 /**
- * A dock item: an app to open, or a window open on the desktop, on a tile
- * tinted from the bot palette, with a dot in the driver's colour while open.
+ * A dock item: an app to open, or a window open on the desktop, by its
+ * icon, with a dot in the driver's colour while open.
  */
 function DockItem({
 	label,
@@ -397,7 +388,6 @@ function DockItem({
 	dotColor: string | undefined;
 	onClick: () => void;
 }) {
-	const tint = DOCK_TINTS[kind];
 	return (
 		<Tooltip label={label} side="top">
 			<button
@@ -405,16 +395,10 @@ function DockItem({
 				aria-label={label}
 				aria-pressed={open}
 				onClick={onClick}
-				className="focus-ring group relative grid size-11 place-items-center rounded-[11px]"
+				className="focus-ring group relative grid size-12 place-items-center rounded-[12px]"
 			>
-				<span
-					style={tint ? botColorVariables(tint) : undefined}
-					className={cn(
-						"grid size-9 place-items-center rounded-[9px] transition-transform group-hover:-translate-y-0.5 [&_svg]:size-[18px]",
-						tint ? "bg-bot-tint text-bot-mono" : "bg-[light-dark(#16171b,#262830)] text-white",
-					)}
-				>
-					<WindowIcon kind={kind} />
+				<span className="drop-shadow-sm transition-transform group-hover:-translate-y-0.5">
+					<AppIconFor kind={kind} />
 				</span>
 				{open && (
 					<span
@@ -428,11 +412,13 @@ function DockItem({
 	);
 }
 
-function WindowIcon({ kind }: { kind: DesktopWindowKind }): ReactNode {
-	if (kind === "browser") return <Globe />;
-	if (kind === "terminal") return <SquareTerminal />;
-	if (kind === "files") return <Folder />;
-	return <AppWindow />;
+const DOCK_ICON_SIZE = 40;
+
+function AppIconFor({ kind }: { kind: DesktopWindowKind }): ReactNode {
+	if (kind === "browser") return <BrowserIcon size={DOCK_ICON_SIZE} />;
+	if (kind === "terminal") return <TerminalIcon size={DOCK_ICON_SIZE} />;
+	if (kind === "files") return <FilesIcon size={DOCK_ICON_SIZE} />;
+	return <AppIcon size={DOCK_ICON_SIZE} />;
 }
 
 function windowTitle(window: ShownWindow) {
