@@ -125,7 +125,7 @@ export interface WebhookDraft {
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
 	/** What a call must meet to run it; none runs every call. */
-	filter: WebhookCondition[];
+	filter: readonly WebhookCondition[];
 }
 
 export const NEW_WEBHOOK: WebhookDraft = {
