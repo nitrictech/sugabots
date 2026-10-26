@@ -558,7 +558,7 @@ function DiskSpace({ disk }: { disk: Disk }) {
 					style={{ width: `${Math.round(usedFraction * 100)}%` }}
 				/>
 			</span>
-			<span>
+			<span className="truncate">
 				{formattedSize(disk.freeBytes)} free of {formattedSize(disk.totalBytes)}
 			</span>
 		</div>
@@ -874,11 +874,18 @@ function decodedText(base64: string) {
 	);
 }
 
+const SIZE_UNITS = ["KB", "MB", "GB", "TB"] as const;
+
+/** `bytes` in the largest unit it makes at least one of, to a tenth below a hundred. */
 function formattedSize(bytes: number) {
 	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+	let amount = bytes / 1024;
+	let unit = 0;
+	while (amount >= 1024 && unit < SIZE_UNITS.length - 1) {
+		amount /= 1024;
+		unit += 1;
+	}
+	return `${amount < 100 ? amount.toFixed(1) : Math.round(amount)} ${SIZE_UNITS[unit]}`;
 }
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
