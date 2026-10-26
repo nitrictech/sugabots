@@ -13,11 +13,13 @@ import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 
 /**
- * An agent's desktop in a thread, live: a WebSocket the web app's noVNC
- * viewer opens, relayed to the desktop's VNC server in the sandbox. The relay
- * logs in to the server with its password and offers the viewer no
- * authentication, then passes frames both ways untouched; neither the
- * password nor the sandbox's address reaches the browser.
+ * An agent's browser and desktop in a thread, live: WebSockets the web app's
+ * viewers open, relayed to servers in the sandbox. The browser's display and
+ * the whole desktop are noVNC's, relayed to their VNC servers: the relay logs
+ * in to the server with its password and offers the viewer no
+ * authentication, then passes frames both ways untouched. The browser's tabs
+ * are relayed to its tabs server, with the password in the upgrade request.
+ * Neither the passwords nor the sandbox's address reach the person's browser.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -26,50 +28,112 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 		const viewer = yield* DesktopViewer.Service;
 		const trusted = new Set((yield* Installation.Service).trustedOrigins);
 
-		yield* router.add(
-			"GET",
-			`${API_BASE_PATH}/threads/:threadId/agents/:agentId/desktop`,
-			Effect.gen(function* () {
-				const request = yield* HttpServerRequest.HttpServerRequest;
-				// Any page the browser visits can open a WebSocket here with the
-				// person's cookie, so only the web app's own origin may.
-				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
-					return HttpServerResponse.text("Untrusted origin", { status: 403 });
-				}
-				const holder = yield* authentication.identify(new Headers(request.headers));
-				if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
-				const { threadId, agentId } = yield* HttpRouter.params;
-				if (!threadId || !agentId) return HttpServerResponse.empty({ status: 404 });
+		/**
+		 * A viewer's WebSocket at `name`: what `open` gives is opened before the
+		 * person's socket is upgraded, so a refusal is an HTTP status, then
+		 * `relay` joins the two.
+		 */
+		const route = (
+			name: "desktop" | "browser" | "browser/tabs",
+			open: typeof viewer.open,
+			relay: (browserSide: Socket.Socket, opened: DesktopViewer.OpenDesktop) => Effect.Effect<void>,
+		) =>
+			router.add(
+				"GET",
+				`${API_BASE_PATH}/threads/:threadId/agents/:agentId/${name}`,
+				Effect.gen(function* () {
+					const request = yield* HttpServerRequest.HttpServerRequest;
+					// Any page the browser visits can open a WebSocket here with the
+					// person's cookie, so only the web app's own origin may.
+					if (!request.headers.origin || !trusted.has(request.headers.origin)) {
+						return HttpServerResponse.text("Untrusted origin", { status: 403 });
+					}
+					const holder = yield* authentication.identify(new Headers(request.headers));
+					if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
+					const { threadId, agentId } = yield* HttpRouter.params;
+					if (!threadId || !agentId) return HttpServerResponse.empty({ status: 404 });
 
-				return yield* Effect.scoped(
-					Effect.gen(function* () {
-						const desktop = yield* viewer.open({ threadId, agentId });
-						const browserSide = yield* request.upgrade;
-						yield* relay(browserSide, upstream(desktop.endpoint), desktop.password);
-						return HttpServerResponse.empty();
-					}),
-				).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id)),
-					Effect.catchTags({
-						DesktopUnavailable: (failure) =>
-							Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),
-						ResourceHidden: () => Effect.succeed(HttpServerResponse.empty({ status: 404 })),
-						ActionForbidden: () => Effect.succeed(HttpServerResponse.empty({ status: 403 })),
-					}),
-				);
-			}).pipe(
-				Effect.catchCause((cause) =>
-					Effect.logWarning("The desktop viewer's connection ended badly", cause).pipe(
-						Effect.as(HttpServerResponse.empty({ status: 502 })),
+					return yield* Effect.scoped(
+						Effect.gen(function* () {
+							const opened = yield* open({ threadId, agentId });
+							const browserSide = yield* request.upgrade;
+							yield* relay(browserSide, opened);
+							return HttpServerResponse.empty();
+						}),
+					).pipe(
+						CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id)),
+						Effect.catchTags({
+							DesktopUnavailable: (failure) =>
+								Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),
+							ResourceHidden: () => Effect.succeed(HttpServerResponse.empty({ status: 404 })),
+							ActionForbidden: () => Effect.succeed(HttpServerResponse.empty({ status: 403 })),
+						}),
+					);
+				}).pipe(
+					Effect.catchCause((cause) =>
+						Effect.logWarning(`The ${name} viewer's connection ended badly`, cause).pipe(
+							Effect.as(HttpServerResponse.empty({ status: 502 })),
+						),
 					),
 				),
-			),
+			);
+
+		yield* route("desktop", viewer.open, (browserSide, desktop) =>
+			relay(browserSide, upstream(desktop.endpoint), desktop.password),
+		);
+		yield* route(
+			"browser",
+			(turn) => Effect.map(viewer.openBrowser(turn), ({ screen }) => screen),
+			(browserSide, screen) => relay(browserSide, upstream(screen.endpoint), screen.password),
+		);
+		yield* route(
+			"browser/tabs",
+			(turn) => Effect.map(viewer.openBrowser(turn), ({ tabs }) => tabs),
+			(browserSide, tabs) => pipe(browserSide, tabsServer(tabs)),
 		);
 	}),
 );
 
 /**
- * The desktop's VNC server as a WebSocket, reached through the sandbox
+ * The browser's tabs server in the sandbox as a WebSocket, logged in to with
+ * the password as a bearer token.
+ */
+function tabsServer(browser: DesktopViewer.OpenDesktop) {
+	return Socket.fromWebSocket(
+		Effect.acquireRelease(
+			Effect.sync(
+				() =>
+					new WebSocket(browser.endpoint.url.replace(/^http/, "ws"), {
+						headers: { ...browser.endpoint.headers, authorization: `Bearer ${browser.password}` },
+					} as unknown as string[]),
+			),
+			(socket) => Effect.sync(() => socket.close()),
+		),
+		{ openTimeout: "10 seconds" },
+	);
+}
+
+/** Copies messages each way, text as text, until either side closes. */
+function pipe(browserSide: Socket.Socket, serverSide: Effect.Effect<Socket.Socket>) {
+	return Effect.scoped(
+		Effect.gen(function* () {
+			const server = yield* serverSide;
+			const [fromBrowser, fromServer] = yield* Effect.all([browserSide.reader, server.reader]);
+			const [toBrowser, toServer] = yield* Effect.all([browserSide.writer, server.writer]);
+			const copy = (from: Socket.Reader, to: Socket.Writer) =>
+				from.pull.pipe(
+					Effect.flatMap((messages) =>
+						Effect.forEach(messages, (message) => to.write(message), { discard: true }),
+					),
+					Effect.forever,
+				);
+			return yield* Effect.raceFirst(copy(fromBrowser, toServer), copy(fromServer, toBrowser));
+		}),
+	).pipe(Effect.ignore);
+}
+
+/**
+ * A display's VNC server as a WebSocket, reached through the sandbox
  * provider: websockify in front of Xvnc, or x11vnc itself in sandboxes made
  * from images before Xvnc.
  */

@@ -19,9 +19,11 @@ import {
 } from "./app.test-support.ts";
 
 /**
- * The desktop viewer's WebSocket, served on real ports: the API relays the
- * person's socket to the desktop's, here a stand-in that logs a viewer in as
- * x11vnc does, with VNC authentication, then echoes what it is sent.
+ * The desktop viewer's and browser tabs' WebSockets, served on real ports:
+ * the API relays the person's socket to the desktop's, here a stand-in that
+ * logs a viewer in as x11vnc does, with VNC authentication, then echoes what
+ * it is sent, and to the tabs server's, a stand-in that echoes to a viewer
+ * with its password.
  */
 const user = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
@@ -31,8 +33,10 @@ const user = {
 };
 const resolveUser: UserResolver = async (headers) =>
 	headers.get("cookie") === "session=good" ? user : null;
-const PATH =
-	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002/desktop";
+const AGENT_IN_THREAD =
+	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002";
+const PATH = `${AGENT_IN_THREAD}/desktop`;
+const TABS_PATH = `${AGENT_IN_THREAD}/browser/tabs`;
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
@@ -97,6 +101,35 @@ beforeAll(async () => {
 			}),
 		),
 	);
+	const tabsPort = await served(
+		Layer.effectDiscard(
+			Effect.gen(function* () {
+				const router = yield* HttpRouter.HttpRouter;
+				yield* router.add(
+					"GET",
+					"/",
+					Effect.gen(function* () {
+						const request = yield* HttpServerRequest.HttpServerRequest;
+						if (request.headers.authorization !== `Bearer ${PASSWORD}`) {
+							return HttpServerResponse.empty({ status: 401 });
+						}
+						const socket = yield* request.upgrade;
+						yield* Effect.scoped(
+							Effect.gen(function* () {
+								const write = yield* socket.writer;
+								const read = yield* socket.reader;
+								return yield* read.pull.pipe(
+									Effect.flatMap((frames) => Effect.forEach(frames, (frame) => write.write(frame))),
+									Effect.forever,
+								);
+							}),
+						).pipe(Effect.ignore);
+						return HttpServerResponse.empty();
+					}),
+				);
+			}),
+		),
+	);
 	apiPort = await served(
 		testRoutes(
 			Layer.mergeAll(
@@ -106,6 +139,17 @@ beforeAll(async () => {
 						Effect.succeed({
 							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
 							password: PASSWORD,
+						}),
+					openBrowser: () =>
+						Effect.succeed({
+							screen: {
+								endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
+								password: PASSWORD,
+							},
+							tabs: {
+								endpoint: { url: `http://127.0.0.1:${tabsPort}`, headers: {} },
+								password: PASSWORD,
+							},
 						}),
 				}),
 			),
@@ -161,5 +205,31 @@ describe("the desktop viewer's WebSocket", () => {
 		);
 
 		expect(response.status).toBe(401);
+	});
+});
+
+describe("the browser tabs' WebSocket", () => {
+	it("connects a signed-in person to the tabs server with its password, and relays text both ways", async () => {
+		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${TABS_PATH}`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+		const echoed = await new Promise<unknown>((resolve, reject) => {
+			socket.onopen = () => socket.send(JSON.stringify({ type: "reload" }));
+			socket.onmessage = (event) => resolve(event.data);
+			socket.onerror = () => reject(new Error("The socket failed"));
+		});
+		socket.close();
+
+		expect(echoed).toBe(JSON.stringify({ type: "reload" }));
+	});
+
+	it("refuses a page on another origin, cookie or not", async () => {
+		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
+			new Request(`http://localhost:3000${TABS_PATH}`, {
+				headers: { origin: "https://elsewhere.example", cookie: "session=good" },
+			}),
+		);
+
+		expect(response.status).toBe(403);
 	});
 });

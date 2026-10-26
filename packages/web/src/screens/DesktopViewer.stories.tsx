@@ -2,15 +2,16 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { DesktopScreen, LiveDesktopCard } from "./DesktopViewer.tsx";
+import { LiveDesktopCard, LiveScreen } from "./DesktopViewer.tsx";
 
 const meta = preview.meta({
-	title: "Product/DesktopScreen",
-	component: DesktopScreen,
+	title: "Product/LiveScreen",
+	component: LiveScreen,
 	tags: ["ai-generated"],
 	args: {
 		threadId: "0199a3a0-0000-7000-8000-000000000501",
 		agentId: "0199a3a0-0000-7000-8000-000000000502",
+		what: "desktop",
 		viewOnly: false,
 	},
 	decorators: [

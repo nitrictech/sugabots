@@ -1,0 +1,8 @@
+{
+	"name": "sugabots-browser-tabs",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"ws": "8.18.3"
+	}
+}

@@ -30,7 +30,6 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 RUN mkdir /icons \
 	&& cd /usr/share/icons/Papirus/64x64/apps \
-	&& cp -L chromium.svg /icons/browser.svg \
 	&& cp -L utilities-terminal.svg /icons/terminal.svg \
 	&& cp -L system-file-manager.svg /icons/files.svg
 
@@ -93,6 +92,10 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
+
+# The server the web app reads and changes the browser's tabs through.
+COPY browser-tabs/package.json browser-tabs/package-lock.json browser-tabs/server.mjs /usr/local/lib/sugabots-browser-tabs/
+RUN cd /usr/local/lib/sugabots-browser-tabs && npm ci --omit=dev && npm cache clean --force
 
 RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop
 

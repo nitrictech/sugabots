@@ -11,7 +11,7 @@ import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**
  * The browser tools: Playwright MCP's, run in the pod's sandbox by a browser
- * of the agent's own in each thread, on the agent's own desktop there, so
+ * of the agent's own in each thread, on a display of its own there, so
  * people watching see what it does. The tools are offered from the list the
  * image's server was built with; the browser starts on the first call.
  */
@@ -27,9 +27,9 @@ interface Failed {
 	error: UserText;
 }
 
-/** A desktop and browser for one agent in one thread, started on first use. */
+/** A browser for one agent in one thread, on its own display, started on first use. */
 export interface BrowserSession {
-	/** The session's name in the sandbox, which the viewer finds its desktop by. */
+	/** The session's name in the sandbox, which viewers find its display by. */
 	readonly name: string;
 	readonly call: (tool: string, input: unknown) => Promise<BrowserResult | Failed>;
 	/** Lets go of the connection to the browser. The browser carries on for later turns. */
@@ -46,33 +46,40 @@ export function sessionName(turn: { threadId: string; agentId: string }) {
 }
 
 /** An agent's desktop in a thread, running: where viewers reach it, and whether it had to start. */
-export interface Desktop {
-	/** The server a viewer may click and type through. */
-	readonly control: VncServer;
-	/** The server a viewer may only watch through. */
-	readonly watch: VncServer;
+export interface Desktop extends ViewerServers {
 	readonly started: boolean;
 }
 
-/** One of a desktop's VNC servers, which takes a WebSocket on its port. */
-export interface VncServer {
+/** The servers a viewer reaches one thing through: one to use it, one only to watch it. */
+export interface ViewerServers {
+	readonly control: ViewerServer;
+	readonly watch: ViewerServer;
+}
+
+/** A server a viewer reaches a desktop or browser through, which takes a WebSocket on its port. */
+export interface ViewerServer {
 	readonly port: number;
 	/** What it asks for: Sugabots' to know, never a person's. */
 	readonly password: string;
 }
 
-/** An agent's browser in a thread, running on its desktop. */
+/** An agent's browser in a thread, running on a display of its own. */
 export interface Browser {
-	readonly viewerPort: number;
 	/** Where its Playwright MCP server is. */
 	readonly browserPort: number;
 	/** Whether it had to start, so its tabs from before are gone. */
 	readonly started: boolean;
+	/**
+	 * Where people watch and use it: its display's VNC servers, and its tabs
+	 * server. Absent in sandboxes made from images from before the browser
+	 * had a display of its own.
+	 */
+	readonly viewers?: { readonly screen: ViewerServers; readonly tabs: ViewerServers };
 }
 
 /**
- * Starts the agent's desktop in the thread, without its browser, or finds it
- * running: what a person opening the desktop needs.
+ * Starts the agent's desktop in the thread, or finds it running: what a
+ * person opening the whole desktop needs. The agent's browser isn't on it.
  */
 export const startDesktop = (
 	sandbox: Sandboxes.Sandbox,
@@ -80,37 +87,48 @@ export const startDesktop = (
 	turn: { threadId: string; agentId: string },
 ) =>
 	Effect.flatMap(desktopCommand(sandbox, place, turn, "desktop"), (reported) =>
-		reported.watch === undefined ||
-		reported.password === undefined ||
-		reported.watchPassword === undefined
+		reported.watch === undefined || reported.passwords === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: IMAGE_BEFORE_PASSWORDS }))
 			: Effect.succeed<Desktop>({
-					control: { port: reported.viewer, password: reported.password },
-					watch: { port: reported.watch, password: reported.watchPassword },
+					...serversAt(reported.viewer, reported.passwords),
 					started: reported.started,
 				}),
 	);
 
 /**
- * Starts the agent's browser in the thread, on its desktop, or finds them
- * running: what the agent's browser calls need. A person who opened the
- * desktop first meets the same desktop, and the same browser if the dock
- * started it.
+ * Starts the agent's browser in the thread, on its own display, or finds
+ * them running: what the agent's browser calls and the people watching it
+ * need.
  */
 export const startBrowser = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
 	turn: { threadId: string; agentId: string },
 ) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (ports) =>
-		ports.browser === undefined
+	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (reported) =>
+		reported.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
 			: Effect.succeed<Browser>({
-					viewerPort: ports.viewer,
-					browserPort: ports.browser,
-					started: ports.started,
+					browserPort: reported.browser,
+					started: reported.started,
+					...(reported.tabs !== undefined && reported.passwords !== undefined
+						? {
+								viewers: {
+									screen: serversAt(reported.viewer, reported.passwords),
+									tabs: serversAt(reported.tabs, reported.passwords),
+								},
+							}
+						: {}),
 				}),
 	);
+
+/** The servers on `port`, taking a display's two passwords. */
+function serversAt(port: number, passwords: { control: string; watch: string }): ViewerServers {
+	return {
+		control: { port, password: passwords.control },
+		watch: { port, password: passwords.watch },
+	};
+}
 
 /**
  * Runs `sugabots-desktop desktop` or `session` for the agent in the thread,
@@ -124,8 +142,12 @@ const desktopCommand = (
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.agentId}`;
+		const browserDirectories =
+			command === "session"
+				? ` ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)}`
+				: "";
 		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)}`,
+			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))}${browserDirectories}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
@@ -138,13 +160,19 @@ const desktopCommand = (
 		if (ran.exitCode !== 0 || !Number.isInteger(viewer)) {
 			return yield* new DesktopUnavailable({ reason: NO_BROWSER });
 		}
+		const port = (name: string) =>
+			reported[name] === undefined ? undefined : Number(reported[name]);
+		const { password, "watch-password": watchPassword } = reported;
 		return {
 			viewer,
-			watch: reported.watch === undefined ? undefined : Number(reported.watch),
-			browser: reported.browser === undefined ? undefined : Number(reported.browser),
+			watch: port("watch"),
+			browser: port("browser"),
+			tabs: port("tabs"),
 			started: reported.started === "yes",
-			password: reported.password,
-			watchPassword: reported["watch-password"],
+			passwords:
+				password === undefined || watchPassword === undefined
+					? undefined
+					: { control: password, watch: watchPassword },
 		};
 	});
 

@@ -212,7 +212,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"gives the agent's browser the desktop a person opened, and shows it to them",
+		"gives a person the same desktop after the agent starts its browser, on a display of its own",
 		async () => {
 			const navigate = tools.browser_navigate?.execute as (
 				input: object,
@@ -248,6 +248,39 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
 
 			expect(await logsIn({ ...exit.value, password: "guessed!" })).toBe(false);
+		},
+		SLOW,
+	);
+
+	const openBrowserAs = (userId: string) =>
+		runOnPostgres(
+			Effect.exit(
+				Scope.provide(scope)(viewer.openBrowser({ threadId, agentId })).pipe(
+					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
+				),
+			),
+		);
+
+	it(
+		"shows the agent's browser on its own display, and its tabs, to someone who opens it",
+		async () => {
+			const exit = await openBrowserAs(ownerId);
+			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+
+			expect(exit.value.screen.endpoint.url).not.toBe(openedFirst);
+			expect(await logsIn(exit.value.screen)).toBe(true);
+			expect(await tabsOf(exit.value.tabs)).toContain("data:text/html,<h1>Watched</h1>");
+		},
+		SLOW,
+	);
+
+	it(
+		"keeps the browser's tabs from anything in the sandbox without its password",
+		async () => {
+			const exit = await openBrowserAs(ownerId);
+			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+
+			await expect(tabsOf({ ...exit.value.tabs, password: "guessed!" })).rejects.toThrow();
 		},
 		SLOW,
 	);
@@ -323,6 +356,25 @@ async function logsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promis
 	} catch (cause) {
 		if (cause instanceof SocketClosed) return false;
 		throw cause;
+	} finally {
+		socket.close();
+	}
+}
+
+/** The tabs' addresses a viewer with the password is first told of. */
+async function tabsOf({ endpoint, password }: DesktopViewer.OpenDesktop) {
+	const socket = new WebSocket(endpoint.url.replace(/^http/, "ws"), {
+		headers: { ...endpoint.headers, authorization: `Bearer ${password}` },
+	} as unknown as string[]);
+	try {
+		return await new Promise<string[]>((resolve, reject) => {
+			socket.onmessage = (event) => {
+				const message = JSON.parse(String(event.data));
+				resolve(message.tabs.map((tab: { url: string }) => tab.url));
+			};
+			socket.onerror = () => reject(new Error("The viewer's socket failed"));
+			socket.onclose = () => reject(new Error("The browser closed the socket"));
+		});
 	} finally {
 		socket.close();
 	}
