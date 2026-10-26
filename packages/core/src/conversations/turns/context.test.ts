@@ -475,6 +475,7 @@ function context(): TurnContext {
 			prompt: "Check facts carefully.",
 			disabledTools: [],
 			usesSandbox: false,
+			look: { color: "orange", face: "dot", shape: "circle" },
 			acceptsImages: false,
 		},
 		reason: "default",

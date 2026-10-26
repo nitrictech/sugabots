@@ -1,0 +1,44 @@
+/* The dock's look, the GTK theme only the dock's panel runs with, so its
+   rules reach no other window: the Sugabots theme, with a flat bar 8px
+   round each tile inside its hairline edge, a 2px ring round each running
+   app's tile, and a tile lifted and brightened under the pointer instead of
+   a label. sugabots-desktop gives each agent's desktop a copy whose ring is
+   the agent's colour. */
+@import url("../../Sugabots/gtk-3.0/gtk.css");
+
+.xfce4-panel.background {
+	border-radius: 14px;
+	border: 1px solid #2a2c33;
+}
+
+/* The plugin makes each button 7px wider than its tile, on the right, so
+   the margins even out every gap at 8px. */
+.xfce4-panel button {
+	padding: 0;
+	margin: 9px 1px 9px 0;
+	border: none;
+	border-radius: 13px;
+	background: none;
+	box-shadow: none;
+}
+.xfce4-panel button:first-child { margin-left: 9px; }
+.xfce4-panel button:last-child { margin-right: 9px; }
+
+.xfce4-panel button.open_group,
+.xfce4-panel button.active_group {
+	box-shadow: 0 0 0 2px #9096a1;
+}
+
+.xfce4-panel button.hover_group image {
+	-gtk-icon-effect: highlight;
+	-gtk-icon-transform: translateY(-2px);
+}
+/* A lifted tile would sit off-centre in its ring. */
+.xfce4-panel button.hover_group.open_group image,
+.xfce4-panel button.hover_group.active_group image {
+	-gtk-icon-transform: none;
+}
+
+/* The plugin labels each tile on hover, and GTK can't switch that off, so
+   the label is drawn invisible. */
+tooltip { opacity: 0; }

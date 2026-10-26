@@ -11,7 +11,12 @@ import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
-import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
+import {
+	type AgentLook,
+	type BrowserSession,
+	browserSession,
+	browserTools,
+} from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	type AttachToReply,
@@ -117,7 +122,7 @@ export const make = Effect.gen(function* () {
 		},
 	});
 	return Service.of({
-		forTurn: ({ pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach }) =>
+		forTurn: ({ pod, turnId, threadId, agentId, look, acceptsImages, usesSandbox, attach }) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
 				const place = placeOf({ threadId, agentId });
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
@@ -130,7 +135,7 @@ export const make = Effect.gen(function* () {
 							acceptsImages,
 							attach,
 							openSandbox: NEVER_OPENED,
-							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
+							browser: browserSession(NEVER_OPENED, place, { threadId, agentId, look }),
 							run: NEVER_RUN,
 							blocked: [],
 						}),
@@ -166,7 +171,7 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
-				const browser = browserSession(openSandbox, place, { threadId, agentId });
+				const browser = browserSession(openSandbox, place, { threadId, agentId, look });
 				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
 				const run = <A, E>(effect: Effect.Effect<A, E>) =>
 					runPromiseExit(effect).then((exit) => {
@@ -238,6 +243,8 @@ export interface Turn {
 	readonly turnId: string;
 	readonly threadId: string;
 	readonly agentId: string;
+	/** How the agent looks, which its desktop shows. */
+	readonly look: AgentLook;
 	/** Whether the agent's model takes images, which results then may carry. */
 	readonly acceptsImages: boolean;
 	/**

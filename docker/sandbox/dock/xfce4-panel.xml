@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The dock: one panel, free of the screen's edges so it floats 12px above
+     the bottom, 64px tall (9px of bar, a 46px tile, 9px of bar), as wide as
+     its tiles, holding the docklike plugin. Its look is the SugabotsDock GTK
+     theme. -->
+<channel name="xfce4-panel" version="1.0">
+	<property name="configver" type="int" value="2"/>
+	<property name="panels" type="array">
+		<value type="int" value="1"/>
+		<property name="dark-mode" type="bool" value="true"/>
+		<property name="panel-1" type="empty">
+			<property name="position" type="string" value="p=0;x=640;y=756"/>
+			<property name="position-locked" type="bool" value="true"/>
+			<property name="length" type="uint" value="1"/>
+			<property name="length-adjust" type="bool" value="true"/>
+			<property name="size" type="uint" value="64"/>
+			<property name="icon-size" type="uint" value="46"/>
+			<property name="background-style" type="uint" value="1"/>
+			<property name="background-rgba" type="array">
+				<value type="double" value="0.067"/>
+				<value type="double" value="0.071"/>
+				<value type="double" value="0.086"/>
+				<value type="double" value="0.96"/>
+			</property>
+			<property name="plugin-ids" type="array">
+				<value type="int" value="1"/>
+			</property>
+		</property>
+	</property>
+	<property name="plugins" type="empty">
+		<property name="plugin-1" type="string" value="docklike"/>
+	</property>
+</channel>

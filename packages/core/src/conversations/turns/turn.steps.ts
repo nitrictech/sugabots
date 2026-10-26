@@ -426,6 +426,7 @@ const streamReply = (
 				turnId: prepared.turnId,
 				threadId: prepared.context.thread.id,
 				agentId: prepared.context.agent.id,
+				look: prepared.context.agent.look,
 				acceptsImages: prepared.context.agent.acceptsImages,
 				// A conversation serves the files in its own thread, so only there can people be shown one.
 				...(prepared.context.thread.type === "conversation" && {

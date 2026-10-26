@@ -14,26 +14,6 @@
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 
-# The desktop's wallpaper, rendered at the display's size, so the renderer
-# doesn't ship in the image.
-FROM debian:trixie-slim AS wallpaper
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends librsvg2-bin \
-	&& rm -rf /var/lib/apt/lists/*
-COPY wallpaper.svg /wallpaper.svg
-RUN rsvg-convert --width 1280 --height 800 /wallpaper.svg --output /wallpaper.png
-
-# The dock's icons, from Papirus, without the rest of its 380 MB.
-FROM debian:trixie-slim AS dock-icons
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends papirus-icon-theme \
-	&& rm -rf /var/lib/apt/lists/*
-RUN mkdir /icons \
-	&& cd /usr/share/icons/Papirus/64x64/apps \
-	&& cp -L chromium.svg /icons/browser.svg \
-	&& cp -L utilities-terminal.svg /icons/terminal.svg \
-	&& cp -L system-file-manager.svg /icons/files.svg
-
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
@@ -48,9 +28,10 @@ RUN apt-get update \
 		build-essential pkg-config \
 		python3 python3-pip python3-venv \
 		nodejs npm \
-		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox plank dconf-gsettings-backend dconf-cli xcompmgr xterm \
-		xfonts-base dbus-x11 hsetroot \
-		lxterminal pcmanfm adwaita-icon-theme librsvg2-common \
+		tigervnc-standalone-server tigervnc-tools websockify x11-utils x11-xserver-utils \
+		xfwm4 xfce4-panel xfce4-docklike-plugin picom xterm \
+		xfonts-base dbus-x11 hsetroot fonts-inter fonts-jetbrains-mono \
+		lxterminal pcmanfm adwaita-icon-theme librsvg2-common librsvg2-bin \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -62,17 +43,32 @@ ARG PLAYWRIGHT_MCP_VERSION
 RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
 	&& npm cache clean --force
 
-COPY --from=wallpaper /wallpaper.png /usr/share/sugabots-desktop/wallpaper.png
-COPY --from=dock-icons /icons /usr/share/sugabots-desktop/icons
-# The dock's launchers stand in for the apps' own, so the dock matches their
-# windows to them, and its settings are the system's dconf defaults.
+# The wallpaper of a desktop Sugabots gives none, rendered at the display's
+# size. `sugabots-desktop` renders the ones it is given the same way.
+COPY wallpaper.svg /usr/share/sugabots-desktop/wallpaper.svg
+RUN rsvg-convert --width 1280 --height 800 /usr/share/sugabots-desktop/wallpaper.svg \
+	--output /usr/share/sugabots-desktop/wallpaper.png
+# The dock: an Xfce panel holding the docklike plugin. Its launchers stand
+# in for the apps' own, so the dock matches their windows to them. The
+# plugin reads its settings only from the user's home, where sugabots-desktop
+# puts them.
+COPY dock/icons/ /usr/share/sugabots-desktop/icons/
 COPY dock/*.desktop /usr/share/applications/
-COPY dock/plank/ /usr/share/sugabots-desktop/plank/
-COPY dock/plank-theme/dock.theme /usr/share/plank/themes/Sugabots/dock.theme
-COPY dock/plank.dconf /etc/dconf/db/local.d/00-plank
-RUN mkdir -p /etc/dconf/profile \
-	&& printf 'user-db:user\nsystem-db:local\n' >/etc/dconf/profile/user \
-	&& dconf update
+COPY dock/xfce4-panel.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+COPY dock/docklike.rc /usr/share/sugabots-desktop/docklike.rc
+COPY dock/theme/ /usr/share/themes/SugabotsDock/
+# The windows' look: xfwm4's frames, drawn by sugabots-window-theme with the
+# theme's own edge round the focused window until a desktop is given an
+# accent, GTK's for the terminal and file manager, the terminal's colours,
+# and the compositor's shadows.
+COPY theme/ /usr/share/themes/Sugabots/
+COPY sugabots-window-theme /usr/local/bin/sugabots-window-theme
+RUN sugabots-window-theme '#2a2c33' /usr/share/themes/Sugabots
+COPY xfwm4/xfwm4.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+COPY picom.conf /usr/share/sugabots-desktop/picom.conf
+# GTK reads its system settings from /etc/gtk-3.0; it ignores /etc/xdg here.
+COPY gtk/settings.ini /etc/gtk-3.0/settings.ini
+COPY lxterminal/lxterminal.conf /usr/share/lxterminal/lxterminal.conf
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
 # or `nix shell nixpkgs#ffmpeg` for one command. The agents' user owns the
 # store, so it installs without root. `nixpkgs` follows a NixOS release and

@@ -1,0 +1,67 @@
+/* The terminal's and file manager's look: GTK's own dark Adwaita, on the web
+   app's surfaces and accent rather than Adwaita's greys and blue. Each rule
+   covers :backdrop too, the state of a window without focus, or Adwaita's
+   greys come back whenever another window is in front. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+
+@define-color sugabots_ground #111216;
+@define-color sugabots_panel #15161a;
+@define-color sugabots_chip #1d1f25;
+@define-color sugabots_hover #262830;
+@define-color sugabots_border #2a2c33;
+@define-color sugabots_foreground #dcdee3;
+@define-color sugabots_muted #7d838e;
+@define-color sugabots_accent #4757c9;
+
+window, .background, window:backdrop, .background:backdrop {
+	background-color: @sugabots_panel;
+	color: @sugabots_foreground;
+}
+.view, iconview, treeview.view, scrolledwindow viewport, textview text,
+.view:backdrop, iconview:backdrop, treeview.view:backdrop, scrolledwindow viewport:backdrop,
+textview text:backdrop {
+	background-color: @sugabots_ground;
+}
+
+headerbar, menubar, toolbar, .toolbar, .inline-toolbar, notebook > header, statusbar,
+headerbar:backdrop, menubar:backdrop, toolbar:backdrop, .toolbar:backdrop,
+.inline-toolbar:backdrop, notebook > header:backdrop, statusbar:backdrop {
+	background-color: @sugabots_panel;
+	background-image: none;
+	border-color: @sugabots_border;
+	box-shadow: none;
+}
+notebook > header tab:checked { box-shadow: inset 0 -2px @sugabots_accent; }
+
+button, entry, combobox button, .linked > button,
+button:backdrop, entry:backdrop, combobox button:backdrop, .linked > button:backdrop {
+	background-color: @sugabots_chip;
+	background-image: none;
+	border-color: @sugabots_border;
+	box-shadow: none;
+	text-shadow: none;
+}
+button:hover { background-color: @sugabots_hover; }
+entry:focus { border-color: @sugabots_accent; box-shadow: inset 0 0 0 1px @sugabots_accent; }
+label:backdrop, entry:backdrop { color: @sugabots_muted; }
+
+.sidebar, placessidebar, placessidebar list,
+.sidebar:backdrop, placessidebar:backdrop, placessidebar list:backdrop {
+	background-color: @sugabots_panel;
+	border-color: @sugabots_border;
+}
+
+*:selected, .view:selected, iconview:selected, treeview.view:selected, selection,
+row:selected, menuitem:hover, menu menuitem:hover {
+	background-color: @sugabots_accent;
+	color: #ffffff;
+}
+
+menu, .menu, .context-menu, popover.background {
+	background-color: @sugabots_panel;
+	border: 1px solid @sugabots_border;
+}
+
+scrollbar, scrollbar:backdrop { background-color: transparent; border: none; }
+scrollbar slider { background-color: alpha(#ffffff, 0.18); min-width: 6px; min-height: 6px; border: none; }
+scrollbar slider:hover { background-color: alpha(#ffffff, 0.3); }

@@ -1,16 +1,9 @@
-import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ComponentProps } from "react";
 import { botColors } from "./bot-colors.ts";
+import type { BotLook } from "./bot-look.ts";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "./face-marks.ts";
 import { type HeadPart, headShape } from "./head-shapes.ts";
-
-/** How a bot looks. A look without a shape is a circle, as every bot was before shapes. */
-export interface BotLook {
-	color: AgentColor;
-	face: AgentFace;
-	shape?: AgentShape;
-}
 
 type BotFaceProps = BotLook &
 	Omit<ComponentProps<"svg">, "color"> & {

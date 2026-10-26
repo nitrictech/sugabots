@@ -1,4 +1,4 @@
-import type { BotLook } from "./bot-face.tsx";
+import type { BotLook } from "./bot-look.ts";
 
 /** One face in the crowd, posed by hand. */
 export interface CrowdMember extends BotLook {

@@ -93,6 +93,7 @@ const prepared: PreparedTurn = {
 			prompt: "",
 			disabledTools: [],
 			usesSandbox: false,
+			look: { color: "orange", face: "dot", shape: "circle" },
 			acceptsImages: false,
 		},
 		reason: "default",

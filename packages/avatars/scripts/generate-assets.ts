@@ -3,6 +3,8 @@
  * or other formats:
  *
  * - assets/bot-crowd.svg: the loose row of faces in src/bot-crowd.ts.
+ * - docker/sandbox/wallpaper.svg: the sandbox desktop's wallpaper, from
+ *   src/desktop-wallpaper.ts.
  * - assets/sugabots-logo.svg: the mark in src/sugabots-logo.ts.
  * - assets/sugabots-wordmark-light.svg and assets/sugabots-wordmark-dark.svg:
  *   the mark beside "Sugabots" in Rubik ExtraBold, as the website's header
@@ -17,59 +19,16 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import opentype from "opentype.js";
-import { botColors } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
-import type { BotLook } from "../src/bot-face.tsx";
-import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
-import { type HeadPart, headShape } from "../src/head-shapes.ts";
+import { crowdWallpaperSvg } from "../src/desktop-wallpaper.ts";
+import { placedBotFaceSvg } from "../src/face-svg.ts";
 import { LOGO_SIZE, sugabotsLogo } from "../src/sugabots-logo.ts";
-
-function markElement(mark: FaceMark, eyesHex: string): string {
-	switch (mark.shape) {
-		case "circle":
-			return `<circle cx="${mark.cx}" cy="${mark.cy}" r="${mark.r}" fill="${eyesHex}"/>`;
-		case "rect":
-			return `<rect x="${mark.x}" y="${mark.y}" width="${mark.width}" height="${mark.height}" rx="${mark.rx}" fill="${eyesHex}"/>`;
-		case "stroke":
-			return `<path d="${mark.d}" fill="none" stroke="${eyesHex}" stroke-width="${mark.strokeWidth}" stroke-linecap="round"/>`;
-	}
-}
-
-function partElement(part: HeadPart, fill: string): string {
-	return part.kind === "circle"
-		? `<circle cx="${part.cx}" cy="${part.cy}" r="${part.r}" fill="${fill}"/>`
-		: `<path d="${part.d}" fill="${fill}"/>`;
-}
-
-function faceElements({ color, face, shape = "circle" }: BotLook): string {
-	const faceHex = botColors[color].face;
-	const eyesHex = botColors[color].eyes;
-	const head = headShape(shape);
-	const centre = FACE_VIEWBOX_SIZE / 2;
-	const { x, y, scale } = head.eyes;
-	const parts = head.parts.map((part) => partElement(part, faceHex)).join("");
-	const marks = faceMarks(face)
-		.map((mark) => markElement(mark, eyesHex))
-		.join("");
-	// Eyes where a circle has them need no moving, which keeps a circle's markup as it was before shapes.
-	const centred = x === centre && y === centre && scale === 1;
-	return centred
-		? parts + marks
-		: `${parts}<g transform="translate(${x} ${y}) scale(${scale}) translate(${-centre} ${-centre})">${marks}</g>`;
-}
 
 function writeAsset(name: string, width: number, height: number, content: string) {
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${content}</svg>\n`;
 	const outputPath = new URL(`../assets/${name}`, import.meta.url);
 	writeFileSync(outputPath, svg);
 	console.log(`Wrote ${outputPath.pathname} (${width}×${height})`);
-}
-
-/** A face drawn at `size` pixels with its top-left corner at (x, y). */
-function placedFace(bot: BotLook, x: number, y: number, size: number, rotate = 0): string {
-	const centre = size / 2;
-	const scale = size / FACE_VIEWBOX_SIZE;
-	return `<g transform="translate(${x} ${y}) rotate(${rotate} ${centre} ${centre}) scale(${scale})">${faceElements(bot)}</g>`;
 }
 
 function writeBotCrowd() {
@@ -82,7 +41,7 @@ function writeBotCrowd() {
 	const width = crowd.length * facePx + (crowd.length - 1) * gapPx;
 	const height = facePx + maxLift - minLift;
 	const faces = crowd.map((bot, index) =>
-		placedFace(bot, index * (facePx + gapPx), maxLift - bot.lift, facePx, bot.rotate),
+		placedBotFaceSvg(bot, index * (facePx + gapPx), maxLift - bot.lift, facePx, bot.rotate),
 	);
 	writeAsset("bot-crowd.svg", width, height, faces.join(""));
 }
@@ -157,6 +116,14 @@ function writeSugabotsWordmark() {
 	}
 }
 
+/** The wallpaper the sandbox image ships, in docker/sandbox, whose image builds only from that directory. */
+function writeSandboxWallpaper() {
+	const outputPath = new URL("../../../docker/sandbox/wallpaper.svg", import.meta.url);
+	writeFileSync(outputPath, crowdWallpaperSvg());
+	console.log(`Wrote ${outputPath.pathname}`);
+}
+
 writeBotCrowd();
+writeSandboxWallpaper();
 writeAsset("sugabots-logo.svg", LOGO_SIZE, LOGO_SIZE, sugabotsLogoElements());
 writeSugabotsWordmark();

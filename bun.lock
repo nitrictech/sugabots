@@ -74,6 +74,7 @@
         "@opencode-ai/models": "^0.0.106",
         "@openrouter/ai-sdk-provider": "^3.1.0",
         "@sugabots/accounting": "workspace:*",
+        "@sugabots/avatars": "workspace:*",
         "@sugabots/contracts": "workspace:*",
         "@sugabots/docs": "workspace:*",
         "@sugabots/errors": "workspace:*",

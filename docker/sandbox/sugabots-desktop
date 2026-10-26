@@ -4,8 +4,8 @@
 #
 #   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
 #   sugabots-desktop stop display                  stop it, and its browser
-#   sugabots-desktop desktop name profile output   the desktop for `name`, without a browser
-#   sugabots-desktop session name profile output   the desktop for `name`, with its browser
+#   sugabots-desktop desktop name profile output [look]   the desktop for `name`, without a browser
+#   sugabots-desktop session name profile output [look]   the desktop for `name`, with its browser
 #   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
@@ -16,6 +16,10 @@
 # prints `display=N viewer=PORT watch=PORT browser=PORT started=yes|no
 # password=P watch-password=P`, where `started` says whether the browser had
 # to start; `desktop` prints the same without `browser`.
+#
+# `look` is whose desktop it is: `--wallpaper FILE`, an SVG drawn over the
+# whole screen, and `--accent #RRGGBB`, the edge of the focused window. Each
+# applies to the running desktop and to it from then on, across restarts.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
 # people watching see what the agent does, in Chromium's own sandbox where the
@@ -88,17 +92,92 @@ desktop() {
 	# The dock matches windows to its apps through a service on the session bus.
 	eval "$(dbus-launch --sh-syntax)"
 	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
-	hsetroot -fill /usr/share/sugabots-desktop/wallpaper.png >>"$log" 2>&1
-	openbox >>"$log" 2>&1 &
+	# Where the window manager's settings are, for `set_look` to reload its theme.
+	echo "$DBUS_SESSION_BUS_ADDRESS" >"$state/$n.bus"
+	# Adwaita's cursors for every program on it, and an arrow over the desktop
+	# rather than the X server's own cross. Before the wallpaper: xsetroot
+	# clears the property the compositor finds the wallpaper by.
+	export XCURSOR_THEME=Adwaita
+	xsetroot -cursor_name left_ptr >>"$log" 2>&1
+	local wallpaper=/usr/share/sugabots-desktop/wallpaper.png
+	[ -f "$state/$n.wallpaper.png" ] && wallpaper="$state/$n.wallpaper.png"
+	hsetroot -fill "$wallpaper" >>"$log" 2>&1
+	write_theme "$n"
+	# xfwm4 looks for its theme in the data directories in order, so it finds
+	# this display's, if it has one, before the image's.
+	XDG_DATA_DIRS="$state/$n.share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+		xfwm4 >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# For the dock's shadows and see-through background.
-	xcompmgr -n >>"$log" 2>&1 &
+	picom --config /usr/share/sugabots-desktop/picom.conf >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# The dock's items are read from the home it runs with.
-	mkdir -p "$HOME/.config/plank/dock1/launchers"
-	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
-	plank >>"$log" 2>&1 &
+	# The dock's plugin reads its settings only from the home it runs with.
+	# It runs with a theme of its own; the apps it opens drop it.
+	mkdir -p "$HOME/.config/xfce4/panel"
+	cp /usr/share/sugabots-desktop/docklike.rc "$HOME/.config/xfce4/panel/docklike-1.rc"
+	XDG_DATA_DIRS="$state/$n.share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" GTK_THEME=SugabotsDock \
+		xfce4-panel >>"$log" 2>&1 &
 	echo $! >>"$pids"
+}
+
+# Display N's copies of the window and dock themes, its focused window
+# edged and its running apps ringed in the display's accent, if it was given
+# one.
+write_theme() {
+	local themes="$state/$1.share/themes"
+	rm -rf "$themes"
+	[ -f "$state/$1.accent" ] || return 0
+	local accent
+	accent="$(cat "$state/$1.accent")"
+	sugabots-window-theme "$accent" "$themes/Sugabots"
+	mkdir -p "$themes/SugabotsDock/gtk-3.0"
+	cat >"$themes/SugabotsDock/gtk-3.0/gtk.css" <<-EOF
+		@import url("/usr/share/themes/SugabotsDock/gtk-3.0/gtk.css");
+		.xfce4-panel button.open_group, .xfce4-panel button.active_group { box-shadow: 0 0 0 2px $accent; }
+	EOF
+}
+
+# Reads `desktop` and `session`'s look into `wallpaper` and `accent`, empty
+# for what it leaves as it is.
+look_options() {
+	wallpaper="" accent=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--wallpaper) wallpaper="${2:?wallpaper file}" ;;
+		--accent) accent="${2:?accent colour}" ;;
+		*)
+			echo "unknown option: $1" >&2
+			exit 2
+			;;
+		esac
+		shift 2
+	done
+	# It goes into the theme through sed, so nothing but a colour may.
+	if [ -n "$accent" ] && ! [[ "$accent" =~ ^#[0-9a-fA-F]{6}$ ]]; then
+		echo "accent must be #RRGGBB: $accent" >&2
+		exit 2
+	fi
+}
+
+# Gives display N the look read by `look_options`, kept for when it restarts.
+# Each part is redrawn only when it changed.
+set_look() {
+	local n="$1" log="$state/$1.log"
+	if [ -n "$wallpaper" ] && ! cmp -s "$wallpaper" "$state/$n.wallpaper.svg"; then
+		rsvg-convert --width 1280 --height 800 "$wallpaper" --output "$state/$n.wallpaper.png"
+		cp "$wallpaper" "$state/$n.wallpaper.svg"
+		DISPLAY=":$n" hsetroot -fill "$state/$n.wallpaper.png" >>"$log" 2>&1
+	fi
+	if [ -n "$accent" ] && [ "$accent" != "$(cat "$state/$n.accent" 2>/dev/null)" ]; then
+		echo "$accent" >"$state/$n.accent"
+		write_theme "$n"
+		# xfwm4 reloads its theme only when its name changes, so it changes
+		# twice. The dock reads its theme when it starts, so it restarts.
+		local bus
+		bus="$(cat "$state/$n.bus")"
+		DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Default
+		DBUS_SESSION_BUS_ADDRESS="$bus" xfconf-query -c xfwm4 -p /general/theme -s Sugabots
+		DISPLAY=":$n" DBUS_SESSION_BUS_ADDRESS="$bus" xfce4-panel --restart >>"$log" 2>&1
+	fi
 }
 
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
@@ -175,8 +254,10 @@ browser() {
 	# Maximized, so it stops at the dock. The profile is
 	# found through XDG_CONFIG_HOME rather than --user-data-dir, which would
 	# put its path in the windows' names, and the dock would no longer know
-	# them as the Browser's.
-	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
+	# them as the Browser's. Light GTK rather than the desktop's dark, which
+	# Chromium would pass on to pages as `prefers-color-scheme: dark`, so
+	# agents see sites as most of their visitors do.
+	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" GTK_THEME=Adwaita:light chromium $(chromium_sandbox_flags) --start-maximized \
 		--class=sugabots-browser \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
 		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
@@ -225,12 +306,16 @@ named_desktop() {
 }
 
 desktop_only() {
+	look_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	set_look "$n"
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
+	look_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	set_look "$n"
 	local started=no
 	if ! running "$n" browser; then
 		stop_part "$n" browser
@@ -264,9 +349,9 @@ open() {
 		browser "$n" "$profile" "$output"
 		;;
 	terminal)
-		exec lxterminal --working-directory=/workspace
+		exec env -u GTK_THEME lxterminal --working-directory=/workspace
 		;;
-	files) exec pcmanfm /workspace ;;
+	files) exec env -u GTK_THEME pcmanfm /workspace ;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2
 		exit 2
@@ -281,12 +366,12 @@ start)
 	echo "DISPLAY=:$n"
 	;;
 stop) stop "${2:-}" ;;
-desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" ;;
-session) session "${2:-}" "${3:-}" "${4:-}" ;;
+desktop) desktop_only "${@:2}" ;;
+session) session "${@:2}" ;;
 viewer) viewer "${2:-}" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [look] | session name profile output [look] | viewer name | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac

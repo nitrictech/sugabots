@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { agentDesktopLook } from "@sugabots/avatars/desktop-wallpaper";
+import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { Data, Effect } from "effect";
@@ -40,6 +42,20 @@ const SCREENSHOT_TOOL = "browser_take_screenshot";
 const IMAGE_BEFORE_PASSWORDS = userText`This sandbox's image is from before desktops had passwords. Upgrade the pod's sandbox to open its desktop.`;
 const NO_BROWSER = userText`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
+/** How an agent looks: its colour, face and head shape. */
+export interface AgentLook {
+	readonly color: AgentColor;
+	readonly face: AgentFace;
+	readonly shape: AgentShape;
+}
+
+/** An agent in a thread, whose desktop shows its look. */
+export interface AgentInThread {
+	readonly threadId: string;
+	readonly agentId: string;
+	readonly look: AgentLook;
+}
+
 /** The session's name for an agent in a thread: one desktop and browser each. */
 export function sessionName(turn: { threadId: string; agentId: string }) {
 	return `${turn.threadId}-${turn.agentId}`;
@@ -74,11 +90,7 @@ export interface Browser {
  * Starts the agent's desktop in the thread, without its browser, or finds it
  * running: what a person opening the desktop needs.
  */
-export const startDesktop = (
-	sandbox: Sandboxes.Sandbox,
-	place: Place,
-	turn: { threadId: string; agentId: string },
-) =>
+export const startDesktop = (sandbox: Sandboxes.Sandbox, place: Place, turn: AgentInThread) =>
 	Effect.flatMap(desktopCommand(sandbox, place, turn, "desktop"), (reported) =>
 		reported.watch === undefined ||
 		reported.password === undefined ||
@@ -97,11 +109,7 @@ export const startDesktop = (
  * desktop first meets the same desktop, and the same browser if the dock
  * started it.
  */
-export const startBrowser = (
-	sandbox: Sandboxes.Sandbox,
-	place: Place,
-	turn: { threadId: string; agentId: string },
-) =>
+export const startBrowser = (sandbox: Sandboxes.Sandbox, place: Place, turn: AgentInThread) =>
 	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (ports) =>
 		ports.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
@@ -119,13 +127,20 @@ export const startBrowser = (
 const desktopCommand = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
-	turn: { threadId: string; agentId: string },
+	turn: AgentInThread,
 	command: "desktop" | "session",
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.agentId}`;
+		const look = agentDesktopLook(turn.look);
+		const wallpaper = `${directory}/wallpaper.svg`;
+		// Images from before desktops had looks ignore the options.
 		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)}`,
+			[
+				`mkdir -p ${Sandboxes.shellQuoted(place.home)} ${Sandboxes.shellQuoted(directory)}`,
+				`printf %s ${Sandboxes.shellQuoted(look.wallpaperSvg)} >${Sandboxes.shellQuoted(wallpaper)}`,
+				`sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)} --wallpaper ${Sandboxes.shellQuoted(wallpaper)} --accent ${Sandboxes.shellQuoted(look.accent)}`,
+			].join(" && "),
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
@@ -161,7 +176,7 @@ export class DesktopUnavailable
 export function browserSession(
 	openSandbox: OpenSandbox,
 	place: Place,
-	turn: { threadId: string; agentId: string },
+	turn: AgentInThread,
 ): BrowserSession {
 	const name = sessionName(turn);
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;

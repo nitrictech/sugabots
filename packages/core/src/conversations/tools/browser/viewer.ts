@@ -98,7 +98,11 @@ export const make = Effect.gen(function* () {
 				const holder: PodSandboxes.Holder = { kind: "viewer", id: yield* ids.random };
 				yield* Effect.addFinalizer(() => podSandboxes.release(holder));
 				const { sandbox } = yield* podSandboxes.open(pod, provider, holder);
-				const turn = { threadId, agentId };
+				const turn = {
+					threadId,
+					agentId,
+					look: { color: agent.color, face: agent.face, shape: agent.shape },
+				};
 				const desktop = yield* startDesktop(sandbox, placeOf(turn), turn);
 				// The watch server ignores input, so a viewer's mouse and keys never
 				// reach the desktop, whatever their client sends.

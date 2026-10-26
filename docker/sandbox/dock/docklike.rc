@@ -1,0 +1,10 @@
+# The dock's apps and how it draws them: the three launchers, at 46px, with
+# none of the plugin's own indicators or previews. The SugabotsDock theme
+# marks running apps instead.
+[user]
+pinned=/usr/share/applications/chromium.desktop;/usr/share/applications/lxterminal.desktop;/usr/share/applications/pcmanfm.desktop;
+indicatorStyle=5
+inactiveIndicatorStyle=5
+forceIconSize=true
+iconSize=46
+showPreviews=false

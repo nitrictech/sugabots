@@ -25,6 +25,7 @@ import {
 	personColumns,
 	toParticipant,
 } from "../threads/participants.ts";
+import type { AgentLook } from "../tools/browser/browser.ts";
 import {
 	estimatedTokens,
 	historyLimitTokens,
@@ -191,6 +192,7 @@ export const make = Effect.gen(function* () {
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
 									podId: loaded.podId,
+									look: { color: speaker.color, face: speaker.face, shape: speaker.shape },
 								},
 								reason: request.reason,
 								podName: loaded.pod.name,
@@ -290,6 +292,8 @@ export interface TurnContext {
 		/** Whether an admin let this agent use its pod's sandbox. */
 		usesSandbox: boolean;
 		podId: string;
+		/** How it looks, which its desktop in the sandbox shows. */
+		look: AgentLook;
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;

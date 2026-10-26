@@ -172,6 +172,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					turnId: "turn-1",
 					threadId,
 					agentId,
+					look: { color: "orange", face: "dot", shape: "circle" },
 					acceptsImages: false,
 				}),
 			),
