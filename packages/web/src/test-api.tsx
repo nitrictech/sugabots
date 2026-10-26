@@ -1,12 +1,14 @@
 import {
 	type Agent,
 	administersWorkspace,
+	type Conversation,
 	type ModelProvider,
 	type Pod,
 	type PodPermissions,
 	type SessionUser,
 	type StreamEvent,
 	type SystemAgent,
+	type ThreadDetails,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
@@ -330,6 +332,51 @@ export const builtInAgents: SystemAgent[] = [
 export const scribe = builtInAgents[0] as SystemAgent;
 export const compaction = builtInAgents[1] as SystemAgent;
 
+/** The conversation with `agent`, one per bot, by the bot's id. */
+export function conversationWith(agent: Agent): Conversation {
+	return {
+		id: `${agent.id.slice(0, -4)}c${agent.id.slice(-3)}`,
+		workspaceId: agent.workspaceId,
+		podId: agent.podId,
+		hostAgentId: agent.id,
+		title: `Conversation with ${agent.name}`,
+		createdAt: "2026-09-18T08:00:00.000Z",
+		updatedAt: "2026-09-18T08:00:00.000Z",
+	};
+}
+
+/** The conversation with `agent` as the thread API returns it, with nothing said yet. */
+export function conversationDetails(agent: Agent): ThreadDetails {
+	const conversation = conversationWith(agent);
+	const participant = {
+		kind: "agent" as const,
+		id: agent.id,
+		name: agent.name,
+		handle: agent.handle,
+		color: agent.color,
+		face: agent.face,
+		shape: agent.shape,
+	};
+	return {
+		thread: {
+			...conversation,
+			conversationId: conversation.id,
+			type: "conversation",
+			status: "done",
+			parentThreadId: null,
+			initiatorUserId: null,
+		},
+		routineExecution: null,
+		participants: [participant],
+		crew: [participant],
+		members: [],
+		messages: [],
+		olderMessagesCursor: null,
+		queuedSince: null,
+		reads: [],
+	};
+}
+
 /** What the mocked API answers before a test says otherwise. */
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.thread.mockImplementation(() => quietEventStream());
@@ -401,7 +448,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({
 					agent,
-					chat: null,
+					conversation: null,
 					lastMessage: null,
 					waitingOn: null,
 					unreadMessages: 0,
@@ -409,14 +456,21 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				})),
 		});
 	});
-	client.api.chats.getOrCreate.mockReturnValue(
-		Effect.fail(new NotFound({ message: userText`No chat fixture` })),
-	);
+	const crew = [...agents, personalAssistant];
+	client.api.chats.open.mockImplementation(({ payload }: { payload: { hostAgentId: string } }) => {
+		const agent = crew.find((one) => one.id === payload.hostAgentId);
+		return agent
+			? Effect.succeed(conversationWith(agent))
+			: Effect.fail(new NotFound({ message: userText`No conversation fixture` }));
+	});
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.threads.get.mockReturnValue(
-		Effect.fail(new NotFound({ message: userText`No such thread` })),
-	);
+	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
+		const agent = crew.find((one) => conversationWith(one).id === params.threadId);
+		return agent
+			? Effect.succeed(conversationDetails(agent))
+			: Effect.fail(new NotFound({ message: userText`No such thread` }));
+	});
 	client.api.threads.activity.mockReturnValue(
 		Effect.fail(new NotFound({ message: userText`No such thread` })),
 	);

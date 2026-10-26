@@ -1,8 +1,7 @@
-import type { ActivityItem, Agent, Pod } from "@sugabots/contracts";
+import type { ActivityItem, Pod } from "@sugabots/contracts";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
 import { useActivityFeed } from "@/lib/chats.ts";
 import { activityThreadLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
@@ -53,7 +52,6 @@ export function ActivityList({
 }) {
 	const feed = useActivityFeed();
 	const { data: pods } = usePods();
-	const { agents } = useAgents();
 	const [tab, setTab] = useState<TabId>("all");
 	const items = feed.data?.items ?? [];
 	const navigate = useNavigate();
@@ -62,19 +60,15 @@ export function ActivityList({
 		return kinds ? items.filter((item) => kinds.includes(item.kind)) : items;
 	};
 	const shown = shownUnder(tab);
-	const placeOf = (item: ActivityItem) => {
-		const pod = pods?.find((candidate) => candidate.id === item.podId);
-		const chatAgent = agents?.find((candidate) => candidate.id === item.chatAgentId);
-		return pod && chatAgent ? { pod, chatAgent } : undefined;
-	};
+	const podOf = (item: ActivityItem) => pods?.find((candidate) => candidate.id === item.podId);
 
 	/** Shows a pill's items and, where its pane is beside the list, opens the first of them. */
 	function choose(id: TabId) {
 		setTab(id);
 		const [first] = shownUnder(id);
 		if (!first || !matchesMedia(SIDE_BY_SIDE)) return;
-		const place = placeOf(first);
-		if (place) void navigate(activityItemLink(first, place));
+		const pod = podOf(first);
+		if (pod) void navigate(activityItemLink(first, pod));
 	}
 
 	return (
@@ -91,7 +85,7 @@ export function ActivityList({
 					<li key={itemIdOf(item)}>
 						<ActivityRow
 							item={item}
-							place={placeOf(item)}
+							pod={podOf(item)}
 							selected={itemIdOf(item) === selectedItemId}
 						/>
 					</li>
@@ -213,35 +207,32 @@ function itemIdOf(item: ActivityItem): string {
 
 /**
  * Where a row opens, beside the list: a run or collaboration as a page of its
- * own, and a message in its chat, jumped to. Either way the row is marked.
+ * own, and a message in its conversation, jumped to. Either way the row is
+ * marked. `pod` is the pod the item is in.
  */
-function activityItemLink(item: ActivityItem, { pod, chatAgent }: ItemPlace) {
+function activityItemLink(item: ActivityItem, pod: Pod) {
+	const place = { pod, conversationId: item.conversationId };
 	if (item.kind === "routine" || item.kind === "collaboration") {
-		return activityThreadLink({ pod, agent: chatAgent }, item.threadId);
+		return activityThreadLink(place, item.threadId);
 	}
 	return linkOptions({
 		from: "/$workspace",
-		to: "./activity/$pod/$agent",
-		params: { pod: pod.slug, agent: chatAgent.handle },
+		to: "./activity/$pod/$conversation",
+		params: { pod: pod.slug, conversation: item.conversationId },
 		search: { item: item.messageId, message: item.messageId },
 	});
-}
-
-/** The pod and the bot whose chat an item is in. */
-interface ItemPlace {
-	pod: Pod;
-	chatAgent: Agent;
 }
 
 /** One thing that happened: what and when, a line about it, and where it opens. */
 function ActivityRow({
 	item,
-	place,
+	pod,
 	selected,
 }: {
 	item: ActivityItem;
 	/** Unknown while the pods and bots load, when the row cannot open yet. */
-	place: ItemPlace | undefined;
+	/** The pod the item is in, once the pods are loaded. */
+	pod: Pod | undefined;
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
@@ -270,10 +261,10 @@ function ActivityRow({
 		</>
 	);
 	const layout = "flex gap-2.5 rounded-tail px-2.5 py-2";
-	if (!place) return <div className={layout}>{content}</div>;
+	if (!pod) return <div className={layout}>{content}</div>;
 	return (
 		<Link
-			{...activityItemLink(item, place)}
+			{...activityItemLink(item, pod)}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				layout,

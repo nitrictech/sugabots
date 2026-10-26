@@ -8,7 +8,7 @@ import {
 	appHandlers,
 	StoryApp,
 	storyChatDetails,
-	storyChatFor,
+	storyConversationFor,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
@@ -20,7 +20,7 @@ import {
 
 const API = import.meta.env.VITE_API_URL as string;
 
-const chat = storyChatFor(growthDesk);
+const chat = storyConversationFor(growthDesk);
 const bot = {
 	kind: "agent" as const,
 	id: growthDesk.id,
@@ -39,7 +39,7 @@ const messages: ChatMessage[] = Array.from({ length: 24 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-000000000a${String(index).padStart(2, "0")}`,
-		threadId: chat.mainThreadId,
+		threadId: chat.id,
 		author:
 			index === 3
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
@@ -87,6 +87,7 @@ const run: ThreadDetails = {
 		workspaceId: revenue.workspaceId,
 		agentId: growthDesk.id,
 		threadId: RUN,
+		conversationId: chat.id,
 		routineName: "Overnight outbound",
 		instructions: "Queue the overnight leads and draft replies to anyone who answered.",
 		trigger: {
@@ -120,7 +121,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/threads/${RUN}`, () => HttpResponse.json(run)),
-			http.get(`${API}/chats/:chatId/history`, () =>
+			http.get(`${API}/conversations/:conversationId/history`, () =>
 				HttpResponse.json({ items: [runEntry], nextCursor: null }),
 			),
 			...appHandlers({ messages: { [growthDesk.id]: messages } }),
@@ -129,7 +130,7 @@ const meta = preview.meta({
 });
 
 const opened = (search: string) =>
-	`/${storyWorkspace.slug}/activity/${revenue.slug}/${growthDesk.handle}?${search}`;
+	`/${storyWorkspace.slug}/activity/${revenue.slug}/${chat.id}?${search}`;
 
 /** A mention opened in its chat: the chat jumps to it, points it out, and puts the focus on it. */
 export const MessageJumpedTo = meta.story({

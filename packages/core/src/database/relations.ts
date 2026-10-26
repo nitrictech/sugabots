@@ -17,23 +17,17 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.routineExecution.threadId,
 		}),
 		compaction: r.one.threadCompaction({ from: r.thread.id, to: r.threadCompaction.threadId }),
-	},
-	chat: {
-		mainThread: r.one.thread({ from: r.chat.mainThreadId, to: r.thread.id, optional: false }),
-		// Collaborations the chat's bot was asked to help with, from any thread.
+		// On a conversation: every thread in it, the conversation's own included.
+		conversationThreads: r.many.thread({ from: r.thread.id, to: r.thread.conversationId }),
+		// Collaborations the thread's host bot was asked to help with, from any thread.
 		hostCollaborations: r.many.collaboration({
-			from: r.chat.hostAgentId,
+			from: r.thread.hostAgentId,
 			to: r.collaboration.collaboratorAgentId,
 		}),
-		threads: r.many.thread({ from: r.chat.id, to: r.thread.chatId }),
-		// The threads of collaborations the chat's bot was asked to help with.
+		// The threads of collaborations the thread's host bot was asked to help with.
 		hostCollaborationThreads: r.many.thread({
-			from: r.chat.hostAgentId.through(r.collaboration.collaboratorAgentId),
+			from: r.thread.hostAgentId.through(r.collaboration.collaboratorAgentId),
 			to: r.thread.id.through(r.collaboration.childThreadId),
-		}),
-		routineExecutions: r.many.routineExecution({
-			from: r.chat.id.through(r.thread.chatId),
-			to: r.routineExecution.threadId.through(r.thread.id),
 		}),
 	},
 	pod: {

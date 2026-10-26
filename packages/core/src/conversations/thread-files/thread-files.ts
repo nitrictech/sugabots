@@ -25,7 +25,7 @@ import { type AttachedFileRow, loadFileParts } from "../threads/file-parts.ts";
 /**
  * The only writer of `thread_file`, and its reader but for the files messages
  * show, which `threads/file-parts.ts` reads: files in a thread, which its
- * agents read, and people too when a chat serves them. A file goes when its
+ * agents read, and people too when a conversation serves them. A file goes when its
  * thread does.
  *
  * A file is a tool's result, kept with `write`, or a person's upload, kept

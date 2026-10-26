@@ -124,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 					workspaceId: space.id,
 					podId: room.id,
 					hostAgentId: host.id,
-					type: "chat",
+					type: "conversation",
 					title: "A thread",
 					initiatorUserId: member.id,
 				})

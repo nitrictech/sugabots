@@ -323,11 +323,11 @@ async function applyWorkspaceEvent(
 		return;
 	}
 	const update = parsed.success;
-	if (update.type === "chat.thread_changed") {
+	if (update.type === "conversation.thread_changed") {
 		await Promise.all([
-			queries.invalidateQueries({ queryKey: ["chat-messages", update.chatId] }),
-			queries.invalidateQueries({ queryKey: ["chat-history", update.chatId] }),
-			// A new message moves its chat up the list, changes its preview, and may leave it unread.
+			queries.invalidateQueries({ queryKey: ["chat-messages", update.conversationId] }),
+			queries.invalidateQueries({ queryKey: ["chat-history", update.conversationId] }),
+			// A new message moves its conversation up the list, changes its preview, and may leave it unread.
 			refreshAfterThreadChange(queries, workspaceId),
 		]);
 	} else if (update.type === "thread.changed") {

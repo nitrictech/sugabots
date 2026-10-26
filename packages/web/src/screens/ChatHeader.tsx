@@ -29,12 +29,14 @@ export type ChatPlace =
 export function ChatHeader({
 	agent,
 	pod,
+	conversationId,
 	place,
 	staged,
 	onOpenDesktop,
 }: {
 	agent: Agent;
 	pod: Pod;
+	conversationId: string;
 	place: ChatPlace;
 	/** Whether something is open large beside the chat, such as an artifact or the desktop. */
 	staged: boolean;
@@ -78,7 +80,7 @@ export function ChatHeader({
 			) : (
 				<span className="flex-1" />
 			)}
-			<ChatSandbox agent={agent} pod={pod} onOpen={onOpenDesktop} />
+			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
 			{place.kind === "away" ? (
 				place.trailing
 			) : staged ? null : (

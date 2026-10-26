@@ -30,17 +30,22 @@ export const chatPageQuerySchema = Schema.Struct({
 
 export type ChatPageQuery = typeof chatPageQuerySchema.Type;
 
-export const chatSchema = Schema.Struct({
+/**
+ * A conversation: a thread people talk to a bot in, in a pod, which the
+ * collaborations and routine runs it leads to are opened beside.
+ */
+export const conversationSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
+	/** The bot it is with. */
 	hostAgentId: uuidSchema,
-	mainThreadId: uuidSchema,
+	title: Schema.String,
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });
 
-export type Chat = typeof chatSchema.Type;
+export type Conversation = typeof conversationSchema.Type;
 
 /**
  * The pod whose chats a list covers, by its id or, as an address names it,
@@ -51,14 +56,14 @@ export const chatListQuerySchema = Schema.Struct({
 });
 
 /**
- * One row of the conversation list: a bot, since each bot has one chat in its
- * pod. `chat` is null until the bot's chat is first opened, by a person or a
- * routine, and is the whole chat, so opening it needs no request of its own.
- * `lastMessage` is null until a message is written.
+ * One row of the conversation list: a bot, with its conversation in the pod.
+ * `conversation` is null until one is first opened with the bot, by a person
+ * or a routine, and is the whole conversation, so opening it needs no request
+ * of its own. `lastMessage` is null until a message is written.
  */
 export const chatListItemSchema = Schema.Struct({
 	agent: agentSchema,
-	chat: Schema.NullOr(chatSchema),
+	conversation: Schema.NullOr(conversationSchema),
 	lastMessage: Schema.NullOr(
 		Schema.Struct({
 			/** The message's first line, shortened for a one-line row. */
@@ -69,17 +74,17 @@ export const chatListItemSchema = Schema.Struct({
 		}),
 	),
 	/**
-	 * The tool the chat's newest reply waiting for approval would run first, or
+	 * The tool the conversation's newest reply waiting for approval would run first, or
 	 * null. Such a reply may have written nothing at all, so this stands in for
 	 * a preview.
 	 */
 	waitingOn: Schema.NullOr(Schema.String),
 	/**
 	 * How many messages somebody else finished since the person last read the
-	 * chat or last wrote in it, whichever came later.
+	 * conversation or last wrote in it, whichever came later.
 	 */
 	unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** A tool call in the chat is waiting for a decision the person may make. */
+	/** A tool call in the conversation is waiting for a decision the person may make. */
 	needsApproval: Schema.Boolean,
 });
 
@@ -87,7 +92,7 @@ export type ChatListItem = typeof chatListItemSchema.Type;
 
 /**
  * How each pod the person reaches stands for them, for the rail: how many
- * unread messages its chats hold, and whether any waits for a decision they
+ * unread messages its conversations hold, and whether any waits for a decision they
  * may make.
  * Pods with neither are left out.
  */
@@ -105,7 +110,7 @@ export type PodChatMarkers = typeof podChatMarkersSchema.Type;
 
 /**
  * A tool call somebody was asked to approve, with where it was asked: the
- * bot that asked, its pod, and the chat to open it in.
+ * bot that asked, its pod, and the conversation to open it in.
  */
 export const approvalRequestSchema = Schema.Struct({
 	/** The call, its approval included. */
@@ -113,12 +118,10 @@ export const approvalRequestSchema = Schema.Struct({
 	/** The bot that asked. */
 	agent: agentParticipantSchema,
 	podId: uuidSchema,
-	/** The thread the call was made in. */
+	/** The thread the call was made in: the conversation itself, or a thread opened beside it. */
 	threadId: uuidSchema,
-	/** The bot whose chat the thread is in, which opens it. */
-	chatAgentId: Schema.NullOr(uuidSchema),
-	/** Whether the thread is the chat's own conversation rather than one opened beside it. */
-	inMainThread: Schema.Boolean,
+	/** The conversation the thread is in, which opens it. */
+	conversationId: Schema.NullOr(uuidSchema),
 });
 
 export type ApprovalRequest = typeof approvalRequestSchema.Type;
@@ -150,15 +153,15 @@ export type ApprovalInbox = typeof approvalInboxSchema.Type;
 /** Where something in the activity feed happened, and whether the person has caught up with it. */
 const activityPlaceFields = {
 	podId: uuidSchema,
-	/** The bot whose chat it is in, which opens it. */
-	chatAgentId: uuidSchema,
+	/** The conversation it is in, which opens it. */
+	conversationId: uuidSchema,
 	at: isoTimestampSchema,
-	/** It happened after the person last read the chat or last wrote in it. */
+	/** It happened after the person last read the conversation or last wrote in it. */
 	unread: Schema.Boolean,
 };
 
 /**
- * Something in one of the person's chats worth their attention: a message
+ * Something in one of the person's conversations worth their attention: a message
  * that mentions them or that they have not read, a routine run, or a
  * collaboration one bot opened with another.
  */
@@ -201,7 +204,7 @@ export const activityItemSchema = Schema.Union([
 
 export type ActivityItem = typeof activityItemSchema.Type;
 
-/** What is new for the person across the workspace's chats, newest first. */
+/** What is new for the person across the workspace's conversations, newest first. */
 export const activityFeedSchema = Schema.Struct({
 	items: Schema.mutable(Schema.Array(activityItemSchema)),
 });
@@ -215,12 +218,13 @@ export const chatListSchema = Schema.Struct({
 
 export type ChatList = typeof chatListSchema.Type;
 
-export const getOrCreateChatSchema = Schema.Struct({
+/** The bot to open a conversation with, and the pod it is in. */
+export const openConversationSchema = Schema.Struct({
 	podId: uuidSchema,
 	hostAgentId: uuidSchema,
 });
 
-export type GetOrCreateChat = typeof getOrCreateChatSchema.Type;
+export type OpenConversation = typeof openConversationSchema.Type;
 
 export const customerThreadTypeSchema = Schema.Literals(["collaboration", "routine"]);
 

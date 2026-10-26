@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Library, Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, artifactsLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, artifactsLink, conversationLink, podSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListColumn } from "@/shell/ListColumn.tsx";
@@ -173,7 +173,9 @@ function ConversationRow({
 	const lit = selected || row.needsApproval || row.unreadMessages > 0;
 	return (
 		<Link
-			{...agentChatLink({ pod, agent })}
+			{...(row.conversation
+				? conversationLink({ pod, conversationId: row.conversation.id })
+				: agentChatLink({ pod, agent }))}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",

@@ -1,4 +1,4 @@
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
 	type Database,
@@ -12,7 +12,6 @@ import type * as schema from "../../../database/schema.ts";
 import {
 	ACTIVE_TURN_STATUSES,
 	agent,
-	chat,
 	collaboration,
 	message,
 	thread,
@@ -98,20 +97,23 @@ export const makeRecords = Effect.gen(function* () {
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("collaboration")));
-						// The collaborator's chat in the pod, if it has one, lists the new
-						// thread in its history, so it is told too.
+						// The collaborator's newest conversation in the pod, if it has one,
+						// lists the new thread in its history, so it is told too.
 						const [address] = yield* query((db) =>
 							db
 								.select({
 									workspaceId: thread.workspaceId,
 									podId: thread.podId,
-									recipientChatId: chat.id,
+									recipientConversationId: sql<string | null>`(
+										select recipient.id from ${thread} recipient
+										where recipient.type = 'conversation'
+											and recipient.pod_id = ${thread.podId}
+											and recipient.host_agent_id = ${input.collaborator.id}
+										order by recipient.created_at desc, recipient.id desc
+										limit 1
+									)`,
 								})
 								.from(thread)
-								.leftJoin(
-									chat,
-									and(eq(chat.podId, thread.podId), eq(chat.hostAgentId, input.collaborator.id)),
-								)
 								.where(eq(thread.id, input.parentThreadId))
 								.limit(1),
 						);
@@ -123,7 +125,7 @@ export const makeRecords = Effect.gen(function* () {
 								...collaborationChange(opened, input.collaborator.name),
 								workspaceId: address.workspaceId,
 								podId: address.podId,
-								recipientChatId: address.recipientChatId,
+								recipientConversationId: address.recipientConversationId,
 								collaboratorAgentId: input.collaborator.id,
 								briefMessageId: input.briefMessageId,
 							}),

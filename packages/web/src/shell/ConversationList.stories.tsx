@@ -1,7 +1,7 @@
 import type { ChatListItem } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
-import { storyChatFor } from "@/story-app.tsx";
+import { storyConversationFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
 import { accountManager, design, growthDesk, leadResearcher, revenue } from "./story-fixtures.ts";
 
@@ -11,7 +11,7 @@ const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000)
 const revenueRows: ChatListItem[] = [
 	{
 		agent: growthDesk,
-		chat: storyChatFor(growthDesk),
+		conversation: storyConversationFor(growthDesk),
 		unreadMessages: 1,
 		needsApproval: true,
 		lastMessage: {
@@ -23,7 +23,7 @@ const revenueRows: ChatListItem[] = [
 	},
 	{
 		agent: accountManager,
-		chat: storyChatFor(accountManager),
+		conversation: storyConversationFor(accountManager),
 		unreadMessages: 3,
 		needsApproval: false,
 		lastMessage: {
@@ -35,7 +35,7 @@ const revenueRows: ChatListItem[] = [
 	},
 	{
 		agent: leadResearcher,
-		chat: storyChatFor(leadResearcher),
+		conversation: storyConversationFor(leadResearcher),
 		unreadMessages: 0,
 		needsApproval: false,
 		lastMessage: {

@@ -134,13 +134,14 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** The call returned, failed, or was abandoned with its turn. */
 	ToolCallFinished: ToolCallChange;
 	/**
-	 * An agent opened a child thread to brief a collaborator. `recipientChatId`
-	 * is the collaborator's chat in the pod, whose history now lists the thread.
+	 * An agent opened a child thread to brief a collaborator.
+	 * `recipientConversationId` is the collaborator's newest conversation in
+	 * the pod, whose history now lists the thread.
 	 */
 	CollaborationOpened: CollaborationChange & {
 		readonly workspaceId: string;
 		readonly podId: string;
-		readonly recipientChatId: string | null;
+		readonly recipientConversationId: string | null;
 		readonly collaboratorAgentId: string;
 		/** The brief, the first message in the collaboration's thread. */
 		readonly briefMessageId: string;
@@ -177,11 +178,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly podId: string;
 		readonly threadId: string;
 	};
-	/** A routine run began in its own thread, listed in the agent's chat. */
+	/** A routine run began in its own thread, listed in the agent's conversation. */
 	RoutineExecutionAccepted: {
 		readonly workspaceId: string;
 		readonly podId: string;
-		readonly chatId: string;
+		readonly conversationId: string;
 		readonly threadId: string;
 	};
 	/**
@@ -197,7 +198,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	RoutineExecutionSettled: {
 		readonly workspaceId: string;
 		readonly podId: string;
-		readonly chatId: string;
+		readonly conversationId: string;
 		readonly threadId: string;
 	};
 }>;

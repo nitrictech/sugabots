@@ -9,8 +9,8 @@ import {
 	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	chatSchema,
-	getOrCreateChatSchema,
+	conversationSchema,
+	openConversationSchema,
 	podChatMarkersSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
@@ -41,31 +41,32 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: approvalInboxSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {
+		/** The bot's conversation in the pod, opened on first use. */
+		HttpApiEndpoint.post("open", "/workspaces/:workspace/conversations", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			payload: getOrCreateChatSchema,
-			success: chatSchema,
+			payload: openConversationSchema,
+			success: conversationSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("messages", "/chats/:chatId/messages", {
-			params: { chatId: Schema.String },
+		HttpApiEndpoint.get("messages", "/conversations/:conversationId/messages", {
+			params: { conversationId: Schema.String },
 			query: chatPageQuerySchema,
 			success: chatMessagesPageSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("history", "/chats/:chatId/history", {
-			params: { chatId: Schema.String },
+		HttpApiEndpoint.get("history", "/conversations/:conversationId/history", {
+			params: { conversationId: Schema.String },
 			query: chatPageQuerySchema,
 			success: chatHistoryPageSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.post("markRead", "/chats/:chatId/read", {
-			params: { chatId: Schema.String },
+		HttpApiEndpoint.post("markRead", "/conversations/:conversationId/read", {
+			params: { conversationId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		HttpApiEndpoint.post("send", "/chats/:chatId/messages", {
-			params: { chatId: Schema.String },
+		HttpApiEndpoint.post("send", "/conversations/:conversationId/messages", {
+			params: { conversationId: Schema.String },
 			payload: newMessageSchema,
 			success: messageSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
@@ -74,8 +75,8 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		 * Uploads a file to attach to a message the caller then sends. The body
 		 * is the file's bytes, and `Content-Type` its media type.
 		 */
-		HttpApiEndpoint.post("uploadFile", "/chats/:chatId/files", {
-			params: { chatId: Schema.String },
+		HttpApiEndpoint.post("uploadFile", "/conversations/:conversationId/files", {
+			params: { conversationId: Schema.String },
 			query: uploadAttachmentQuerySchema,
 			payload: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array()),
 			success: uploadedAttachmentSchema.pipe(HttpApiSchema.status(201)),
@@ -85,14 +86,14 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		 * Removes one of the caller's uploads before it is sent. Removing one
 		 * already gone, sent, or someone else's changes nothing.
 		 */
-		HttpApiEndpoint.delete("removeFile", "/chats/:chatId/files/:fileId", {
-			params: { chatId: Schema.String, fileId: Schema.String },
+		HttpApiEndpoint.delete("removeFile", "/conversations/:conversationId/files/:fileId", {
+			params: { conversationId: Schema.String, fileId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		/** A file attached to a message in the chat, with its own media type. */
-		HttpApiEndpoint.get("file", "/chats/:chatId/files/:fileId", {
-			params: { chatId: Schema.String, fileId: Schema.String },
+		/** A file attached to a message in the conversation, with its own media type. */
+		HttpApiEndpoint.get("file", "/conversations/:conversationId/files/:fileId", {
+			params: { conversationId: Schema.String, fileId: Schema.String },
 			success: HttpApiSchema.StreamUint8Array(),
 			error: refused,
 		}),

@@ -6,7 +6,7 @@ import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { agent, pod, routine, routineExecution } from "../../database/schema.ts";
+import { agent, pod, routine, routineExecution, thread } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
@@ -125,8 +125,9 @@ export const makeView = Effect.gen(function* () {
 					if (!definition) return yield* new RoutineNotFound();
 					const rows = yield* query((db) =>
 						db
-							.select()
+							.select({ run: routineExecution, conversationId: thread.conversationId })
 							.from(routineExecution)
+							.innerJoin(thread, eq(thread.id, routineExecution.threadId))
 							.where(
 								and(
 									eq(routineExecution.routineId, scope.routineId),
@@ -139,9 +140,12 @@ export const makeView = Effect.gen(function* () {
 							.limit(page.limit + 1),
 					);
 					const items = rows.slice(0, page.limit);
-					const oldest = items.at(-1);
+					const oldest = items.at(-1)?.run;
 					return {
-						items: items.map(toRoutineExecution),
+						items: items.map(({ run, conversationId }) => {
+							if (!conversationId) throw new Error(`Routine run ${run.id} is in no conversation`);
+							return toRoutineExecution(run, conversationId);
+						}),
 						nextCursor:
 							rows.length > page.limit && oldest
 								? encodeCursor({ at: oldest.acceptedAt, id: oldest.id })

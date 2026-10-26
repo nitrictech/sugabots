@@ -113,14 +113,14 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationOpened: (opened) => [
 			collaborationUpdated(opened),
 			listedThreadChanged(opened.workspaceId, opened.podId, opened.collaboration.threadId),
-			...(opened.recipientChatId
+			...(opened.recipientConversationId
 				? [
 						{
 							channel: workspaceChannel(opened.workspaceId),
 							event: PodAudience.forPod(
 								opened.podId,
-								streamEvent("chat.thread_changed", {
-									chatId: opened.recipientChatId,
+								streamEvent("conversation.thread_changed", {
+									conversationId: opened.recipientConversationId,
 									threadId: opened.collaboration.threadId,
 									threadType: "collaboration",
 								}),
@@ -147,13 +147,13 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			threadChanged(workspaceId, podId, threadId),
 		ThreadCompacted: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
-		RoutineExecutionAccepted: ({ workspaceId, podId, chatId, threadId }) => [
-			routineThreadChanged(workspaceId, podId, chatId, threadId),
+		RoutineExecutionAccepted: ({ workspaceId, podId, conversationId, threadId }) => [
+			routineThreadChanged(workspaceId, podId, conversationId, threadId),
 		],
 		RoutineWorkCancelled: ({ workspaceId, podId, threadIds }) =>
 			threadIds.flatMap((threadId) => threadChanged(workspaceId, podId, threadId)),
-		RoutineExecutionSettled: ({ workspaceId, podId, chatId, threadId }) => [
-			routineThreadChanged(workspaceId, podId, chatId, threadId),
+		RoutineExecutionSettled: ({ workspaceId, podId, conversationId, threadId }) => [
+			routineThreadChanged(workspaceId, podId, conversationId, threadId),
 		],
 	});
 }
@@ -185,14 +185,18 @@ function listedThreadChanged(workspaceId: string, podId: string, threadId: strin
 function routineThreadChanged(
 	workspaceId: string,
 	podId: string,
-	chatId: string,
+	conversationId: string,
 	threadId: string,
 ): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
 		event: PodAudience.forPod(
 			podId,
-			streamEvent("chat.thread_changed", { chatId, threadId, threadType: "routine" }),
+			streamEvent("conversation.thread_changed", {
+				conversationId,
+				threadId,
+				threadType: "routine",
+			}),
 		),
 	};
 }

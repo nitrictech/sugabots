@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { expect, userEvent } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * What is new across the workspace's chats, opened from the rail: mentions of
@@ -29,7 +29,7 @@ const feed: ActivityFeed = {
 			preview: "@ryan-eyes can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
 			podId: revenue.id,
-			chatAgentId: growthDesk.id,
+			conversationId: storyConversationFor(growthDesk).id,
 		},
 		{
 			kind: "message",
@@ -47,7 +47,7 @@ const feed: ActivityFeed = {
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
 			podId: revenue.id,
-			chatAgentId: accountManager.id,
+			conversationId: storyConversationFor(accountManager).id,
 		},
 		{
 			kind: "routine",
@@ -69,7 +69,7 @@ const feed: ActivityFeed = {
 			at: minutesAgo(90),
 			unread: true,
 			podId: revenue.id,
-			chatAgentId: growthDesk.id,
+			conversationId: storyConversationFor(growthDesk).id,
 		},
 		{
 			kind: "collaboration",
@@ -97,7 +97,7 @@ const feed: ActivityFeed = {
 			at: minutesAgo(120),
 			unread: false,
 			podId: revenue.id,
-			chatAgentId: growthDesk.id,
+			conversationId: storyConversationFor(growthDesk).id,
 		},
 		{
 			kind: "mention",
@@ -107,7 +107,7 @@ const feed: ActivityFeed = {
 			preview: "Thanks @ryan-eyes, that fixed it.",
 			at: minutesAgo(26 * 60),
 			podId: revenue.id,
-			chatAgentId: growthDesk.id,
+			conversationId: storyConversationFor(growthDesk).id,
 		},
 	],
 };
@@ -156,7 +156,7 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		threadId: storyChatFor(growthDesk).mainThreadId,
+		threadId: storyConversationFor(growthDesk).id,
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })

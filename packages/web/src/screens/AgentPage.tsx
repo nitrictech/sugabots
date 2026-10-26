@@ -8,6 +8,8 @@ import type { BackTo } from "./ChatHeader.tsx";
 interface AgentPageProps {
 	agent: Agent;
 	pod: Pod;
+	/** The conversation shown, which is with `agent`. */
+	conversationId: string;
 	user: SessionUser;
 	threadId?: string;
 	/** A message to jump to and point out, such as the mention it was opened from. */
@@ -53,7 +55,7 @@ function OwnPageChat(chat: Omit<AgentPageProps, "away">) {
 	);
 }
 
-/** Another chat starts fresh: its scroll, its draft's audience, and what it jumped to. */
-function chatKey({ pod, agent }: { pod: Pod; agent: Agent }): string {
-	return `${pod.id}:${agent.id}`;
+/** Another conversation starts fresh: its scroll, its draft's audience, and what it jumped to. */
+function chatKey({ conversationId }: { conversationId: string }): string {
+	return conversationId;
 }

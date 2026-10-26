@@ -1,6 +1,5 @@
 import {
-	type Chat,
-	type ChatList,
+	type Agent,
 	type ChatMessageItem,
 	type FilePart,
 	handleFromName,
@@ -23,11 +22,10 @@ import {
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { client } from "@/api.ts";
-import { agentsQuery, findPodAgent } from "@/lib/agents.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { podsQuery } from "@/lib/pods.ts";
+import { useAgents } from "@/lib/agents.ts";
+import { findPod, usePods } from "@/lib/pods.ts";
 import { threadQuery } from "@/lib/threads.ts";
-import { useWorkspace, workspacesQuery } from "@/lib/workspace.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
 
 const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
@@ -134,16 +132,16 @@ export function useAttentionCounts(): AttentionCounts {
 }
 
 /**
- * Records that the person has read the chat up to its newest message, and
+ * Records that the person has read the conversation up to its newest message, and
  * clears its dot and its count on the rail.
  */
-export function useMarkChatRead(chatId: string | undefined) {
+export function useMarkChatRead(conversationId: string | undefined) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
 		mutationFn: () =>
-			chatId
-				? Effect.runPromise(client.api.chats.markRead({ params: { chatId } }))
+			conversationId
+				? Effect.runPromise(client.api.chats.markRead({ params: { conversationId } }))
 				: Promise.resolve(),
 		onSuccess: () => refreshChatMarkers(queries, workspaceId),
 	});
@@ -159,21 +157,21 @@ export function useMarkChatRead(chatId: string | undefined) {
  * and what arrives there is unseen until the person comes back to it.
  */
 export function useMarkReadWhileSeen(
-	chatId: string | undefined,
+	conversationId: string | undefined,
 	newest: ChatMessageItem | undefined,
 	latestInView: boolean,
 ) {
-	const { mutate } = useMarkChatRead(chatId);
+	const { mutate } = useMarkChatRead(conversationId);
 	const newestRevision = newest && readRevision(newest);
 	useEffect(() => {
-		if (!chatId || newestRevision === undefined || !latestInView) return;
+		if (!conversationId || newestRevision === undefined || !latestInView) return;
 		const markIfFocused = () => {
 			if (document.hasFocus()) mutate();
 		};
 		markIfFocused();
 		window.addEventListener("focus", markIfFocused);
 		return () => window.removeEventListener("focus", markIfFocused);
-	}, [chatId, newestRevision, latestInView, mutate]);
+	}, [conversationId, newestRevision, latestInView, mutate]);
 }
 
 /**
@@ -214,25 +212,25 @@ export function refreshAfterThreadChange(queries: QueryClient, workspaceId: stri
 }
 
 /**
- * The chat with `hostAgentId` in the pod. It is read from the pod's
- * conversation list, which the screen loads anyway, so a chat that exists
- * costs no request of its own. Only a bot whose chat the list lacks, because
- * it was never opened or was opened after the list loaded, has one opened
- * with a request.
+ * The bot's newest conversation in the pod, for an address that names the bot
+ * rather than the conversation. It is read from the pod's conversation list,
+ * which the screen loads anyway, so one that exists costs no request of its
+ * own. Only a bot the list shows without one, because it never had one or it
+ * began after the list loaded, has one opened with a request.
  */
-export function useChat(pod: Pod, hostAgentId: string) {
+export function useOpenConversation(pod: Pod, hostAgentId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: chatKey(workspaceId, pod.id, hostAgentId),
+		queryKey: ["conversation-with", workspaceId, pod.id, hostAgentId],
 		queryFn: workspaceId
 			? async ({ signal }) => {
 					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-					const listed = listedChat(list, hostAgentId);
+					const listed = list.items.find((item) => item.agent.id === hostAgentId)?.conversation;
 					return (
 						listed ??
 						Effect.runPromise(
-							client.api.chats.getOrCreate({
+							client.api.chats.open({
 								params: { workspace: workspaceId },
 								payload: { podId: pod.id, hostAgentId },
 							}),
@@ -244,64 +242,62 @@ export function useChat(pod: Pod, hostAgentId: string) {
 	});
 }
 
-/** The chat with `hostAgentId` in a pod's conversation list, when the list has it. */
-function listedChat(list: ChatList, hostAgentId: string): Chat | undefined {
-	return list.items.find((item) => item.agent.id === hostAgentId)?.chat ?? undefined;
-}
-
-function chatKey(workspaceId: string | undefined, podId: string | undefined, hostAgentId: string) {
-	return ["chat", workspaceId, podId, hostAgentId] as const;
+/**
+ * The pod at `podSlug` and the bot the conversation `conversationId` is with;
+ * `undefined` when the conversation is not one in that pod. Read from the
+ * pod's conversation list, which the screen loads anyway, and from the
+ * conversation itself only when the list does not have it, so the screen does
+ * not wait on the conversation to know whose it is.
+ */
+export function useConversationPlace(
+	podSlug: string,
+	conversationId: string,
+): { found: { pod: Pod; agent: Agent } | undefined; isPending: boolean; error: unknown } {
+	const pods = usePods();
+	const roster = useAgents();
+	const list = useChatList(podSlug);
+	const listed = list.data?.items.find((item) => item.conversation?.id === conversationId);
+	const unlisted = useQuery({
+		...threadQuery(conversationId),
+		enabled: list.isSuccess && !listed,
+	});
+	const pod = findPod(pods.data, podSlug);
+	const thread = unlisted.data?.thread;
+	const hostAgentId =
+		listed?.agent.id ??
+		(thread?.type === "conversation" && thread.podId === pod?.id ? thread.hostAgentId : undefined);
+	const agent = roster.agents?.find((candidate) => candidate.id === hostAgentId);
+	return {
+		found: pod && agent ? { pod, agent } : undefined,
+		isPending:
+			pods.isPending ||
+			roster.isPending ||
+			list.isPending ||
+			(list.isSuccess && !listed && unlisted.isPending),
+		error: pods.error ?? roster.error ?? list.error ?? unlisted.error,
+	};
 }
 
 /**
- * Starts loading the chat an address names: as its page first loads, and for a
- * link the pointer is on, so the chat is on screen when the click lands. A page
- * whose workspace's pods are not cached yet first asks for them, its agents and
- * its conversation list at once, the list by the slug in the address. A failure
- * is left for the screen's own queries to meet and show. It never opens a chat
- * nobody has: that waits for the screen.
+ * Starts loading the conversation an address names: as its page first loads,
+ * and for a link the pointer is on, so it is on screen when the click lands.
+ * A failure is left for the screen's own queries to meet and show.
  */
-export async function prefetchChat(
-	queries: QueryClient,
-	address: { workspace: string; pod: string; agent: string },
-): Promise<void> {
-	const workspace = queries
-		.getQueryData(workspacesQuery.queryKey)
-		?.find((one) => one.slug === address.workspace);
-	if (!workspace) return;
-	if (!queries.getQueryData(podsQuery(workspace.id).queryKey)) {
-		await Promise.all([
-			queries.ensureQueryData(podsQuery(workspace.id)),
-			queries.ensureQueryData(agentsQuery(workspace.id)),
-			queries.ensureQueryData(chatListQuery(workspace.id, address.pod)),
-		]).catch(() => {});
-	}
-	const found = findPodAgent(
-		queries.getQueryData(podsQuery(workspace.id).queryKey),
-		queries.getQueryData(agentsQuery(workspace.id).queryKey),
-		address.pod,
-		address.agent,
-	);
-	if (!found) return;
-	const list = queries.getQueryData(chatListQuery(workspace.id, found.pod.slug).queryKey);
-	const chat = list && listedChat(list, found.agent.id);
-	if (!chat) return;
-	const key = chatKey(workspace.id, found.pod.id, found.agent.id);
-	if (!queries.getQueryData(key)) queries.setQueryData(key, chat);
-	void queries.prefetchInfiniteQuery(chatMessagesQuery(chat.id));
-	void queries.prefetchInfiniteQuery(chatHistoryQuery(chat.id));
-	void queries.prefetchQuery(threadQuery(chat.mainThreadId));
+export function prefetchConversation(queries: QueryClient, conversationId: string): void {
+	void queries.prefetchInfiniteQuery(chatMessagesQuery(conversationId));
+	void queries.prefetchInfiniteQuery(chatHistoryQuery(conversationId));
+	void queries.prefetchQuery(threadQuery(conversationId));
 }
 
-/** The chat's main conversation, a page at a time, newest page first. */
-function chatMessagesQuery(chatId: string | undefined) {
+/** The conversation, a page at a time, newest page first. */
+function chatMessagesQuery(conversationId: string | undefined) {
 	return infiniteQueryOptions({
-		queryKey: ["chat-messages", chatId],
-		queryFn: chatId
+		queryKey: ["chat-messages", conversationId],
+		queryFn: conversationId
 			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
 					Effect.runPromise(
 						client.api.chats.messages({
-							params: { chatId },
+							params: { conversationId },
 							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
 						{ signal },
@@ -312,21 +308,21 @@ function chatMessagesQuery(chatId: string | undefined) {
 	});
 }
 
-/** The chat's side threads, a page at a time, newest activity first. */
-function chatHistoryQuery(chatId: string | undefined) {
+/** The threads opened beside the conversation, a page at a time, newest activity first. */
+function chatHistoryQuery(conversationId: string | undefined) {
 	return infiniteQueryOptions({
-		queryKey: ["chat-history", chatId],
+		queryKey: ["chat-history", conversationId],
 		refetchInterval: (current) =>
 			current.state.data?.pages.some((page) =>
 				page?.items.some((entry) => entry.status === "queued" || entry.status === "running"),
 			)
 				? RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS
 				: false,
-		queryFn: chatId
+		queryFn: conversationId
 			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
 					Effect.runPromise(
 						client.api.chats.history({
-							params: { chatId },
+							params: { conversationId },
 							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
 						{ signal },
@@ -337,8 +333,8 @@ function chatHistoryQuery(chatId: string | undefined) {
 	});
 }
 
-export function useChatMessages(chatId: string | undefined) {
-	const query = useInfiniteQuery(chatMessagesQuery(chatId));
+export function useChatMessages(conversationId: string | undefined) {
+	const query = useInfiniteQuery(chatMessagesQuery(conversationId));
 	const items = query.data?.pages
 		.slice()
 		.reverse()
@@ -346,8 +342,8 @@ export function useChatMessages(chatId: string | undefined) {
 	return { ...query, items: items ?? [] };
 }
 
-export function useChatHistory(chatId: string | undefined) {
-	const query = useInfiniteQuery(chatHistoryQuery(chatId));
+export function useChatHistory(conversationId: string | undefined) {
+	const query = useInfiniteQuery(chatHistoryQuery(conversationId));
 	return {
 		...query,
 		entries: query.data?.pages.flatMap((page) => page?.items ?? []) ?? [],
@@ -363,26 +359,25 @@ export type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
 	files?: readonly FilePart[];
 };
 
-export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
+export function useSendChatMessage(conversationId: string, user: SessionUser) {
 	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
 		mutationFn: async ({ replyTo, files = [], ...message }: MessageToSend) => {
-			if (!chat) throw new NotReadyError();
 			const payload: NewMessage = {
 				...message,
 				...(replyTo && { replyTo: replyTo.id }),
 				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
 			};
-			return Effect.runPromise(client.api.chats.send({ params: { chatId: chat.id }, payload }));
+			return Effect.runPromise(client.api.chats.send({ params: { conversationId }, payload }));
 		},
 		onMutate: async (input) => {
-			if (!chat) return;
-			await queries.cancelQueries({ queryKey: ["chat-messages", chat.id] });
+			await queries.cancelQueries({ queryKey: ["chat-messages", conversationId] });
 			const optimistic: ChatMessageItem = {
 				kind: "message",
 				message: {
 					id: input.id,
-					threadId: chat.mainThreadId,
+					threadId: conversationId,
 					author: {
 						kind: "person",
 						id: user.id,
@@ -400,25 +395,24 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 					content: input.message,
 					...(input.replyTo ? { replyTo: input.replyTo } : {}),
 					createdAt: timestampAfter(
-						queries.getQueryData<ThreadDetails>(["thread", chat.mainThreadId])?.messages ?? [],
+						queries.getQueryData<ThreadDetails>(["thread", conversationId])?.messages ?? [],
 					),
 				},
 			};
-			queries.setQueryData(["chat-optimistic", chat.id], (items: ChatMessageItem[] = []) => [
+			queries.setQueryData(["chat-optimistic", conversationId], (items: ChatMessageItem[] = []) => [
 				...items,
 				optimistic,
 			]);
 		},
 		onSettled: async (_result, _error, input) => {
-			if (!chat) return;
-			queries.setQueryData<ChatMessageItem[]>(["chat-optimistic", chat.id], (items) =>
+			queries.setQueryData<ChatMessageItem[]>(["chat-optimistic", conversationId], (items) =>
 				items?.filter((item) => item.kind !== "message" || item.message.id !== input.id),
 			);
 			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-messages", chat.id] }),
-				queries.invalidateQueries({ queryKey: ["chat-history", chat.id] }),
-				queries.invalidateQueries({ queryKey: ["thread", chat.mainThreadId] }),
-				queries.invalidateQueries({ queryKey: ["chat-list", chat.workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
+				queries.invalidateQueries({ queryKey: ["chat-history", conversationId] }),
+				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
+				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 			]);
 		},
 	});
@@ -434,9 +428,9 @@ function timestampAfter(messages: readonly { createdAt: string }[]): string {
 	return new Date(Math.max(...times)).toISOString();
 }
 
-export function useOptimisticChatItems(chatId: string | undefined): ChatMessageItem[] {
+export function useOptimisticChatItems(conversationId: string | undefined): ChatMessageItem[] {
 	const query = useQuery<ChatMessageItem[]>({
-		queryKey: ["chat-optimistic", chatId],
+		queryKey: ["chat-optimistic", conversationId],
 		queryFn: skipToken,
 		initialData: [],
 	});

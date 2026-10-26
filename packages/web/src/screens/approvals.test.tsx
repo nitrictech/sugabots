@@ -41,8 +41,7 @@ function request(id: string, approval: ToolCallPart["approval"]): ApprovalReques
 		agent: host,
 		podId: pod.id,
 		threadId: "0199a3a0-0000-7000-8000-0000000003b1",
-		chatAgentId: linear.id,
-		inMainThread: true,
+		conversationId: "0199a3a0-0000-7000-8000-0000000003b1",
 	};
 }
 

@@ -100,11 +100,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			hostAgentId: input.hostAgentId,
 		});
 		await chats.post({
-			chatId: opened.id,
+			conversationId: opened.id,
 			messageId: crypto.randomUUID(),
 			content: input.message,
 		});
-		return viewAs(input.initiatorUserId).get(opened.mainThreadId);
+		return viewAs(input.initiatorUserId).get(opened.id);
 	}
 
 	/** The agent's turn running in the thread, as its workflow runs it. */
@@ -352,7 +352,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(await statusNow()).toBe("done");
 	});
 
-	it("loads a Chat thread with its participants and first message", async () => {
+	it("loads a conversation with its participants and first message", async () => {
 		const details = await createThread({
 			workspaceId,
 			podId,
@@ -361,7 +361,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			message: "Check the release\nPay attention to migrations.",
 		});
 
-		expect(details.thread.title).toBe("Chat");
+		expect(details.thread.title).toMatch(/^Conversation with Release agent /);
 		expect(details.participants.map(({ kind }) => kind)).toEqual(["person", "agent"]);
 		expect(details.messages).toMatchObject([
 			{
@@ -469,9 +469,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		}
 
 		const messageId = crypto.randomUUID();
-		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
+		if (!details.thread.conversationId) throw new Error("The thread is in no conversation");
 		await chatsAs(memberId).post({
-			chatId: details.thread.chatId,
+			conversationId: details.thread.conversationId,
 			messageId,
 			content: "Second",
 		});
@@ -536,7 +536,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 					workspaceId,
 					podId: foreignPod.id,
 					hostAgentId: agentId,
-					type: "chat",
+					type: "conversation",
 					title: "Foreign pod",
 					initiatorUserId: memberId,
 				}),
@@ -548,7 +548,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 					workspaceId,
 					podId,
 					hostAgentId: foreignAgent.id,
-					type: "chat",
+					type: "conversation",
 					title: "Foreign host",
 					initiatorUserId: memberId,
 				}),
@@ -586,9 +586,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			message: "First",
 		});
 
-		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
+		if (!details.thread.conversationId) throw new Error("The thread is in no conversation");
 		await chatsAs(outsiderId).post({
-			chatId: details.thread.chatId,
+			conversationId: details.thread.conversationId,
 			messageId: crypto.randomUUID(),
 			content: "I can help",
 		});
@@ -732,9 +732,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			compactedAt: null,
 		});
 
-		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
+		if (!details.thread.conversationId) throw new Error("The thread is in no conversation");
 		await chatsAs(memberId).post({
-			chatId: details.thread.chatId,
+			conversationId: details.thread.conversationId,
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});

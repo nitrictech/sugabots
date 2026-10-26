@@ -67,7 +67,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	let checker: { id: string; name: string };
 	let rootThreadId: string;
 	let hostChatId: string;
-	let helperChatId: string;
+	let helperConversationId: string;
 	let helperMainThreadId: string;
 	/** The host's reply in the root thread, which its collaborations hang off. */
 	let reply: Awaited<ReturnType<typeof openReply>>;
@@ -161,18 +161,18 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 		hostChatId = opened.id;
 		await chatsAs(memberId).post({
-			chatId: opened.id,
+			conversationId: opened.id,
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
-		rootThreadId = opened.mainThreadId;
+		rootThreadId = opened.id;
 		const helperChat = await chatsAs(memberId).open({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: helper.id,
 		});
-		helperChatId = helperChat.id;
-		helperMainThreadId = helperChat.mainThreadId;
+		helperConversationId = helperChat.id;
+		helperMainThreadId = helperChat.id;
 		reply = await openReply(rootThreadId, host.id);
 	});
 
@@ -236,14 +236,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
 			{ request: { agentId: helper.id } },
 		]);
-		expect((await chatViewAs(memberId).messages(helperChatId))?.items).toEqual([
+		expect((await chatViewAs(memberId).messages(helperConversationId))?.items).toEqual([
 			expect.objectContaining({
 				kind: "collaboration",
 				threadId: opened.collaboration.threadId,
 				initiator: expect.objectContaining({ id: host.id }),
 			}),
 		]);
-		expect((await chatViewAs(memberId).history(helperChatId))?.items).toEqual([
+		expect((await chatViewAs(memberId).history(helperConversationId))?.items).toEqual([
 			expect.objectContaining({ threadId: opened.collaboration.threadId }),
 		]);
 		const recipientEvents = await onDatabase((db) =>
@@ -254,8 +254,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		);
 		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
 			expect.objectContaining({
-				type: "chat.thread_changed",
-				chatId: helperChatId,
+				type: "conversation.thread_changed",
+				conversationId: helperConversationId,
 				threadId: opened.collaboration.threadId,
 			}),
 		);
@@ -373,7 +373,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			}),
 		);
 		await chatsAs(memberId).post({
-			chatId: hostChatId,
+			conversationId: hostChatId,
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});

@@ -166,7 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			return { space, member, pod: madePod, host };
 		}
 
-		async function startChat(input: {
+		async function openConversationAndPost(input: {
 			workspaceId: string;
 			podId: string;
 			hostAgentId: string;
@@ -185,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						hostAgentId: input.hostAgentId,
 					});
 					yield* chats.post({
-						chatId: opened.id,
+						conversationId: opened.id,
 						messageId: crypto.randomUUID(),
 						content: input.content,
 					});
@@ -197,7 +197,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("finishes the host's turn when the helper answers", async () => {
 			const { space, pod: room, member, host } = await aRoom();
 			const started = Date.now();
-			const opened = await startChat({
+			const opened = await openConversationAndPost({
 				workspaceId: space.id,
 				podId: room.id,
 				hostAgentId: host.id,
@@ -212,25 +212,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					db
 						.select({ status: turn.status })
 						.from(turn)
-						.where(and(eq(turn.threadId, opened.mainThreadId), eq(turn.agentId, host.id))),
+						.where(and(eq(turn.threadId, opened.id), eq(turn.agentId, host.id))),
 				);
 				if (hostTurn?.status === "done") break;
 				await new Promise((resolve) => setTimeout(resolve, 100));
 			}
 			const elapsed = Date.now() - started;
 			const [made] = await onDatabase((db) =>
-				db
-					.select()
-					.from(collaboration)
-					.where(eq(collaboration.parentThreadId, opened.mainThreadId)),
+				db.select().from(collaboration).where(eq(collaboration.parentThreadId, opened.id)),
 			);
 			const [reply] = await onDatabase((db) =>
 				db
 					.select({ content: message.content })
 					.from(message)
-					.where(
-						and(eq(message.threadId, opened.mainThreadId), eq(message.authorAgentId, host.id)),
-					),
+					.where(and(eq(message.threadId, opened.id), eq(message.authorAgentId, host.id))),
 			);
 
 			expect(hostTurn?.status).toBe("done");

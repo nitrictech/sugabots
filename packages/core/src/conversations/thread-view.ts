@@ -237,7 +237,11 @@ function toThreadDetails(
 				"sandbox-managers",
 			),
 		},
-		routineExecution: row.routineExecution ? toRoutineExecution(row.routineExecution) : null,
+		// A run's thread is always opened in a conversation.
+		routineExecution:
+			row.routineExecution && row.conversationId
+				? toRoutineExecution(row.routineExecution, row.conversationId)
+				: null,
 		participants: row.participants.map(({ user: person, agent: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),
@@ -309,7 +313,7 @@ function toThread(row: schema.ThreadRow, running: boolean): Thread {
 		workspaceId: row.workspaceId,
 		podId: row.podId,
 		hostAgentId: row.hostAgentId,
-		chatId: row.chatId,
+		conversationId: row.conversationId,
 		type: row.type,
 		title: row.title,
 		status: running ? "running" : "done",

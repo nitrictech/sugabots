@@ -177,29 +177,35 @@ describe("envelope", () => {
 		}
 	});
 
-	it.each(["collaboration", "routine"])("accepts chat thread changes for %s", (threadType) => {
-		const event = {
-			v: EVENT_VERSION,
-			type: "chat.thread_changed",
-			chatId: "00000000-0000-4000-8000-000000000001",
-			threadId: "00000000-0000-4000-8000-000000000002",
-			threadType,
-		};
-		expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
-		expect(Schema.decodeUnknownResult(threadUpdateEventSchema)(event)._tag).toBe("Success");
-	});
-
-	it.each(["chat", "system_agent"])("rejects chat thread changes for %s", (threadType) => {
-		expect(
-			Schema.decodeUnknownResult(workspaceUpdateEventSchema)({
+	it.each(["collaboration", "routine"])(
+		"accepts conversation thread changes for %s",
+		(threadType) => {
+			const event = {
 				v: EVENT_VERSION,
-				type: "chat.thread_changed",
-				chatId: "00000000-0000-4000-8000-000000000001",
+				type: "conversation.thread_changed",
+				conversationId: "00000000-0000-4000-8000-000000000001",
 				threadId: "00000000-0000-4000-8000-000000000002",
 				threadType,
-			})._tag,
-		).toBe("Failure");
-	});
+			};
+			expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
+			expect(Schema.decodeUnknownResult(threadUpdateEventSchema)(event)._tag).toBe("Success");
+		},
+	);
+
+	it.each(["conversation", "system_agent"])(
+		"rejects conversation thread changes for %s",
+		(threadType) => {
+			expect(
+				Schema.decodeUnknownResult(workspaceUpdateEventSchema)({
+					v: EVENT_VERSION,
+					type: "conversation.thread_changed",
+					conversationId: "00000000-0000-4000-8000-000000000001",
+					threadId: "00000000-0000-4000-8000-000000000002",
+					threadType,
+				})._tag,
+			).toBe("Failure");
+		},
+	);
 });
 
 function toolCall(status: "running" | "completed") {

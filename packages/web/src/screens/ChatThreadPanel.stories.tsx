@@ -57,7 +57,7 @@ const collaboration: ThreadDetails = {
 		workspaceId: revenue.workspaceId,
 		podId: revenue.id,
 		hostAgentId: linearHandler.id,
-		chatId: CHAT,
+		conversationId: CHAT,
 		type: "collaboration",
 		title: "Checkout timeouts",
 		status: "running",
@@ -126,6 +126,7 @@ function routineRun(failed: boolean): ThreadDetails {
 			workspaceId: revenue.workspaceId,
 			agentId: growthDesk.id,
 			threadId: RUN,
+			conversationId: CHAT,
 			routineName: "Overnight outbound",
 			instructions: "Queue the overnight leads and draft replies to anyone who answered.",
 			trigger: {
@@ -181,7 +182,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	args: {
-		chatId: CHAT,
+		conversationId: CHAT,
 		chatAgentId: growthDesk.id,
 		threadId: THREAD,
 		history: [],

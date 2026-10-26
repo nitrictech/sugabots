@@ -1,6 +1,5 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Agent } from "@sugabots/contracts";
 import { Monitor } from "lucide-react";
-import { useChat } from "@/lib/chats.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -11,17 +10,17 @@ import { IconButton } from "@/ui/icon-button.tsx";
  */
 export function ChatSandbox({
 	agent,
-	pod,
+	threadId,
 	onOpen,
 }: {
 	agent: Agent;
-	pod: Pod;
+	/** The conversation the bot's desktop is watched from. */
+	threadId: string;
 	onOpen: () => void;
 }) {
-	const threadId = useChat(pod, agent.id).data?.mainThreadId;
 	const sandboxesOn = useSandboxAccess().data?.enabled === true;
 	const inUse = useDesktopInUse(threadId, agent.id);
-	if (!agent.usesSandbox || !sandboxesOn || !threadId) return null;
+	if (!agent.usesSandbox || !sandboxesOn) return null;
 	return <SandboxButton agentName={agent.name} inUse={inUse} onOpen={onOpen} />;
 }
 

@@ -6,13 +6,18 @@ import type * as schema from "../../database/schema.ts";
 import { routineExecution } from "../../database/schema.ts";
 import { lineageOf } from "../threads/tree.ts";
 
-export function toRoutineExecution(row: schema.RoutineExecutionRow): RoutineExecution {
+/** A run as the API describes it, listed in the conversation `conversationId`. */
+export function toRoutineExecution(
+	row: schema.RoutineExecutionRow,
+	conversationId: string,
+): RoutineExecution {
 	return {
 		id: row.id,
 		routineId: row.routineId,
 		workspaceId: row.workspaceId,
 		agentId: row.agentId,
 		threadId: row.threadId,
+		conversationId,
 		routineName: row.routineName,
 		instructions: row.instructions,
 		trigger: row.trigger,

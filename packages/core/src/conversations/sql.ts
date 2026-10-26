@@ -141,7 +141,15 @@ export const thread = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		podId: uuid("pod_id").notNull(),
 		hostAgentId: uuid("host_agent_id").notNull(),
-		chatId: uuid("chat_id").references((): AnyPgColumn => chat.id, { onDelete: "cascade" }),
+		/**
+		 * The conversation this thread belongs to: its own id on a conversation,
+		 * and the conversation it was opened from on a collaboration or a routine
+		 * run. Null on a system agent's thread, which serves a thread rather than
+		 * belonging to one.
+		 */
+		conversationId: uuid("conversation_id").references((): AnyPgColumn => thread.id, {
+			onDelete: "cascade",
+		}),
 		type: text("type").$type<ThreadType>().notNull(),
 		title: text("title").notNull(),
 		/**
@@ -162,7 +170,7 @@ export const thread = pgTable(
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('chat', 'collaboration', 'routine', 'system_agent')`,
+			sql`${table.type} in ('conversation', 'collaboration', 'routine', 'system_agent')`,
 		),
 		foreignKey({
 			columns: [table.podId, table.workspaceId],
@@ -179,40 +187,7 @@ export const thread = pgTable(
 		index("thread_pod_host_created_at_idx").on(table.podId, table.hostAgentId, table.createdAt),
 		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
 		index("thread_pod_host_updated_at_idx").on(table.podId, table.hostAgentId, table.updatedAt),
-		index("thread_chat_updated_at_idx").on(table.chatId, table.updatedAt),
-	],
-);
-
-export const chat = pgTable(
-	"chat",
-	{
-		id: primaryKey(),
-		workspaceId: uuid("workspace_id")
-			.notNull()
-			.references(() => workspace.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").notNull(),
-		hostAgentId: uuid("host_agent_id").notNull(),
-		mainThreadId: uuid("main_thread_id")
-			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
-		initiatorUserId: uuid("initiator_user_id").references(() => user.id, {
-			onDelete: "restrict",
-		}),
-		createdAt: stamp("created_at"),
-		updatedAt: updatedStamp("updated_at"),
-	},
-	(table) => [
-		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "chat_pod_workspace_fkey",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.hostAgentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "chat_host_agent_workspace_fkey",
-		}).onDelete("cascade"),
-		uniqueIndex("chat_pod_host_idx").on(table.podId, table.hostAgentId),
+		index("thread_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
 	],
 );
 
@@ -410,7 +385,7 @@ export const message = pgTable(
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
-		/** The routine run this message is the result of, posted in the agent's chat. */
+		/** The routine run this message is the result of, posted in the agent's conversation. */
 		routineExecutionId: uuid("routine_execution_id").references(() => routineExecution.id, {
 			onDelete: "set null",
 		}),
@@ -700,7 +675,6 @@ export const threadRead = pgTable(
 );
 
 export type ThreadRow = typeof thread.$inferSelect;
-export type ChatRow = typeof chat.$inferSelect;
 export type RoutineRow = typeof routine.$inferSelect;
 export type RoutineTriggerRow = typeof routineTrigger.$inferSelect;
 /** What a trigger is, by kind: a trigger as the API shows it, without what the row keeps apart. */

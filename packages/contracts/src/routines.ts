@@ -405,7 +405,10 @@ export const routineExecutionSchema = Schema.Struct({
 	routineId: uuidSchema,
 	workspaceId: uuidSchema,
 	agentId: uuidSchema,
+	/** The run's own thread. */
 	threadId: uuidSchema,
+	/** The conversation the run's thread is opened beside. */
+	conversationId: uuidSchema,
 	routineName: routineNameSchema,
 	instructions: routineInstructionsSchema,
 	trigger: routineExecutionTriggerSchema,

@@ -1,8 +1,7 @@
-import type { Agent, AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
+import type { AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { type ReactNode, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
@@ -29,7 +28,6 @@ export function ApprovalList({
 	className?: string;
 }) {
 	const inbox = useApprovalInbox();
-	const { agents } = useAgents();
 	const waiting = inbox.data?.waiting ?? [];
 	const answered = inbox.data?.answered ?? [];
 	// Until the person picks a tab or a row, it is the one the open request is under.
@@ -37,8 +35,6 @@ export function ApprovalList({
 	const openIsAnswered = answered.some((request) => request.call.id === selectedCallId);
 	const tab = chosenTab ?? (openIsAnswered ? "answered" : "waiting");
 	const [showAll, setShowAll] = useState(false);
-	const chatAgentOf = (request: ApprovalRequest) =>
-		agents?.find((agent) => agent.id === request.chatAgentId);
 	const answeredShown = showAll ? answered : answered.slice(0, ANSWERED_SHOWN);
 	const navigate = useNavigate();
 
@@ -81,7 +77,6 @@ export function ApprovalList({
 							<li key={request.call.id}>
 								<WaitingRow
 									request={request}
-									chatAgent={chatAgentOf(request)}
 									selected={request.call.id === selectedCallId}
 									// Answering it moves it to Answered; the list stays where the person was.
 									onOpen={() => setChosenTab("waiting")}
@@ -180,12 +175,10 @@ const rowClassName = (selected: boolean) =>
 /** A request waiting on the person: the app's mark, what the bot would do, who asked, and when. */
 function WaitingRow({
 	request,
-	chatAgent,
 	selected,
 	onOpen,
 }: {
 	request: ApprovalRequest;
-	chatAgent?: Agent;
 	selected: boolean;
 	onOpen: () => void;
 }) {
@@ -208,11 +201,7 @@ function WaitingRow({
 					</span>
 					<ListTime at={call.startedAt} selected={selected} />
 				</span>
-				<span className="truncate text-[12.5px] text-muted-foreground">
-					{chatAgent && chatAgent.id !== agent.id
-						? `${agent.name} in ${chatAgent.name}`
-						: agent.name}
-				</span>
+				<span className="truncate text-[12.5px] text-muted-foreground">{agent.name}</span>
 			</span>
 		</Link>
 	);

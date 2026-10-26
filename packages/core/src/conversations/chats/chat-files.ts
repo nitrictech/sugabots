@@ -11,19 +11,19 @@ import { serviceOperations } from "../../database/database.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 
 /**
- * Files people attach to messages in a chat, kept in its main thread. Anyone
- * who can see the chat can upload to it, and read what was attached there.
+ * Files people attach to messages in a conversation, kept in its thread.
+ * Anyone who can see the conversation can upload to it, and read what was attached there.
  */
 export interface Interface {
 	/**
 	 * Keeps `stream` as an upload the actor can attach to a message they send
-	 * to the chat, as `type`, or, when that is missing or says only that it is
+	 * to the conversation, as `type`, or, when that is missing or says only that it is
 	 * bytes, as the type its name suggests. Fails with `FileTooLarge` past
 	 * `MAX_ATTACHMENT_BYTES`, or below it past what the thread keeps, and with
 	 * `TooManyUnsentUploads` once the actor has a message's worth unsent.
 	 */
 	readonly upload: <E>(input: {
-		chatId: string;
+		conversationId: string;
 		name: string;
 		type: string | undefined;
 		stream: Stream.Stream<Uint8Array, E>;
@@ -37,19 +37,19 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Removes one of the actor's uploads to the chat before it is sent, such as
+	 * Removes one of the actor's uploads to the conversation before it is sent, such as
 	 * one taken off the message they are writing. Anything else is left as it is.
 	 */
 	readonly removeUpload: (input: {
-		chatId: string;
+		conversationId: string;
 		fileId: string;
 	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
-	 * A file attached to a message in the chat. Any other file in its thread,
+	 * A file attached to a message in the conversation. Any other file in its thread,
 	 * such as an upload not yet sent or a tool call's result, is not found.
 	 */
 	readonly read: (input: {
-		chatId: string;
+		conversationId: string;
 		fileId: string;
 	}) => Effect.Effect<
 		ThreadFiles.StoredFile,
@@ -66,14 +66,14 @@ export const make = Effect.gen(function* () {
 	const files = yield* ThreadFiles.Service;
 
 	return Service.of({
-		upload: ({ chatId, name, type, stream }) =>
+		upload: ({ conversationId, name, type, stream }) =>
 			operation(
 				"upload",
 				Effect.gen(function* () {
-					const { mainThreadId } = yield* visibility.chat(chatId);
+					const conversation = yield* visibility.conversation(conversationId);
 					const { userId } = yield* CurrentActor.Service;
 					return yield* files.upload({
-						threadId: mainThreadId,
+						threadId: conversation.id,
 						uploaderId: userId,
 						name,
 						maxSize: MAX_ATTACHMENT_BYTES,
@@ -82,20 +82,24 @@ export const make = Effect.gen(function* () {
 					});
 				}),
 			),
-		removeUpload: ({ chatId, fileId }) =>
+		removeUpload: ({ conversationId, fileId }) =>
 			operation(
 				"removeUpload",
 				Effect.gen(function* () {
-					const { mainThreadId } = yield* visibility.chat(chatId);
+					const conversation = yield* visibility.conversation(conversationId);
 					const { userId } = yield* CurrentActor.Service;
-					yield* files.removeUnsentUpload({ threadId: mainThreadId, uploaderId: userId, fileId });
+					yield* files.removeUnsentUpload({
+						threadId: conversation.id,
+						uploaderId: userId,
+						fileId,
+					});
 				}),
 			),
-		read: ({ chatId, fileId }) =>
+		read: ({ conversationId, fileId }) =>
 			operation(
 				"read",
-				Effect.flatMap(visibility.chat(chatId), ({ mainThreadId }) =>
-					files.readMessageFile({ threadId: mainThreadId, fileId }),
+				Effect.flatMap(visibility.conversation(conversationId), (conversation) =>
+					files.readMessageFile({ threadId: conversation.id, fileId }),
 				),
 			),
 	});

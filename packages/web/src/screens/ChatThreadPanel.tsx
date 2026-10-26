@@ -32,7 +32,7 @@ export type ThreadFrame =
 
 /** A collaboration or routine run opened from its line, framed by `frame`. */
 export function ChatThreadPanel({
-	chatId,
+	conversationId,
 	chatAgentId,
 	threadId,
 	entry,
@@ -41,7 +41,7 @@ export function ChatThreadPanel({
 	onOpenThread,
 	onOpenArtifact,
 }: {
-	chatId: string;
+	conversationId: string;
 	/** The bot whose chat this opened from, which a collaboration draws on the right. */
 	chatAgentId: string;
 	threadId: string;
@@ -119,7 +119,7 @@ export function ChatThreadPanel({
 	) : !details ||
 		!host ||
 		!type ||
-		(details.thread.chatId !== chatId && entry?.threadId !== threadId) ? (
+		(details.thread.conversationId !== conversationId && entry?.threadId !== threadId) ? (
 		<EmptyState title="Could not load this thread">
 			{frame.kind === "sidebar"
 				? "Try closing this panel and opening it again."
@@ -171,7 +171,7 @@ export function ChatThreadPanel({
 					</p>
 				)}
 				<ThreadConversation
-					fileUrlOf={(fileId) => chatFileUrl(chatId, fileId)}
+					fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
 					messages={
 						type === "routine"
 							? details.messages.filter((message) => message.author.kind !== "routine_trigger")

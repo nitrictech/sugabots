@@ -12,7 +12,7 @@ const scout = "0199a3a0-0000-7000-8000-000000000009";
 
 function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
-		threadType: "chat",
+		threadType: "conversation",
 		peopleOnly: false,
 		content: "Hello",
 		hostAgentId: host,
