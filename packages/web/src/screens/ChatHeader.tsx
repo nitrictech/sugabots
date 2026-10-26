@@ -87,7 +87,7 @@ export function ChatHeader({
 	return (
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
 			<HeaderBack back={back} />
-			<h1 className="m-0 flex min-w-0 shrink-0 font-semibold text-[16px] text-foreground max-md:shrink">
+			<h1 className="m-0 flex min-w-0 font-semibold text-[16px] text-foreground">
 				{details ? (
 					<button
 						type="button"
@@ -188,7 +188,7 @@ export function PeopleChatHeader({
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
 			<HeaderBack back={back} />
 			{tile}
-			<h1 className="m-0 min-w-0 shrink-0 truncate font-semibold text-[16px] text-foreground max-md:shrink">
+			<h1 className="m-0 min-w-0 truncate font-semibold text-[16px] text-foreground">
 				{title}
 			</h1>
 			{description ? (
