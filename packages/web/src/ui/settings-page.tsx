@@ -224,7 +224,7 @@ export function SettingsFieldRow({
 			<input
 				id={id}
 				type={secret ? "password" : "text"}
-				autoComplete="off"
+				autoComplete={secret ? "new-password" : "off"}
 				value={value}
 				onChange={(event) => onChange(event.target.value)}
 				placeholder={placeholder}

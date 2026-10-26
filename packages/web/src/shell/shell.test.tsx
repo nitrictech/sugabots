@@ -1606,7 +1606,7 @@ describe("workspace settings", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: /Custom provider/ }));
 		const step = await screen.findByRole("dialog", { name: "Custom provider" });
 		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: provider.name } });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: provider.baseUrl },
 		});
 		fireEvent.click(within(step).getByRole("radio", { name: "Anthropic" }));

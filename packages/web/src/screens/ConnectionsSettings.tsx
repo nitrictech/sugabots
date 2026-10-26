@@ -489,7 +489,7 @@ function ByUrlStep({
 						placeholder="e.g. Team wiki"
 					/>
 					<SettingsFieldRow
-						label="Address"
+						label="Server URL"
 						value={url}
 						onChange={clearingOutcome(setUrl)}
 						placeholder={isEndpoint ? "https://api.example.com/v1" : "https://mcp.example.com/mcp"}
