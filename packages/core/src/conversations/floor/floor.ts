@@ -24,11 +24,9 @@ import { crewOf } from "../threads/participants.ts";
  *   to ask a bot.
  * - A conversation (`conversation`), with a bot or between people:
  *   1. Between people, or mentioning only people: nobody.
- *   2. With other people in it: its bot when they mention it, otherwise
- *      nobody. They talk to each other until they call it.
- *   3. Otherwise its bot, whichever bots they mention. A conversation is with
- *      one bot, so another bot the person names is reached by that bot
- *      collaborating, not by joining.
+ *   2. Otherwise its bot, whoever else is in it and whichever bots they
+ *      mention. A conversation is with one bot, so another bot the person
+ *      names is reached by that bot collaborating, not by joining.
  * - A routine's thread (`routine_feed`):
  *   1. Mentioning only people: nobody.
  *   2. Mentioning bots by handle: those bots, and nobody else.
@@ -37,8 +35,6 @@ import { crewOf } from "../threads/participants.ts";
 
 export interface FloorInput {
 	threadType: ThreadType;
-	/** How many people are in the thread, the writer included. */
-	peopleInThread: number;
 	/** What the message says, for mentions. */
 	content: string;
 	/** The bot the thread is with; null in a pod's chat or between people. */
@@ -64,13 +60,12 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	const { hostAgentId } = input;
 	if (hostAgentId === null || mentionsOnlyPeople) return NOBODY;
 	switch (input.threadType) {
-		case "conversation":
-			if (input.peopleInThread <= 1) {
-				return { kind: "turns", agents: [{ agentId: hostAgentId, reason: "default" }] };
-			}
-			return mentionedAgents.some((member) => member.id === hostAgentId)
-				? { kind: "turns", agents: [{ agentId: hostAgentId, reason: "mention" }] }
-				: NOBODY;
+		case "conversation": {
+			const reason = mentionedAgents.some((member) => member.id === hostAgentId)
+				? "mention"
+				: "default";
+			return { kind: "turns", agents: [{ agentId: hostAgentId, reason }] };
+		}
 		case "routine_feed": {
 			if (mentionedAgents.length > 0) {
 				return {
@@ -124,10 +119,6 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 				from ${threadParticipant}
 				where ${threadParticipant.threadId} = ${thread.id}
 			)`,
-			peopleInThread: sql<number>`(
-				select count(*)::int from ${threadParticipant}
-				where ${threadParticipant.threadId} = ${thread.id} and ${threadParticipant.userId} is not null
-			)`,
 			lastAgentSpeakerId: sql<string | null>`(
 				select ${message.authorAgentId}
 				from ${message}
@@ -149,7 +140,6 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		hostAgentId: scope.hostAgentId,
 		crew: scope.crew,
 		agentParticipantIds: new Set(scope.participantAgentIds),
-		peopleInThread: scope.peopleInThread,
 		lastAgentSpeakerId: scope.lastAgentSpeakerId ?? undefined,
 	};
 });

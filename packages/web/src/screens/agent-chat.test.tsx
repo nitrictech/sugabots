@@ -514,21 +514,26 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
-	it("with other people in the thread, says the bot replies only once the draft mentions it", async () => {
+	it("with other people in the thread, says the bot stays out only of a draft mentioning just people", async () => {
 		const shared = details(chat.id, "Chat", "conversation", [mainMessage]);
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		const composer = await screen.findByLabelText(`Message ${podmate.name}`);
-		expect(screen.getByText(`Mention ${linear.name} to have it reply.`)).toBeTruthy();
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		expect(screen.queryByText(`${linear.name} won't reply.`)).toBeNull();
 
-		writeDraft(composer, `@${linear.handle} can you check?`);
+		writeDraft(composer, `@${podmate.handle} can you check?`);
 
-		expect(await screen.findByText(`${linear.name} will reply.`)).toBeTruthy();
-		const box = screen.getByLabelText(`Message ${linear.name}`);
-		// The finished mention is drawn in the box as the bot's name.
-		expect(within(box).getByText(linear.name)).toBeTruthy();
+		expect(await screen.findByText(`${linear.name} won't reply.`)).toBeTruthy();
+		const box = screen.getByLabelText(`Message ${podmate.name}`);
+		// The finished mention is drawn in the box as the person's name.
+		expect(within(box).getByText(podmate.name)).toBeTruthy();
+
+		writeDraft(box, `@${podmate.handle} and @${linear.handle}, can you check?`);
+
+		await waitFor(() => expect(screen.queryByText(`${linear.name} won't reply.`)).toBeNull());
+		expect(screen.getByLabelText(`Message ${linear.name}`)).toBeTruthy();
 	});
 
 	it("offers the pod's people and the chat's own bot to mention, not the pod's other bots or you", async () => {
