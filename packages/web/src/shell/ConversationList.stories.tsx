@@ -14,6 +14,7 @@ const revenueRows: ChatListItem[] = [
 		conversation: storyConversationFor(growthDesk),
 		unreadMessages: 1,
 		needsApproval: true,
+		mentionsYou: false,
 		lastMessage: {
 			preview: "I'll send the outreach emails now:",
 			authorUserId: null,
@@ -26,6 +27,7 @@ const revenueRows: ChatListItem[] = [
 		conversation: storyConversationFor(accountManager),
 		unreadMessages: 3,
 		needsApproval: false,
+		mentionsYou: false,
 		lastMessage: {
 			preview: "Renewal notes for Halcyon are ready",
 			authorUserId: null,
@@ -38,6 +40,7 @@ const revenueRows: ChatListItem[] = [
 		conversation: storyConversationFor(leadResearcher),
 		unreadMessages: 0,
 		needsApproval: false,
+		mentionsYou: false,
 		lastMessage: {
 			preview: "Go deeper on the fintech prospects from last week's list",
 			authorUserId: "0199a3a0-0000-7000-8000-000000000009",
@@ -140,6 +143,7 @@ const revenueChat = {
 		id: "0199a3a0-0000-7000-8000-00000000c900",
 		hostAgentId: null,
 		title: "Pod chat",
+		doneAt: null,
 	},
 	unreadMessages: 2,
 };
@@ -185,6 +189,7 @@ export const PeopleThread = meta.story({
 				},
 				unreadMessages: 0,
 				needsApproval: false,
+				mentionsYou: false,
 				lastMessage: null,
 				waitingOn: null,
 			},
@@ -195,6 +200,32 @@ export const PeopleThread = meta.story({
 		await expect(
 			canvas.getByRole("link", { name: /Who's covering Halcyon next week\?/ }),
 		).toBeVisible();
+	},
+});
+
+/**
+ * Threads marked done fold away under Done, counted, and come back in dimmer
+ * when it is opened. A thread with a message that mentions you shows a dot.
+ */
+export const DoneAndMentioned = meta.story({
+	args: {
+		podChat: revenueChat,
+		rows: [
+			{ ...(revenueRows[0] as ChatListItem), needsApproval: false, mentionsYou: true },
+			{
+				...(revenueRows[1] as ChatListItem),
+				conversation: {
+					...(revenueRows[1] as ChatListItem).conversation,
+					doneAt: "2026-09-18T07:00:00.000Z",
+				},
+			},
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).toHaveTextContent("Needs you");
+		await expect(canvas.queryByRole("link", { name: /Account Manager/ })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: /Done/ }));
+		await expect(canvas.getByRole("link", { name: /Account Manager/ })).toBeVisible();
 	},
 });
 

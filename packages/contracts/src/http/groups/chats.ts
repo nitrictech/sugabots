@@ -81,6 +81,18 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: chatHistoryPageSchema,
 			error: refused,
 		}),
+		/** Marks the conversation done. */
+		HttpApiEndpoint.put("markDone", "/conversations/:conversationId/done", {
+			params: { conversationId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: refused,
+		}),
+		/** Reopens a conversation marked done. */
+		HttpApiEndpoint.delete("reopen", "/conversations/:conversationId/done", {
+			params: { conversationId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: refused,
+		}),
 		HttpApiEndpoint.post("markRead", "/conversations/:conversationId/read", {
 			params: { conversationId: Schema.String },
 			success: HttpApiSchema.Empty(204),

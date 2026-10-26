@@ -170,6 +170,7 @@ export const make = Effect.gen(function* () {
 					const latest = yield* query((db) => latestMessages(db, threadIds));
 					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, threadIds));
 					const marksOf = yield* conversationMarks(workspaceId, threadIds);
+					const mentioning = yield* query((db) => unreadMentionsIn(db, userId, threadIds));
 					const items = listed.map((row): ChatListItem => {
 						const crew = row.agent && crewAgentRow(row.agent);
 						const last = latest.get(row.conversation.id);
@@ -185,6 +186,7 @@ export const make = Effect.gen(function* () {
 								: null,
 							waitingOn: waitingOn.get(row.conversation.id) || null,
 							...marksOf(row.conversation.id),
+							mentionsYou: mentioning.has(row.conversation.id),
 						};
 					});
 					const [podChat] = yield* query((db) => podChats(db, [podId]));
@@ -540,6 +542,33 @@ const unreadMessageCounts = Effect.fn("ChatView.unreadMessageCounts")(function* 
 		)
 		.groupBy(message.threadId);
 	return new Map(rows.map((row) => [row.threadId, row.count]));
+});
+
+/** Those of the threads with a message `userId` has not read that mentions them. */
+const unreadMentionsIn = Effect.fn("ChatView.unreadMentionsIn")(function* (
+	db: Executor,
+	userId: string,
+	threadIds: readonly string[],
+) {
+	if (threadIds.length === 0) return new Set<string>();
+	const [person] = yield* db
+		.select({ name: user.name })
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	if (!person) return new Set<string>();
+	const rows = yield* db
+		.selectDistinct({ threadId: message.threadId })
+		.from(message)
+		.where(
+			and(
+				inArray(message.threadId, [...threadIds]),
+				finishedWordsFromOthers(userId),
+				mentions(handleFromName(person.name)),
+				unreadBy(db, userId, { threadId: message.threadId, at: message.createdAt }),
+			),
+		);
+	return new Set(rows.map((row) => row.threadId));
 });
 
 /** A `message` with words in it, finished, written by somebody other than `userId`. */

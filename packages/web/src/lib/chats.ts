@@ -495,6 +495,25 @@ export function useThreadFrom(podChatId: string) {
 	});
 }
 
+/** Marks the conversation done, or reopens it. Its thread and the pod's list show it once it has. */
+export function useSetDone(conversationId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: (done: boolean) =>
+			Effect.runPromise(
+				done
+					? client.api.chats.markDone({ params: { conversationId } })
+					: client.api.chats.reopen({ params: { conversationId } }),
+			),
+		onSettled: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
+				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			]),
+	});
+}
+
 /** Fetches again what shows the threads started from a pod's chat: the chat and the pod's list. */
 function refreshPodChat(queries: QueryClient, workspaceId: string | undefined, podChatId: string) {
 	return Promise.all([

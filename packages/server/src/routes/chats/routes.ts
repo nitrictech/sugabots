@@ -57,6 +57,16 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("threadFrom", ({ params }) =>
 				chats.threadFrom(params.messageId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("markDone", ({ params }) =>
+				chats
+					.setDone({ conversationId: params.conversationId, done: true })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("reopen", ({ params }) =>
+				chats
+					.setDone({ conversationId: params.conversationId, done: false })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("messages", ({ params, query }) =>
 				view.messages(params.conversationId, query).pipe(asSessionUser, asHttpError(chatErrors)),
 			)

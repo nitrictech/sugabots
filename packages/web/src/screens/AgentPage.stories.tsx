@@ -92,6 +92,7 @@ export const Conversation = meta.story({
 		await expect(
 			canvas.getByRole("heading", { name: `Conversation with ${growthDesk.name}`, level: 1 }),
 		).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Mark done" })).toBeInTheDocument();
 	},
 });
 
@@ -550,6 +551,7 @@ const collaboration: ThreadDetails = {
 		status: "done",
 		parentThreadId: storyConversationFor(growthDesk).id,
 		initiatorUserId: storyUser.id,
+		doneAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",
 	},

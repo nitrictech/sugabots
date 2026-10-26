@@ -518,6 +518,7 @@ describe("the conversation list", () => {
 			podId: linear.podId,
 			hostAgentId: linear.id,
 			title: `Conversation with ${linear.name}`,
+			doneAt: null,
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T08:00:00.000Z",
 		};

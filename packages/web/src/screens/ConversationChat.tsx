@@ -34,6 +34,7 @@ import {
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
 	useSendChatMessage,
+	useSetDone,
 	useStartThread,
 	useThreadFrom,
 } from "@/lib/chats.ts";
@@ -133,6 +134,7 @@ export function ConversationChat({
 	const optimistic = useOptimisticChatItems(conversationId);
 	const send = useSendChatMessage(conversationId, user);
 	const startThread = useStartThread(conversationId);
+	const setDone = useSetDone(conversationId);
 	const threadFrom = useThreadFrom(conversationId);
 	const navigate = useNavigate();
 	const [startError, setStartError] = useState<string>();
@@ -325,10 +327,15 @@ export function ConversationChat({
 	}
 
 	const title = details?.thread.title;
+	const done =
+		details && !isPodChat
+			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
+			: undefined;
 	const header = agent ? (
 		<ChatHeader
 			agent={agent}
 			title={title}
+			done={done}
 			pod={pod}
 			conversationId={conversationId}
 			place={place}
@@ -343,7 +350,7 @@ export function ConversationChat({
 			place={place}
 		/>
 	) : (
-		<PeopleChatHeader title={title ?? ""} pod={pod} place={place} />
+		<PeopleChatHeader title={title ?? ""} done={done} pod={pod} place={place} />
 	);
 	if (!details || (agent && !host))
 		return (

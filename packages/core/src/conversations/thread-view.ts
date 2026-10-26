@@ -321,6 +321,7 @@ function toThread(row: schema.ThreadRow, running: boolean): Thread {
 		status: running ? "running" : "done",
 		parentThreadId: row.parentThreadId,
 		initiatorUserId: row.initiatorUserId,
+		doneAt: row.doneAt?.toISOString() ?? null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
