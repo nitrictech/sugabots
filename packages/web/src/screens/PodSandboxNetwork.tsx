@@ -50,6 +50,19 @@ export function PodNetworkGroup({
 }) {
 	const [showingWorkspace, setShowingWorkspace] = useState(false);
 	const reachable = network.workspaceHosts.filter((entry) => entry.blockedBy === null);
+	if (network.mode === "open") {
+		return (
+			<SettingsGroup
+				label="Network"
+				note="The workspace's sandboxes are open. Its admins choose this, and any hosts it blocks, in its sandbox settings."
+			>
+				<SettingsRow
+					label="Open"
+					sub={network.blocking ? "Any host the workspace hasn't blocked" : "Any host"}
+				/>
+			</SettingsGroup>
+		);
+	}
 	return (
 		<>
 			<SettingsGroup

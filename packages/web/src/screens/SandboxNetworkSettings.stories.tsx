@@ -15,6 +15,8 @@ const trustedHosts = [
 ];
 
 const settings: SandboxNetworkSettings = {
+	mode: "allowlist",
+	blocking: true,
 	trustedHosts,
 	addedHosts: [
 		{
@@ -91,7 +93,9 @@ export const BlockedHosts = meta.story({
 
 /** Only the trusted hosts, listed once asked for. */
 export const TrustedOnly = meta.story({
-	args: { settings: { trustedHosts, addedHosts: [], blockedHosts: [] } },
+	args: {
+		settings: { mode: "allowlist", blocking: true, trustedHosts, addedHosts: [], blockedHosts: [] },
+	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByText("Trusted hosts"));
 		await expect(canvas.getByText(/registry\.npmjs\.org/)).toBeVisible();
@@ -101,4 +105,29 @@ export const TrustedOnly = meta.story({
 /** A host the API refused, said under the group. */
 export const Refused = meta.story({
 	args: { error: new Error("Enter a domain name, such as api.example.com or *.example.com") },
+});
+
+/** Open: every host but the blocked ones, which can still be changed; the allowed hosts wait. */
+export const Open = meta.story({
+	args: { settings: { ...settings, mode: "open" } },
+	play: async ({ canvas, args, userEvent }) => {
+		await expect(canvas.getByText(/Any host but the blocked ones below/)).toBeVisible();
+		await expect(canvas.queryByLabelText("Add host")).toBeNull();
+		await expect(canvas.queryByText("api.stripe.com")).toBeNull();
+
+		await userEvent.type(canvas.getByLabelText("Block host"), "paste.example.com");
+		await userEvent.click(canvas.getByRole("button", { name: "Block" }));
+		await expect(args.onBlock).toHaveBeenCalledWith("paste.example.com");
+	},
+});
+
+/** Open at a provider that can't block hosts: the blocked hosts don't apply, so they aren't offered. */
+export const OpenWithoutBlocking = meta.story({
+	args: { settings: { ...settings, mode: "open", blocking: false } },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Any host")).toBeVisible();
+		await expect(canvas.getByText(/can't block hosts/)).toBeVisible();
+		await expect(canvas.queryByLabelText("Block host")).toBeNull();
+		await expect(canvas.queryByText("*.pastebin.com")).toBeNull();
+	},
 });

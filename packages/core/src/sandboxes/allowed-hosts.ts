@@ -1,11 +1,12 @@
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { query } from "../database/database.ts";
+import { type Database, query } from "../database/database.ts";
 import {
 	sandboxAllowedHost,
 	sandboxBlockedHost,
 	sandboxPodAllowedHost,
 } from "../database/schema.ts";
+import type { Sandboxes } from "./sandboxes.ts";
 
 /**
  * What every workspace's sandboxes may reach: where source code is hosted,
@@ -97,6 +98,34 @@ export const allowedHostsOf = (pod: { workspaceId: string; podId: string }) =>
 			].filter((host) => blockOn(host, blocks) === undefined);
 		},
 	);
+
+/**
+ * What the pod's sandbox may reach at `provider`, by its network mode: on the
+ * allowlist, {@link allowedHostsOf}; open, everything but what the workspace
+ * blocked, if the provider can block hosts, and everything if not.
+ */
+export const reachOf = (
+	pod: { workspaceId: string; podId: string },
+	provider: Pick<Sandboxes.Provider, "networkMode" | "capabilities">,
+): Effect.Effect<Sandboxes.Reach, never, Database> => {
+	if (provider.networkMode === "allowlist") {
+		return Effect.map(allowedHostsOf(pod), (hosts) => ({ kind: "allowlist", hosts }));
+	}
+	if (!provider.capabilities.blocksHosts) return Effect.succeed({ kind: "open", blockedHosts: [] });
+	return Effect.map(blockedHostsOf(pod.workspaceId), (blocked) => ({
+		kind: "open",
+		blockedHosts: blocked.flatMap((row) => namesBlockedBy(row.host)),
+	}));
+};
+
+/**
+ * The names a block keeps out, as a sandbox's network rules match them:
+ * blocking `example.com` blocks its subdomains too, but a rule for it
+ * matches only itself.
+ */
+function namesBlockedBy(block: string) {
+	return isWildcard(block) ? [block] : [block, `*.${block}`];
+}
 
 /**
  * The block among `blocks` that keeps `host` out, if any: one that blocks a

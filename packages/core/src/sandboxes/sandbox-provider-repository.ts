@@ -2,10 +2,15 @@ export * as SandboxProviderRepository from "./sandbox-provider-repository.ts";
 
 import type {
 	NewSandboxProvider,
+	SandboxNetworkMode,
 	SandboxProviderSettings,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { SANDBOX_E2B_DEFAULT_SIZE, sandboxProviderPreset } from "@sugabots/contracts";
+import {
+	SANDBOX_E2B_DEFAULT_SIZE,
+	SANDBOX_NETWORK_MODE_DEFAULT,
+	sandboxProviderPreset,
+} from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
@@ -98,6 +103,7 @@ export const make = Effect.gen(function* () {
 							baseUrl: settings.serverUrl,
 							apiKey,
 							image: settings.image ?? defaultImage,
+							networkMode: networkModeIn(settings),
 						}
 					: undefined;
 			case "e2b":
@@ -105,6 +111,7 @@ export const make = Effect.gen(function* () {
 					provider: "e2b",
 					apiKey,
 					template: settings.template ?? defaultImage,
+					networkMode: networkModeIn(settings),
 					size: {
 						cpuCount: settings.cpuCount ?? SANDBOX_E2B_DEFAULT_SIZE.cpuCount,
 						memoryGiB: settings.memoryGiB ?? SANDBOX_E2B_DEFAULT_SIZE.memoryGiB,
@@ -341,6 +348,11 @@ export function addressesIn(settings: SandboxProviderSettings): string[] {
 }
 
 /** OpenSandbox at the address it's usually at, when none is given. */
+/** How the provider's sandboxes reach the internet, by its settings or the default. */
+export function networkModeIn(settings: SandboxProviderSettings): SandboxNetworkMode {
+	return settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT;
+}
+
 export function withUsualAddress(settings: SandboxProviderSettings): SandboxProviderSettings {
 	if (settings.preset !== "opensandbox" || settings.serverUrl) return settings;
 	return { ...settings, serverUrl: sandboxProviderPreset(settings.preset).baseUrl };

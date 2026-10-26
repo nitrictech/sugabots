@@ -1,8 +1,12 @@
-import type { SandboxNetworkSettings, SandboxProvider } from "@sugabots/contracts";
+import type {
+	SandboxNetworkSettings,
+	SandboxProvider,
+	SandboxProviderUpdate,
+} from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect } from "storybook/test";
+import { expect, fn, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { SettingsPage } from "@/ui/settings-page.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
@@ -33,6 +37,8 @@ const openSandbox: SandboxProvider = {
 const providersUrl = `${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-providers`;
 
 const network: SandboxNetworkSettings = {
+	mode: "open",
+	blocking: true,
 	trustedHosts: ["github.com", "*.github.com", "registry.npmjs.org", "pypi.org"],
 	addedHosts: [],
 	blockedHosts: [],
@@ -122,6 +128,54 @@ export const InUse = meta.story({
 		).toHaveAttribute("aria-checked", "true");
 		await expect(canvas.getByText("The last test connected.")).toBeInTheDocument();
 		await expect(canvas.getByText("In use")).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "Open" })).toBeChecked();
+	},
+});
+
+const savedChanges = fn<(changes: SandboxProviderUpdate) => void>();
+
+/**
+ * OpenSandbox open to every host but the blocked ones. Going back to the
+ * allowlist saves it in the provider's settings.
+ */
+export const OpenNetwork = meta.story({
+	beforeEach({ msw }) {
+		savedChanges.mockClear();
+		const provider: SandboxProvider = {
+			...openSandbox,
+			settings: { ...openSandbox.settings, preset: "opensandbox", networkMode: "open" },
+			enabled: true,
+			hasApiKey: true,
+			status: "connected",
+		};
+		msw.use(
+			answers([provider]),
+			http.get(`${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-network`, () =>
+				HttpResponse.json({ ...network, mode: "open" }),
+			),
+			http.patch(`${providersUrl}/:providerId`, async ({ request }) => {
+				const changes = (await request.json()) as SandboxProviderUpdate;
+				savedChanges(changes);
+				return HttpResponse.json({ ...provider, settings: changes.settings });
+			}),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(await canvas.findByRole("radio", { name: "Open" })).toBeChecked();
+		await expect(
+			await canvas.findByText(/Any host but the blocked ones below/),
+		).toBeInTheDocument();
+
+		await userEvent.click(canvas.getByRole("radio", { name: "Allowlist" }));
+		await waitFor(() =>
+			expect(savedChanges).toHaveBeenCalledWith({
+				settings: {
+					preset: "opensandbox",
+					serverUrl: "http://localhost:8090",
+					networkMode: "allowlist",
+				},
+			}),
+		);
 	},
 });
 
@@ -154,6 +208,7 @@ export const SwitchingProvider = meta.story({
 		);
 		await expect(canvas.getByLabelText("Sandbox URL")).toBeInTheDocument();
 		await expect(canvas.getByText(/moves sandboxes from OpenSandbox to E2B/)).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "Open" })).toBeChecked();
 	},
 });
 

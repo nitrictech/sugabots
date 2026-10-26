@@ -1,5 +1,6 @@
 export * as Sandboxes from "./sandboxes.ts";
 
+import type { SandboxNetworkMode } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
@@ -40,6 +41,8 @@ export const layer = layerNoDeps;
  */
 export interface Provider {
 	readonly capabilities: Capabilities;
+	/** What its sandboxes reach: see {@link Reach}. */
+	readonly networkMode: SandboxNetworkMode;
 	/**
 	 * For a provider that makes sandboxes from a template it builds from an
 	 * image, as E2B does: building the connection's template. Absent for one
@@ -108,6 +111,12 @@ export interface Capabilities {
 	 * by `host-and-path`. See {@link Network.credentials}.
 	 */
 	readonly credentials: "none" | "host" | "host-and-path";
+	/**
+	 * Whether it can refuse hosts by name to a sandbox that reaches everything
+	 * else. E2B denies addresses but never names, so its open sandboxes reach
+	 * blocked hosts too. See {@link Reach}.
+	 */
+	readonly blocksHosts: boolean;
 }
 
 /** What a workspace's settings say about reaching its provider. */
@@ -125,6 +134,7 @@ export interface E2bConnection {
 	readonly template: string;
 	/** What the template is built with, so every sandbox made from it has. */
 	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
+	readonly networkMode: SandboxNetworkMode;
 }
 
 export interface OpenSandboxConnection {
@@ -134,6 +144,7 @@ export interface OpenSandboxConnection {
 	readonly apiKey: Redacted.Redacted;
 	/** The image sandboxes are made from. */
 	readonly image: string;
+	readonly networkMode: SandboxNetworkMode;
 }
 
 export type SandboxId = Brand.Branded<string, "SandboxId">;
@@ -143,8 +154,7 @@ export const SandboxId = (id: string) => id as SandboxId;
 export interface Spec {
 	/** Written on the provider's record of the sandbox, so it can be found from the provider's side. */
 	readonly labels: Readonly<Record<string, string>>;
-	/** The hosts it may connect to; it is refused everything else. See {@link Network.allowedHosts}. */
-	readonly allowedHosts: readonly string[];
+	readonly reach: Reach;
 	/**
 	 * Names the work in its {@link WORKSPACE_DIRECTORY}: lowercase letters,
 	 * digits and dashes. A provider that keeps work apart from the sandbox
@@ -207,12 +217,7 @@ export interface Sandbox {
 
 /** What a sandbox may connect to, and what is added to its requests on the way. */
 export interface Network {
-	/**
-	 * The hosts it may connect to; it is refused everything else. A host is a
-	 * domain name or a leading wildcard such as `*.example.com`, which leaves
-	 * the domain itself out.
-	 */
-	readonly allowedHosts: readonly string[];
+	readonly reach: Reach;
 	/**
 	 * Added to its HTTPS requests by the provider, outside the sandbox, as far
 	 * as its {@link Capabilities.credentials} allow; empty for a provider that
@@ -225,6 +230,17 @@ export interface Network {
 	 */
 	readonly environment: Readonly<Record<string, string>>;
 }
+
+/**
+ * What a sandbox may connect to, by its provider's {@link Provider.networkMode}:
+ * only the `hosts` on an allowlist, or everything but its `blockedHosts`,
+ * which are empty unless its {@link Capabilities.blocksHosts}. A
+ * host is a domain name or a leading wildcard such as `*.example.com`, which
+ * leaves the domain itself out.
+ */
+export type Reach =
+	| { readonly kind: "allowlist"; readonly hosts: readonly string[] }
+	| { readonly kind: "open"; readonly blockedHosts: readonly string[] };
 
 /**
  * A header the provider sets on the sandbox's HTTPS requests to `host`, in

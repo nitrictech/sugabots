@@ -48,6 +48,8 @@ function Preview({ children }: { children: ReactNode }) {
 const answers = (shown: PodSandbox) => http.get(sandboxUrl, () => HttpResponse.json(shown));
 
 const network: PodSandboxNetwork = {
+	mode: "allowlist",
+	blocking: true,
 	workspaceHosts: [
 		{ host: "github.com", blockedBy: null },
 		{ host: "registry.npmjs.org", blockedBy: null },

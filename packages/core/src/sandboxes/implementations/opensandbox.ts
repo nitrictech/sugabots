@@ -1,10 +1,14 @@
 import {
 	ConnectionConfig,
+	type NetworkPolicy,
+	type NetworkRule,
+	type NetworkRuleAction,
 	Sandbox as OpenSandbox,
 	SandboxApiException,
 	type SandboxInfo,
 	SandboxManager,
 } from "@alibaba-group/opensandbox";
+import { createLifecycleClient } from "@alibaba-group/opensandbox/internal";
 import { userText } from "@sugabots/errors";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
@@ -50,6 +54,27 @@ export const fromOpenSandbox = (
 			requestTimeoutSeconds: REQUEST_TIMEOUT_SECONDS,
 		});
 	const manager = () => SandboxManager.create({ connectionConfig: connectionConfig() });
+	/**
+	 * Replaces the sandbox's whole egress policy. The SDK's own calls only
+	 * patch rules and keep the default action the sandbox was made with.
+	 */
+	const replacePolicy = async (sandboxId: string, policy: NetworkPolicy) => {
+		const lifecycle = createLifecycleClient({
+			baseUrl: connectionConfig().getBaseUrl(),
+			apiKey: Redacted.value(connection.apiKey),
+		});
+		const { error, response } = await lifecycle.PUT("/sandboxes/{sandboxId}/networkpolicy", {
+			params: { path: { sandboxId } },
+			body: policy,
+		});
+		if (error !== undefined) {
+			throw new SandboxApiException({
+				message: `Replacing the network policy failed with HTTP ${response.status}`,
+				statusCode: response.status,
+				rawBody: error,
+			});
+		}
+	};
 	const unavailable = (cause: unknown) =>
 		new Sandboxes.Unavailable({ provider: "opensandbox", cause });
 	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
@@ -61,7 +86,8 @@ export const fromOpenSandbox = (
 	return {
 		// Docker keeps memory across a pause, but Kubernetes keeps only the
 		// root filesystem, and the server doesn't say which it runs on.
-		capabilities: { pauseKeeps: "disk", credentials: "host-and-path" },
+		capabilities: { pauseKeeps: "disk", credentials: "host-and-path", blocksHosts: true },
+		networkMode: connection.networkMode,
 		check: Effect.tryPromise({
 			try: () => manager().listSandboxInfos({ pageSize: 1 }),
 			catch: unavailable,
@@ -75,7 +101,7 @@ export const fromOpenSandbox = (
 						// Kept until Sugabots destroys it: a pod's sandbox outlives any one turn.
 						timeoutSeconds: null,
 						metadata: { ...spec.labels, [WORK_VOLUME_KEY]: workVolume(spec.workName) },
-						networkPolicy: { defaultAction: "deny", egress: allowRules(spec.allowedHosts) },
+						networkPolicy: policyOf(spec.reach),
 						// What lets the egress sidecar add credentials: it intercepts the
 						// sandbox's HTTPS, with a CA the sandbox trusts.
 						credentialProxy: { enabled: true },
@@ -213,14 +239,15 @@ export const fromOpenSandbox = (
 			setNetwork: (network) =>
 				Effect.tryPromise({
 					try: async () => {
-						const hosts = network.allowedHosts;
-						const { egress = [] } = await sandbox.getEgressPolicy();
-						const stale = egress.filter((rule) => !hosts.includes(rule.target));
+						const wanted = policyOf(network.reach);
+						const current = await sandbox.getEgressPolicy();
 						// The vault refuses a credential for a host the sandbox may not
-						// reach, so hosts are added before it changes, and removed after.
-						if (hosts.length > 0) await sandbox.patchEgressRules(allowRules(hosts));
+						// reach, so while it changes the sandbox reaches what either
+						// policy lets through.
+						const meanwhile = eitherOf(current, wanted);
+						if (!isSamePolicy(meanwhile, current)) await replacePolicy(sandbox.id, meanwhile);
 						await setCredentials(sandbox, network.credentials);
-						if (stale.length > 0) await sandbox.deleteEgressRules(stale.map((rule) => rule.target));
+						if (!isSamePolicy(wanted, meanwhile)) await replacePolicy(sandbox.id, wanted);
 						await writeAsRoot(
 							sandbox,
 							Sandboxes.NETWORK_ENVIRONMENT_FILE,
@@ -321,8 +348,50 @@ async function writeAsRoot(sandbox: OpenSandbox, path: string, content: string) 
 	]);
 }
 
-function allowRules(hosts: readonly string[]) {
-	return hosts.map((host) => ({ action: "allow" as const, target: host }));
+function policyOf(reach: Sandboxes.Reach): NetworkPolicy {
+	return reach.kind === "allowlist"
+		? { defaultAction: "deny", egress: rulesFor("allow", reach.hosts) }
+		: { defaultAction: "allow", egress: rulesFor("deny", reach.blockedHosts) };
+}
+
+/**
+ * A policy that lets through whatever `a` or `b` does: an open one denies
+ * only what every open policy denies and no allowlist allows.
+ */
+function eitherOf(a: NetworkPolicy, b: NetworkPolicy): NetworkPolicy {
+	const allowlisted = [a, b].filter((policy) => !isOpen(policy));
+	const allowed = new Set(allowlisted.flatMap(targetsOf));
+	const open = [a, b].filter(isOpen);
+	if (open.length === 0) return { defaultAction: "deny", egress: rulesFor("allow", [...allowed]) };
+	const deniedByAll = open
+		.map((policy) => new Set(targetsOf(policy)))
+		.reduce((denied, next) => denied.intersection(next));
+	return {
+		defaultAction: "allow",
+		egress: rulesFor(
+			"deny",
+			[...deniedByAll].filter((target) => !allowed.has(target)),
+		),
+	};
+}
+
+/** An unset default action is the server's default, deny. */
+function isOpen(policy: NetworkPolicy) {
+	return policy.defaultAction === "allow";
+}
+
+/** What the policy's rules name: the hosts an allowlist allows, or an open policy denies. */
+function targetsOf(policy: NetworkPolicy) {
+	return (policy.egress ?? []).map((rule) => rule.target);
+}
+
+function isSamePolicy(a: NetworkPolicy, b: NetworkPolicy) {
+	const sorted = (policy: NetworkPolicy) => targetsOf(policy).toSorted();
+	return isOpen(a) === isOpen(b) && sorted(a).join() === sorted(b).join();
+}
+
+function rulesFor(action: NetworkRuleAction, hosts: readonly string[]): NetworkRule[] {
+	return hosts.map((host) => ({ action, target: host }));
 }
 
 const MADE_WITHOUT_CREDENTIAL_PROXY = userText`The pod's sandbox was made before sandboxes could be signed in to the services the pod uses, such as its repositories. Upgrade it under Sandbox in the pod's settings: its work is kept.`;

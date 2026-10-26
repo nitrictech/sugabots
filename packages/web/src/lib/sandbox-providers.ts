@@ -139,11 +139,15 @@ export function usePrepareSandboxTemplate(providerId: string) {
 	});
 }
 
-/** What the workspace lets every pod's sandbox connect to and keeps them all from, and changing either. */
+/**
+ * What the workspace lets every pod's sandbox connect to and keeps them all
+ * from, and changing either. Its key starts with the providers' key, so
+ * changing a provider, which sets the network mode, refetches it.
+ */
 export function useSandboxNetwork() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
-	const queryKey = ["sandbox-network", workspaceId];
+	const queryKey = ["sandbox-providers", workspaceId, "network"];
 	function requiredWorkspace() {
 		if (!workspaceId) throw new NotReadyError();
 		return workspaceId;
