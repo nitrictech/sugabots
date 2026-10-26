@@ -932,7 +932,7 @@ const activityIndexRoute = createRoute({
 	),
 });
 
-interface ActivityChatSearch extends AgentSearch {
+interface ActivityChatSearch extends ConversationSearch {
 	/** The row the pane was opened from, which the list marks. */
 	item?: string;
 	/** A message to jump to in the chat, such as the mention the row is. */
@@ -945,7 +945,7 @@ const activityChatRoute = createRoute({
 	getParentRoute: () => activityRoute,
 	path: "/$pod/$conversation",
 	validateSearch: (search: Record<string, unknown>): ActivityChatSearch => ({
-		...validateAgentSearch(search),
+		...validateConversationSearch(search),
 		...idParam(search, "item"),
 		...idParam(search, "message"),
 		...idParam(search, "threadPage"),
@@ -964,8 +964,7 @@ const activityChatRoute = createRoute({
 				{(found, user) => (
 					<ActivityPane
 						pod={found.pod}
-						agent={found.agent}
-						isPodChat={found.isPodChat}
+						conversation={found.conversation}
 						conversationId={conversation}
 						user={user}
 						threadPageId={search.threadPage}
@@ -1104,7 +1103,7 @@ function PodRoute() {
 		matchRoute({ to: newThreadRoute.fullPath }) || matchRoute({ to: routineThreadRoute.fullPath }),
 	);
 	const { data: pods, isPending, error } = usePods();
-	const { found: inConversation } = useConversationPlace(podSlug, conversation ?? "");
+	const { found: inConversation } = useConversationPlace(podSlug, conversation);
 	const selected = selectionOf(conversation, inConversation, openingPodChat);
 	const pod = findPod(pods, podSlug);
 	if (isPending) return <Panes>{null}</Panes>;
@@ -1131,14 +1130,14 @@ function PodRoute() {
 	);
 }
 
-/** The row of the list a pod's page has open: a thread, or the pod's chat. */
+/** The row of the list a pod's page has open: a chat or thread, or the pod's first chat while it opens. */
 function selectionOf(
 	conversationId: string | undefined,
 	place: ConversationPlace | undefined,
 	openingPodChat: boolean,
 ): ListSelection | undefined {
-	if (openingPodChat || place?.isPodChat) return { kind: "podChat" };
-	if (conversationId && place) return { kind: "thread", conversationId };
+	if (openingPodChat) return { kind: "podChat" };
+	if (conversationId && place) return { kind: "conversation", conversationId };
 	return undefined;
 }
 
@@ -1164,16 +1163,17 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 	const { data: list } = useChatList(pod.slug);
 	if (!sideBySide) return null;
 	if (pod.kind === "shared" && list) {
+		const first = list.chats.find((chat) => chat.conversation.main);
 		return (
 			<Navigate
-				{...(list.podChat
-					? conversationLink({ pod, conversationId: list.podChat.conversation.id })
+				{...(first
+					? conversationLink({ pod, conversationId: first.conversation.id })
 					: podChatLink(pod))}
 				replace
 			/>
 		);
 	}
-	const top = list?.items[0];
+	const top = list?.threads[0];
 	if (!top) return null;
 	return <Navigate {...conversationLink({ pod, conversationId: top.conversation.id })} replace />;
 }
@@ -1217,7 +1217,7 @@ const artifactRoute = createRoute({
 	},
 });
 
-interface AgentSearch {
+interface ConversationSearch {
 	/** A collaboration or routine thread open beside the chat. */
 	thread?: string;
 	/** An artifact open large beside the chat, in place of the conversation list. */
@@ -1228,7 +1228,7 @@ interface AgentSearch {
 	desktop?: true;
 }
 
-const validateAgentSearch = (search: Record<string, unknown>): AgentSearch => {
+const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
 	const { artifact } = idParam(search, "artifact");
 	return {
 		...idParam(search, "thread"),
@@ -1241,14 +1241,14 @@ const validateAgentSearch = (search: Record<string, unknown>): AgentSearch => {
 };
 
 /** What `search` opens beside a chat, and the search that opens `staged`. */
-const stagedOf = (search: AgentSearch): Staged | undefined =>
+const stagedOf = (search: ConversationSearch): Staged | undefined =>
 	search.artifact
 		? { kind: "artifact", artifactId: search.artifact, version: search.version }
 		: search.desktop
 			? { kind: "desktop" }
 			: undefined;
 
-const stagedSearchOf = (staged: Staged | undefined): AgentSearch => ({
+const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
 	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
 	version: staged?.kind === "artifact" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
@@ -1282,16 +1282,16 @@ const routineThreadRoute = createRoute({
 });
 
 function OpenRoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
-	const opened = useOpenRoutineFeed(pod, routineId);
-	if (opened.isError) {
-		return (
-			<EmptyState title="Could not open this routine">
-				It may have been removed. Reload this page to try again.
-			</EmptyState>
-		);
-	}
-	if (!opened.data) return null;
-	return <Navigate {...conversationLink({ pod, conversationId: opened.data.id })} replace />;
+	return (
+		<NavigateWhenOpened
+			pod={pod}
+			opened={useOpenRoutineFeed(pod, routineId)}
+			failure={{
+				title: "Could not open this routine",
+				body: "It may have been removed. Reload this page to try again.",
+			}}
+		/>
+	);
 }
 
 /** The pod's chat, opened first if nobody has, then shown at its own address. */
@@ -1307,23 +1307,20 @@ const podChatRoute = createRoute({
 });
 
 function OpenPodChat({ pod }: { pod: Pod }) {
-	const opened = useOpenPodChat(pod);
-	if (opened.isError) {
-		return (
-			<EmptyState title="Could not open this pod's chat">
-				The API did not answer. Reload this page to try again.
-			</EmptyState>
-		);
-	}
-	if (!opened.data) return null;
-	return <Navigate {...conversationLink({ pod, conversationId: opened.data.id })} replace />;
+	return (
+		<NavigateWhenOpened
+			pod={pod}
+			opened={useOpenPodChat(pod)}
+			failure={{ title: "Could not open this pod's chat", body: API_DID_NOT_ANSWER }}
+		/>
+	);
 }
 
 /** A bot's newest conversation, opened first if it has none, then shown at its own address. */
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
-	validateSearch: validateAgentSearch,
+	validateSearch: validateConversationSearch,
 	loader: () => ConversationPage.preload(),
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
@@ -1337,15 +1334,43 @@ const agentRoute = createRoute({
 });
 
 /** Opens `agent`'s newest conversation in `pod`, keeping what `search` opens beside it. */
-function OpenConversation({ pod, agent, search }: { pod: Pod; agent: Agent; search: AgentSearch }) {
-	const opened = useOpenConversation(pod, agent.id);
-	if (opened.isError) {
-		return (
-			<EmptyState title="Could not open this chat">
-				The API did not answer. Reload this page to try again.
-			</EmptyState>
-		);
-	}
+function OpenConversation({
+	pod,
+	agent,
+	search,
+}: {
+	pod: Pod;
+	agent: Agent;
+	search: ConversationSearch;
+}) {
+	return (
+		<NavigateWhenOpened
+			pod={pod}
+			opened={useOpenConversation(pod, agent.id)}
+			failure={{ title: "Could not open this chat", body: API_DID_NOT_ANSWER }}
+			search={search}
+		/>
+	);
+}
+
+const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
+
+/**
+ * Goes to the conversation `opened` finds or opens, at its own address and in
+ * place of this one, keeping `search`; says `failure` when it cannot.
+ */
+function NavigateWhenOpened({
+	pod,
+	opened,
+	failure,
+	search,
+}: {
+	pod: Pod;
+	opened: { data: { id: string } | undefined; isError: boolean };
+	failure: { title: string; body: string };
+	search?: ConversationSearch;
+}) {
+	if (opened.isError) return <EmptyState title={failure.title}>{failure.body}</EmptyState>;
 	if (!opened.data) return null;
 	return (
 		<Navigate
@@ -1371,7 +1396,7 @@ const newThreadRoute = createRoute({
 const conversationRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/threads/$conversation",
-	validateSearch: validateAgentSearch,
+	validateSearch: validateConversationSearch,
 	// On every hover, not once per 30 s: the query cache, not the router,
 	// decides what of the conversation is still fresh.
 	preloadStaleTime: 0,
@@ -1388,8 +1413,7 @@ const conversationRoute = createRoute({
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
 				{(found, user) => (
 					<ConversationPage
-						agent={found.agent}
-						isPodChat={found.isPodChat}
+						conversation={found.conversation}
 						pod={found.pod}
 						conversationId={conversation}
 						user={user}

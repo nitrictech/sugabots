@@ -11,8 +11,9 @@ import {
 	type RoutineUpdate,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronRight, Copy, Ellipsis, Play, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Ellipsis, Play, Trash2 } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
+import { useChatList } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useRoutineActions } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -24,6 +25,8 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import {
@@ -107,6 +110,8 @@ export function NewRoutinePage({
 	const [open, setOpen] = useState<string | "adding">();
 	// Unset until chosen, so the result follows the first trigger's default.
 	const [chosenResults, setChosenResults] = useState<RoutineResults>();
+	// Null for the pod's first chat.
+	const [chatId, setChatId] = useState<string | null>(null);
 	const [page, setPage] = useState<RoutineSubpage>("routine");
 	const actions = useRoutineActions();
 	const bot = choices.find((choice) => choice.agent.id === agentId);
@@ -123,7 +128,13 @@ export function NewRoutinePage({
 		try {
 			const created = await actions.create.mutateAsync({
 				agentId: bot.agent.id,
-				json: { name, instructions, results, triggers: inputs },
+				json: {
+					name,
+					instructions,
+					results,
+					...(results === "post_to_chat" && chatId !== null && { chatId }),
+					triggers: inputs,
+				},
 			});
 			onCreated(created.routine);
 		} catch {
@@ -194,6 +205,9 @@ export function NewRoutinePage({
 			/>
 			<SettingsGroup>
 				<ResultsRow results={results} onChange={setChosenResults} />
+				{results === "post_to_chat" && bot && (
+					<ChatRow pod={bot.pod} chatId={chatId} onChange={setChatId} />
+				)}
 			</SettingsGroup>
 			<Dialog open={open !== undefined} onOpenChange={(opened) => !opened && setOpen(undefined)}>
 				{open !== undefined && (
@@ -332,6 +346,9 @@ export function RoutinePage({
 			<SettingsGroup>
 				<Editable editable={canManage}>
 					<ResultsRow results={routine.results} onChange={(results) => save({ results })} />
+					{routine.results === "post_to_chat" && (
+						<ChatRow pod={pod} chatId={routine.chatId} onChange={(chatId) => save({ chatId })} />
+					)}
 				</Editable>
 			</SettingsGroup>
 			<Dialog open={open !== undefined} onOpenChange={(opened) => !opened && setOpen(undefined)}>
@@ -728,6 +745,58 @@ function ResultsRow({
 			checked={results === "post_to_chat"}
 			onChange={(posted) => onChange(posted ? "post_to_chat" : "keep_in_run")}
 		/>
+	);
+}
+
+/**
+ * Which of the pod's chats a routine's results go to, offered once the pod
+ * has more than one: its first, which a null `chatId` stands for, or another.
+ */
+function ChatRow({
+	pod,
+	chatId,
+	onChange,
+}: {
+	pod: Pod;
+	chatId: string | null;
+	onChange: (chatId: string | null) => void;
+}) {
+	const chats = useChatList(pod.kind === "shared" ? pod.slug : undefined).data?.chats ?? [];
+	if (chats.length < 2) return null;
+	const chosen =
+		chats.find(({ conversation }) => conversation.id === chatId) ??
+		chats.find(({ conversation }) => conversation.main);
+	const name = chosen?.conversation.title ?? "";
+	return (
+		<SettingsControlRow label="Chat">
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					aria-label={`Chat: ${name}`}
+					className="focus-ring ml-auto flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-[8px] bg-chip px-2.5 text-[14px] text-foreground transition-colors hover:bg-hover"
+				>
+					<span className="truncate">{name}</span>
+					<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align="end" className="min-w-48">
+					<DropdownMenuRadioGroup
+						value={chosen?.conversation.id}
+						onValueChange={(id: string) =>
+							onChange(
+								chats.find(({ conversation }) => conversation.id === id)?.conversation.main
+									? null
+									: id,
+							)
+						}
+					>
+						{chats.map(({ conversation }) => (
+							<DropdownMenuRadioItem key={conversation.id} value={conversation.id}>
+								{conversation.title}
+							</DropdownMenuRadioItem>
+						))}
+					</DropdownMenuRadioGroup>
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</SettingsControlRow>
 	);
 }
 

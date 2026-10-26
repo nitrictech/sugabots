@@ -50,15 +50,21 @@ export const threadSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
-	/** The bot the thread is with; null on a pod's chat. */
+	/** The bot the thread is with; null on a pod's chat, and on a thread between people. */
 	hostAgentId: Schema.NullOr(uuidSchema),
-	/** The conversation it is in; its own id on a conversation. Null on a system agent's thread. */
+	/**
+	 * The conversation it is in: its own id on a conversation, a pod's chat or
+	 * a routine's thread. Null on a system agent's thread.
+	 */
 	conversationId: Schema.NullOr(uuidSchema),
 	type: threadTypeSchema,
 	title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_THREAD_TITLE_CHARACTERS)),
 	/** `running` while a turn is queued or in progress for the thread. */
 	status: Schema.Literals(["running", "done"]),
-	/** Set on a thread one agent opened to collaborate with another; the parent holds the collaboration card. */
+	/**
+	 * The thread this one was opened under: by a bot collaborating, which the
+	 * parent holds the card for, or from a message in a pod's chat.
+	 */
 	parentThreadId: Schema.NullOr(uuidSchema),
 	/** When somebody marked the conversation done; null while it is open, and on any other thread. */
 	doneAt: Schema.NullOr(isoTimestampSchema),
@@ -613,8 +619,6 @@ export const newMessageSchema = Schema.Struct({
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),
 	),
-	/** For the people in the thread only: the bots read it, but none replies. */
-	peopleOnly: Schema.optional(Schema.Boolean),
 	/** The id of the message in the same thread that this one quotes and answers. */
 	replyTo: Schema.optional(uuidSchema),
 }).check(

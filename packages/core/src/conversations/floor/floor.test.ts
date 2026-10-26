@@ -13,7 +13,7 @@ const scout = "0199a3a0-0000-7000-8000-000000000009";
 function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
 		threadType: "conversation",
-		peopleOnly: false,
+		peopleInThread: 1,
 		content: "Hello",
 		hostAgentId: host,
 		crew: [
@@ -30,7 +30,9 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 describe("a person's message", () => {
 	it("goes to the agents mentioned, whether or not they are in the thread yet", () => {
 		expect(
-			decideFloor(input({ threadType: "routine", content: "@reviewer and @scout, thoughts?" })),
+			decideFloor(
+				input({ threadType: "routine_feed", content: "@reviewer and @scout, thoughts?" }),
+			),
 		).toEqual({
 			kind: "turns",
 			agents: [
@@ -41,32 +43,40 @@ describe("a person's message", () => {
 	});
 
 	it("goes to nobody when only people are mentioned", () => {
-		expect(decideFloor(input({ threadType: "routine", content: "@sam can you look?" }))).toEqual({
+		expect(
+			decideFloor(input({ threadType: "routine_feed", content: "@sam can you look?" })),
+		).toEqual({
 			kind: "nobody",
 		});
 	});
 
-	it("goes to the chat's agent in a chat, not to the agents mentioned", () => {
-		// The chat's agent brings a mentioned agent in by collaborating. Handing
-		// the mentioned agent the turn made it a participant of the chat.
+	it("goes to the conversation's bot, not to the bots mentioned", () => {
+		// The conversation's bot brings a mentioned bot in by collaborating.
 		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "default" }],
 		});
 	});
 
-	it("goes to nobody in a chat when only people are mentioned", () => {
-		// The chat's agent used to answer anyway, only to say the message was not for it.
+	it("goes to nobody in a conversation when only people are mentioned", () => {
 		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
 	});
 
-	it("goes to nobody when written for people only, even with an agent mentioned", () => {
+	it("goes to nobody in a conversation other people are in, unless its bot is mentioned", () => {
+		const shared = { peopleInThread: 2 };
+		expect(decideFloor(input({ ...shared, content: "Shall we ship it?" }))).toEqual({
+			kind: "nobody",
+		});
 		expect(
-			decideFloor(input({ peopleOnly: true, content: "Should we let @reviewer take this?" })),
+			decideFloor(input({ ...shared, content: "Should we let @reviewer take this?" })),
 		).toEqual({ kind: "nobody" });
+		expect(decideFloor(input({ ...shared, content: "@host-agent can you check?" }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: host, reason: "mention" }],
+		});
 	});
 
-	it("goes to the chat's agent in a chat with several agents in it", () => {
+	it("goes to the conversation's bot when several bots are in it", () => {
 		expect(decideFloor(input({ agentParticipantIds: new Set([host, reviewer]) }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "default" }],
@@ -77,7 +87,7 @@ describe("a person's message", () => {
 		expect(
 			decideFloor(
 				input({
-					threadType: "routine",
+					threadType: "routine_feed",
 					agentParticipantIds: new Set([host, reviewer]),
 					lastAgentSpeakerId: reviewer,
 				}),
@@ -85,8 +95,17 @@ describe("a person's message", () => {
 		).toEqual({ kind: "turns", agents: [{ agentId: reviewer, reason: "default" }] });
 	});
 
+	it("goes to nobody in a pod's chat or a conversation between people", () => {
+		expect(
+			decideFloor(input({ threadType: "pod_chat", hostAgentId: null, content: "@reviewer?" })),
+		).toEqual({ kind: "nobody" });
+		expect(decideFloor(input({ hostAgentId: null, content: "@reviewer?" }))).toEqual({
+			kind: "nobody",
+		});
+	});
+
 	it("ignores a last speaker who has since left the thread", () => {
-		expect(decideFloor(input({ threadType: "routine", lastAgentSpeakerId: scout }))).toEqual({
+		expect(decideFloor(input({ threadType: "routine_feed", lastAgentSpeakerId: scout }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "default" }],
 		});

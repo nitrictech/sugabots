@@ -9,10 +9,13 @@ import {
 	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	conversationSchema,
+	conversationThreadSchema,
+	newChatSchema,
 	newThreadSchema,
 	openConversationSchema,
 	podChatMarkersSchema,
+	podChatSchema,
+	routineFeedSchema,
 	startedThreadSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
@@ -43,24 +46,44 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: approvalInboxSchema,
 			error: refused,
 		}),
-		/** The bot's conversation in the pod, opened on first use. */
+		/** The bot's newest thread in the pod, opened on first use. */
 		HttpApiEndpoint.post("open", "/workspaces/:workspace/conversations", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			payload: openConversationSchema,
-			success: conversationSchema,
+			success: conversationThreadSchema,
 			error: refused,
 		}),
 		/** The routine's own thread, where its runs post, opened on first use. */
 		HttpApiEndpoint.post("openRoutineFeed", "/workspaces/:workspace/routines/:routineId/thread", {
 			params: { workspace: workspaceIdOrSlugSchema, routineId: Schema.String },
-			success: conversationSchema,
+			success: routineFeedSchema,
 			error: refused,
 		}),
-		/** The pod's chat, opened on first use. */
+		/** The shared pod's first chat, opened on first use. */
 		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
 			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },
-			success: conversationSchema,
+			success: podChatSchema,
 			error: refused,
+		}),
+		/** Starts another chat in the pod, for everyone in it. */
+		HttpApiEndpoint.post("startChat", "/pods/:podId/chats", {
+			params: { podId: Schema.String },
+			payload: newChatSchema,
+			success: podChatSchema.pipe(HttpApiSchema.status(201)),
+			error: [BadRequest, ...refused],
+		}),
+		/** Renames one of the pod's chats that is not archived. */
+		HttpApiEndpoint.put("renameChat", "/conversations/:conversationId/name", {
+			params: { conversationId: Schema.String },
+			payload: newChatSchema,
+			success: HttpApiSchema.Empty(204),
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		/** Archives one of the pod's chats other than its first, which hides it from the pod's list. */
+		HttpApiEndpoint.put("archiveChat", "/conversations/:conversationId/archived", {
+			params: { conversationId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: [Conflict, ...refused],
 		}),
 		/** Starts a thread from the pod's chat `conversationId` with its first message. */
 		HttpApiEndpoint.post("startThread", "/conversations/:conversationId/threads", {
@@ -72,7 +95,7 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		/** Starts a thread between people from a message in a pod's chat, or finds the one it has. */
 		HttpApiEndpoint.post("threadFrom", "/messages/:messageId/thread", {
 			params: { messageId: Schema.String },
-			success: conversationSchema,
+			success: conversationThreadSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("messages", "/conversations/:conversationId/messages", {

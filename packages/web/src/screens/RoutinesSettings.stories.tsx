@@ -44,6 +44,7 @@ function placed(
 			triggers: routineTriggers(id, ...[trigger].flat()),
 			state: "enabled",
 			results: "post_to_chat",
+			chatId: null,
 			createdById: null,
 			createdByAgentId: null,
 			createdAt: "2026-09-01T00:00:00.000Z",

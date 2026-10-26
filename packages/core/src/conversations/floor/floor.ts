@@ -18,24 +18,30 @@ import { crewOf } from "../threads/participants.ts";
  *
  * The decision is a pure function of the message and the thread, so it can be
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
- * applies it, and asks for the turns. Precedence, top wins:
+ * applies it, and asks for the turns. People post in three types of thread:
  *
- * 1. Writing in a pod's chat, for people only, or mentioning only people:
- *    nobody. They are talking to each other.
- * 2. Writing in a conversation: its agent, whichever agents they mention. A
- *    conversation is with one agent, so another agent the person names is
- *    reached by that agent collaborating, not by joining.
- * 3. Mentioning agents by handle: those agents, and nobody else.
- * 4. Default: the agent that spoke last, else the host.
+ * - A pod's chat: nobody. Its people talk to each other, and start a thread
+ *   to ask a bot.
+ * - A conversation (`conversation`), with a bot or between people:
+ *   1. Between people, or mentioning only people: nobody.
+ *   2. With other people in it: its bot when they mention it, otherwise
+ *      nobody. They talk to each other until they call it.
+ *   3. Otherwise its bot, whichever bots they mention. A conversation is with
+ *      one bot, so another bot the person names is reached by that bot
+ *      collaborating, not by joining.
+ * - A routine's thread (`routine_feed`):
+ *   1. Mentioning only people: nobody.
+ *   2. Mentioning bots by handle: those bots, and nobody else.
+ *   3. Otherwise the bot that spoke last, else the routine's own.
  */
 
 export interface FloorInput {
 	threadType: ThreadType;
-	/** Written for the other people, so no bot replies. */
-	peopleOnly: boolean;
+	/** How many people are in the thread, the writer included. */
+	peopleInThread: number;
 	/** What the message says, for mentions. */
 	content: string;
-	/** The bot the thread is with; null in a pod's chat. */
+	/** The bot the thread is with; null in a pod's chat or between people. */
 	hostAgentId: string | null;
 	/** Crew placed in the pod, addressable by handle. */
 	crew: ReadonlyArray<{ id: string; handle: string }>;
@@ -49,30 +55,38 @@ export type FloorDecision =
 	| { kind: "turns"; agents: Array<{ agentId: string; reason: TurnReason }> }
 	| { kind: "nobody" };
 
+const NOBODY: FloorDecision = { kind: "nobody" };
+
 export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
-	if (
-		input.hostAgentId === null ||
-		input.peopleOnly ||
-		(mentioned.length > 0 && mentionedAgents.length === 0)
-	) {
-		return { kind: "nobody" };
+	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
+	const { hostAgentId } = input;
+	if (hostAgentId === null || mentionsOnlyPeople) return NOBODY;
+	switch (input.threadType) {
+		case "conversation":
+			if (input.peopleInThread <= 1) {
+				return { kind: "turns", agents: [{ agentId: hostAgentId, reason: "default" }] };
+			}
+			return mentionedAgents.some((member) => member.id === hostAgentId)
+				? { kind: "turns", agents: [{ agentId: hostAgentId, reason: "mention" }] }
+				: NOBODY;
+		case "routine_feed": {
+			if (mentionedAgents.length > 0) {
+				return {
+					kind: "turns",
+					agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
+				};
+			}
+			const fallback =
+				input.lastAgentSpeakerId && input.agentParticipantIds.has(input.lastAgentSpeakerId)
+					? input.lastAgentSpeakerId
+					: hostAgentId;
+			return { kind: "turns", agents: [{ agentId: fallback, reason: "default" }] };
+		}
+		default:
+			return NOBODY;
 	}
-	if (input.threadType === "conversation") {
-		return { kind: "turns", agents: [{ agentId: input.hostAgentId, reason: "default" }] };
-	}
-	if (mentionedAgents.length > 0) {
-		return {
-			kind: "turns",
-			agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
-		};
-	}
-	const fallback =
-		input.lastAgentSpeakerId && input.agentParticipantIds.has(input.lastAgentSpeakerId)
-			? input.lastAgentSpeakerId
-			: input.hostAgentId;
-	return { kind: "turns", agents: [{ agentId: fallback, reason: "default" }] };
 }
 
 /** A person's message, committed, that somebody may answer. */
@@ -80,7 +94,6 @@ export interface FloorMessage {
 	id: string;
 	threadId: string;
 	content: string;
-	peopleOnly: boolean;
 }
 
 /**
@@ -94,7 +107,7 @@ export interface FloorMessage {
 export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
-): Effect.fn.Return<Omit<FloorInput, "content" | "peopleOnly">, QueryFailure> {
+): Effect.fn.Return<Omit<FloorInput, "content">, QueryFailure> {
 	// One round trip: the crew, the participants and the last speaker ride
 	// along as JSON beside the thread.
 	const [scope] = yield* db
@@ -110,6 +123,10 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 				select coalesce(json_agg(${threadParticipant.agentId}) filter (where ${threadParticipant.agentId} is not null), '[]'::json)
 				from ${threadParticipant}
 				where ${threadParticipant.threadId} = ${thread.id}
+			)`,
+			peopleInThread: sql<number>`(
+				select count(*)::int from ${threadParticipant}
+				where ${threadParticipant.threadId} = ${thread.id} and ${threadParticipant.userId} is not null
 			)`,
 			lastAgentSpeakerId: sql<string | null>`(
 				select ${message.authorAgentId}
@@ -132,6 +149,7 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		hostAgentId: scope.hostAgentId,
 		crew: scope.crew,
 		agentParticipantIds: new Set(scope.participantAgentIds),
+		peopleInThread: scope.peopleInThread,
 		lastAgentSpeakerId: scope.lastAgentSpeakerId ?? undefined,
 	};
 });

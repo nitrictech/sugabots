@@ -1,10 +1,16 @@
-import type { ChatList, ChatListItem, ListedRoutine, Pod } from "@sugabots/contracts";
+import {
+	type ChatList,
+	type ChatListItem,
+	FIRST_CHAT_NAME,
+	type ListedRoutine,
+	type Pod,
+} from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, Library, Plus, Settings2, Users } from "lucide-react";
 import { useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
-import { useChatList } from "@/lib/chats.ts";
+import { useChatList, useStartChat } from "@/lib/chats.ts";
 import {
 	agentChatLink,
 	artifactsLink,
@@ -13,16 +19,25 @@ import {
 	podSettingsLink,
 	routineThreadLink,
 } from "@/lib/links.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
 import { ListColumn } from "@/shell/ListColumn.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
+import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
-/** Which row of the list is open: the pod's chat, or a thread. */
-export type ListSelection = { kind: "podChat" } | { kind: "thread"; conversationId: string };
+/**
+ * Which row of the list is open: the pod's first chat while it is being
+ * opened, or a conversation, which is a chat, a thread or a routine's thread.
+ */
+export type ListSelection = { kind: "podChat" } | { kind: "conversation"; conversationId: string };
+
+/** One of a shared pod's chats in its list. */
+export type ListedChat = ChatList["chats"][number];
 
 /**
  * The column of conversations for the pod chosen on the rail: a shared pod's
@@ -39,6 +54,8 @@ export function ConversationList({
 }) {
 	const list = useChatList(pod.slug);
 	const [creating, setCreating] = useState(false);
+	const [namingChat, setNamingChat] = useState(false);
+	const startChat = useStartChat(pod);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
 	const { agents } = useAgents();
@@ -48,14 +65,16 @@ export function ConversationList({
 		hint: newBot ? undefined : "Someone who runs this pod can add one.",
 		action: newBot ? { label: "New bot", onClick: newBot } : undefined,
 	};
-	const rows = list.data?.items ?? [];
-
 	return (
 		<>
 			<ConversationListView
 				pod={pod}
-				podChat={pod.kind === "shared" ? (list.data?.podChat ?? "unopened") : undefined}
-				rows={rows}
+				chats={
+					pod.kind === "shared"
+						? { list: list.data?.chats ?? [], onNew: () => setNamingChat(true) }
+						: undefined
+				}
+				rows={list.data?.threads ?? []}
 				routines={list.data?.routines ?? []}
 				hasBots={hasBots}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
@@ -64,6 +83,17 @@ export function ConversationList({
 				emptyState={emptyState}
 				className={className}
 			/>
+			<Dialog open={namingChat} onOpenChange={setNamingChat}>
+				<ChatNameDialog
+					title="New chat"
+					action="Create"
+					onSave={async (name) => {
+						const started = await startChat.mutateAsync(name);
+						setNamingChat(false);
+						await navigate(conversationLink({ pod, conversationId: started.id }));
+					}}
+				/>
+			</Dialog>
 			<Dialog open={creating} onOpenChange={setCreating}>
 				<NewAgentDialog
 					podId={pod.id}
@@ -88,9 +118,9 @@ export interface EmptyList {
 
 export function ConversationListView({
 	pod,
-	podChat,
+	chats,
 	rows,
-	routines = [],
+	routines,
 	hasBots,
 	status,
 	selected,
@@ -99,11 +129,15 @@ export function ConversationListView({
 	className,
 }: {
 	pod: Pod;
-	/** The pod's chat, `unopened` until somebody first opens it. Absent from a Personal pod. */
-	podChat?: NonNullable<ChatList["podChat"]> | "unopened";
+	/**
+	 * A shared pod's chats, its first first, none until somebody opens one, and
+	 * what starts another. Absent from a Personal pod, which has none.
+	 */
+	chats?: { list: readonly ListedChat[]; onNew: () => void };
+	/** The pod's threads, newest message first. */
 	rows: readonly ChatListItem[];
 	/** The pod's routines, under their own heading, folded until opened. */
-	routines?: readonly ListedRoutine[];
+	routines: readonly ListedRoutine[];
 	/** Whether the pod has bots; one without says so, with the way to make the first. */
 	hasBots: boolean;
 	status: "loading" | "ready" | "failed";
@@ -120,9 +154,19 @@ export function ConversationListView({
 	// Folded until opened, unless a routine has failed, which opens it.
 	const [routinesChosen, setRoutinesShown] = useState<boolean>();
 	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
-	const isSelected = (row: ChatListItem) =>
-		selected?.kind === "thread" && row.conversation.id === selected.conversationId;
-	const title = pod.name;
+	const isSelected = (conversationId: string | undefined) =>
+		selected?.kind === "conversation" && conversationId === selected.conversationId;
+	// The first chat is listed before anyone opens it, which opens it.
+	const shownChats: (ListedChat | "unopened")[] | undefined =
+		chats &&
+		(chats.list.some((chat) => chat.conversation.main)
+			? [...chats.list]
+			: ["unopened", ...chats.list]);
+	const isChatSelected = (chat: ListedChat | "unopened") =>
+		chat === "unopened"
+			? selected?.kind === "podChat"
+			: isSelected(chat.conversation.id) ||
+				(selected?.kind === "podChat" && chat.conversation.main);
 	const empty = status === "ready" && rows.length === 0 && !hasBots;
 	const noBots = (
 		// A little above the middle, as the design sets it, with the one next step under it.
@@ -150,12 +194,12 @@ export function ConversationListView({
 
 	return (
 		<ListColumn
-			title={title}
+			title={pod.name}
 			className={className}
 			actions={
 				<>
 					{onNewBot && !empty && (
-						<IconButton label={`New bot in ${title}`} variant="bar" onClick={onNewBot}>
+						<IconButton label={`New bot in ${pod.name}`} variant="bar" onClick={onNewBot}>
 							<Plus size={17} strokeWidth={2.2} />
 						</IconButton>
 					)}
@@ -172,7 +216,7 @@ export function ConversationListView({
 				</>
 			}
 		>
-			{(podChat || !empty) && (
+			{(shownChats || !empty) && (
 				<ul
 					className={cn(
 						"m-0 flex min-h-0 list-none flex-col gap-px overflow-y-auto px-2 pt-2.5 pb-3",
@@ -182,11 +226,21 @@ export function ConversationListView({
 					{status === "failed" && (
 						<li className="px-2.5 py-3 text-muted-foreground">Could not load these chats.</li>
 					)}
-					{podChat && (
+					{shownChats && (
 						<>
-							<li>
-								<PodChatRow pod={pod} podChat={podChat} selected={selected?.kind === "podChat"} />
+							<li className="flex items-center pr-1.5 pb-1 pl-2.5 font-medium text-[12px] text-subtle-foreground">
+								<span className="flex-1">Chats</span>
+								{chats && (
+									<IconButton label={`New chat in ${pod.name}`} size="sm" onClick={chats.onNew}>
+										<Plus strokeWidth={2.4} />
+									</IconButton>
+								)}
 							</li>
+							{shownChats.map((chat) => (
+								<li key={chat === "unopened" ? "unopened" : chat.conversation.id}>
+									<PodChatRow pod={pod} chat={chat} selected={isChatSelected(chat)} />
+								</li>
+							))}
 							{open.length > 0 && (
 								<li className="px-2.5 pt-3.5 pb-1 font-medium text-[12px] text-subtle-foreground">
 									Threads
@@ -196,7 +250,7 @@ export function ConversationListView({
 					)}
 					{open.map((row) => (
 						<li key={row.conversation.id}>
-							<ConversationRow row={row} pod={pod} selected={isSelected(row)} />
+							<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
 						</li>
 					))}
 					{routines.length > 0 && (
@@ -212,13 +266,7 @@ export function ConversationListView({
 					{routinesShown &&
 						routines.map((row) => (
 							<li key={row.routine.id}>
-								<RoutineRow
-									row={row}
-									pod={pod}
-									selected={
-										selected?.kind === "thread" && row.conversation?.id === selected.conversationId
-									}
-								/>
+								<RoutineRow row={row} pod={pod} selected={isSelected(row.conversation?.id)} />
 							</li>
 						))}
 					{done.length > 0 && (
@@ -234,7 +282,7 @@ export function ConversationListView({
 					{doneShown &&
 						done.map((row) => (
 							<li key={row.conversation.id}>
-								<ConversationRow row={row} pod={pod} selected={isSelected(row)} />
+								<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
 							</li>
 						))}
 				</ul>
@@ -244,37 +292,37 @@ export function ConversationListView({
 	);
 }
 
-/** The pod's chat on one line, bright while something there is new, with how much. */
+/**
+ * One of the pod's chats on one line, bright while something there is new,
+ * with how much.
+ */
 function PodChatRow({
 	pod,
-	podChat,
+	chat,
 	selected,
 }: {
 	pod: Pod;
-	podChat: NonNullable<ChatList["podChat"]> | "unopened";
+	chat: ListedChat | "unopened";
 	selected: boolean;
 }) {
-	const unreadMessages = podChat === "unopened" ? 0 : podChat.unreadMessages;
+	const unreadMessages = chat === "unopened" ? 0 : chat.unreadMessages;
 	const lit = selected || unreadMessages > 0;
 	return (
 		<Link
-			{...(podChat === "unopened"
+			{...(chat === "unopened"
 				? podChatLink(pod)
-				: conversationLink({ pod, conversationId: podChat.conversation.id }))}
+				: conversationLink({ pod, conversationId: chat.conversation.id }))}
 			aria-current={selected ? "page" : undefined}
-			className={cn(
-				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
-				selected ? "bg-row-selected" : "hover:bg-row-hover",
-			)}
+			className={rowClassName(selected)}
 		>
-			<PeopleTile />
+			<PodChatTile color={pod.color} size={26} />
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",
 					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
 				)}
 			>
-				Pod chat
+				{chat === "unopened" ? FIRST_CHAT_NAME : chat.conversation.title}
 			</span>
 			<ChatMarker needsYou={false} unreadMessages={unreadMessages} />
 		</Link>
@@ -282,8 +330,9 @@ function PodChatRow({
 }
 
 /**
- * A bot's chat on one line: its face and name, bright while something there is
- * new or waits on the viewer, and at the end what does.
+ * A thread on one line: its bot's face, or the people's tile for one between
+ * people, and its title, bright while something there is new or waits on the
+ * viewer, and at the end what does.
  */
 function ConversationRow({
 	row,
@@ -302,10 +351,7 @@ function ConversationRow({
 		<Link
 			{...conversationLink({ pod, conversationId: row.conversation.id })}
 			aria-current={selected ? "page" : undefined}
-			className={cn(
-				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
-				selected ? "bg-row-selected" : "hover:bg-row-hover",
-			)}
+			className={rowClassName(selected)}
 		>
 			{agent ? (
 				<AgentAvatar
@@ -329,6 +375,14 @@ function ConversationRow({
 			</span>
 			<ChatMarker needsYou={needsYou} unreadMessages={row.unreadMessages} />
 		</Link>
+	);
+}
+
+/** A list row, shaded while it is the one open. */
+function rowClassName(selected: boolean): string {
+	return cn(
+		"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
+		selected ? "bg-row-selected" : "hover:bg-row-hover",
 	);
 }
 
@@ -376,10 +430,7 @@ function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; sele
 				? conversationLink({ pod, conversationId: row.conversation.id })
 				: routineThreadLink(pod, routine.id))}
 			aria-current={selected ? "page" : undefined}
-			className={cn(
-				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
-				selected ? "bg-row-selected" : "hover:bg-row-hover",
-			)}
+			className={rowClassName(selected)}
 		>
 			<AgentAvatar
 				color={agent.color}
@@ -411,7 +462,7 @@ function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; sele
 	);
 }
 
-/** Where a row has no bot's face, as the pod's chat and threads between people do. */
+/** Where a thread's row has no bot's face, as a thread between people does. */
 function PeopleTile() {
 	return (
 		<span
@@ -446,7 +497,7 @@ function ChatMarker({
 	return (
 		<CountBadge
 			count={unreadMessages}
-			label={unreadMessages === 1 ? "1 unread message" : `${unreadMessages} unread messages`}
+			label={countOf(unreadMessages, "unread message", "unread messages")}
 			size="md"
 		/>
 	);

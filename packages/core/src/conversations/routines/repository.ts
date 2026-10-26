@@ -144,8 +144,8 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const runs = yield* RoutineRuns.Service;
 
-	/** The conversation a run's thread is in, which lists the run, and their pod. */
-	const conversationOf = (run: schema.RoutineExecutionRow) =>
+	/** The routine's own thread, which lists the run, and its pod. */
+	const listingOf = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
 			const [root] = yield* query((db) =>
 				db
@@ -206,7 +206,7 @@ export const make = Effect.gen(function* () {
 			yield* emit([
 				ConversationEvent.RoutineExecutionSettled({
 					workspaceId: run.workspaceId,
-					...(yield* conversationOf(run)),
+					...(yield* listingOf(run)),
 					threadId: run.threadId,
 				}),
 			]);
@@ -406,7 +406,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.RoutineExecutionAccepted({
 								workspaceId: accepted.workspaceId,
-								...(yield* conversationOf(accepted)),
+								...(yield* listingOf(accepted)),
 								threadId: accepted.threadId,
 							}),
 						]);
@@ -535,7 +535,10 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** What a routine is: its name, what it tells the agent, where its result goes, and whether it runs. */
-export type Definition = Pick<schema.RoutineRow, "name" | "instructions" | "results" | "state">;
+export type Definition = Pick<
+	schema.RoutineRow,
+	"name" | "instructions" | "results" | "chatId" | "state"
+>;
 
 /** What one of a routine's triggers is, and what it keeps beside that: a webhook's secret, a schedule's next time. */
 export type TriggerValues = Pick<

@@ -1,12 +1,16 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Agent, Pod, ThreadDetails } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, CircleCheck, Info, Pause, Play, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
+import { useRoutineControls } from "@/lib/chats.ts";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
+
+/** A routine, as its own thread knows it. */
+type RoutineStanding = NonNullable<ThreadDetails["routine"]>;
 
 /** The list a page covers on a phone, which its Back returns to. */
 export type BackTo = { to: "pod"; pod: Pod } | { to: "activity" };
@@ -20,36 +24,46 @@ export type ChatPlace =
 	| { kind: "own"; detailsOpen: boolean; onDetailsChange: (open: boolean) => void }
 	| { kind: "away"; back: BackTo; trailing: ReactNode };
 
+/** What a chat's header does around its title: where Back goes, what is at its right, and its Details. */
+export interface HeaderPlace {
+	/** The list the chat covers on a phone, which Back returns to. */
+	back: BackTo;
+	/** At the right of the header, such as the way to the chat itself when shown elsewhere. */
+	trailing?: ReactNode;
+	/** Whether its Details are open, and what opens or closes them; absent where it has none. */
+	details?: DetailsToggle;
+}
+
+/** Whether a chat's Details are open, and what opens or closes them. */
+export interface DetailsToggle {
+	open: boolean;
+	onChange: (open: boolean) => void;
+}
+
 /**
  * The bar across the top of a bot's chat: its face and name, what it is for,
- * the way into its sandbox's desktop when it has one, and, on its own page,
- * the way into its Details: the ⓘ, or the name, which is how a phone reaches
- * them. Not while something is staged beside the chat, which takes Details'
- * place. On a phone the chat covers the list, so Back returns to it.
+ * the way into its sandbox's desktop when it has one, and, with `details`, the
+ * way into its Details: the ⓘ, or the name, which is how a phone reaches them.
  */
 export function ChatHeader({
 	agent,
 	title,
 	done,
 	routine,
-	pod,
 	conversationId,
-	place,
-	staged,
 	onOpenDesktop,
-}: {
+	back,
+	trailing,
+	details,
+}: HeaderPlace & {
 	agent: Agent;
 	/** The thread's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it. */
 	done?: DoneToggle;
-	/** On a routine's own thread: whether the routine is paused, and how to pause or resume it. */
-	routine?: { paused: boolean; pending: boolean; onPausedChange: (paused: boolean) => void };
-	pod: Pod;
+	/** On a routine's own thread: the routine, which the header pauses and resumes. */
+	routine?: RoutineStanding;
 	conversationId: string;
-	place: ChatPlace;
-	/** Whether something is open large beside the chat, such as an artifact or the desktop. */
-	staged: boolean;
 	onOpenDesktop: () => void;
 }) {
 	const name = (
@@ -66,12 +80,12 @@ export function ChatHeader({
 	);
 	return (
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
-			<HeaderBack back={place.kind === "away" ? place.back : { to: "pod", pod }} />
+			<HeaderBack back={back} />
 			<h1 className="m-0 flex min-w-0 shrink-0 font-semibold text-[16px] text-foreground max-md:shrink">
-				{place.kind === "own" && !staged ? (
+				{details ? (
 					<button
 						type="button"
-						onClick={() => place.onDetailsChange(!place.detailsOpen)}
+						onClick={() => details.onChange(!details.open)}
 						className="focus-ring flex min-w-0 items-center gap-3 rounded-md text-left"
 					>
 						{name}
@@ -92,64 +106,82 @@ export function ChatHeader({
 			)}
 			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
 			{done && <DoneButton {...done} />}
-			{routine && (
-				<Button
-					size="sm"
-					variant="outline"
-					disabled={routine.pending}
-					onClick={() => routine.onPausedChange(!routine.paused)}
-				>
-					{routine.paused ? (
-						<Play aria-hidden size={14} strokeWidth={2} />
-					) : (
-						<Pause aria-hidden size={14} strokeWidth={2} />
-					)}
-					{routine.paused ? "Resume" : "Pause"}
-				</Button>
-			)}
-			{place.kind === "away" ? (
-				place.trailing
-			) : staged ? null : (
-				<IconButton
-					label="Details"
-					variant="bar"
-					aria-pressed={place.detailsOpen}
-					onClick={() => place.onDetailsChange(!place.detailsOpen)}
-					className="size-8 aria-pressed:bg-chip max-md:hidden"
-				>
-					<Info size={18} strokeWidth={2} />
-				</IconButton>
-			)}
+			{routine && <RoutinePauseButton conversationId={conversationId} routine={routine} />}
+			{details && <DetailsButton {...details} />}
+			{trailing}
 		</header>
+	);
+}
+
+/** Pauses the routine whose own thread `conversationId` is, or resumes it. */
+function RoutinePauseButton({
+	conversationId,
+	routine,
+}: {
+	conversationId: string;
+	routine: RoutineStanding;
+}) {
+	const controls = useRoutineControls(conversationId, routine);
+	const paused = routine.state === "paused";
+	return (
+		<Button
+			size="sm"
+			variant="outline"
+			disabled={controls.pending}
+			onClick={() => void controls.setPaused(!paused)}
+		>
+			{paused ? (
+				<Play aria-hidden size={14} strokeWidth={2} />
+			) : (
+				<Pause aria-hidden size={14} strokeWidth={2} />
+			)}
+			{paused ? "Resume" : "Pause"}
+		</Button>
+	);
+}
+
+/** The ⓘ that opens a chat's Details, or closes them. */
+function DetailsButton({ open, onChange }: DetailsToggle) {
+	return (
+		<IconButton
+			label="Details"
+			variant="bar"
+			aria-pressed={open}
+			onClick={() => onChange(!open)}
+			className="size-8 aria-pressed:bg-chip max-md:hidden"
+		>
+			<Info size={18} strokeWidth={2} />
+		</IconButton>
 	);
 }
 
 /**
  * The bar across the top of a chat between people, the pod's chat or a thread
- * started from it: what it is called, and what it is for. Shown away from its
- * own page, as Activity shows it, it has the way to the chat itself at the
- * right.
+ * started from it: what it is called, and what it is for.
  */
 export function PeopleChatHeader({
 	title,
+	tile,
+	menu,
 	description,
 	done,
+	back,
+	trailing,
 	details,
-	pod,
-	place,
-}: {
+}: HeaderPlace & {
 	title: string;
+	/** Drawn before the title, such as the pod's tile on its chat. */
+	tile?: ReactNode;
+	/** What else can be done with it, at the end of the header. */
+	menu?: ReactNode;
 	description?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
 	done?: DoneToggle;
-	/** Whether its Details are open, and what opens or closes them; absent where it has none. */
-	details?: { open: boolean; onChange: (open: boolean) => void };
-	pod: Pod;
-	place: ChatPlace;
 }) {
 	return (
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
-			<HeaderBack back={place.kind === "away" ? place.back : { to: "pod", pod }} />
+			<HeaderBack back={back} />
+			{tile}
 			<h1 className="m-0 min-w-0 shrink-0 truncate font-semibold text-[16px] text-foreground max-md:shrink">
 				{title}
 			</h1>
@@ -164,18 +196,9 @@ export function PeopleChatHeader({
 				<span className="flex-1" />
 			)}
 			{done && <DoneButton {...done} />}
-			{details && (
-				<IconButton
-					label="Details"
-					variant="bar"
-					aria-pressed={details.open}
-					onClick={() => details.onChange(!details.open)}
-					className="size-8 aria-pressed:bg-chip max-md:hidden"
-				>
-					<Info size={18} strokeWidth={2} />
-				</IconButton>
-			)}
-			{place.kind === "away" && place.trailing}
+			{details && <DetailsButton {...details} />}
+			{menu}
+			{trailing}
 		</header>
 	);
 }

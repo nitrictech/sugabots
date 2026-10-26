@@ -47,6 +47,21 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.openPodChat({ workspace: params.workspace, podId: params.podId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("startChat", ({ params, payload }) =>
+				chats
+					.startChat({ podId: params.podId, name: payload.name })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("renameChat", ({ params, payload }) =>
+				chats
+					.changeChat({ conversationId: params.conversationId, change: { name: payload.name } })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("archiveChat", ({ params }) =>
+				chats
+					.changeChat({ conversationId: params.conversationId, change: { archived: true } })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("startThread", ({ params, payload }) =>
 				chats
 					.startThread({
@@ -88,7 +103,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						messageId: payload.id,
 						content: payload.message,
 						attachments: payload.attachments,
-						peopleOnly: payload.peopleOnly,
 						replyTo: payload.replyTo,
 					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
@@ -142,11 +156,13 @@ const storeOutagesAsDefects = {
 
 const chatErrors = {
 	...refusals,
-	ChatPlacementRejected: BadRequest,
+	HostNotCrew: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
-	ChatAgentHasNoModel: Conflict,
-	InvalidChatCursor: BadRequest,
+	HostHasNoModel: Conflict,
+	ChatArchived: Conflict,
+	FirstChatNotArchivable: Conflict,
+	InvalidPageCursor: BadRequest,
 	UploadsNotFound: BadRequest,
 };
 

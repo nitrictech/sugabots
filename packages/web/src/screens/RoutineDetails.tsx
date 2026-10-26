@@ -8,7 +8,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { useRoutineControls } from "@/lib/chats.ts";
+import { useChatList, useRoutineControls } from "@/lib/chats.ts";
 import { routineSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
@@ -104,7 +104,7 @@ export function RoutineDetails({
 						</Link>
 					)}
 				</div>
-				{routine && <RoutineFacts routine={routine} />}
+				{routine && <RoutineFacts routine={routine} pod={pod} />}
 				<RecentRuns routine={standing} onOpenThread={onOpenThread} />
 				<Tools pod={pod} agent={agent} />
 			</div>
@@ -127,7 +127,11 @@ function nextRunWords(routine: Routine): string {
 }
 
 /** When the routine runs, what it is told, and where its result goes. */
-function RoutineFacts({ routine }: { routine: Routine }) {
+function RoutineFacts({ routine, pod }: { routine: Routine; pod: Pod }) {
+	const chats = useChatList(pod.kind === "shared" ? pod.slug : undefined).data?.chats ?? [];
+	const chat =
+		chats.find(({ conversation }) => conversation.id === routine.chatId) ??
+		chats.find(({ conversation }) => conversation.main);
 	return (
 		<>
 			<SidebarSection title="Schedule">
@@ -140,7 +144,9 @@ function RoutineFacts({ routine }: { routine: Routine }) {
 			</SidebarSection>
 			<SidebarSection title="Posts to">
 				<p className="m-0 px-3.5 py-3 text-[14px] text-foreground">
-					{routine.results === "post_to_chat" ? "This thread and the pod's chat" : "This thread"}
+					{routine.results === "post_to_chat"
+						? `This thread and ${chat?.conversation.title ?? "the pod's chat"}`
+						: "This thread"}
 				</p>
 			</SidebarSection>
 		</>

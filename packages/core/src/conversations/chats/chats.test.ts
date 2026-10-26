@@ -214,7 +214,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const list = await view.list({ workspace: workspaceId, pod: podId });
 
-		expect(list?.items).toEqual([
+		expect(list?.threads).toEqual([
 			{
 				agent: null,
 				// Nobody has replied yet: the message it was started from stays in the chat.
@@ -370,7 +370,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const doneAt = async () =>
-			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
 				(item) => item.conversation.id === current.id,
 			)?.conversation.doneAt;
 
@@ -388,7 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("says when a message the person has not read mentions them", async () => {
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const mentioned = async () =>
-			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
 				(item) => item.conversation.id === current.id,
 			)?.mentionsYou;
 		expect(await mentioned()).toBe(false);
@@ -466,7 +466,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const list = await view.list({ workspace: workspaceId, pod: podId });
 
-		const host = list?.items.find((item) => item.agent?.id === agentId);
+		const host = list?.threads.find((item) => item.agent?.id === agentId);
 		expect(host?.lastMessage?.preview).toBe("I'm still getting denied.");
 	});
 
@@ -491,7 +491,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			return written;
 		};
 		const hostRow = async () =>
-			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
 				(item) => item.agent?.id === agentId,
 			);
 
@@ -774,7 +774,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await expect(view.list({ workspace: workspaceId, pod: unjoined.id })).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
-		expect((await view.list({ workspace: workspaceId, pod: personal.id }))?.items).toHaveLength(1);
+		expect((await view.list({ workspace: workspaceId, pod: personal.id }))?.threads).toHaveLength(
+			1,
+		);
 	});
 
 	it("lists the person's own Personal pod by the slug every Personal pod shares", async () => {
@@ -818,7 +820,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 
 		const listed = async (list: Promised<ChatView.Interface>) =>
-			(await list.list({ workspace: workspaceId, pod: "personal" }))?.items.map(
+			(await list.list({ workspace: workspaceId, pod: "personal" }))?.threads.map(
 				(item) => item.agent?.name,
 			);
 
@@ -860,7 +862,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const input = { workspace: workspaceId, podId };
 		const [first, again] = await Promise.all([chats.openPodChat(input), chats.openPodChat(input)]);
 		expect(again.id).toBe(first.id);
-		expect(first).toMatchObject({ podId, hostAgentId: null, title: "Pod chat" });
+		expect(first).toMatchObject({ kind: "pod_chat", podId, main: true, title: "General" });
 		const [host] = await onDatabase((db) =>
 			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
 		);
@@ -888,13 +890,45 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		expect((await view.list({ workspace: workspaceId, pod: podId }))?.podChat).toEqual({
-			conversation: expect.objectContaining({ id: podChat.id }),
-			unreadMessages: 1,
-		});
+		expect((await view.list({ workspace: workspaceId, pod: podId }))?.chats).toEqual([
+			{ conversation: expect.objectContaining({ id: podChat.id, main: true }), unreadMessages: 1 },
+		]);
 		expect(await view.podMarkers(workspaceId)).toEqual({
 			pods: { [podId]: { unreadMessages: 1, needsApproval: false, failedRoutines: 0 } },
 		});
+	});
+
+	it("lists the pod's chats, its first first, and hides one once archived", async () => {
+		const first = await chats.openPodChat({ workspace: workspaceId, podId });
+		const pricing = await chats.startChat({ podId, name: "Pricing" });
+		const launch = await chats.startChat({ podId, name: "Launch" });
+
+		const listed = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.chats.map(
+				({ conversation }) => conversation.title,
+			);
+		expect(await listed()).toEqual([first.title, "Pricing", "Launch"]);
+
+		// Changing a chat is for whoever may change the pod.
+		const administering = onPostgresAs(administratorId)(Context.get(conversations, Chats.Service));
+		await administering.changeChat({ conversationId: pricing.id, change: { name: "Prices" } });
+		await administering.changeChat({ conversationId: launch.id, change: { archived: true } });
+		// The first chat can be renamed, but stays.
+		await administering.changeChat({ conversationId: first.id, change: { name: "Everyone" } });
+		await expect(
+			administering.changeChat({ conversationId: first.id, change: { archived: true } }),
+		).rejects.toMatchObject({ _tag: "FirstChatNotArchivable" });
+
+		expect(await listed()).toEqual(["Everyone", "Prices"]);
+	});
+
+	it("leaves renaming and archiving a pod's chat to whoever may change the pod", async () => {
+		const pricing = await chats.startChat({ podId, name: "Pricing" });
+
+		// The member the chats are with may start one, but not change the pod.
+		await expect(
+			chats.changeChat({ conversationId: pricing.id, change: { archived: true } }),
+		).rejects.toMatchObject({ _tag: "ActionForbidden" });
 	});
 
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
@@ -908,7 +942,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				messageId,
 				content: "Anyone there?",
 			}),
-		).rejects.toMatchObject({ _tag: "ChatAgentHasNoModel" });
+		).rejects.toMatchObject({ _tag: "HostHasNoModel" });
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
 		).toHaveLength(0);

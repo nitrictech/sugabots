@@ -245,6 +245,8 @@ export const routineSchema = Schema.Struct({
 	triggers: Schema.Array(routineTriggerSchema),
 	state: routineStateSchema,
 	results: routineResultsSchema,
+	/** The pod's chat its results are posted to; the pod's first chat when null. */
+	chatId: Schema.NullOr(uuidSchema),
 	createdById: Schema.NullOr(uuidSchema),
 	/** The routine's own bot, when it made the routine at `createdById`'s request. */
 	createdByAgentId: Schema.NullOr(uuidSchema),
@@ -313,6 +315,7 @@ export const newRoutineSchema = Schema.Struct({
 	instructions: routineInstructionsSchema,
 	state: Schema.optional(routineStateSchema),
 	results: Schema.optional(routineResultsSchema),
+	chatId: Schema.optional(Schema.NullOr(uuidSchema)),
 	triggers: Schema.Array(routineTriggerInputSchema).check(Schema.isMaxLength(MAX_ROUTINE_TRIGGERS)),
 });
 
@@ -324,6 +327,7 @@ export const routineUpdateSchema = Schema.Struct({
 	instructions: Schema.optional(routineInstructionsSchema),
 	state: Schema.optional(routineStateSchema),
 	results: Schema.optional(routineResultsSchema),
+	chatId: Schema.optional(Schema.NullOr(uuidSchema)),
 });
 
 export type RoutineUpdate = typeof routineUpdateSchema.Type;
@@ -407,7 +411,7 @@ export const routineExecutionSchema = Schema.Struct({
 	agentId: uuidSchema,
 	/** The run's own thread. */
 	threadId: uuidSchema,
-	/** The conversation the run's thread is opened beside. */
+	/** The routine's own thread, which lists the run beside its other runs. */
 	conversationId: uuidSchema,
 	routineName: routineNameSchema,
 	instructions: routineInstructionsSchema,

@@ -18,6 +18,7 @@ import { Installation } from "../../installation/installation.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { RoutineRepository } from "./repository.ts";
 import type {
+	RoutineChatNotFound,
 	RoutineNotFound,
 	RoutineRepositoryNotInPod,
 	RoutineTriggerKindChanged,
@@ -262,6 +263,7 @@ export type Refused =
 	| MayNotManageRoutines
 	| TriggerSetInSettings
 	| RoutineNotFound
+	| RoutineChatNotFound
 	| RoutineRepository.RoutineNameTaken
 	| InvalidRoutineSchedule
 	| WebhookSecretTooShort

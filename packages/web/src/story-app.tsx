@@ -2,10 +2,11 @@ import type {
 	Agent,
 	ChatListItem,
 	ChatMessageItem,
-	Conversation,
+	ConversationThread,
 	Message,
 	ModelProvider,
 	Pod,
+	PodChat,
 	SessionUser,
 	SystemAgent,
 	ThreadActivity,
@@ -23,6 +24,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, type RequestHandler } from "msw";
 import { useEffect, useState } from "react";
+import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { podsWithBots } from "@/shell/story-fixtures.ts";
@@ -62,10 +64,11 @@ export const storyPods: Pod[] = podsWithBots.map(({ pod }) =>
 );
 export const storyBots: Agent[] = podsWithBots.flatMap(({ bots }) => bots);
 
-/** One conversation per bot, by the bot's id. */
-export function storyConversationFor(agent: Agent): Conversation {
+/** One thread per bot, by the bot's id. */
+export function storyConversationFor(agent: Agent): ConversationThread {
 	const suffix = agent.id.slice(-4);
 	return {
+		kind: "thread",
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: agent.workspaceId,
 		podId: agent.podId,
@@ -176,14 +179,15 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 }
 
 /** A shared pod's chat, by the pod's id. */
-export function storyPodChatFor(pod: Pod): Conversation {
+export function storyPodChatFor(pod: Pod): PodChat {
 	return {
+		kind: "pod_chat",
 		id: `0199a3a0-0000-7000-8000-00000000c9${pod.id.slice(-2)}`,
 		workspaceId: pod.workspaceId,
 		podId: pod.id,
-		hostAgentId: null,
-		title: "Pod chat",
-		doneAt: null,
+		title: "General",
+		main: true,
+		archivedAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
@@ -199,7 +203,13 @@ export function storyPodChatDetails(
 	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {
 		thread: {
-			...chat,
+			id: chat.id,
+			workspaceId: chat.workspaceId,
+			podId: chat.podId,
+			hostAgentId: null,
+			title: chat.title,
+			createdAt: chat.createdAt,
+			updatedAt: chat.updatedAt,
 			conversationId: chat.id,
 			type: "pod_chat",
 			status: "done",
@@ -243,11 +253,6 @@ export function storyChatActivity(agent: Agent, messages: Message[] = []): Threa
 		context: null,
 		recentParticipants: [...details.participants].reverse(),
 	};
-}
-
-/** When a chat item happened, for putting a page of them in order. */
-function itemAt(item: ChatMessageItem): string {
-	return item.kind === "message" ? item.message.createdAt : item.createdAt;
 }
 
 /** A stream that stays open and says nothing, as a quiet thread's does. */
@@ -360,9 +365,9 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				});
 			return HttpResponse.json({
 				routines: [],
-				podChat:
-					pod?.kind === "shared" ? { conversation: storyPodChatFor(pod), unreadMessages: 0 } : null,
-				items,
+				chats:
+					pod?.kind === "shared" ? [{ conversation: storyPodChatFor(pod), unreadMessages: 0 }] : [],
+				threads: items,
 			});
 		}),
 		http.post(api("/workspaces/:workspace/pods/:podId/chat"), ({ params }) => {
@@ -387,7 +392,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				items: [
 					...(said ?? []).map((message): ChatMessageItem => ({ kind: "message", message })),
 					...links,
-				].sort((left, right) => itemAt(left).localeCompare(itemAt(right))),
+				].sort((left, right) => chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right))),
 				nextCursor: null,
 			});
 		}),

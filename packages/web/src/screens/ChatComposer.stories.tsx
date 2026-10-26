@@ -1,7 +1,7 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { useEffect, useState } from "react";
-import { expect, fn, spyOn } from "storybook/test";
+import { expect, fn, spyOn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
 import {
@@ -67,21 +67,9 @@ const meta = preview.meta({
 	render: function Composer(args) {
 		const [value, setValue] = useState(args.value);
 		useEffect(() => setValue(args.value), [args.value]);
-		const [peopleOnly, setPeopleOnly] = useState(args.peopleOnly?.on ?? false);
-		useEffect(() => setPeopleOnly(args.peopleOnly?.on ?? false), [args.peopleOnly?.on]);
 		return (
 			<ChatComposer
 				{...args}
-				peopleOnly={
-					args.peopleOnly && {
-						...args.peopleOnly,
-						on: peopleOnly,
-						onChange: (on) => {
-							setPeopleOnly(on);
-							args.peopleOnly?.onChange(on);
-						},
-					}
-				}
 				value={value}
 				onValueChange={(next) => {
 					setValue(next);
@@ -147,13 +135,24 @@ export const SelectMention = meta.story({
 			canvas.getByRole("option", { name: /Sam Rivera/, selected: true }).id,
 		);
 		await userEvent.keyboard("{Enter}");
-		await expect(input).toHaveValue("Ask @sam-rivera ");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Ask @sam-rivera ");
+		// The chosen person shows in the draft as a chip of their name.
+		await expect(within(input).getByText("Sam Rivera")).toBeVisible();
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(args.onSubmit).not.toHaveBeenCalled();
 		// A name is matched as it is written, spaces and all.
 		await userEvent.clear(input);
 		await userEvent.type(input, "@Sam Ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+	},
+});
+
+/** Typing `@` and taking it back leaves the draft empty, not a new line. */
+export const TakeBackMention = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "@{Backspace}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("");
 	},
 });
 
@@ -169,7 +168,7 @@ export const DismissMention = meta.story({
 		await expect(canvas.getByRole("listbox")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
-		await expect(input).toHaveValue("@sam");
+		await expect(input.textContent).toBe("@sam");
 		await userEvent.clear(input);
 		await userEvent.type(input, "sam@");
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
@@ -180,36 +179,35 @@ export const DismissMention = meta.story({
 });
 
 /**
- * With the list open, Shift+Enter still breaks the line, and choosing someone
- * with the cursor inside a handle replaces the whole handle.
+ * With the list open, Shift+Enter still breaks the line. A handle typed out in
+ * full becomes a chip once a space follows it, and one Backspace removes it.
  */
 export const EditMention = meta.story({
 	tags: ["ai-generated"],
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "@sam");
 		await expect(canvas.getByRole("listbox")).toBeVisible();
 		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
-		await expect(input).toHaveValue("@sam\n");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("@sam\n");
 
 		await userEvent.clear(input);
 		await userEvent.type(input, "@sam-rivera hello");
-		// Back to just after "@sam", inside the handle.
-		await userEvent.keyboard("{ArrowLeft>13/}");
-		await expect(canvas.getByRole("listbox")).toBeVisible();
-		await userEvent.keyboard("{Enter}");
-		await expect(input).toHaveValue("@sam-rivera hello");
+		await expect(within(input).getByText("Sam Rivera")).toBeVisible();
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("@sam-rivera hello");
+		await userEvent.keyboard("{Backspace>7/}");
+		await expect(within(input).queryByText("Sam Rivera")).not.toBeInTheDocument();
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("");
 	},
 });
 
 /** The @ starts a mention where the cursor is, opening the same list as typing `@`. */
 export const MentionButton = meta.story({
 	args: { value: "Can you ask" },
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
 		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
-		await expect(canvas.getByRole("textbox", { name: "Message Growth Desk" })).toHaveValue(
-			"Can you ask @",
-		);
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Can you ask @");
 		await expect(
 			await canvas.findByRole("listbox", { name: "People and bots to mention" }),
 		).toBeVisible();
@@ -225,7 +223,7 @@ export const SendWithEnter = meta.story({
 		await userEvent.type(input, "First line");
 		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
 		await userEvent.type(input, "Second line");
-		await expect(input).toHaveValue("First line\nSecond line");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("First line\nSecond line");
 		await expect(args.onSubmit).not.toHaveBeenCalled();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onSubmit).toHaveBeenCalledOnce();
@@ -249,53 +247,29 @@ export const SendFailed = meta.story({
 	args: { value: "Please summarise the feedback.", error: "Could not send. Try again." },
 });
 
-const growthDesk = { name: "Growth Desk", color: "green", face: "arc" } as const;
-
 /**
- * WithPeople is a thread with someone else in it: the people button beside
- * the @, or Tab, moves to people only and back. Tab
- * picks a mention instead while the mention list is open.
+ * Text run up against a chip, as when the space after it is deleted, is still
+ * sent with the mention apart from it, so the mention still names the bot.
  */
-export const WithPeople = meta.story({
-	args: { peopleOnly: { on: false, onChange: fn(), agent: growthDesk } },
-	play: async ({ canvas, userEvent }) => {
+export const TextAgainstAChip = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		const chip = canvas.getByRole("button", { name: "People only" });
-		await expect(chip).toHaveAttribute("aria-pressed", "false");
-		await expect(chip).not.toHaveTextContent("People only");
-		await userEvent.click(input);
-		await userEvent.keyboard("{Tab}");
-		await expect(chip).toHaveAttribute("aria-pressed", "true");
-		await expect(input).toHaveFocus();
-		await userEvent.keyboard("{Tab}");
-		await expect(chip).toHaveAttribute("aria-pressed", "false");
-
-		await userEvent.type(input, "@sam");
-		await userEvent.keyboard("{Tab}");
-		await expect(input).toHaveValue("@sam-rivera ");
-		await expect(chip).toHaveAttribute("aria-pressed", "false");
-
-		await userEvent.click(chip);
-		await expect(chip).toHaveAttribute("aria-pressed", "true");
+		await userEvent.type(input, "@issue-triager we can start");
+		await expect(within(input).getByText("Issue Triager")).toBeVisible();
+		// To just after the space that follows the chip, which goes.
+		await userEvent.keyboard("{ArrowLeft>12/}{Backspace}");
+		await expect(input.textContent).toBe("Issue Triagerwe can start");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("@issue-triager we can start");
 	},
 });
 
-/**
- * PeopleOnly writes to the other people, named in the placeholder: the chip
- * says so, the edge steps up a grey and Send goes neutral, since the accent is
- * the bot's. Clicking the chip goes back to the bot.
- */
-export const PeopleOnly = meta.story({
-	args: {
-		label: "Message Jay Yu and Priya Kaur",
-		value: "Can one of you check the quote?",
-		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
-	},
-	play: async ({ args, canvas, userEvent }) => {
-		const chip = canvas.getByRole("button", { name: "People only" });
-		await expect(chip).toHaveTextContent("People only");
-		await userEvent.click(chip);
-		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
+/** A mentioned bot shows in the draft as a chip of its face and name, where it was mentioned. */
+export const MentionChip = meta.story({
+	args: { value: "@issue-triager can you check the quote?" },
+	play: async ({ canvas }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await expect(within(input).getByText("Issue Triager")).toBeVisible();
+		await expect(input.textContent).toBe("Issue Triager can you check the quote?");
 	},
 });
 
@@ -341,7 +315,7 @@ export const AttachFiles = meta.story({
 
 /**
  * Before the chat exists there is nowhere to upload to: the paperclip is off,
- * and a pasted file is left to the browser rather than lost.
+ * and a pasted file writes nothing into the draft.
  */
 export const BeforeTheChatExists = meta.story({
 	args: { attachments: { ...withFiles([]), attach: undefined } },
@@ -363,7 +337,7 @@ export const BeforeTheChatExists = meta.story({
 			clipboardData: pasted,
 		});
 		input.dispatchEvent(paste);
-		await expect(paste.defaultPrevented).toBe(false);
+		await expect(input.textContent).toBe("");
 	},
 });
 
@@ -391,7 +365,7 @@ export const PasteFiles = meta.story({
 		await userEvent.click(input);
 		await userEvent.paste(clipboard);
 		await expect(args.attachments.attach).toHaveBeenCalledWith([screenshot]);
-		await expect(input).toHaveValue("");
+		await expect(input.textContent).toBe("");
 	},
 });
 
@@ -407,7 +381,7 @@ export const PasteFromOffice = meta.story({
 		clipboard.items.add(new File(["png"], "image.png", { type: "image/png" }));
 		await userEvent.click(input);
 		await userEvent.paste(clipboard);
-		await expect(input).toHaveValue("Q3 revenue\t1.2M");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Q3 revenue\t1.2M");
 		await expect(args.attachments.attach).not.toHaveBeenCalled();
 	},
 });

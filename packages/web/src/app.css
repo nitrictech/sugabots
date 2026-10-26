@@ -60,10 +60,6 @@
 	--border: light-dark(#eaeaee, #1d1f25);
 	--border-strong: light-dark(#e8e8ec, #2a2c33);
 	--border-dashed: light-dark(#cfd0d6, #2f323a);
-	/* The composer's edge while a message is for people only: a step up, so the change is seen. */
-	--people-only: light-dark(#c6c8cf, #3d4049);
-	/* The send button while a message is for people only: grey, as no bot will answer it. */
-	--people-only-send: light-dark(#b4b7bf, #4a4e57);
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#dcdee3, #23252c);
 	/*
@@ -172,8 +168,6 @@
 	--color-soft-foreground: var(--soft-foreground);
 	--color-border-strong: var(--border-strong);
 	--color-border-dashed: var(--border-dashed);
-	--color-people-only: var(--people-only);
-	--color-people-only-send: var(--people-only-send);
 	--color-chip-strong: var(--chip-strong);
 	--color-tile: var(--tile);
 	--color-tile-empty: var(--tile-empty);

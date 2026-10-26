@@ -1,9 +1,11 @@
 import {
 	type Agent,
+	type AgentParticipant,
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
 	type Message,
+	mentionedHandles,
 	messageAuthorName,
 	type Pod,
 	quotedPreview,
@@ -22,6 +24,7 @@ import {
 	useEffect,
 	useEffectEvent,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -30,21 +33,25 @@ import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
+	type ConversationKind,
+	chatItemCreatedAt,
+	THREAD_NOT_STARTED,
 	useChatHistory,
+	useChatList,
 	useChatMessages,
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
 	useRoutineControls,
 	useSendChatMessage,
 	useSetDone,
-	useStartThread,
 	useThreadFrom,
+	useThreadStarter,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink, conversationLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
-import { listNames } from "@/lib/name-list.ts";
+import { countOf, listNames } from "@/lib/name-list.ts";
 import { useReactions } from "@/lib/reactions.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -55,13 +62,15 @@ import {
 } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { ChatHeader, type ChatPlace, PeopleChatHeader } from "./ChatHeader.tsx";
+import { ChatHeader, type ChatPlace, type HeaderPlace, PeopleChatHeader } from "./ChatHeader.tsx";
+import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar, PeopleDetails, type ThreadContents } from "./DetailsSidebar.tsx";
@@ -79,8 +88,6 @@ import {
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
-type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
-
 /**
  * How close to the foot of the log still counts as at the latest message, both
  * for following new messages and for marking the chat read: about two lines, so
@@ -97,10 +104,9 @@ export type Staged =
 	| { kind: "desktop" };
 
 export function ConversationChat({
-	agent,
+	conversation,
 	pod,
 	conversationId,
-	isPodChat,
 	user,
 	threadId,
 	focusMessageId,
@@ -109,13 +115,11 @@ export function ConversationChat({
 	staged,
 	onStagedChange,
 }: {
-	/** The bot the conversation is with; null in the pod's chat, which is its people's. */
-	agent: Agent | null;
+	/** Which kind of conversation it is, and its bot when it has one. */
+	conversation: ConversationKind;
 	pod: Pod;
-	/** The conversation shown, which is with `agent`. */
+	/** The conversation shown. */
 	conversationId: string;
-	/** Whether it is the pod's chat, which starts threads, rather than a thread. */
-	isPodChat: boolean;
 	user: SessionUser;
 	threadId?: string;
 	/** A message to jump to and point out, such as the mention it was opened from. */
@@ -136,12 +140,7 @@ export function ConversationChat({
 	const notices = useThreadNotices(conversationId);
 	const optimistic = useOptimisticChatItems(conversationId);
 	const send = useSendChatMessage(conversationId, user);
-	const startThread = useStartThread(conversationId);
 	const setDone = useSetDone(conversationId);
-	const routineControls = useRoutineControls(
-		conversationId,
-		mainThread.data?.routine ?? { id: "", agentId: "" },
-	);
 	const threadFrom = useThreadFrom(conversationId);
 	const navigate = useNavigate();
 	const [startError, setStartError] = useState<string>();
@@ -150,7 +149,7 @@ export function ConversationChat({
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, conversationId);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, conversationId);
 	const attachments = useComposerAttachments(conversationId);
-	const [peopleOnly, setPeopleOnly] = useState(false);
+	const threads = useThreadStarter(conversationId, attachments);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
@@ -162,6 +161,8 @@ export function ConversationChat({
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
 	const details = mainThread.data;
+	const agent = conversation.kind === "botThread" ? conversation.agent : null;
+	const isPodChat = conversation.kind === "podChat";
 	const host = agent
 		? details?.participants.find(
 				(participant): participant is AgentParticipant =>
@@ -182,6 +183,20 @@ export function ConversationChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
+	const threadWith = isPodChat && details ? firstBotNamed(draft, details.crew) : undefined;
+	// The people here and this chat's own bot, not yourself; the pod's other bots are not
+	// offered, except in the pod's chat, where naming one starts a thread with it.
+	const composerMentionable = useMemo(
+		() =>
+			details
+				? mentionableIn(details).filter(
+						(candidate) =>
+							candidate.id !== user.id &&
+							(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
+					)
+				: [],
+		[details, user.id, isPodChat, host?.id],
+	);
 
 	useLayoutEffect(() => {
 		if (!details) return;
@@ -235,7 +250,7 @@ export function ConversationChat({
 	}, []);
 
 	async function submit() {
-		if (send.isPending || startThread.isPending) return;
+		if (send.isPending || threads.isPending) return;
 		setStartError(undefined);
 		if (threadWith) {
 			await startThreadWith(threadWith);
@@ -253,7 +268,6 @@ export function ConversationChat({
 			const sent = send.mutateAsync({
 				id: uuidv4(),
 				message,
-				peopleOnly: writingToPeople,
 				replyTo: answering,
 				files: files.parts,
 			});
@@ -269,26 +283,18 @@ export function ConversationChat({
 
 	/** Sends the draft as the first message of a thread with `bot`, staying in the pod's chat. */
 	async function startThreadWith(bot: AgentParticipant) {
-		const files = attachments.takeForSending(draft);
-		if (!files) return;
 		const submitted = draft;
 		const answering = replyingTo;
 		setDraft("");
 		setReplyingTo(undefined);
-		try {
-			await startThread.mutateAsync({
-				id: uuidv4(),
-				message: submitted.trim(),
-				hostAgentId: bot.id,
-				replyTo: answering?.id,
-				files: files.parts,
-			});
-		} catch (failure) {
-			setDraft((current) => (current === "" ? submitted : current));
-			setReplyingTo((current) => current ?? answering);
-			files.putBack(failure);
-			setStartError("The thread was not started. Your draft is still here.");
-		}
+		const started = await threads.start(submitted, {
+			hostAgentId: bot.id,
+			replyTo: answering?.id,
+		});
+		if (started.outcome === "started") return;
+		setDraft((current) => (current === "" ? submitted : current));
+		setReplyingTo((current) => current ?? answering);
+		if (started.outcome === "refused") setStartError(THREAD_NOT_STARTED);
 	}
 
 	/** Opens a thread started from the pod's chat in its own place. */
@@ -334,49 +340,58 @@ export function ConversationChat({
 	}
 
 	const title = details?.thread.title;
+	const listedChat = useChatList(pod.slug).data?.chats.find(
+		(chat) => chat.conversation.id === conversationId,
+	)?.conversation;
+	// An archived chat is not listed, so it goes by the name it was archived with.
+	const podChatName = listedChat?.title ?? title ?? "";
 	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
 		details?.thread.type === "conversation"
 			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
 			: undefined;
-	const header = agent ? (
-		<ChatHeader
-			agent={agent}
-			title={title}
-			done={done}
-			routine={
-				details?.routine && {
-					paused: details.routine.state === "paused",
-					pending: routineControls.pending,
-					onPausedChange: (paused) => void routineControls.setPaused(paused),
+	const headerPlace: HeaderPlace =
+		place.kind === "away"
+			? { back: place.back, trailing: place.trailing }
+			: {
+					back: { to: "pod", pod },
+					details: staged
+						? undefined
+						: { open: place.detailsOpen, onChange: place.onDetailsChange },
+				};
+	const header =
+		conversation.kind === "botThread" ? (
+			<ChatHeader
+				{...headerPlace}
+				agent={conversation.agent}
+				title={title}
+				done={done}
+				routine={details?.routine}
+				conversationId={conversationId}
+				onOpenDesktop={openDesktop}
+			/>
+		) : conversation.kind === "podChat" ? (
+			<PeopleChatHeader
+				back={headerPlace.back}
+				trailing={headerPlace.trailing}
+				title={podChatName}
+				tile={<PodChatTile color={pod.color} size={28} />}
+				description="Everyone in the pod. Mention a bot to start a thread with it."
+				menu={
+					listedChat &&
+					pod.permissions.rename && (
+						<ChatMenu
+							pod={pod}
+							conversationId={conversationId}
+							name={podChatName}
+							archivable={!listedChat.main}
+						/>
+					)
 				}
-			}
-			pod={pod}
-			conversationId={conversationId}
-			place={place}
-			staged={staged !== undefined}
-			onOpenDesktop={openDesktop}
-		/>
-	) : isPodChat ? (
-		<PeopleChatHeader
-			title="Pod chat"
-			description={`Everyone in ${pod.name}. Mention a bot to start a thread with it.`}
-			pod={pod}
-			place={place}
-		/>
-	) : (
-		<PeopleChatHeader
-			title={title ?? ""}
-			done={done}
-			details={
-				place.kind === "own" && !staged
-					? { open: place.detailsOpen, onChange: place.onDetailsChange }
-					: undefined
-			}
-			pod={pod}
-			place={place}
-		/>
-	);
+			/>
+		) : (
+			<PeopleChatHeader {...headerPlace} title={title ?? ""} done={done} />
+		);
 	if (!details || (agent && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
@@ -390,23 +405,16 @@ export function ConversationChat({
 		);
 
 	const mentionable = mentionableIn(details);
-	// The people here and this chat's own bot, not yourself; the pod's other bots are not
-	// offered, except in the pod's chat, where naming one starts a thread with it.
-	const composerMentionable = mentionable.filter(
-		(candidate) =>
-			candidate.id !== user.id &&
-			(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
+	// With other people in a bot's thread, the bot replies only when somebody mentions it.
+	const otherPeople = details.participants.filter(
+		(participant) => participant.kind === "person" && participant.id !== user.id,
 	);
-	const threadWith = isPodChat ? firstBotNamed(draft, details.crew) : undefined;
-	// The pod's people, not only those who have written here, so a new bot's chat can start people-only.
-	const otherPeople = mentionable.filter(
-		(candidate) => candidate.kind === "person" && candidate.id !== user.id,
-	);
-	const writingToPeople = agent !== null && peopleOnly && otherPeople.length > 0;
-	// Written to the people here rather than the bot: their names, with the rest counted.
-	const composerLabel = writingToPeople
-		? `Message ${listNames(otherPeople.map((person) => person.name))}`
-		: `Message ${agent?.name ?? pod.name}`;
+	const botWaitsForMention = host !== undefined && otherPeople.length > 0;
+	const callsBot = botWaitsForMention && mentionedHandles(draft).includes(host.handle);
+	const composerLabel =
+		botWaitsForMention && !callsBot
+			? `Message ${listNames(otherPeople.map((person) => person.name))}`
+			: `Message ${agent?.name ?? (isPodChat ? podChatName : pod.name)}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
 	const contents: ThreadContents = {
 		participants: details.participants,
@@ -419,7 +427,11 @@ export function ConversationChat({
 		? threadWith
 			? `Sending starts a thread with ${threadWith.name}.`
 			: "Mention a bot to start a thread."
-		: undefined;
+		: botWaitsForMention
+			? callsBot
+				? `${host.name} will reply.`
+				: `Mention ${host.name} to have it reply.`
+			: undefined;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -471,6 +483,8 @@ export function ConversationChat({
 								!messages.hasNextPage &&
 								(details.thread.parentThreadId ? (
 									<ThreadIntro details={details} pod={pod} />
+								) : isPodChat ? (
+									<PodChatIntro pod={pod} name={podChatName} details={details} />
 								) : details.thread.type === "routine_feed" ? (
 									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
@@ -563,16 +577,10 @@ export function ConversationChat({
 								onValueChange={setDraft}
 								onSubmit={submit}
 								submitLabel="Send message"
-								sending={send.isPending || startThread.isPending}
+								sending={send.isPending || threads.isPending}
 								error={startError ?? (send.isError ? sendFailureMessage(send.error) : undefined)}
 								className="w-full"
 								mentionable={composerMentionable}
-								peopleOnly={
-									host && otherPeople.length > 0
-										? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
-										: undefined
-								}
-								threadWith={threadWith}
 								replyingTo={
 									replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
 								}
@@ -770,11 +778,7 @@ function sendingIds(
 }
 
 function chatItemId(item: ChatMessageItem): string {
-	return item.kind === "message" ? `message:${item.message.id}` : `collaboration:${item.id}`;
-}
-
-function chatItemCreatedAt(item: ChatMessageItem): string {
-	return item.kind === "message" ? item.message.createdAt : item.createdAt;
+	return item.kind === "message" ? `message:${item.message.id}` : `${item.kind}:${item.id}`;
 }
 
 function chatItemRevision(item: ChatMessageItem | undefined): string {
@@ -874,7 +878,6 @@ function useJumpToMessage({
 	return { pointedOut, notFound };
 }
 
-/** The top of a chat, once there is nothing older to load: whom it is with, and what they do. */
 /** The newest routine run in `items`, which is the one that can be tried again. */
 function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
 	return items.findLast((item) => item.kind === "routine")?.id;
@@ -931,7 +934,7 @@ function FailedRunCard({
 						onClick={() => onOpenThread(item.threadId)}
 						className="focus-ring self-start rounded-sm text-left font-semibold text-[14px] text-failed-card-heading"
 					>
-						Run failed · {formatListTime(new Date(item.createdAt), new Date())}
+						Run failed {formatListTime(new Date(item.createdAt), new Date())}
 					</button>
 					{item.error && <p className="m-0 text-[13.5px] text-failed-card-text">{item.error}</p>}
 					{latest && (
@@ -954,10 +957,6 @@ function FailedRunCard({
 	);
 }
 
-/**
- * A thread started from the pod's chat, on one line in it: what it is called
- * and how many replies it has, opening it.
- */
 /**
  * A thread started from a message in the pod's chat, as a line under that
  * message, drawn as a collaboration is: the faces of who started it and its
@@ -985,7 +984,7 @@ function ThreadLine({
 			lastActivityAt={item.lastReplyAt ?? undefined}
 			tag={
 				item.replies > 0
-					? { text: item.replies === 1 ? "1 reply" : `${item.replies} replies` }
+					? { text: countOf(item.replies, "reply", "replies") }
 					: item.agent
 						? "working"
 						: undefined
@@ -1072,6 +1071,23 @@ function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
 	);
 }
 
+/** The top of a pod's chat: how many are in it, and what the chat is for. */
+function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details: ThreadDetails }) {
+	const people = details.members.length;
+	const bots = details.crew.filter((member) => member.kind === "agent").length;
+	return (
+		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
+			<PodChatTile color={pod.color} size={64} />
+			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">{name}</h2>
+			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
+				This is the start of {name}, with {countOf(people, "person", "people")} and{" "}
+				{countOf(bots, "bot", "bots")}. Talk here, or mention a bot to start a thread with it.
+			</p>
+		</div>
+	);
+}
+
+/** The top of a chat, once there is nothing older to load: whom it is with, and what they do. */
 function ChatIntro({ agent }: { agent: Agent }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">

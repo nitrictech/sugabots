@@ -19,6 +19,7 @@ import type {
 import {
 	DEFAULT_CHAT_PAGE_LIMIT,
 	handleFromName,
+	mentionPattern,
 	messagePreview,
 	PERSONAL_POD_SLUG,
 	textWithoutNarration,
@@ -84,7 +85,7 @@ import {
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
 import { Turns } from "../turns/turns.ts";
-import { toConversation } from "./conversation.ts";
+import { toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 
 /**
  * What the chat screens show, of the conversations the current actor can see:
@@ -122,12 +123,12 @@ export interface Interface {
 	readonly messages: (
 		conversationId: string,
 		page?: ChatPageQuery,
-	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
+	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidPageCursor, CurrentActor.Service>;
 	/** A page of the threads opened beside the conversation, newest activity first. */
 	readonly history: (
 		conversationId: string,
 		page?: ChatPageQuery,
-	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
+	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidPageCursor, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatView") {}
@@ -178,7 +179,7 @@ export const make = Effect.gen(function* () {
 						const last = latest.get(row.conversation.id);
 						return {
 							agent: crew ? toAgent(crew) : null,
-							conversation: toConversation(row.conversation),
+							conversation: toConversationThread(row.conversation),
 							lastMessage: last
 								? {
 										preview: replyPreview(last),
@@ -191,12 +192,14 @@ export const make = Effect.gen(function* () {
 							mentionsYou: mentioning.has(row.conversation.id),
 						};
 					});
-					const [podChat] = yield* query((db) => podChats(db, [podId]));
-					const podChatUnread = podChat
-						? ((yield* query((db) => unreadMessageCounts(db, userId, [podChat.id]))).get(
-								podChat.id,
-							) ?? 0)
-						: 0;
+					const chats = yield* query((db) => podChats(db, podId));
+					const chatsUnread = yield* query((db) =>
+						unreadMessageCounts(
+							db,
+							userId,
+							chats.map((chat) => chat.id),
+						),
+					);
 					const owned = yield* query((db) => listedRoutines(db, podId));
 					const feedMentions = yield* query((db) =>
 						unreadMentionsIn(
@@ -217,17 +220,18 @@ export const make = Effect.gen(function* () {
 									failed: row.failed,
 								},
 								agent: toAgent(crew),
-								conversation: row.feed && toConversation(row.feed),
+								conversation: row.feed && toRoutineFeed(row.feed),
 								mentionsYou: row.feed !== null && feedMentions.has(row.feed.id),
 							},
 						];
 					});
 					return {
 						routines,
-						podChat: podChat
-							? { conversation: toConversation(podChat), unreadMessages: podChatUnread }
-							: null,
-						items: items.sort(byLatestMessage),
+						chats: chats.map((chat) => ({
+							conversation: toPodChat(chat),
+							unreadMessages: chatsUnread.get(chat.id) ?? 0,
+						})),
+						threads: items.sort(byLatestMessage),
 					};
 				}),
 			),
@@ -374,7 +378,7 @@ export const make = Effect.gen(function* () {
 					}
 					// Before the query, and whether or not the conversation is there, so a
 					// bad cursor says nothing about the conversation.
-					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
+					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
 					const reachesPod = yield* visibility.reachesPod;
 					const row = yield* query((db) =>
 						loadMainPage(db, conversationId, reachesPod, page.limit, before),
@@ -392,7 +396,7 @@ export const make = Effect.gen(function* () {
 					if (!isUuid(conversationId)) {
 						return yield* new ResourceHidden({ resource: "conversation" });
 					}
-					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
+					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
 					const reachesPod = yield* visibility.reachesPod;
 					const row = yield* query((db) =>
 						loadHistory(db, conversationId, reachesPod, page.limit, before),
@@ -408,9 +412,9 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
-export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") implements UserFacing {
+export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") implements UserFacing {
 	get userMessage() {
-		return userText`That chat cursor is invalid`;
+		return userText`That page cursor is invalid`;
 	}
 }
 
@@ -492,18 +496,16 @@ const listedRoutines = Effect.fn("ChatView.listedRoutines")(function* (
 		.orderBy(asc(routine.name), asc(routine.id));
 });
 
-/** The chats of the pods `podIds` that have one. */
-const podChats = Effect.fn("ChatView.podChats")(function* (
-	db: Executor,
-	podIds: readonly string[],
-) {
+/** The pod's chats not archived: its first, then the rest in the order they were started. */
+const podChats = Effect.fn("ChatView.podChats")(function* (db: Executor, podId: string) {
 	return yield* db
 		.select()
 		.from(thread)
-		.where(and(eq(thread.type, "pod_chat"), inArray(thread.podId, [...podIds])));
+		.where(and(eq(thread.type, "pod_chat"), eq(thread.podId, podId), isNull(thread.archivedAt)))
+		.orderBy(desc(thread.main), asc(thread.createdAt), asc(thread.id));
 });
 
-/** The chats of every pod the listing reaches that has one. */
+/** The chats not archived of every pod the listing reaches. */
 const podChatsReached = Effect.fn("ChatView.podChatsReached")(function* (
 	db: Executor,
 	input: Listing,
@@ -514,6 +516,7 @@ const podChatsReached = Effect.fn("ChatView.podChatsReached")(function* (
 		.where(
 			and(
 				eq(thread.type, "pod_chat"),
+				isNull(thread.archivedAt),
 				eq(thread.workspaceId, input.workspaceId),
 				input.reachesPod(thread.podId),
 			),
@@ -665,13 +668,9 @@ function caughtUpAt(db: Executor, userId: string, threadId: SQLWrapper): SQL<Dat
 	return sql<Date | null>`greatest((${readThrough}), (${lastWritten}))`;
 }
 
-/**
- * Whether a `message` mentions `handle`, as the floor reads a mention: an `@`
- * at the start or after a non-word character, and the handle ending there.
- * Handles are lowercase letters, digits and hyphens, so none needs escaping.
- */
+/** Whether a `message` mentions `handle`, as the floor reads a mention. */
 function mentions(handle: string): SQL {
-	return sql`${message.content} ~* ${`(^|[^a-z0-9_.])@${handle}([^a-z0-9-]|$)`}`;
+	return sql`${message.content} ~* ${mentionPattern(handle)}`;
 }
 
 /** How far back the activity feed looks: past this, a conversation is old news, read or not. */
@@ -1140,7 +1139,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 				...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
 				with: messageRelations,
 			},
-			openedThreads: {
+			childThreads: {
 				limit: limit + 1,
 				orderBy: { createdAt: "desc", id: "desc" },
 				where: {
@@ -1223,7 +1222,7 @@ function toMainPage(row: MainPage, limit: number) {
 		...(row.pausedAfterFailures
 			? [pausedCandidate(row.pausedAfterFailures.routineId, row.pausedAfterFailures.at)]
 			: []),
-		...row.openedThreads.map((opened) => ({
+		...row.childThreads.map((opened) => ({
 			id: opened.id,
 			createdAt: opened.createdAt,
 			item: (): ChatMessageItem => ({
@@ -1324,15 +1323,9 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 
 type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
 
-/** Both lists merged newest activity first, a thread in both counted once, cut to the page. */
+/** The threads, loaded newest activity first, cut to the page. */
 function toHistoryPage(row: HistoryRow, limit: number) {
-	const threads = [
-		...new Map(row.conversationThreads.map((side) => [side.id, side])).values(),
-	].sort((left, right) =>
-		left.updatedAt.getTime() === right.updatedAt.getTime()
-			? right.id.localeCompare(left.id)
-			: right.updatedAt.getTime() - left.updatedAt.getTime(),
-	);
+	const threads = row.conversationThreads;
 	const page = threads.slice(0, limit);
 	const items = page.flatMap((side): ChatHistoryEntry[] => {
 		if (side.type !== "collaboration" && side.type !== "routine") return [];
@@ -1382,7 +1375,7 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 	};
 }
 
-const chatCursor = (cursor: string) => {
+const pageCursor = (cursor: string) => {
 	const point = decodeCursor(cursor);
-	return point ? Effect.succeed(point) : Effect.fail(new InvalidChatCursor());
+	return point ? Effect.succeed(point) : Effect.fail(new InvalidPageCursor());
 };

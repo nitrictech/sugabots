@@ -116,6 +116,7 @@ function routine(
 		triggers: routineTriggers(id, trigger),
 		state,
 		results: "keep_in_run",
+		chatId: null,
 		createdById: null,
 		createdByAgentId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",

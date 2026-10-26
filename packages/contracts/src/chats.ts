@@ -32,22 +32,61 @@ export const chatPageQuerySchema = Schema.Struct({
 
 export type ChatPageQuery = typeof chatPageQuerySchema.Type;
 
-/**
- * A conversation: a thread people talk to a bot in, in a pod, which the
- * collaborations and routine runs it leads to are opened beside.
- */
-export const conversationSchema = Schema.Struct({
+/** What every kind of conversation has. */
+const conversationFields = {
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	podId: uuidSchema,
-	/** The bot it is with; null on the pod's chat, which is the pod's people's. */
-	hostAgentId: Schema.NullOr(uuidSchema),
 	title: Schema.String,
-	/** When somebody marked it done; null while it is open. */
-	doneAt: Schema.NullOr(isoTimestampSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
+};
+
+/** One of a shared pod's chats, where its people talk and start threads. */
+export const podChatSchema = Schema.Struct({
+	kind: Schema.Literal("pod_chat"),
+	...conversationFields,
+	/** Whether it is the pod's first chat, which is never archived. */
+	main: Schema.Boolean,
+	/** When somebody archived it; null while it is listed. */
+	archivedAt: Schema.NullOr(isoTimestampSchema),
 });
+
+export type PodChat = typeof podChatSchema.Type;
+
+/**
+ * A thread in a pod, with a bot or between people, and perhaps started from a
+ * message in one of the pod's chats. The collaborations and routine runs it
+ * leads to are opened beside it.
+ */
+export const conversationThreadSchema = Schema.Struct({
+	kind: Schema.Literal("thread"),
+	...conversationFields,
+	/** The bot it is with; null when it is between people. */
+	hostAgentId: Schema.NullOr(uuidSchema),
+	/** When somebody marked it done; null while it is open. */
+	doneAt: Schema.NullOr(isoTimestampSchema),
+});
+
+export type ConversationThread = typeof conversationThreadSchema.Type;
+
+/** A routine's own thread, where each of its runs posts. */
+export const routineFeedSchema = Schema.Struct({
+	kind: Schema.Literal("routine_feed"),
+	...conversationFields,
+	/** The bot that runs the routine. */
+	hostAgentId: uuidSchema,
+	routineId: uuidSchema,
+});
+
+export type RoutineFeed = typeof routineFeedSchema.Type;
+
+/** Something people open and post in: a pod's chat, a thread, or a routine's thread. */
+export const conversationSchema = Schema.Union([
+	podChatSchema,
+	conversationThreadSchema,
+	routineFeedSchema,
+]);
 
 export type Conversation = typeof conversationSchema.Type;
 
@@ -60,14 +99,14 @@ export const chatListQuerySchema = Schema.Struct({
 });
 
 /**
- * One row of the conversation list: a thread in the pod, with the bot it is
- * with, or null when it is between people. `conversation` is the whole
- * thread, so opening it needs no request of its own. `lastMessage` is null
- * until a message is written.
+ * One thread in the conversation list, with the bot it is with, or null when
+ * it is between people. `conversation` is the whole thread, so opening it
+ * needs no request of its own. `lastMessage` is null until a message is
+ * written.
  */
 export const chatListItemSchema = Schema.Struct({
 	agent: Schema.NullOr(agentSchema),
-	conversation: conversationSchema,
+	conversation: conversationThreadSchema,
 	lastMessage: Schema.NullOr(
 		Schema.Struct({
 			/** The message's first line, shortened for a one-line row. */
@@ -233,7 +272,7 @@ export const listedRoutineSchema = Schema.Struct({
 	}),
 	/** The bot that runs it. */
 	agent: agentSchema,
-	conversation: Schema.NullOr(conversationSchema),
+	conversation: Schema.NullOr(routineFeedSchema),
 	/** A message in its thread the person has not read mentions them. */
 	mentionsYou: Schema.Boolean,
 });
@@ -241,18 +280,21 @@ export const listedRoutineSchema = Schema.Struct({
 export type ListedRoutine = typeof listedRoutineSchema.Type;
 
 /**
- * A pod's conversation list: its chat, null until somebody first opens it,
- * with how many of its messages the person has not read; and its bots, most
- * recent message first, those nobody has messaged last, by name.
+ * A pod's conversation list: its chats not archived, the first one first and
+ * the rest in the order they were started, each with how many of its messages
+ * the person has not read, and none until somebody first opens one; its
+ * threads, most recent message first; and its routines.
  */
 export const chatListSchema = Schema.Struct({
-	podChat: Schema.NullOr(
-		Schema.Struct({
-			conversation: conversationSchema,
-			unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-		}),
+	chats: Schema.mutable(
+		Schema.Array(
+			Schema.Struct({
+				conversation: podChatSchema,
+				unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			}),
+		),
 	),
-	items: Schema.mutable(Schema.Array(chatListItemSchema)),
+	threads: Schema.mutable(Schema.Array(chatListItemSchema)),
 	/** Its bots' routines, by name. */
 	routines: Schema.mutable(Schema.Array(listedRoutineSchema)),
 });
@@ -275,9 +317,25 @@ export const newThreadSchema = Schema.Struct({
 
 export type NewThread = typeof newThreadSchema.Type;
 
+export const CHAT_NAME_MAX_LENGTH = 64;
+
+/** What a pod's first chat is called until somebody renames it. */
+export const FIRST_CHAT_NAME = "General";
+
+/** What a pod's chat is called. */
+export const chatNameSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(CHAT_NAME_MAX_LENGTH),
+);
+
+/** Another chat in a pod: what it is called. */
+export const newChatSchema = Schema.Struct({ name: chatNameSchema });
+
+export type NewChat = typeof newChatSchema.Type;
+
 /** A thread started from a pod's chat, and the message it was started with. */
 export const startedThreadSchema = Schema.Struct({
-	conversation: conversationSchema,
+	conversation: conversationThreadSchema,
 	message: messageSchema,
 });
 
