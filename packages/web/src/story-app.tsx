@@ -1,6 +1,7 @@
 import type {
 	Agent,
 	ChatListItem,
+	ChatMessageItem,
 	Conversation,
 	Message,
 	ModelProvider,
@@ -161,6 +162,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
+		startedFrom: null,
 		participants: [person, bot],
 		crew: [bot],
 		members: [],
@@ -203,6 +205,7 @@ export function storyPodChatDetails(
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
+		startedFrom: null,
 		participants: [person],
 		crew: bots
 			.filter((bot) => bot.podId === pod.id)
@@ -238,6 +241,11 @@ export function storyChatActivity(agent: Agent, messages: Message[] = []): Threa
 	};
 }
 
+/** When a chat item happened, for putting a page of them in order. */
+function itemAt(item: ChatMessageItem): string {
+	return item.kind === "message" ? item.message.createdAt : item.createdAt;
+}
+
 /** A stream that stays open and says nothing, as a quiet thread's does. */
 function quietStream() {
 	return new HttpResponse(new ReadableStream({ start() {} }), {
@@ -253,6 +261,8 @@ export interface StoryAppData {
 	messages?: Record<string, Message[]>;
 	/** Messages in each shared pod's chat, by the pod's id. */
 	podChatMessages?: Record<string, Message[]>;
+	/** Threads started from each shared pod's chat, by the pod's id, as the chat links to them. */
+	podChatThreads?: Record<string, Extract<ChatMessageItem, { kind: "thread" }>[]>;
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
@@ -322,24 +332,26 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			// By the pod's id or its slug, as the API takes it.
 			const named = new URL(request.url).searchParams.get("pod");
 			const pod = pods.find((one) => one.id === named || one.slug === named);
+			// A conversation with each bot somebody has written to.
 			const items: ChatListItem[] = bots
 				.filter((bot) => bot.podId === pod?.id)
-				.map((bot) => {
+				.flatMap((bot) => {
 					const last = messages[bot.id]?.at(-1);
-					return {
-						agent: bot,
-						conversation: last ? storyConversationFor(bot) : null,
-						lastMessage: last
-							? {
-									preview: last.content,
-									authorUserId: last.author.kind === "person" ? last.author.id : null,
-									at: last.createdAt,
-								}
-							: null,
-						waitingOn: null,
-						unreadMessages: 0,
-						needsApproval: false,
-					};
+					if (!last) return [];
+					return [
+						{
+							agent: bot,
+							conversation: storyConversationFor(bot),
+							lastMessage: {
+								preview: last.content,
+								authorUserId: last.author.kind === "person" ? last.author.id : null,
+								at: last.createdAt,
+							},
+							waitingOn: null,
+							unreadMessages: 0,
+							needsApproval: false,
+						},
+					];
 				});
 			return HttpResponse.json({
 				podChat:
@@ -364,13 +376,41 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			const bot = botForThread(String(params.conversationId));
 			const pod = podForChat(String(params.conversationId));
 			const said = bot ? messages[bot.id] : pod ? data.podChatMessages?.[pod.id] : undefined;
+			const links = pod ? (data.podChatThreads?.[pod.id] ?? []) : [];
 			return HttpResponse.json({
-				items: (said ?? []).map((message) => ({
-					kind: "message",
-					message,
-				})),
+				items: [
+					...(said ?? []).map((message): ChatMessageItem => ({ kind: "message", message })),
+					...links,
+				].sort((left, right) => itemAt(left).localeCompare(itemAt(right))),
 				nextCursor: null,
 			});
+		}),
+		http.post(api("/conversations/:conversationId/threads"), async ({ params, request }) => {
+			const pod = podForChat(String(params.conversationId));
+			const body = (await request.json()) as { id: string; message: string; hostAgentId?: string };
+			if (!pod) return new HttpResponse(null, { status: 404 });
+			const conversation = {
+				...storyPodChatFor(pod),
+				id: "0199a3a0-0000-7000-8000-00000000c990",
+				hostAgentId: body.hostAgentId ?? null,
+				title: body.message.slice(0, 44),
+			};
+			return HttpResponse.json(
+				{
+					conversation,
+					message: {
+						id: body.id,
+						threadId: storyPodChatFor(pod).id,
+						author: testPerson({ id: storyUser.id, name: storyUser.name }),
+						kind: "text",
+						status: "complete",
+						parts: [{ type: "text", text: body.message }],
+						content: body.message,
+						createdAt: new Date().toISOString(),
+					},
+				},
+				{ status: 201 },
+			);
 		}),
 		http.get(api("/conversations/:conversationId/history"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),

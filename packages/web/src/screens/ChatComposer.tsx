@@ -49,8 +49,10 @@ export function ChatComposer({
 	className,
 	mentionable,
 	peopleOnly,
+	threadWith,
 	replyingTo,
 	attachments,
+	needsText = false,
 }: {
 	/** Names the box for assistive technology, and is its placeholder. */
 	label: string;
@@ -71,10 +73,14 @@ export function ChatComposer({
 		/** The bot that replies unless the message is for people only. */
 		agent: Pick<AgentParticipant, "name">;
 	};
+	/** In a pod's chat: the bot the draft names, which sending starts a thread with. */
+	threadWith?: AgentParticipant;
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 	/** The files attached to the message, and what attaches, removes and retries them. */
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
+	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
+	needsText?: boolean;
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -269,6 +275,18 @@ export function ChatComposer({
 							<AtSign size={16} strokeWidth={2} />
 						</button>
 					</Tooltip>
+					{threadWith && (
+						<span className="ml-1 flex h-7 min-w-0 items-center gap-[7px] rounded-[8px] bg-hover pr-2.5 pl-[7px] font-medium text-[13px] text-foreground">
+							<AgentAvatar
+								color={threadWith.color}
+								face={threadWith.face}
+								shape={threadWith.shape}
+								size={18}
+								className="shrink-0"
+							/>
+							<span className="truncate">Thread with {threadWith.name}</span>
+						</span>
+					)}
 					{peopleOnly && (
 						<AudienceChip
 							agent={peopleOnly.agent}
@@ -283,7 +301,9 @@ export function ChatComposer({
 					<button
 						type="submit"
 						aria-label={submitLabel}
-						disabled={sending || !canSend(value, attachments.items)}
+						disabled={
+							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
+						}
 						className={cn(
 							"focus-ring grid size-[30px] place-items-center rounded-[8px] text-primary-foreground transition-colors disabled:bg-chip-strong",
 							toPeople ? "bg-people-only-send" : "bg-primary hover:bg-primary-hover",

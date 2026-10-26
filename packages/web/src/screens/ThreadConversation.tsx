@@ -13,7 +13,7 @@ import {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, CornerUpLeft, Reply } from "lucide-react";
+import { ChevronRight, CornerUpLeft, MessageSquarePlus, Reply } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
@@ -31,6 +31,7 @@ import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
 import { textWithMentions } from "./mentions.tsx";
+import { SideThreadLine } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
@@ -82,6 +83,8 @@ export function ThreadConversation({
 	threadActivityAt,
 	authorLinkOf,
 	onReply,
+	onStartThread,
+	threadLinesOf,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -148,6 +151,10 @@ export function ThreadConversation({
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
 	onReply?: (message: Message) => void;
+	/** In a pod's chat: starts a thread from the message. */
+	onStartThread?: (message: Message) => void;
+	/** In a pod's chat: the lines of the threads started from the message, drawn under it. */
+	threadLinesOf?: (message: Message) => ReactNode;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
@@ -205,6 +212,8 @@ export function ThreadConversation({
 								threadActivityAt={threadActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
 								onReply={onReply}
+								onStartThread={onStartThread}
+								threadLines={threadLinesOf?.(message)}
 								onJumpToMessage={onJumpToMessage}
 								reacting={reacting}
 								fileUrlOf={fileUrlOf}
@@ -414,6 +423,8 @@ function MessageRow({
 	threadActivityAt,
 	authorLink,
 	onReply,
+	onStartThread,
+	threadLines,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -446,6 +457,8 @@ function MessageRow({
 	/** Where its author's name leads. */
 	authorLink?: AuthorLink;
 	onReply?: (message: Message) => void;
+	onStartThread?: (message: Message) => void;
+	threadLines?: ReactNode;
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
@@ -484,6 +497,7 @@ function MessageRow({
 	if (message.status === "streaming" && !showsSomething) return null;
 	const finished = message.status === "complete" && !sending;
 	const replyable = onReply !== undefined && finished;
+	const threadable = onStartThread !== undefined && finished;
 	const reactable = reacting !== undefined && finished;
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
@@ -630,6 +644,7 @@ function MessageRow({
 						className="pt-2"
 					/>
 				)}
+				{threadLines}
 				<MessageReactions message={message} reacting={reacting} addable={finished} />
 				{message.routineResultOf && (
 					<RowNote className="text-subtle-foreground">
@@ -647,7 +662,7 @@ function MessageRow({
 				)}
 				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
 			</div>
-			{(words || replyable || reactable) && (
+			{(words || replyable || threadable || reactable) && (
 				<div
 					className={cn(
 						"absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
@@ -670,6 +685,16 @@ function MessageRow({
 							className={TOOLBAR_BUTTON}
 						>
 							<Reply aria-hidden />
+						</IconButton>
+					)}
+					{threadable && (
+						<IconButton
+							label="Start a thread"
+							side="top"
+							onClick={() => onStartThread(message)}
+							className={TOOLBAR_BUTTON}
+						>
+							<MessageSquarePlus aria-hidden />
 						</IconButton>
 					)}
 					{words && (
@@ -780,8 +805,7 @@ const COLLABORATION_TAG: Partial<Record<CollaborationPart["status"], string>> = 
 
 /**
  * The collaboration a bot's message opened, as a thread under it: both bots'
- * faces, who it was with, when it last moved, and where it stands. The whole
- * line opens the thread beside the chat.
+ * faces, who it was with, when it last moved, and where it stands.
  */
 function CollaborationLine({
 	initiator,
@@ -798,52 +822,14 @@ function CollaborationLine({
 }) {
 	const tag = COLLABORATION_TAG[status];
 	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			aria-label={`Open Collaboration: ${initiator.name} and ${recipient.name}, ${tag ?? "Working"}`}
-			className="focus-ring -ml-1.5 mt-[5px] flex max-w-full items-center gap-2 rounded-[8px] border border-transparent py-1 pr-2.5 pl-1.5 transition-colors hover:border-border-strong hover:bg-panel"
-		>
-			<span aria-hidden className="flex shrink-0">
-				{[initiator, recipient].map((bot) => (
-					<AgentAvatar
-						key={bot.id}
-						color={bot.color}
-						face={bot.face}
-						shape={bot.shape}
-						size={20}
-						ringed={{ color: "var(--background)", width: 2 }}
-						className="-mr-[7px]"
-					/>
-				))}
-			</span>
-			<span className="truncate pl-2 font-semibold text-[13px] text-link">
-				Collaboration with {recipient.name}
-			</span>
-			{lastActivityAt && (
-				<span className="shrink-0 text-[12.5px] text-subtle-foreground">
-					Last reply {formatTime(lastActivityAt)}
-				</span>
-			)}
-			{tag ? (
-				<span
-					className={cn(
-						"shrink-0 rounded-[5px] px-1.5 py-px font-semibold text-[11.5px]",
-						status === "pending"
-							? "bg-primary text-primary-foreground"
-							: "bg-chip text-muted-foreground",
-					)}
-				>
-					{tag}
-				</span>
-			) : (
-				<span aria-hidden className="typing-dots typing-dots-small shrink-0 text-muted-foreground">
-					<i />
-					<i />
-					<i />
-				</span>
-			)}
-		</button>
+		<SideThreadLine
+			faces={[initiator, recipient]}
+			label={`Collaboration with ${recipient.name}`}
+			description={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
+			lastActivityAt={lastActivityAt}
+			tag={tag ? { text: tag, urgent: status === "pending" } : "working"}
+			onOpen={onOpen}
+		/>
 	);
 }
 

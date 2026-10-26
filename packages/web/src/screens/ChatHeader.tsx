@@ -28,6 +28,7 @@ export type ChatPlace =
  */
 export function ChatHeader({
 	agent,
+	title,
 	pod,
 	conversationId,
 	place,
@@ -35,6 +36,8 @@ export function ChatHeader({
 	onOpenDesktop,
 }: {
 	agent: Agent;
+	/** The thread's title, shown in place of the bot's name once it is loaded. */
+	title?: string;
 	pod: Pod;
 	conversationId: string;
 	place: ChatPlace;
@@ -51,7 +54,7 @@ export function ChatHeader({
 				size={24}
 				className="shrink-0"
 			/>
-			<span className="truncate">{agent.name}</span>
+			<span className="truncate">{title ?? agent.name}</span>
 		</>
 	);
 	return (
@@ -99,19 +102,38 @@ export function ChatHeader({
 }
 
 /**
- * The bar across the top of a pod's chat: what it is and who is in it. Shown
- * away from its own page, as Activity shows it, it has the way to the chat
- * itself at the right.
+ * The bar across the top of a chat between people, the pod's chat or a thread
+ * started from it: what it is called, and what it is for. Shown away from its
+ * own page, as Activity shows it, it has the way to the chat itself at the
+ * right.
  */
-export function PodChatHeader({ pod, place }: { pod: Pod; place: ChatPlace }) {
+export function PeopleChatHeader({
+	title,
+	description,
+	pod,
+	place,
+}: {
+	title: string;
+	description?: string;
+	pod: Pod;
+	place: ChatPlace;
+}) {
 	return (
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
 			<HeaderBack back={place.kind === "away" ? place.back : { to: "pod", pod }} />
-			<h1 className="m-0 shrink-0 font-semibold text-[16px] text-foreground">Pod chat</h1>
-			<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
-			<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
-				Everyone in {pod.name}.
-			</p>
+			<h1 className="m-0 min-w-0 shrink-0 truncate font-semibold text-[16px] text-foreground max-md:shrink">
+				{title}
+			</h1>
+			{description ? (
+				<>
+					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
+					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
+						{description}
+					</p>
+				</>
+			) : (
+				<span className="flex-1" />
+			)}
 			{place.kind === "away" && place.trailing}
 		</header>
 	);

@@ -113,10 +113,15 @@ export const eventPayloadSchemas = {
 	 * that what lists show of the thread may be out of date.
 	 */
 	"thread.changed": Schema.Struct({ threadId }),
+	/**
+	 * A thread opened beside the conversation `conversationId` changed: a
+	 * routine run or collaboration in it, or, in a pod's chat, a thread
+	 * somebody started from it.
+	 */
 	"conversation.thread_changed": Schema.Struct({
 		conversationId: uuidSchema,
 		threadId,
-		threadType: customerThreadTypeSchema,
+		threadType: Schema.Union([customerThreadTypeSchema, Schema.Literal("conversation")]),
 	}),
 	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
 	"collaboration.updated": Schema.Struct({

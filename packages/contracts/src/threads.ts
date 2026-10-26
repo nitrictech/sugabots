@@ -132,6 +132,23 @@ export function splitAroundMentions(content: string): string[] {
 	return content.split(MENTION);
 }
 
+/**
+ * A pattern matching a mention of `handle` as `mentionedHandles` reads one,
+ * in syntax that JavaScript and Postgres regular expressions both accept.
+ * Match it case-insensitively. Handles are lowercase letters, digits and
+ * hyphens, so none needs escaping.
+ */
+export function mentionPattern(handle: string): string {
+	return `(?<!${NOT_BEFORE_MENTION.source})@${handle}(?![a-z0-9]|-[a-z0-9])`;
+}
+
+/** `content` without its mentions, the text around them kept as it is. */
+export function withoutMentions(content: string): string {
+	return splitAroundMentions(content)
+		.filter((_, index) => index % 2 === 0)
+		.join("");
+}
+
 /** The handles mentioned in a message, in order, without duplicates. */
 export function mentionedHandles(content: string): string[] {
 	const found = new Set<string>();
@@ -519,6 +536,8 @@ export const threadDetailsSchema = Schema.Struct({
 		}),
 	),
 	routineExecution: Schema.NullOr(routineExecutionSchema),
+	/** The message in a pod's chat that this thread was started from, which stays there. */
+	startedFrom: Schema.NullOr(messageSchema),
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	/**
 	 * The pod's agents, whether or not they have spoken. Who a mention can name,

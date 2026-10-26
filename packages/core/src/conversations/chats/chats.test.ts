@@ -28,7 +28,13 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Reactions } from "../reactions/reactions.ts";
 import { Routines } from "../routines/routines.ts";
@@ -36,7 +42,12 @@ import { conversationsForTests } from "../testing.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ThreadView } from "../thread-view.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { queueTurnForTests, runningTurns } from "../turns/testing.ts";
+import {
+	prepareRunnable,
+	queueTurnForTests,
+	runningTurns,
+	TurnExecution,
+} from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
@@ -61,6 +72,27 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	/** A conversation with each of `bots`, written straight to the database. */
+	const conversationsWith = (
+		bots: readonly { id: string; workspaceId: string; podId: string | null }[],
+	) =>
+		onDatabase((db) =>
+			db.insert(thread).values(
+				bots.map((bot) => {
+					const id = crypto.randomUUID();
+					return {
+						id,
+						workspaceId: bot.workspaceId,
+						podId: bot.podId as string,
+						hostAgentId: bot.id,
+						conversationId: id,
+						type: "conversation" as const,
+						title: "Conversation",
+					};
+				}),
+			),
+		);
 
 	beforeEach(async () => {
 		const suffix = crypto.randomUUID();
@@ -171,10 +203,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 	});
 
-	it("lists a pod's bots newest message first, with bots nobody has messaged last", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
-		await chats.post({
-			conversationId: current.id,
+	it("lists a pod's threads newest message first, and no bot nobody has talked to", async () => {
+		const quiet = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const started = await chats.startThread({
+			podChatId: podChat.id,
 			messageId: crypto.randomUUID(),
 			content: "\n  Budget   review is Friday\nand bring the numbers",
 		});
@@ -183,26 +216,135 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		expect(list?.items).toEqual([
 			{
-				agent: expect.objectContaining({ id: agentId }),
-				conversation: expect.objectContaining({ id: current.id }),
-				lastMessage: {
-					preview: "Budget review is Friday",
-					authorUserId: userId,
-					at: expect.any(String),
-				},
+				agent: null,
+				// Nobody has replied yet: the message it was started from stays in the chat.
+				conversation: expect.objectContaining({
+					id: started.conversation.id,
+					title: "Budget review is Friday and bring the number…",
+				}),
+				lastMessage: null,
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,
 			},
 			{
-				agent: expect.objectContaining({ id: recipientAgentId }),
-				conversation: null,
+				agent: expect.objectContaining({ id: agentId }),
+				conversation: expect.objectContaining({ id: quiet.id }),
 				lastMessage: null,
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,
 			},
 		]);
+	});
+
+	it("starts a thread with the bot named in the pod's chat from a message that stays in the chat, under which it shows", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const [host] = await onDatabase((db) =>
+			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
+		);
+		const messageId = crypto.randomUUID();
+		const input = {
+			podChatId: podChat.id,
+			messageId,
+			content: `@${host?.handle} can you check the renewal numbers for Northwind before Friday? Thanks.`,
+			hostAgentId: agentId,
+		};
+
+		const started = await chats.startThread(input);
+
+		expect(started.conversation).toMatchObject({
+			hostAgentId: agentId,
+			title: "Can you check the renewal numbers for Northw…",
+		});
+		expect(started.message).toMatchObject({ id: messageId, threadId: podChat.id });
+		expect(await runOnPostgres(runningTurns(started.conversation.id))).toHaveLength(1);
+		expect((await chats.startThread(input)).conversation.id).toBe(started.conversation.id);
+		// Written in one transaction, so the two are at the same moment: the chat draws the thread under its message.
+		const inChat = (await view.messages(podChat.id))?.items;
+		expect(inChat).toHaveLength(2);
+		expect(inChat).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: "message",
+					message: expect.objectContaining({ id: messageId }),
+				}),
+				expect.objectContaining({
+					kind: "thread",
+					threadId: started.conversation.id,
+					originMessageId: messageId,
+					agent: expect.objectContaining({ id: agentId }),
+					replies: 0,
+					lastReplyAt: null,
+				}),
+			]),
+		);
+		expect((await view.messages(started.conversation.id))?.items).toEqual([]);
+
+		const [reply] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: started.conversation.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "On it." }],
+					content: "On it.",
+				})
+				.returning(),
+		);
+		expect((await view.messages(podChat.id))?.items).toContainEqual(
+			expect.objectContaining({
+				kind: "thread",
+				replies: 1,
+				lastReplyAt: reply?.createdAt.toISOString(),
+			}),
+		);
+	});
+
+	it("gives the thread's bot the message it was started from, which stays in the chat", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const messageId = crypto.randomUUID();
+		const started = await chats.startThread({
+			podChatId: podChat.id,
+			messageId,
+			content: "Can you check the renewal numbers?",
+			hostAgentId: agentId,
+		});
+		const [run] = await runOnPostgres(runningTurns(started.conversation.id));
+		if (!run) throw new Error("The thread's bot was not asked");
+
+		const prepared = await prepareRunnable(
+			onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+			run,
+		);
+
+		expect(prepared.context.messages).toEqual([
+			expect.objectContaining({ id: messageId, threadId: podChat.id }),
+		]);
+		expect(prepared.context.askedBy).toBe(userId);
+	});
+
+	it("starts one thread between people from a message in the pod's chat, quoting it", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const said = await chats.post({
+			conversationId: podChat.id,
+			messageId: crypto.randomUUID(),
+			content: "who is covering Halcyon next week?",
+		});
+
+		const [first, again] = await Promise.all([
+			chats.threadFrom(said.id),
+			chats.threadFrom(said.id),
+		]);
+
+		expect(again.id).toBe(first.id);
+		expect(first).toMatchObject({ hostAgentId: null, title: "Who is covering Halcyon next week?" });
+		const details = await onPostgresAs(userId)(Context.get(conversations, ThreadView.Service)).get(
+			first.id,
+		);
+		expect(details.startedFrom).toMatchObject({ id: said.id });
 	});
 
 	it("lists a pod by its slug as by its id, as an address names it", async () => {
@@ -233,7 +375,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const list = await view.list({ workspace: workspaceId, pod: podId });
 
-		const host = list?.items.find((item) => item.agent.id === agentId);
+		const host = list?.items.find((item) => item.agent?.id === agentId);
 		expect(host?.lastMessage?.preview).toBe("I'm still getting denied.");
 	});
 
@@ -259,7 +401,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		};
 		const hostRow = async () =>
 			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
-				(item) => item.agent.id === agentId,
+				(item) => item.agent?.id === agentId,
 			);
 
 		it("counts what a bot writes after the person last read the chat", async () => {
@@ -519,20 +661,24 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.returning(),
 		);
 		if (!personal || !unjoined) throw new Error("Could not create list test pods");
-		await onDatabase((db) =>
-			db.insert(agent).values(
-				[personal, unjoined].map((room) => ({
-					workspaceId,
-					podId: room.id,
-					name: `Bot in ${room.name}`,
-					handle: handleFromName(`Bot in ${room.name} ${suffix}`),
-					color: "rose" as const,
-					face: "dot" as const,
-					model: "test/model",
-					createdById: userId,
-				})),
-			),
+		const bots = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values(
+					[personal, unjoined].map((room) => ({
+						workspaceId,
+						podId: room.id,
+						name: `Bot in ${room.name}`,
+						handle: handleFromName(`Bot in ${room.name} ${suffix}`),
+						color: "rose" as const,
+						face: "dot" as const,
+						model: "test/model",
+						createdById: userId,
+					})),
+				)
+				.returning(),
 		);
+		await conversationsWith(bots);
 
 		await expect(view.list({ workspace: workspaceId, pod: unjoined.id })).rejects.toMatchObject({
 			_tag: "ResourceHidden",
@@ -558,27 +704,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.returning(),
 		);
 		if (!mine || !theirs) throw new Error("Could not create Personal pods");
-		await onDatabase((db) =>
-			db.insert(agent).values(
-				[mine, theirs].map((room) => ({
-					workspaceId,
-					podId: room.id,
-					name: `Assistant ${room.id === mine.id ? "mine" : "theirs"}`,
-					handle: handleFromName(`Assistant ${room.id} ${suffix}`),
-					color: "rose" as const,
-					face: "dot" as const,
-					model: "test/model",
-					createdById: room.ownerId,
-				})),
-			),
+		const assistants = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values(
+					[mine, theirs].map((room) => ({
+						workspaceId,
+						podId: room.id,
+						name: `Assistant ${room.id === mine.id ? "mine" : "theirs"}`,
+						handle: handleFromName(`Assistant ${room.id} ${suffix}`),
+						color: "rose" as const,
+						face: "dot" as const,
+						model: "test/model",
+						createdById: room.ownerId,
+					})),
+				)
+				.returning(),
 		);
+		await conversationsWith(assistants);
 		const asAdministrator = onPostgresAs(administratorId)(
 			Context.get(conversations, ChatView.Service),
 		);
 
 		const listed = async (list: Promised<ChatView.Interface>) =>
 			(await list.list({ workspace: workspaceId, pod: "personal" }))?.items.map(
-				(item) => item.agent.name,
+				(item) => item.agent?.name,
 			);
 
 		expect(await listed(view)).toEqual(["Assistant mine"]);
@@ -1003,7 +1153,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(secondPage?.nextCursor).toBeNull();
 	});
 
-	it("shows an agent collaboration in both agents' Chats", async () => {
+	it("shows an agent collaboration in the asking chat only", async () => {
 		const initiatorChat = await chats.open({
 			workspace: workspaceId,
 			podId,
@@ -1093,17 +1243,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			kind: "message",
 			message: { parts: [{ type: "collaboration", threadId: child.id }] },
 		});
-		expect(inbound?.items).toEqual([
-			expect.objectContaining({
-				kind: "collaboration",
-				id: collaborationId,
-				threadId: child.id,
-				initiator: expect.objectContaining({ id: agentId, name: "Personal Agent" }),
-			}),
-		]);
-		expect((await view.history(recipientChat.id))?.items).toEqual([
-			expect.objectContaining({ threadId: child.id, type: "collaboration" }),
-		]);
+		// The asked bot's own threads are about other things.
+		expect(inbound?.items).toEqual([]);
+		expect((await view.history(recipientChat.id))?.items).toEqual([]);
 	});
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {
@@ -1635,6 +1777,63 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await expect(
 				chats.post({ conversationId, messageId, content: "again", attachments: [fresh.id] }),
 			).resolves.toMatchObject({ parts: [{ type: "text" }, asPart(fresh)] });
+		});
+
+		it("keeps the files a thread is started with on its message in the pod's chat", async () => {
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
+			const uploaded = await files.upload({
+				conversationId: podChat.id,
+				name: "pricing.txt",
+				type: "text/plain",
+				stream: Stream.succeed(new TextEncoder().encode("pricing")),
+			});
+
+			const started = await chats.startThread({
+				podChatId: podChat.id,
+				messageId: crypto.randomUUID(),
+				content: "Pricing for Northwind",
+				attachments: [uploaded.id],
+			});
+
+			expect(started.message).toMatchObject({
+				threadId: podChat.id,
+				parts: [{ type: "text", text: "Pricing for Northwind" }, asPart(uploaded)],
+			});
+			expect(await files.read({ conversationId: podChat.id, fileId: uploaded.id })).toMatchObject({
+				name: "pricing.txt",
+				size: uploaded.size,
+			});
+		});
+
+		it("starts no thread when a file is not the sender's unsent upload, which leaves the uploads in the pod's chat", async () => {
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
+			const uploaded = await files.upload({
+				conversationId: podChat.id,
+				name: "pricing.txt",
+				type: "text/plain",
+				stream: Stream.succeed(new TextEncoder().encode("pricing")),
+			});
+			const messageId = crypto.randomUUID();
+
+			await expect(
+				chats.startThread({
+					podChatId: podChat.id,
+					messageId,
+					content: "Pricing for Northwind",
+					attachments: [uploaded.id, crypto.randomUUID()],
+				}),
+			).rejects.toBeInstanceOf(ThreadFiles.UploadsNotFound);
+
+			expect(await view.messages(podChat.id)).toMatchObject({ items: [] });
+			const sent = await chats.post({
+				conversationId: podChat.id,
+				messageId,
+				content: "Pricing for Northwind",
+				attachments: [uploaded.id],
+			});
+			expect(sent.parts).toContainEqual(asPart(uploaded));
 		});
 
 		it("returns a message sent again with its files, and refuses its id for other files", async () => {

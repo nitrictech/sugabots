@@ -236,27 +236,18 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
 			{ request: { agentId: helper.id } },
 		]);
-		expect((await chatViewAs(memberId).messages(helperConversationId))?.items).toEqual([
-			expect.objectContaining({
-				kind: "collaboration",
-				threadId: opened.collaboration.threadId,
-				initiator: expect.objectContaining({ id: host.id }),
-			}),
-		]);
-		expect((await chatViewAs(memberId).history(helperConversationId))?.items).toEqual([
-			expect.objectContaining({ threadId: opened.collaboration.threadId }),
-		]);
+		// The helper's own threads are about other things, so they list nothing of it.
+		expect((await chatViewAs(memberId).messages(helperConversationId))?.items).toEqual([]);
 		const recipientEvents = await onDatabase((db) =>
 			db
 				.select({ payload: event.payload })
 				.from(event)
 				.where(eq(event.channel, workspaceChannel(workspaceId))),
 		);
-		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
+		expect(recipientEvents.map(({ payload }) => payload)).not.toContainEqual(
 			expect.objectContaining({
 				type: "conversation.thread_changed",
 				conversationId: helperConversationId,
-				threadId: opened.collaboration.threadId,
 			}),
 		);
 	});

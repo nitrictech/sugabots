@@ -8,6 +8,8 @@ import { ConversationChat, type Staged } from "./ConversationChat.tsx";
 interface ConversationPageProps {
 	/** The bot the conversation is with; null in the pod's chat. */
 	agent: Agent | null;
+	/** Whether it is the pod's chat, rather than a thread. */
+	isPodChat: boolean;
 	pod: Pod;
 	/** The conversation shown, which is with `agent`. */
 	conversationId: string;

@@ -53,7 +53,7 @@ export function modelPrompt(
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
-		context.thread.parentThreadId
+		context.thread.type === "collaboration"
 			? "Another agent opened this thread to ask you for help. Its first message is their brief; your reply is returned to them when your turn ends, so make it stand alone."
 			: undefined,
 		context.thread.type === "routine" && context.reason === "routine"

@@ -33,7 +33,7 @@ import {
 	useOpenPodChat,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { agentChatLink, conversationLink, podChatLink, podLink } from "@/lib/links.ts";
+import { conversationLink, podChatLink, podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -62,6 +62,7 @@ const ConversationPage = lazyNamed(
 	() => import("@/screens/ConversationPage.tsx"),
 	"ConversationPage",
 );
+const NewThread = lazyNamed(() => import("@/screens/NewThread.tsx"), "NewThread");
 const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
@@ -147,6 +148,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
+ *   /$workspace/pods/$pod/threads/new         starting a thread from its first message
  *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
  *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
  *   /$workspace/settings/members/$member   one person, by membership id
@@ -961,6 +963,7 @@ const activityChatRoute = createRoute({
 					<ActivityPane
 						pod={found.pod}
 						agent={found.agent}
+						isPodChat={found.isPodChat}
 						conversationId={conversation}
 						user={user}
 						threadPageId={search.threadPage}
@@ -1054,19 +1057,20 @@ function AgentsRoute() {
 function ConversationLayout({
 	pod,
 	selected,
-	artifactsOpen,
+	paneOpen,
 	listTuckedAway,
 	children,
 }: {
 	pod: Pod;
 	selected: ListSelection | undefined;
-	artifactsOpen: boolean;
+	/** Whether something is open beside the list, which covers it on a phone. */
+	paneOpen: boolean;
 	listTuckedAway: boolean;
 	children: React.ReactNode;
 }) {
 	return (
 		<ListAndPane
-			open={selected !== undefined || artifactsOpen}
+			open={paneOpen}
 			list={(className) => (
 				<ConversationList
 					pod={pod}
@@ -1094,9 +1098,10 @@ function PodRoute() {
 	const matchRoute = useMatchRoute();
 	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const openingPodChat = Boolean(matchRoute({ to: podChatRoute.fullPath }));
+	const startingThread = Boolean(matchRoute({ to: newThreadRoute.fullPath }));
 	const { data: pods, isPending, error } = usePods();
-	const { found } = usePodAgent(podSlug, handle ?? "");
 	const { found: inConversation } = useConversationPlace(podSlug, conversation ?? "");
+	const selected = selectionOf(conversation, inConversation, openingPodChat);
 	const pod = findPod(pods, podSlug);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!pod) {
@@ -1113,8 +1118,8 @@ function PodRoute() {
 	return (
 		<ConversationLayout
 			pod={pod}
-			selected={selectionOf(inConversation ?? found, openingPodChat)}
-			artifactsOpen={artifactsOpen}
+			selected={selected}
+			paneOpen={selected !== undefined || startingThread || handle !== undefined || artifactsOpen}
 			listTuckedAway={stagedArtifact !== undefined || stagedDesktop !== undefined}
 		>
 			<Outlet />
@@ -1122,13 +1127,14 @@ function PodRoute() {
 	);
 }
 
-/** The row of the list a pod's page has open: a bot's, or the pod's chat. */
+/** The row of the list a pod's page has open: a thread, or the pod's chat. */
 function selectionOf(
-	open: { agent: Agent | null } | undefined,
+	conversationId: string | undefined,
+	place: ConversationPlace | undefined,
 	openingPodChat: boolean,
 ): ListSelection | undefined {
-	if (open?.agent) return { kind: "bot", agentId: open.agent.id };
-	if (open || openingPodChat) return { kind: "podChat" };
+	if (openingPodChat || place?.isPodChat) return { kind: "podChat" };
+	if (conversationId && place) return { kind: "thread", conversationId };
 	return undefined;
 }
 
@@ -1165,14 +1171,7 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 	}
 	const top = list?.items[0];
 	if (!top) return null;
-	return (
-		<Navigate
-			{...(top.conversation
-				? conversationLink({ pod, conversationId: top.conversation.id })
-				: agentChatLink({ pod, agent: top.agent }))}
-			replace
-		/>
-	);
+	return <Navigate {...conversationLink({ pod, conversationId: top.conversation.id })} replace />;
 }
 
 /**
@@ -1328,6 +1327,18 @@ function OpenConversation({ pod, agent, search }: { pod: Pod; agent: Agent; sear
 	);
 }
 
+/** Starting a thread in a pod, from its first message. */
+const newThreadRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/threads/new",
+	component: () => {
+		const { pod: podSlug } = newThreadRoute.useParams();
+		const pod = findPod(usePods().data, podSlug);
+		const { user } = useSession();
+		return pod && user ? <NewThread pod={pod} userId={user.id} /> : null;
+	},
+});
+
 const conversationRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/threads/$conversation",
@@ -1349,6 +1360,7 @@ const conversationRoute = createRoute({
 				{(found, user) => (
 					<ConversationPage
 						agent={found.agent}
+						isPodChat={found.isPodChat}
 						pod={found.pod}
 						conversationId={conversation}
 						user={user}
@@ -1486,6 +1498,7 @@ const routeTree = rootRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
 			podChatRoute,
+			newThreadRoute,
 			conversationRoute,
 			artifactsRoute,
 			artifactRoute,

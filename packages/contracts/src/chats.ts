@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { agentSchema } from "./agents.ts";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "./attachments.ts";
 import { podSlugSchema } from "./pods.ts";
 import {
 	routineExecutionStateSchema,
@@ -56,14 +57,14 @@ export const chatListQuerySchema = Schema.Struct({
 });
 
 /**
- * One row of the conversation list: a bot, with its conversation in the pod.
- * `conversation` is null until one is first opened with the bot, by a person
- * or a routine, and is the whole conversation, so opening it needs no request
- * of its own. `lastMessage` is null until a message is written.
+ * One row of the conversation list: a thread in the pod, with the bot it is
+ * with, or null when it is between people. `conversation` is the whole
+ * thread, so opening it needs no request of its own. `lastMessage` is null
+ * until a message is written.
  */
 export const chatListItemSchema = Schema.Struct({
-	agent: agentSchema,
-	conversation: Schema.NullOr(conversationSchema),
+	agent: Schema.NullOr(agentSchema),
+	conversation: conversationSchema,
 	lastMessage: Schema.NullOr(
 		Schema.Struct({
 			/** The message's first line, shortened for a one-line row. */
@@ -228,6 +229,30 @@ export const chatListSchema = Schema.Struct({
 
 export type ChatList = typeof chatListSchema.Type;
 
+/** A message that starts a thread from a pod's chat, and the bot it is for, if one. */
+export const newThreadSchema = Schema.Struct({
+	id: uuidSchema,
+	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
+	/** Files the sender uploaded to the pod's chat and has not sent yet, which move to the thread. */
+	attachments: Schema.optional(
+		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),
+	),
+	/** The bot the thread is with; a thread between people when absent. */
+	hostAgentId: Schema.optional(uuidSchema),
+	/** The id of the message in the pod's chat that this one quotes and answers. */
+	replyTo: Schema.optional(uuidSchema),
+});
+
+export type NewThread = typeof newThreadSchema.Type;
+
+/** A thread started from a pod's chat, and the message it was started with. */
+export const startedThreadSchema = Schema.Struct({
+	conversation: conversationSchema,
+	message: messageSchema,
+});
+
+export type StartedThread = typeof startedThreadSchema.Type;
+
 /** The bot to open a conversation with, and the pod it is in. */
 export const openConversationSchema = Schema.Struct({
 	podId: uuidSchema,
@@ -244,18 +269,27 @@ export const chatMessageItemSchema = Schema.Union([
 		message: messageSchema,
 	}),
 	Schema.Struct({
-		kind: Schema.Literal("collaboration"),
-		id: uuidSchema,
-		threadId: uuidSchema,
-		initiator: agentParticipantSchema,
-		createdAt: isoTimestampSchema,
-	}),
-	Schema.Struct({
 		kind: Schema.Literal("routine"),
 		id: uuidSchema,
 		threadId: uuidSchema,
 		routineName: Schema.String,
 		triggerKind: routineExecutionTriggerKindSchema,
+		createdAt: isoTimestampSchema,
+	}),
+	/** In a pod's chat: a thread somebody started from one of its messages, which it links to. */
+	Schema.Struct({
+		kind: Schema.Literal("thread"),
+		id: uuidSchema,
+		threadId: uuidSchema,
+		/** The message in the chat it was started from, which it is shown under. */
+		originMessageId: Schema.NullOr(uuidSchema),
+		title: Schema.String,
+		/** The bot it is with, or null when it is between people. */
+		agent: Schema.NullOr(agentParticipantSchema),
+		/** How many messages it has. */
+		replies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		/** When its newest message was written; null until it has one. */
+		lastReplyAt: Schema.NullOr(isoTimestampSchema),
 		createdAt: isoTimestampSchema,
 	}),
 ]);

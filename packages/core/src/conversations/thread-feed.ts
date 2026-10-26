@@ -113,21 +113,6 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationOpened: (opened) => [
 			collaborationUpdated(opened),
 			listedThreadChanged(opened.workspaceId, opened.podId, opened.collaboration.threadId),
-			...(opened.recipientConversationId
-				? [
-						{
-							channel: workspaceChannel(opened.workspaceId),
-							event: PodAudience.forPod(
-								opened.podId,
-								streamEvent("conversation.thread_changed", {
-									conversationId: opened.recipientConversationId,
-									threadId: opened.collaboration.threadId,
-									threadType: "collaboration",
-								}),
-							),
-						},
-					]
-				: []),
 		],
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
@@ -142,6 +127,20 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 					readAt: readAt.toISOString(),
 				}),
 			),
+		],
+		ThreadOpened: ({ workspaceId, podId, podChatId, threadId }) => [
+			listedThreadChanged(workspaceId, podId, threadId),
+			{
+				channel: workspaceChannel(workspaceId),
+				event: PodAudience.forPod(
+					podId,
+					streamEvent("conversation.thread_changed", {
+						conversationId: podChatId,
+						threadId,
+						threadType: "conversation",
+					}),
+				),
+			},
 		],
 		ThreadSummarised: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),

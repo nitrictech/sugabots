@@ -56,7 +56,8 @@ const meta = preview.meta({
 		pod: revenue,
 		rows: revenueRows,
 		status: "ready" as const,
-		selected: { kind: "bot" as const, agentId: growthDesk.id },
+		hasBots: true,
+		selected: { kind: "thread" as const, conversationId: storyConversationFor(growthDesk).id },
 		onNewBot: fn(),
 		emptyState: { title: "No bots in Revenue yet" },
 	},
@@ -85,7 +86,7 @@ export const Default = meta.story({
  * when both apply.
  */
 export const UnreadAndWaiting = meta.story({
-	args: { selected: { kind: "bot", agentId: leadResearcher.id } },
+	args: { selected: { kind: "thread", conversationId: storyConversationFor(leadResearcher).id } },
 	play: async ({ canvas }) => {
 		const growth = canvas.getByRole("link", { name: /Growth Desk/ });
 		await expect(growth).toHaveTextContent("Needs you");
@@ -106,6 +107,7 @@ export const EmptyPod = meta.story({
 	args: {
 		pod: design,
 		rows: [],
+		hasBots: false,
 		selected: undefined,
 		emptyState: { title: "No bots in Design yet", action: { label: "New bot", onClick: newBot } },
 	},
@@ -121,6 +123,7 @@ export const EmptyPodForAMember = meta.story({
 	args: {
 		pod: design,
 		rows: [],
+		hasBots: false,
 		selected: undefined,
 		onNewBot: undefined,
 		emptyState: { title: "No bots in Design yet", hint: "Someone who runs this pod can add one." },
@@ -164,6 +167,34 @@ export const PodChatUnopened = meta.story({
 			expect.stringMatching(/\/pods\/revenue\/chat$/),
 		);
 		await expect(canvas.queryByText("Threads")).toBeNull();
+	},
+});
+
+/** A thread between people has no bot's face, and is called what it was started with. */
+export const PeopleThread = meta.story({
+	args: {
+		podChat: revenueChat,
+		rows: [
+			{
+				agent: null,
+				conversation: {
+					...storyConversationFor(growthDesk),
+					id: "0199a3a0-0000-7000-8000-00000000c950",
+					hostAgentId: null,
+					title: "Who's covering Halcyon next week?",
+				},
+				unreadMessages: 0,
+				needsApproval: false,
+				lastMessage: null,
+				waitingOn: null,
+			},
+			...revenueRows,
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByRole("link", { name: /Who's covering Halcyon next week\?/ }),
+		).toBeVisible();
 	},
 });
 

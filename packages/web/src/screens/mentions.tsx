@@ -1,5 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
+	type AgentParticipant,
+	mentionedHandles,
 	splitAroundMentions,
 	type ThreadDetails,
 	type ThreadParticipant,
@@ -33,8 +35,23 @@ export function mentionableIn(
 	];
 }
 
-function participantWithHandle(
-	mentionable: ThreadParticipant[],
+/**
+ * The bot named first in `draft` among `crew`, which sending from a pod's
+ * chat starts a thread with; any named after it are only mentioned.
+ */
+export function firstBotNamed(
+	draft: string,
+	crew: readonly ThreadParticipant[],
+): AgentParticipant | undefined {
+	const bots = crew.filter((member): member is AgentParticipant => member.kind === "agent");
+	return mentionedHandles(draft)
+		.flatMap((handle) => bots.filter((bot) => bot.handle === handle))
+		.at(0);
+}
+
+/** Whom the handle `handle`, as a mention writes it, names among `mentionable`. */
+export function participantWithHandle(
+	mentionable: readonly ThreadParticipant[],
 	handle: string,
 ): ThreadParticipant | undefined {
 	const lowered = handle.toLowerCase();

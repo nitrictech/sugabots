@@ -48,6 +48,7 @@ const thread = {
 const details: ThreadDetails = {
 	thread,
 	routineExecution: null,
+	startedFrom: null,
 	crew: [],
 	members: [],
 	participants: [

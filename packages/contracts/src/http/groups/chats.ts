@@ -10,8 +10,10 @@ import {
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
 	conversationSchema,
+	newThreadSchema,
 	openConversationSchema,
 	podChatMarkersSchema,
+	startedThreadSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
@@ -51,6 +53,19 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		/** The pod's chat, opened on first use. */
 		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
 			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },
+			success: conversationSchema,
+			error: refused,
+		}),
+		/** Starts a thread from the pod's chat `conversationId` with its first message. */
+		HttpApiEndpoint.post("startThread", "/conversations/:conversationId/threads", {
+			params: { conversationId: Schema.String },
+			payload: newThreadSchema,
+			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		/** Starts a thread between people from a message in a pod's chat, or finds the one it has. */
+		HttpApiEndpoint.post("threadFrom", "/messages/:messageId/thread", {
+			params: { messageId: Schema.String },
 			success: conversationSchema,
 			error: refused,
 		}),

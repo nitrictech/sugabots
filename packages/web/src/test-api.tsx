@@ -367,6 +367,7 @@ export function conversationDetails(agent: Agent): ThreadDetails {
 			initiatorUserId: null,
 		},
 		routineExecution: null,
+		startedFrom: null,
 		participants: [participant],
 		crew: [participant],
 		members: [],
@@ -440,7 +441,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.routines.getSecret.mockReturnValue(
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
-	// Every crew bot in the pod, none messaged yet.
+	// A conversation with every crew bot in the pod, nothing said in any yet.
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);
 		return Effect.succeed({
@@ -449,7 +450,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({
 					agent,
-					conversation: null,
+					conversation: conversationWith(agent),
 					lastMessage: null,
 					waitingOn: null,
 					unreadMessages: 0,

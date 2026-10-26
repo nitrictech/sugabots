@@ -477,7 +477,7 @@ describe("the rail", () => {
 });
 
 describe("the conversation list", () => {
-	it("lists a pod's bots newest first, marking the open chat", async () => {
+	it("lists a pod's threads newest first, under its chat, marking the open one", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				podChat: null,
@@ -491,7 +491,7 @@ describe("the conversation list", () => {
 							at: new Date().toISOString(),
 						},
 					},
-					{ agent: triager, conversation: null, lastMessage: null },
+					{ agent: triager, conversation: conversationWith(triager), lastMessage: null },
 				],
 			}),
 		);
@@ -511,7 +511,7 @@ describe("the conversation list", () => {
 		});
 	});
 
-	it("loads a chat while the pointer is on its row, and opens none for a bot without one", async () => {
+	it("loads a thread while the pointer is on its row", async () => {
 		const linearChat = {
 			id: "0199a3a0-0000-7000-8000-0000000000c1",
 			workspaceId: workspace.id,
@@ -524,17 +524,14 @@ describe("the conversation list", () => {
 		const unread = { lastMessage: null, waitingOn: null, unreadMessages: 0, needsApproval: false };
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
-				items: [
-					{ agent: linear, conversation: linearChat, ...unread },
-					{ agent: triager, conversation: null, ...unread },
-				],
+				podChat: null,
+				items: [{ agent: linear, conversation: linearChat, ...unread }],
 			}),
 		);
 		mount("/suga/pods/suga-team");
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
 
 		fireEvent.mouseEnter(await within(list).findByRole("link", { name: /Linear Handler/ }));
-		fireEvent.mouseEnter(within(list).getByRole("link", { name: /Issue Triager/ }));
 
 		await waitFor(() =>
 			expect(client.api.chats.messages).toHaveBeenCalledWith(
@@ -563,6 +560,9 @@ describe("the conversation list", () => {
 
 	it("says a pod has no bots yet, and offers the first", async () => {
 		client.api.chats.list.mockReturnValue(Effect.succeed({ podChat: null, items: [] }));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed(agents.filter((agent) => agent.podId !== pods[1]?.id)),
+		);
 		mount("/suga/pods/sales");
 
 		expect(await screen.findByText("No bots in Sales yet")).toBeDefined();

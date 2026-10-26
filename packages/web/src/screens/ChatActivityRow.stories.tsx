@@ -70,25 +70,6 @@ export const CollaborationDone = meta.story({
 	},
 });
 
-/** In the chat of the bot that was asked, the same collaboration says it helped. */
-export const CollaborationInTheAskedBotsChat = meta.story({
-	render: () => (
-		<ChatActivityRow
-			type="collaboration"
-			initiator={growthDesk}
-			recipient={linearHandler}
-			inChatOf="recipient"
-			state="done"
-			onOpen={fn()}
-		/>
-	),
-	play: async ({ canvas }) => {
-		await expect(
-			canvas.getByRole("button", { name: /Linear Handler helped Growth Desk/ }),
-		).toBeInTheDocument();
-	},
-});
-
 /** RoutineRan is a scheduled routine that posted into the chat, marked with a clock. */
 export const RoutineRan = meta.story({ render: () => routine("done") });
 

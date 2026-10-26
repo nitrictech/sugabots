@@ -26,7 +26,7 @@ export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivitySt
 
 /**
  * A quiet row for something that happened in the chat around the bot's
- * messages: a collaboration another bot asked it into, or a routine run. It
+ * messages: a collaboration, or a routine run. It
  * lines up with the messages, its mark where their faces are, and the whole of
  * it opens the thread.
  */
@@ -36,11 +36,6 @@ export function ChatActivityRow(
 				type: "collaboration";
 				initiator: AgentParticipant;
 				recipient: AgentParticipant;
-				/**
-				 * Whose chat the row is in: the bot that asked, by default, or the
-				 * one it asked, whose row says it helped.
-				 */
-				inChatOf?: "initiator" | "recipient";
 		  }
 		| { type: "routine"; routineName: string; triggerKind: RoutineExecutionTriggerKind }
 	),
@@ -48,9 +43,7 @@ export function ChatActivityRow(
 	const { state, at, onOpen } = props;
 	const text =
 		props.type === "collaboration"
-			? props.inChatOf === "recipient"
-				? helpedText(props.recipient.name, props.initiator.name, state)
-				: collaborationText(props.initiator.name, props.recipient.name, state)
+			? collaborationText(props.initiator.name, props.recipient.name, state)
 			: routineText(props.routineName, state);
 	return (
 		<button
@@ -130,20 +123,6 @@ export function collaborationText(host: string, other: string, state: ActivitySt
 			return `${host} collaborated with ${other}`;
 		case "failed":
 			return `Collaboration with ${other} failed`;
-	}
-}
-
-/** The same line in the chat of the bot that was asked, which it says it helped. */
-function helpedText(helper: string, asker: string, state: ActivityState): string {
-	switch (state) {
-		case "running":
-			return `${helper} is helping ${asker}`;
-		case "waiting_on_you":
-			return `${helper} is waiting on your approval`;
-		case "done":
-			return `${helper} helped ${asker}`;
-		case "failed":
-			return `Collaboration with ${asker} failed`;
 	}
 }
 

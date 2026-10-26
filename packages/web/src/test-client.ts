@@ -111,6 +111,8 @@ export const client = {
 			markRead: vi.fn(),
 			open: vi.fn(),
 			openPodChat: vi.fn(),
+			startThread: vi.fn(),
+			threadFrom: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
 			send: vi.fn(),

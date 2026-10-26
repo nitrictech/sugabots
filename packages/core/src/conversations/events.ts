@@ -133,15 +133,10 @@ export type ConversationEvent = Data.TaggedEnum<{
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */
 	ToolCallFinished: ToolCallChange;
-	/**
-	 * An agent opened a child thread to brief a collaborator.
-	 * `recipientConversationId` is the collaborator's newest conversation in
-	 * the pod, whose history now lists the thread.
-	 */
+	/** An agent opened a child thread to brief a collaborator. */
 	CollaborationOpened: CollaborationChange & {
 		readonly workspaceId: string;
 		readonly podId: string;
-		readonly recipientConversationId: string | null;
 		readonly collaboratorAgentId: string;
 		/** The brief, the first message in the collaboration's thread. */
 		readonly briefMessageId: string;
@@ -165,6 +160,13 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly person: PersonParticipant;
 		readonly readThrough: Date;
 		readonly readAt: Date;
+	};
+	/** Somebody started a thread from the pod's chat `podChatId`, which links to it. */
+	ThreadOpened: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly podChatId: string;
+		readonly threadId: string;
 	};
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: {
