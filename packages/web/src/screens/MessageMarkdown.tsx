@@ -1,7 +1,13 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import type { Root } from "hast";
 import { createElement, type ReactNode } from "react";
-import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown } from "streamdown";
+import {
+	type Components,
+	defaultRemarkPlugins,
+	type ExtraProps,
+	type LinkSafetyConfig,
+	Streamdown,
+} from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
 import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
@@ -29,6 +35,7 @@ export function MessageMarkdown({
 				rehypePlugins={REHYPE_PLUGINS}
 				components={COMPONENTS}
 				controls={CONTROLS}
+				linkSafety={LINK_SAFETY}
 				isAnimating={false}
 			>
 				{text}
@@ -44,6 +51,12 @@ export function MessageMarkdown({
  * `rehypeFocusableCodeBlocks`.
  */
 const BREAK_LONG_WORDS = "break-words";
+
+/* Streamdown asks before following a link off the app; one back into it needs no warning. */
+const LINK_SAFETY: LinkSafetyConfig = {
+	enabled: true,
+	onLinkCheck: (url) => URL.parse(url, window.location.href)?.origin === window.location.origin,
+};
 
 /**
  * rehypeFocusableCodeBlocks makes fenced code scrollers keyboard-focusable
