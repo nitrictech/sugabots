@@ -12,7 +12,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"typecheck": "tsc --noEmit",
-		"storybook": "storybook dev --port 6006 --exact-port --no-open",
+		"storybook": "storybook dev --port 6006 --exact-port --ci",
 		"build:storybook": "storybook build",
 		"test:storybook": "vitest run --config vitest.config.ts"
 	},
