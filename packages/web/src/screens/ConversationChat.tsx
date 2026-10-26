@@ -345,9 +345,12 @@ export function ConversationChat({
 	)?.conversation;
 	// An archived chat is not listed, so it goes by the name it was archived with.
 	const podChatName = listedChat?.title ?? title ?? "";
+	// A conversation in a Personal pod is the person's own with their bot: it goes by
+	// the bot's name, and is kept going rather than marked done.
+	const direct = pod.kind === "personal" && details?.thread.type === "conversation";
 	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
-		details?.thread.type === "conversation"
+		details?.thread.type === "conversation" && !direct
 			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
 			: undefined;
 	const headerPlace: HeaderPlace =
@@ -364,7 +367,8 @@ export function ConversationChat({
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
-				title={title}
+				title={direct ? undefined : title}
+				onlyYou={direct}
 				done={done}
 				routine={details?.routine}
 				conversationId={conversationId}
@@ -488,7 +492,7 @@ export function ConversationChat({
 								) : details.thread.type === "routine_feed" ? (
 									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
-									agent && <ChatIntro agent={agent} />
+									agent && <ChatIntro agent={agent} direct={direct} />
 								))}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
@@ -1087,8 +1091,11 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 	);
 }
 
-/** The top of a chat, once there is nothing older to load: whom it is with, and what they do. */
-function ChatIntro({ agent }: { agent: Agent }) {
+/**
+ * The top of a chat, once there is nothing older to load: whom it is with,
+ * and what they do, or, `direct` in a Personal pod, that it is the person's own.
+ */
+function ChatIntro({ agent, direct }: { agent: Agent; direct: boolean }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
@@ -1096,8 +1103,14 @@ function ChatIntro({ agent }: { agent: Agent }) {
 				{agent.name}
 			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
-				This is the start of your conversation with {agent.name}.
-				{agent.description && ` ${agent.description}`}
+				{direct ? (
+					"Your own bot. It works for you only and nobody else in the workspace can see this conversation."
+				) : (
+					<>
+						This is the start of your conversation with {agent.name}.
+						{agent.description && ` ${agent.description}`}
+					</>
+				)}
 			</p>
 		</div>
 	);
