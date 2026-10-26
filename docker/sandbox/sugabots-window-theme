@@ -1,6 +1,6 @@
 #!/bin/bash
 # Draws the Sugabots window theme for xfwm4 into `directory`/xfwm4: dark title
-# bars with rounded top corners, a 2px edge in `accent` round the focused
+# bars, corners rounded at picom's radius, a 2px edge in `accent` round the focused
 # window, and macOS-style traffic lights on the left that show their glyph
 # under the pointer. Drawn as SVG and rendered to PNG so the curves are
 # antialiased.
@@ -29,22 +29,27 @@ render() {
 		rsvg-convert --width "$width" --height "$height" --output "$out/$name.png"
 }
 
-# A frame's pieces for one state: the edge colour, with the title bar inside it.
+# A frame's pieces for one state: the edge colour round the title bar and,
+# under the window's contents, a strip of the title bar's colour as tall as
+# the corners' radius, so the bottom corners curve as the top ones do. Every
+# piece is opaque: xfwm4 would cut a see-through corner to a one-bit mask, so
+# picom rounds each window's corners instead, antialiased, at the radius the
+# edge curves at here.
 frame() {
 	local state="$1" edge="$2" title="$3"
-	# The rounded top-left corner, mirrored for the right: an edged rounded
-	# rectangle seen through a window as big as the corner.
-	local corner="<rect width=\"40\" height=\"80\" rx=\"$radius_px\" fill=\"$edge\"/><rect x=\"$edge_px\" y=\"$edge_px\" width=\"40\" height=\"80\" rx=\"$((radius_px - edge_px))\" fill=\"$title\"/>"
-	render "top-left-$state" 12 "$title_px" "$corner"
-	render "top-right-$state" 12 "$title_px" "<g transform=\"translate(12 0) scale(-1 1)\">$corner</g>"
+	local inner_radius=$((radius_px - edge_px)) bottom_px=$radius_px
+	local top="<rect width=\"12\" height=\"$title_px\" fill=\"$edge\"/><rect x=\"$edge_px\" y=\"$edge_px\" width=\"40\" height=\"80\" rx=\"$inner_radius\" fill=\"$title\"/>"
+	render "top-left-$state" 12 "$title_px" "$top"
+	render "top-right-$state" 12 "$title_px" "<g transform=\"translate(12 0) scale(-1 1)\">$top</g>"
 	local strip="<rect width=\"1\" height=\"$title_px\" fill=\"$title\"/><rect width=\"1\" height=\"$edge_px\" fill=\"$edge\"/>"
 	for part in 1 2 3 4 5; do render "title-$part-$state" 1 "$title_px" "$strip"; done
 	local side="<rect width=\"$edge_px\" height=\"1\" fill=\"$edge\"/>"
 	render "left-$state" "$edge_px" 1 "$side"
 	render "right-$state" "$edge_px" 1 "$side"
-	render "bottom-$state" 1 "$edge_px" "<rect width=\"1\" height=\"$edge_px\" fill=\"$edge\"/>"
-	render "bottom-left-$state" "$edge_px" "$edge_px" "<rect width=\"$edge_px\" height=\"$edge_px\" fill=\"$edge\"/>"
-	render "bottom-right-$state" "$edge_px" "$edge_px" "<rect width=\"$edge_px\" height=\"$edge_px\" fill=\"$edge\"/>"
+	render "bottom-$state" 1 "$bottom_px" "<rect width=\"1\" height=\"$bottom_px\" fill=\"$edge\"/><rect width=\"1\" height=\"$((bottom_px - edge_px))\" fill=\"$title\"/>"
+	local bottom="<rect width=\"12\" height=\"$bottom_px\" fill=\"$edge\"/><rect x=\"$edge_px\" y=\"-80\" width=\"40\" height=\"$((80 + bottom_px - edge_px))\" rx=\"$inner_radius\" fill=\"$title\"/>"
+	render "bottom-left-$state" 12 "$bottom_px" "$bottom"
+	render "bottom-right-$state" 12 "$bottom_px" "<g transform=\"translate(12 0) scale(-1 1)\">$bottom</g>"
 }
 
 # A traffic light in each state xfwm4 draws, its glyph shown under the pointer
