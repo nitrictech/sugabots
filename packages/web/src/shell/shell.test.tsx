@@ -481,6 +481,7 @@ describe("the conversation list", () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				podChat: null,
+				routines: [],
 				items: [
 					{
 						agent: linear,
@@ -526,6 +527,7 @@ describe("the conversation list", () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				podChat: null,
+				routines: [],
 				items: [{ agent: linear, conversation: linearChat, ...unread }],
 			}),
 		);
@@ -560,7 +562,9 @@ describe("the conversation list", () => {
 	});
 
 	it("says a pod has no bots yet, and offers the first", async () => {
-		client.api.chats.list.mockReturnValue(Effect.succeed({ podChat: null, items: [] }));
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({ podChat: null, items: [], routines: [] }),
+		);
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.filter((agent) => agent.podId !== pods[1]?.id)),
 		);

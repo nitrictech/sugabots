@@ -6,6 +6,7 @@ import {
 	routineExecutionStateSchema,
 	routineExecutionSummarySchema,
 	routineExecutionTriggerKindSchema,
+	routineStateSchema,
 } from "./routines.ts";
 import {
 	agentParticipantSchema,
@@ -217,6 +218,21 @@ export const activityFeedSchema = Schema.Struct({
 export type ActivityFeed = typeof activityFeedSchema.Type;
 
 /**
+ * One of a pod's routines in its conversation list, with the thread its runs
+ * post in: null until it first runs or somebody opens it.
+ */
+export const listedRoutineSchema = Schema.Struct({
+	routine: Schema.Struct({ id: uuidSchema, name: Schema.String, state: routineStateSchema }),
+	/** The bot that runs it. */
+	agent: agentSchema,
+	conversation: Schema.NullOr(conversationSchema),
+	/** A message in its thread the person has not read mentions them. */
+	mentionsYou: Schema.Boolean,
+});
+
+export type ListedRoutine = typeof listedRoutineSchema.Type;
+
+/**
  * A pod's conversation list: its chat, null until somebody first opens it,
  * with how many of its messages the person has not read; and its bots, most
  * recent message first, those nobody has messaged last, by name.
@@ -229,6 +245,8 @@ export const chatListSchema = Schema.Struct({
 		}),
 	),
 	items: Schema.mutable(Schema.Array(chatListItemSchema)),
+	/** Its bots' routines, by name. */
+	routines: Schema.mutable(Schema.Array(listedRoutineSchema)),
 });
 
 export type ChatList = typeof chatListSchema.Type;

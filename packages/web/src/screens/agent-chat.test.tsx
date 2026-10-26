@@ -267,6 +267,7 @@ function details(
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
 		podChat: null,
+		routines: [],
 		items: listed
 			? [
 					{

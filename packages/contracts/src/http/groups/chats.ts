@@ -50,6 +50,12 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: conversationSchema,
 			error: refused,
 		}),
+		/** The routine's own thread, where its runs post, opened on first use. */
+		HttpApiEndpoint.post("openRoutineFeed", "/workspaces/:workspace/routines/:routineId/thread", {
+			params: { workspace: workspaceIdOrSlugSchema, routineId: Schema.String },
+			success: conversationSchema,
+			error: refused,
+		}),
 		/** The pod's chat, opened on first use. */
 		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
 			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },

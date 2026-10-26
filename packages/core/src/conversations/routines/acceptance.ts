@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
-import type { RoutineExecutionTrigger, RoutineResults } from "@sugabots/contracts";
+import type { RoutineExecutionTrigger } from "@sugabots/contracts";
 import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import { agent, routine, routineExecution, routineTrigger } from "../../database/schema.ts";
+import { agent, pod, routine, routineExecution, routineTrigger } from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { RoutineRepository } from "./repository.ts";
 import {
@@ -12,6 +12,7 @@ import {
 	RoutineNotFound,
 	RoutineTriggerConflict,
 	RoutineTriggerRejected,
+	resultGoesToPodChat,
 	type Scope,
 } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
@@ -44,18 +45,19 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 				yield* lockTriggers(input.routineId);
 				const [definition] = yield* query((db) =>
 					db
-						.select({ routine, podId: agent.podId })
+						.select({ routine, podId: pod.id, podKind: pod.kind })
 						.from(routine)
 						.innerJoin(
 							agent,
 							and(eq(agent.id, routine.agentId), eq(agent.workspaceId, routine.workspaceId)),
 						)
+						// A routine runs a crew agent, which is one in a pod.
+						.innerJoin(pod, eq(pod.id, agent.podId))
 						.where(inScope(input))
 						.limit(1),
 				);
-				// A routine runs a crew agent, which is one in a pod.
-				if (!definition || definition.podId === null) return yield* new RoutineNotFound();
-				const podId = definition.podId;
+				if (!definition) return yield* new RoutineNotFound();
+				const { podId } = definition;
 				if (input.trigger.kind !== "manual" && definition.routine.state !== "enabled") {
 					return yield* new RoutineTriggerRejected();
 				}
@@ -88,12 +90,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					return { executionId: existing.id, threadId: existing.threadId, duplicate: true };
 				}
 
-				const conversation = yield* threads.openConversation({
-					workspaceId: input.workspaceId,
-					podId,
-					hostAgentId: input.agentId,
-					initiatorUserId: null,
-				});
+				const conversation = yield* threads.openRoutineFeed({ ...definition.routine, podId });
 				const acceptedAt = yield* DateTime.nowAsDate;
 				const runThread = yield* threads.openRoutineThread({
 					workspaceId: input.workspaceId,
@@ -126,7 +123,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					},
 					content: triggerMessageContent(
 						definition.routine.instructions,
-						definition.routine.results,
+						resultGoesToPodChat(definition.routine.results, definition.podKind),
 						input.trigger,
 					),
 				});
@@ -171,19 +168,23 @@ const acceptedAs = (input: Trigger, identity: string) =>
 
 function triggerMessageContent(
 	instructions: string,
-	results: RoutineResults,
+	postedToPodChat: boolean,
 	trigger: RoutineExecutionTrigger,
 ) {
-	const delivery = results === "post_to_chat" ? `\n\n${POSTED_RESULT_NOTE}` : "";
-	return `Routine instructions:\n${instructions}${delivery}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
+	const delivery = postedToPodChat ? POSTED_TO_POD_CHAT_NOTE : POSTED_RESULT_NOTE;
+	return `Routine instructions:\n${instructions}\n\n${delivery}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
 
 /**
- * Tells the agent of a run whose result is posted to its chat that its last
- * reply is what people will read there, so it writes that reply to them.
+ * Tells the agent of a run that its last reply is what people will read in
+ * the routine's thread, so it writes that reply to them.
  */
 const POSTED_RESULT_NOTE =
-	"When you finish, your last reply is posted in your chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
+	"When you finish, your last reply is posted in this routine's thread for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
+
+/** As `POSTED_RESULT_NOTE`, for a routine whose result is posted in its pod's chat too. */
+const POSTED_TO_POD_CHAT_NOTE =
+	"When you finish, your last reply is posted in this routine's thread and in the pod's chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
 
 function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigger) {
 	if (left.kind !== right.kind) return false;

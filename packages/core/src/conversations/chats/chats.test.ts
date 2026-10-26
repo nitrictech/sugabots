@@ -328,6 +328,45 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prepared.context.askedBy).toBe(userId);
 	});
 
+	it("lists a pod's routines by name, each with its thread once it has run", async () => {
+		const [quiet, ran] = await Promise.all(
+			["Weekly digest", "Overnight review"].map((name) =>
+				routines.create(
+					{ agentId },
+					{ name, instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+				),
+			),
+		);
+		if (!quiet || !ran) throw new Error("Could not create the routines");
+		const accepted = await routines.run({
+			agentId,
+			routineId: ran.routine.id,
+			requestId: crypto.randomUUID(),
+		});
+
+		const listed = (await view.list({ workspace: workspaceId, pod: podId }))?.routines;
+
+		expect(listed).toEqual([
+			expect.objectContaining({
+				routine: expect.objectContaining({ id: ran.routine.id, name: "Overnight review" }),
+				agent: expect.objectContaining({ id: agentId }),
+				conversation: expect.objectContaining({ title: "Overnight review" }),
+			}),
+			expect.objectContaining({
+				routine: expect.objectContaining({ id: quiet.routine.id }),
+				conversation: null,
+			}),
+		]);
+		const feed = listed?.[0]?.conversation;
+		if (!feed) throw new Error("The routine has no thread");
+		expect((await view.messages(feed.id))?.items).toEqual([
+			expect.objectContaining({ kind: "routine", threadId: accepted.threadId }),
+		]);
+		expect(
+			(await chats.openRoutineFeed({ workspace: workspaceId, routineId: quiet.routine.id })).title,
+		).toBe("Weekly digest");
+	});
+
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const doneAt = async () =>
@@ -1123,8 +1162,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
-	it("includes Routine runs in the main Chat timeline", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+	it("lists Routine runs in the routine's thread", async () => {
 		const created = await routines.create(
 			{ agentId },
 			{
@@ -1135,6 +1173,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
+		// The routine's own thread, where its runs are listed.
+		const current = await chats.openRoutineFeed({
+			workspace: workspaceId,
+			routineId: created.routine.id,
+		});
 
 		expect((await view.messages(current.id))?.items).toEqual([
 			expect.objectContaining({
@@ -1147,8 +1190,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
-	it("paginates interleaved messages and Routine runs without gaps", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+	it("paginates interleaved messages and Routine runs in a routine's thread without gaps", async () => {
 		const created = await routines.create(
 			{ agentId },
 			{
@@ -1159,6 +1201,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
+		// The routine's own thread, where its runs are listed.
+		const current = await chats.openRoutineFeed({
+			workspace: workspaceId,
+			routineId: created.routine.id,
+		});
 		const olderMessageId = crypto.randomUUID();
 		const newerMessageId = crypto.randomUUID();
 		await onDatabase((db) =>
@@ -1301,7 +1348,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const created = await routines.create(
 			{ agentId },
 			{
@@ -1312,6 +1358,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
+		// The routine's own thread, where its runs are listed.
+		const current = await chats.openRoutineFeed({
+			workspace: workspaceId,
+			routineId: created.routine.id,
+		});
 		const [failed, running] = await onDatabase((db) =>
 			db
 				.insert(thread)
@@ -1655,7 +1706,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists a routine run in the person's chats, with the start of what it said", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			const created = await routines.create(
 				{ agentId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
@@ -1675,7 +1725,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					triggerKind: "manual",
 					agent: expect.objectContaining({ id: agentId }),
 					preview: "Two PRs merged. The release branch is green.",
-					conversationId: current.id,
+					conversationId: (await view.list({ workspace: workspaceId, pod: podId }))?.routines[0]
+						?.conversation?.id,
 					unread: true,
 				}),
 			);
@@ -1729,6 +1780,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				messageId: crypto.randomUUID(),
 				content: "Seen both",
 			});
+			// The run is listed in the routine's own thread, read there.
+			await chats.markRead(
+				(await chats.openRoutineFeed({ workspace: workspaceId, routineId: created.routine.id })).id,
+			);
 
 			expect(await unreadOf()).toEqual(
 				expect.arrayContaining([

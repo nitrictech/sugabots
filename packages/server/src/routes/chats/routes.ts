@@ -37,6 +37,11 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.open({ ...payload, workspace: params.workspace })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("openRoutineFeed", ({ params }) =>
+				chats
+					.openRoutineFeed({ workspace: params.workspace, routineId: params.routineId })
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("openPodChat", ({ params }) =>
 				chats
 					.openPodChat({ workspace: params.workspace, podId: params.podId })

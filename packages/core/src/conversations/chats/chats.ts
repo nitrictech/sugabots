@@ -2,14 +2,14 @@ export * as Chats from "./chats.ts";
 
 import type { Conversation, Message } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, message, pod } from "../../database/schema.ts";
+import { agent, message, pod, routine } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
@@ -47,6 +47,14 @@ export interface Interface {
 	readonly openPodChat: (input: {
 		workspace: string;
 		podId: string;
+	}) => Effect.Effect<Conversation, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
+	/**
+	 * The routine's own thread, where its runs post, opened on first use.
+	 * Hidden unless the actor reaches the pod of the bot that runs it.
+	 */
+	readonly openRoutineFeed: (input: {
+		workspace: string;
+		routineId: string;
 	}) => Effect.Effect<Conversation, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Posts the actor's message into the conversation, with the files
@@ -184,6 +192,41 @@ export const make = Effect.gen(function* () {
 								podId: reached.id,
 								initiatorUserId: actor.userId,
 							}),
+						);
+					}),
+				),
+			),
+
+		openRoutineFeed: (input) =>
+			operation(
+				"openRoutineFeed",
+				transaction(
+					Effect.gen(function* () {
+						const { workspaceId } = yield* authorization.workspace(
+							input.workspace,
+							"workspace.read",
+						);
+						const reachesPod = yield* visibility.reachesPod;
+						const [owned] = isUuid(input.routineId)
+							? yield* query((db) =>
+									db
+										.select({ routine, podId: agent.podId })
+										.from(routine)
+										.innerJoin(agent, eq(agent.id, routine.agentId))
+										.where(
+											and(
+												eq(routine.id, input.routineId),
+												eq(routine.workspaceId, workspaceId),
+												isNull(routine.deletedAt),
+												reachesPod(agent.podId),
+											),
+										)
+										.limit(1),
+								)
+							: [];
+						if (!owned?.podId) return yield* new ResourceHidden({ resource: "routine" });
+						return toConversation(
+							yield* threads.openRoutineFeed({ ...owned.routine, podId: owned.podId }),
 						);
 					}),
 				),

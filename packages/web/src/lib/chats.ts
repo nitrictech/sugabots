@@ -268,7 +268,9 @@ export function useConversationPlace(
 	const roster = useAgents();
 	const list = useChatList(podSlug);
 	const listedPodChat = list.data?.podChat?.conversation.id === conversationId;
-	const listedThread = list.data?.items.find((item) => item.conversation.id === conversationId);
+	const listedThread =
+		list.data?.items.find((item) => item.conversation.id === conversationId) ??
+		list.data?.routines.find((item) => item.conversation?.id === conversationId);
 	const listed = listedPodChat || listedThread !== undefined;
 	const unlisted = useQuery({
 		...threadQuery(conversationId),
@@ -277,8 +279,11 @@ export function useConversationPlace(
 	const pod = findPod(pods.data, podSlug);
 	const thread = unlisted.data?.thread?.podId === pod?.id ? unlisted.data?.thread : undefined;
 	const isPodChat = listedPodChat || thread?.type === "pod_chat";
-	const isThread = listedThread !== undefined || thread?.type === "conversation";
-	const hostAgentId = listedThread ? listedThread.conversation.hostAgentId : thread?.hostAgentId;
+	const isThread =
+		listedThread !== undefined ||
+		thread?.type === "conversation" ||
+		thread?.type === "routine_feed";
+	const hostAgentId = listedThread ? (listedThread.agent?.id ?? null) : thread?.hostAgentId;
 	const agent = roster.agents?.find((candidate) => candidate.id === hostAgentId) ?? null;
 	// A thread with a bot waits for the roster to have the bot.
 	const known = isPodChat || (isThread && (hostAgentId === null || agent !== null));
@@ -309,6 +314,30 @@ export function useOpenPodChat(pod: Pod) {
 						list.podChat?.conversation ??
 						Effect.runPromise(
 							client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
+							{ signal },
+						)
+					);
+				}
+			: skipToken,
+	});
+}
+
+/**
+ * The routine's own thread, read from its pod's list when it has one, and
+ * otherwise opened with a request.
+ */
+export function useOpenRoutineFeed(pod: Pod, routineId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["routine-feed", workspaceId, routineId],
+		queryFn: workspaceId
+			? async ({ signal }) => {
+					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					return (
+						list.routines.find((item) => item.routine.id === routineId)?.conversation ??
+						Effect.runPromise(
+							client.api.chats.openRoutineFeed({ params: { workspace: workspaceId, routineId } }),
 							{ signal },
 						)
 					);

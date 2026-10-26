@@ -327,8 +327,9 @@ export function ConversationChat({
 	}
 
 	const title = details?.thread.title;
+	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
-		details && !isPodChat
+		details?.thread.type === "conversation"
 			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
 			: undefined;
 	const header = agent ? (
@@ -439,6 +440,8 @@ export function ConversationChat({
 								!messages.hasNextPage &&
 								(details.thread.parentThreadId ? (
 									<ThreadIntro details={details} pod={pod} />
+								) : details.thread.type === "routine_feed" ? (
+									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
 									agent && <ChatIntro agent={agent} />
 								))}
@@ -913,6 +916,18 @@ function StartedFrom({
 					{files.map((file) => file.name).join(", ")}
 				</p>
 			)}
+		</div>
+	);
+}
+
+/** The top of a routine's own thread: what the routine is called, and the bot that runs it. */
+function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
+	return (
+		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
+			<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">{title}</h2>
+			<p className="m-0 text-[13.5px] text-muted-foreground">
+				Runs as {agent.name}. Each run posts here.
+			</p>
 		</div>
 	);
 }

@@ -31,6 +31,7 @@ import {
 	useConversationPlace,
 	useOpenConversation,
 	useOpenPodChat,
+	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { conversationLink, podChatLink, podLink } from "@/lib/links.ts";
@@ -148,6 +149,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
+ *   /$workspace/pods/$pod/routines/$routine  a routine's own thread, opened first if it has none
  *   /$workspace/pods/$pod/threads/new         starting a thread from its first message
  *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
  *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
@@ -1098,7 +1100,9 @@ function PodRoute() {
 	const matchRoute = useMatchRoute();
 	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const openingPodChat = Boolean(matchRoute({ to: podChatRoute.fullPath }));
-	const startingThread = Boolean(matchRoute({ to: newThreadRoute.fullPath }));
+	const startingThread = Boolean(
+		matchRoute({ to: newThreadRoute.fullPath }) || matchRoute({ to: routineThreadRoute.fullPath }),
+	);
 	const { data: pods, isPending, error } = usePods();
 	const { found: inConversation } = useConversationPlace(podSlug, conversation ?? "");
 	const selected = selectionOf(conversation, inConversation, openingPodChat);
@@ -1263,6 +1267,31 @@ function idParam<Name extends string>(
 	return { [name]: typeof value === "string" && isUuid(value) ? value : undefined } as {
 		[key in Name]: string | undefined;
 	};
+}
+
+/** A routine's own thread, opened first if it has none, then shown at its own address. */
+const routineThreadRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/routines/$routine",
+	loader: () => ConversationPage.preload(),
+	component: () => {
+		const { pod: podSlug, routine } = routineThreadRoute.useParams();
+		const pod = findPod(usePods().data, podSlug);
+		return pod ? <OpenRoutineFeed pod={pod} routineId={routine} /> : null;
+	},
+});
+
+function OpenRoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
+	const opened = useOpenRoutineFeed(pod, routineId);
+	if (opened.isError) {
+		return (
+			<EmptyState title="Could not open this routine">
+				It may have been removed. Reload this page to try again.
+			</EmptyState>
+		);
+	}
+	if (!opened.data) return null;
+	return <Navigate {...conversationLink({ pod, conversationId: opened.data.id })} replace />;
 }
 
 /** The pod's chat, opened first if nobody has, then shown at its own address. */
@@ -1498,6 +1527,7 @@ const routeTree = rootRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
 			podChatRoute,
+			routineThreadRoute,
 			newThreadRoute,
 			conversationRoute,
 			artifactsRoute,

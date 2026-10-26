@@ -14,7 +14,14 @@ import {
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type * as schema from "../../database/schema.ts";
-import { collaboration, message, routineExecution, thread, turn } from "../../database/schema.ts";
+import {
+	collaboration,
+	message,
+	pod,
+	routineExecution,
+	thread,
+	turn,
+} from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
@@ -28,13 +35,15 @@ import {
 	RoutineRepository,
 	RUN_STOPPED_UNEXPECTEDLY,
 } from "./repository.ts";
+import { resultGoesToPodChat } from "./routine.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { RoutineRuns } from "./runs.ts";
 
 /**
  * Settles routine runs: records how a run ended once nothing in its threads
- * is running, waiting or about to start. A completed run whose results are
- * posted to the chat has its agent's last reply posted there.
+ * is running, waiting or about to start. A completed run has its agent's
+ * last reply posted in the routine's thread, and in the pod's chat too when
+ * the routine's results go there.
  *
  * `handler` reacts to the conversation events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
@@ -74,18 +83,19 @@ export const make = Effect.gen(function* () {
 	const threads = yield* ThreadRepository.Service;
 
 	/**
-	 * Posts the agent's last reply in the run's own thread into its conversation. A
-	 * run whose agent wrote nothing to show posts nothing.
+	 * Posts the agent's last reply in the run's own thread into the routine's
+	 * thread, and into its pod's chat as well when `resultGoesToPodChat`. A run
+	 * whose agent wrote nothing to show posts nothing.
 	 */
 	const postResult = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
 			const content = (yield* lastReplyText(run)).trim();
 			if (content === "") return;
-			yield* threads.postRoutineResult({
-				threadId: yield* conversationOf(run.threadId),
-				run,
-				content,
-			});
+			yield* threads.postRunResult({ run, content });
+			const placement = yield* placementOf(run.threadId);
+			if (!resultGoesToPodChat(run.results, placement.podKind)) return;
+			const podChat = yield* threads.openPodChat({ ...placement, initiatorUserId: null });
+			yield* threads.postRunResultToChat({ chatId: podChat.id, run, content });
 		});
 
 	/**
@@ -125,7 +135,7 @@ export const make = Effect.gen(function* () {
 					yield* emit([
 						ConversationEvent.RoutineWorkCancelled({
 							workspaceId: run.workspaceId,
-							podId: yield* podOf(run.threadId),
+							podId: (yield* placementOf(run.threadId)).podId,
 							threadIds: work,
 						}),
 					]);
@@ -134,9 +144,7 @@ export const make = Effect.gen(function* () {
 				if (yield* stillBusy(work, ending !== undefined)) return;
 				const settled = settledAs(ending, yield* lastTurnIn(work));
 				if (!(yield* routines.settle(run.id, settled))) return;
-				if (settled.state === "completed" && run.results === "post_to_chat") {
-					yield* postResult(run);
-				}
+				if (settled.state === "completed") yield* postResult(run);
 				yield* runs.settled({ routineId: run.routineId, executionId: run.id });
 			}),
 		);
@@ -277,30 +285,19 @@ const runningRun = (executionId: string) =>
 		([row]) => row,
 	);
 
-/** The pod the thread `threadId` is in. */
-const podOf = (threadId: string) =>
-	Effect.flatMap(
-		query((db) =>
-			db.select({ podId: thread.podId }).from(thread).where(eq(thread.id, threadId)).limit(1),
-		),
-		([row]) =>
-			row ? Effect.succeed(row.podId) : Effect.die(new Error("A routine run's thread is gone")),
-	);
-
-/** The conversation the run's thread `threadId` is in. */
-const conversationOf = (threadId: string) =>
+/** The workspace and pod of the run's thread `threadId`, and what kind of pod it is. */
+const placementOf = (threadId: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ conversationId: thread.conversationId })
+				.select({ workspaceId: thread.workspaceId, podId: thread.podId, podKind: pod.kind })
 				.from(thread)
+				.innerJoin(pod, eq(pod.id, thread.podId))
 				.where(eq(thread.id, threadId))
 				.limit(1),
 		),
 		([row]) =>
-			row?.conversationId
-				? Effect.succeed(row.conversationId)
-				: Effect.die(new Error("A routine run's thread is in no conversation")),
+			row ? Effect.succeed(row) : Effect.die(new Error("A routine run's thread is gone")),
 	);
 
 /**

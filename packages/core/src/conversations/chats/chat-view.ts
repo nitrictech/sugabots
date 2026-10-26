@@ -56,9 +56,11 @@ import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
+	CONVERSATION_TYPES,
 	collaboration,
 	message,
 	pod,
+	routine,
 	routineExecution,
 	thread,
 	threadRead,
@@ -195,7 +197,28 @@ export const make = Effect.gen(function* () {
 								podChat.id,
 							) ?? 0)
 						: 0;
+					const owned = yield* query((db) => listedRoutines(db, podId));
+					const feedMentions = yield* query((db) =>
+						unreadMentionsIn(
+							db,
+							userId,
+							owned.flatMap((row) => (row.feed ? [row.feed.id] : [])),
+						),
+					);
+					const routines = owned.flatMap((row) => {
+						const crew = crewAgentRow(row.agent);
+						if (!crew) return [];
+						return [
+							{
+								routine: { id: row.routine.id, name: row.routine.name, state: row.routine.state },
+								agent: toAgent(crew),
+								conversation: row.feed && toConversation(row.feed),
+								mentionsYou: row.feed !== null && feedMentions.has(row.feed.id),
+							},
+						];
+					});
 					return {
+						routines,
 						podChat: podChat
 							? { conversation: toConversation(podChat), unreadMessages: podChatUnread }
 							: null,
@@ -441,6 +464,21 @@ const listedConversations = Effect.fn("ChatView.listedConversations")(function* 
 			),
 		)
 		.orderBy(desc(conversation.updatedAt), desc(conversation.id));
+});
+
+/** The routines of the pod `podId`'s bots that are still there, by name, each with its thread when it has one. */
+const listedRoutines = Effect.fn("ChatView.listedRoutines")(function* (
+	db: Executor,
+	podId: string,
+) {
+	const feed = alias(thread, "feed");
+	return yield* db
+		.select({ routine, agent, feed })
+		.from(routine)
+		.innerJoin(agent, eq(agent.id, routine.agentId))
+		.leftJoin(feed, eq(feed.routineId, routine.id))
+		.where(and(eq(agent.podId, podId), isNull(routine.deletedAt)))
+		.orderBy(asc(routine.name), asc(routine.id));
 });
 
 /** The chats of the pods `podIds` that have one. */
@@ -1059,7 +1097,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	const conversation = yield* db.query.thread.findFirst({
 		where: {
 			id: conversationId,
-			type: { in: ["conversation", "pod_chat"] },
+			type: { in: [...CONVERSATION_TYPES] },
 			RAW: (row) => reachesPod(row.podId),
 		},
 		columns: { id: true },
@@ -1117,6 +1155,7 @@ type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
 
 /** The three sources merged newest first, cut to the page, and put back in reading order. */
 function toMainPage(row: MainPage, limit: number) {
+	const posted = new Set(row.messages.flatMap((stored) => stored.routineExecutionId ?? []));
 	const candidates = [
 		...row.messages.map((stored) => ({
 			id: stored.id,
@@ -1138,18 +1177,21 @@ function toMainPage(row: MainPage, limit: number) {
 				createdAt: opened.createdAt.toISOString(),
 			}),
 		})),
-		...row.routineExecutions.map((execution) => ({
-			id: execution.id,
-			createdAt: execution.acceptedAt,
-			item: (): ChatMessageItem => ({
-				kind: "routine",
+		// A run that posted its result is shown by the post, which opens the run.
+		...row.routineExecutions
+			.filter((execution) => !posted.has(execution.id))
+			.map((execution) => ({
 				id: execution.id,
-				threadId: execution.threadId,
-				routineName: execution.routineName,
-				triggerKind: execution.triggerKind,
-				createdAt: execution.acceptedAt.toISOString(),
-			}),
-		})),
+				createdAt: execution.acceptedAt,
+				item: (): ChatMessageItem => ({
+					kind: "routine",
+					id: execution.id,
+					threadId: execution.threadId,
+					routineName: execution.routineName,
+					triggerKind: execution.triggerKind,
+					createdAt: execution.acceptedAt.toISOString(),
+				}),
+			})),
 	].sort((left, right) =>
 		left.createdAt.getTime() === right.createdAt.getTime()
 			? right.id.localeCompare(left.id)
@@ -1209,7 +1251,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	return yield* db.query.thread.findFirst({
 		where: {
 			id: conversationId,
-			type: { in: ["conversation", "pod_chat"] },
+			type: { in: [...CONVERSATION_TYPES] },
 			RAW: (row) => reachesPod(row.podId),
 		},
 		columns: { id: true },

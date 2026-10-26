@@ -229,5 +229,43 @@ export const DoneAndMentioned = meta.story({
 	},
 });
 
+/** A pod's routines fold away under their own heading; one paused says so when it is opened. */
+export const Routines = meta.story({
+	args: {
+		podChat: revenueChat,
+		routines: [
+			{
+				routine: {
+					id: "0199a3a0-0000-7000-8000-0000000003a1",
+					name: "Overnight outbound",
+					state: "enabled",
+				},
+				agent: growthDesk,
+				conversation: null,
+				mentionsYou: false,
+			},
+			{
+				routine: {
+					id: "0199a3a0-0000-7000-8000-0000000003a2",
+					name: "Inbox triage",
+					state: "paused",
+				},
+				agent: accountManager,
+				conversation: null,
+				mentionsYou: false,
+			},
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.queryByRole("link", { name: /Overnight outbound/ })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: /Routines/ }));
+		await expect(canvas.getByRole("link", { name: /Overnight outbound/ })).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/pods\/revenue\/routines\/0199a3a0-0000-7000-8000-0000000003a1$/),
+		);
+		await expect(canvas.getByRole("link", { name: /Inbox triage/ })).toHaveTextContent("Paused");
+	},
+});
+
 /** Failed says the chats could not be loaded. */
 export const Failed = meta.story({ args: { rows: [], status: "failed" as const } });
