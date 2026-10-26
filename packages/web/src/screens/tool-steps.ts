@@ -103,6 +103,10 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return step("Set up the routine", name(input.name), "Set up a routine");
 		case "update_routine":
 			return step("Changed the routine", name(input.name), "Changed a routine");
+		case "mark_done":
+			return { action: "Marked the thread done" };
+		case "start_thread":
+			return step("Started the thread", name(input.title), "Started a thread");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
 		case "request_network_access":

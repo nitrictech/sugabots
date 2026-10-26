@@ -13,6 +13,7 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotThreads } from "../chats/bot-threads.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
@@ -20,12 +21,14 @@ import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { MARK_DONE_TOOL } from "../tools/mark-done/tool.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
 import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
+import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -356,6 +359,8 @@ describe("runSegment", () => {
 			READ_THREAD_TOOL,
 			READ_THREAD_FILE_TOOL,
 			...ROUTINE_TOOLS,
+			START_THREAD_TOOL,
+			MARK_DONE_TOOL,
 			SAVE_INSTRUCTIONS_TOOL,
 			"collaborate",
 		]);
@@ -771,6 +776,7 @@ function segmentWith(given: Given) {
 					Installation.Service,
 					Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 				),
+				unimplemented(BotThreads.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {

@@ -77,6 +77,21 @@ export interface Interface {
 		initiatorUserId: string;
 	}) => Effect.Effect<{ thread: schema.ThreadRow; opened: boolean }>;
 	/**
+	 * Starts a thread in the pod with the bot `hostAgentId`, for the person
+	 * `initiatorUserId`, both in it. Its first message is `brief`, written by
+	 * the bot `briefingAgentId`, which may be the host itself; announced so the
+	 * host takes its turn on the brief.
+	 */
+	readonly startBriefedThread: (input: {
+		workspaceId: string;
+		podId: string;
+		hostAgentId: string;
+		initiatorUserId: string;
+		briefingAgentId: string;
+		title: string;
+		brief: string;
+	}) => Effect.Effect<schema.ThreadRow>;
+	/**
 	 * Marks the conversation `thread` done, or reopens it, and announces it
 	 * when that changed it. Only a conversation is ever done, so any other
 	 * thread is left as it is.
@@ -459,6 +474,61 @@ export const make = Effect.gen(function* () {
 							}),
 						]);
 						return { thread: created, opened: true };
+					}),
+				),
+			),
+
+		startBriefedThread: (input) =>
+			operation(
+				"startBriefedThread",
+				transaction(
+					Effect.gen(function* () {
+						const id = yield* ids.next;
+						const created = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: input.workspaceId,
+									podId: input.podId,
+									hostAgentId: input.hostAgentId,
+									conversationId: id,
+									type: "conversation",
+									title: input.title,
+									initiatorUserId: input.initiatorUserId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						// One bot per thread: the briefing bot writes the first message without joining.
+						yield* query((db) =>
+							db.insert(threadParticipant).values([
+								{ threadId: created.id, userId: input.initiatorUserId },
+								{ threadId: created.id, agentId: input.hostAgentId },
+							]),
+						);
+						const brief = yield* query((db) =>
+							db
+								.insert(message)
+								.values({
+									threadId: created.id,
+									authorAgentId: input.briefingAgentId,
+									kind: "text",
+									status: "complete",
+									parts: [{ type: "text", text: input.brief }],
+									content: input.brief,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("message")));
+						yield* emit([
+							ConversationEvent.BriefedThreadStarted({
+								workspaceId: created.workspaceId,
+								podId: created.podId,
+								threadId: created.id,
+								hostAgentId: input.hostAgentId,
+								briefMessageId: brief.id,
+							}),
+						]);
+						return created;
 					}),
 				),
 			),

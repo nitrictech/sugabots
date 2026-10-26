@@ -138,6 +138,9 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				),
 			},
 		],
+		BriefedThreadStarted: ({ workspaceId, podId, threadId }) => [
+			listedThreadChanged(workspaceId, podId, threadId),
+		],
 		ConversationDoneChanged: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
 		PodChatChanged: ({ workspaceId, podId, threadId }) =>

@@ -168,6 +168,17 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly parentThreadId: string;
 		readonly threadId: string;
 	};
+	/**
+	 * A bot started the thread `threadId` for the person it was answering,
+	 * with the bot `hostAgentId`, whose first message is the brief it works from.
+	 */
+	BriefedThreadStarted: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadId: string;
+		readonly hostAgentId: string;
+		readonly briefMessageId: string;
+	};
 	/** Somebody started, renamed or archived the pod's chat `threadId`. */
 	PodChatChanged: {
 		readonly workspaceId: string;

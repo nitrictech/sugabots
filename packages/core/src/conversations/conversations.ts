@@ -6,6 +6,7 @@ import { EventOutbox } from "../database/events/outbox.ts";
 import { Notifications } from "../notifications/notifications.ts";
 import { AgentAdministration } from "../workspaces/agents/agent-administration.ts";
 import { WorkspaceTimeZone } from "../workspaces/time-zone/workspace-time-zone.ts";
+import { BotThreads } from "./chats/bot-threads.ts";
 import { ChatFiles } from "./chats/chat-files.ts";
 import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
@@ -41,6 +42,8 @@ const services = Layer.mergeAll(
 	Routines.connectionEventsLayer,
 	// The turn's steps read it from here, for the routine tools.
 	BotRoutines.layer,
+	// The turn's steps read it from here, for start_thread.
+	BotThreads.layer,
 	// The turn's steps read it from here, for save_instructions.
 	AgentAdministration.layer,
 	// Moving the workspace's zone moves its routines' schedules, through the repository that emits.
