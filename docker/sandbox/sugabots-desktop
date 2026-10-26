@@ -4,9 +4,10 @@
 #
 #   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
 #   sugabots-desktop stop display                  stop it, and its browser
-#   sugabots-desktop desktop name profile output   the desktop for `name`, without a browser
-#   sugabots-desktop session name profile output   the desktop for `name`, with its browser
-#   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
+#   sugabots-desktop desktop name profile output [claimant]   the desktop for `name`, without a browser
+#   sugabots-desktop session name profile output [claimant]   the desktop for `name`, with its browser
+#   sugabots-desktop release name claimant                    `claimant` is done with `name`'s desktop
+#   sugabots-desktop viewer name                              the viewer port of `name`'s desktop, if running
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
 # `desktop` is what Sugabots runs when a person opens an agent's desktop, and
@@ -33,6 +34,16 @@
 # Sugabots reads them from what `desktop` and `session` print. Its
 # browser's MCP server is on port 8930+N, and the browser's DevTools on port
 # 9230+N.
+#
+# A named desktop is claimed by what uses it, a turn or a person viewing it,
+# given as `claimant` to `desktop` and `session` and given back by
+# `release`. Each `desktop` or `session` with a claimant first stops the
+# other named desktops that have gone unclaimed for IDLE_MINUTES minutes, so
+# the desktops of threads that have gone quiet don't hold the sandbox's memory.
+# A claim older than CLAIM_MINUTES minutes was never given back, as when
+# Sugabots stops partway through a turn, and is dropped; a viewer claims its
+# desktop again sooner. Desktops never claimed, such as those started by
+# `start`, are never stopped this way.
 set -euo pipefail
 
 # Set here rather than relied on from the image: E2B runs commands without
@@ -40,7 +51,10 @@ set -euo pipefail
 export LANG="${LANG:-C.UTF-8}"
 
 state="${TMPDIR:-/tmp}/sugabots-desktop"
-mkdir -p "$state/sessions"
+claims="$state/claims"
+mkdir -p "$state/sessions" "$claims"
+IDLE_MINUTES=15
+CLAIM_MINUTES=60
 
 free_display() {
 	local n=1
@@ -224,12 +238,47 @@ named_desktop() {
 	fi
 }
 
+# Claims the desktop named `name` for `claimant`, then stops every other
+# named desktop that has gone unclaimed for IDLE_MINUTES. Claims are made and
+# checked under one lock, so a desktop is never stopped as it is claimed.
+claim_and_sweep() {
+	local name="$1" claimant="$2"
+	(
+		flock 9
+		mkdir -p "$claims/$name"
+		touch "$claims/$name/$claimant"
+		local dir other
+		for dir in "$claims"/*/; do
+			[ -d "$dir" ] || continue
+			other="$(basename "$dir")"
+			[ "$other" = "$name" ] && continue
+			find "$dir" -mindepth 1 -mmin +"$CLAIM_MINUTES" -delete
+			[ -z "$(ls -A "$dir")" ] || continue
+			# Adding or removing a claim updates the directory's time, so it says
+			# when the desktop was last given back.
+			[ -n "$(find "$dir" -maxdepth 0 -mmin +"$IDLE_MINUTES")" ] || continue
+			if [ -f "$state/sessions/$other" ]; then stop "$(cat "$state/sessions/$other")"; fi
+			rmdir "$dir"
+		done
+	) 9>"$state/claims.lock"
+}
+
+release() {
+	local name="${1:?name}" claimant="${2:?claimant}"
+	(
+		flock 9
+		rm -f "$claims/$name/$claimant"
+	) 9>"$state/claims.lock"
+}
+
 desktop_only() {
+	if [ -n "${4:-}" ]; then claim_and_sweep "${1:?name}" "$4"; fi
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
+	if [ -n "${4:-}" ]; then claim_and_sweep "${1:?name}" "$4"; fi
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	local started=no
 	if ! running "$n" browser; then
@@ -281,12 +330,13 @@ start)
 	echo "DISPLAY=:$n"
 	;;
 stop) stop "${2:-}" ;;
-desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" ;;
-session) session "${2:-}" "${3:-}" "${4:-}" ;;
+desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+session) session "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+release) release "${2:-}" "${3:-}" ;;
 viewer) viewer "${2:-}" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [claimant] | session name profile output [claimant] | release name claimant | viewer name | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac

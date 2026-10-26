@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import { Data, Effect } from "effect";
+import { Data, Duration, Effect } from "effect";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import { type Image, withImages } from "../images.ts";
@@ -32,7 +32,11 @@ export interface BrowserSession {
 	/** The session's name in the sandbox, which the viewer finds its desktop by. */
 	readonly name: string;
 	readonly call: (tool: string, input: unknown) => Promise<BrowserResult | Failed>;
-	/** Lets go of the connection to the browser. The browser carries on for later turns. */
+	/**
+	 * Lets go of the connection to the browser, and gives back the turn's claim
+	 * on its desktop. The browser carries on for later turns, until the
+	 * desktop has gone unclaimed long enough for the sandbox to stop it.
+	 */
 	readonly close: () => Promise<void>;
 }
 
@@ -71,15 +75,23 @@ export interface Browser {
 }
 
 /**
+ * How often a viewer claims its desktop again, well inside the hour after
+ * which `sugabots-desktop` drops a claim as never given back.
+ */
+export const DESKTOP_CLAIM_RENEWAL = Duration.minutes(10);
+
+/**
  * Starts the agent's desktop in the thread, without its browser, or finds it
- * running: what a person opening the desktop needs.
+ * running, and claims it for `claimant` until {@link releaseDesktop}: what a
+ * person opening the desktop needs.
  */
 export const startDesktop = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
 	turn: { threadId: string; agentId: string },
+	claimant: string,
 ) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "desktop"), (reported) =>
+	Effect.flatMap(desktopCommand(sandbox, place, turn, claimant, "desktop"), (reported) =>
 		reported.watch === undefined ||
 		reported.password === undefined ||
 		reported.watchPassword === undefined
@@ -93,16 +105,17 @@ export const startDesktop = (
 
 /**
  * Starts the agent's browser in the thread, on its desktop, or finds them
- * running: what the agent's browser calls need. A person who opened the
- * desktop first meets the same desktop, and the same browser if the dock
- * started it.
+ * running, and claims the desktop for `claimant` until {@link releaseDesktop}:
+ * what the agent's browser calls need. A person who opened the desktop first
+ * meets the same desktop, and the same browser if the dock started it.
  */
 export const startBrowser = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
 	turn: { threadId: string; agentId: string },
+	claimant: string,
 ) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (ports) =>
+	Effect.flatMap(desktopCommand(sandbox, place, turn, claimant, "session"), (ports) =>
 		ports.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
 			: Effect.succeed<Browser>({
@@ -113,19 +126,37 @@ export const startBrowser = (
 	);
 
 /**
+ * Gives back `claimant`'s claim on the agent's desktop in the thread, so the
+ * sandbox may stop the desktop once nothing has claimed it for a while. An
+ * image from before claims has no `release`, and never stops desktops.
+ */
+export const releaseDesktop = (
+	sandbox: Sandboxes.Sandbox,
+	turn: { threadId: string; agentId: string },
+	claimant: string,
+) =>
+	sandbox
+		.exec(
+			`sugabots-desktop release ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(claimant)}`,
+			{ timeout: "30 seconds", maxOutputCharacters: 2_000 },
+		)
+		.pipe(Effect.ignore);
+
+/**
  * Runs `sugabots-desktop desktop` or `session` for the agent in the thread,
- * and reads the ports and passwords it reports.
+ * claimed for `claimant`, and reads the ports and passwords it reports.
  */
 const desktopCommand = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
 	turn: { threadId: string; agentId: string },
+	claimant: string,
 	command: "desktop" | "session",
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.agentId}`;
 		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)}`,
+			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)} ${Sandboxes.shellQuoted(claimant)}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
@@ -158,19 +189,22 @@ export class DesktopUnavailable
 	}
 }
 
+/** The agent's browser in the thread for the turn `turnId`, which claims its desktop. */
 export function browserSession(
 	openSandbox: OpenSandbox,
 	place: Place,
-	turn: { threadId: string; agentId: string },
+	turn: { threadId: string; agentId: string; turnId: string },
 ): BrowserSession {
 	const name = sessionName(turn);
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
+	let claimedIn: Sandboxes.Sandbox | undefined;
 	let told = false;
 
 	const connect = async (): Promise<{ client: Client; note?: UserText } | Failed> => {
 		const { sandbox } = await openSandbox();
+		claimedIn = sandbox;
 		const browser = await Effect.runPromise(
-			startBrowser(sandbox, place, turn).pipe(
+			startBrowser(sandbox, place, turn, turn.turnId).pipe(
 				Effect.catchTag("DesktopUnavailable", (unavailable) =>
 					Effect.succeed({ status: "failed" as const, error: unavailable.reason }),
 				),
@@ -217,6 +251,7 @@ export function browserSession(
 		close: async () => {
 			const connected = await connecting?.catch(() => undefined);
 			if (connected && !("status" in connected)) await connected.client.close();
+			if (claimedIn) await Effect.runPromise(releaseDesktop(claimedIn, turn, turn.turnId));
 		},
 	};
 }

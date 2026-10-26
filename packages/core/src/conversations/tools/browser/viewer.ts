@@ -14,7 +14,12 @@ import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import { placeOf } from "../sandbox/tools.ts";
-import { DesktopUnavailable, startDesktop } from "./browser.ts";
+import {
+	DESKTOP_CLAIM_RENEWAL,
+	DesktopUnavailable,
+	releaseDesktop,
+	startDesktop,
+} from "./browser.ts";
 
 /**
  * An agent's desktop in a thread, opened by a person to watch and use: where
@@ -99,12 +104,17 @@ export const make = Effect.gen(function* () {
 				yield* Effect.addFinalizer(() => podSandboxes.release(holder));
 				const { sandbox } = yield* podSandboxes.open(pod, provider, holder);
 				const turn = { threadId, agentId };
-				const desktop = yield* startDesktop(sandbox, placeOf(turn), turn);
+				yield* Effect.addFinalizer(() => releaseDesktop(sandbox, turn, holder.id));
+				const claimDesktop = startDesktop(sandbox, placeOf(turn), turn, holder.id);
+				const desktop = yield* claimDesktop;
 				// The watch server ignores input, so a viewer's mouse and keys never
 				// reach the desktop, whatever their client sends.
 				const server = may("sandbox.desktop.use") ? desktop.control : desktop.watch;
 				yield* Effect.forkScoped(
 					podSandboxes.renew(holder).pipe(Effect.delay(PodSandboxes.LEASE_RENEWAL), Effect.forever),
+				);
+				yield* Effect.forkScoped(
+					claimDesktop.pipe(Effect.ignore, Effect.delay(DESKTOP_CLAIM_RENEWAL), Effect.forever),
 				);
 				return { endpoint: yield* sandbox.endpoint(server.port), password: server.password };
 			}),

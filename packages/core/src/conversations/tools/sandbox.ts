@@ -130,7 +130,7 @@ export const make = Effect.gen(function* () {
 							acceptsImages,
 							attach,
 							openSandbox: NEVER_OPENED,
-							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
+							browser: browserSession(NEVER_OPENED, place, { threadId, agentId, turnId }),
 							run: NEVER_RUN,
 							blocked: [],
 						}),
@@ -166,7 +166,7 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
-				const browser = browserSession(openSandbox, place, { threadId, agentId });
+				const browser = browserSession(openSandbox, place, { threadId, agentId, turnId });
 				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
 				const run = <A, E>(effect: Effect.Effect<A, E>) =>
 					runPromiseExit(effect).then((exit) => {
