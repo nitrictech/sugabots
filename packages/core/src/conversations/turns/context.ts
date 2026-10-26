@@ -347,6 +347,8 @@ const CHECK_PRESENT_DAY_FACTS =
 
 function whyYou(context: TurnContext): string {
 	switch (context.reason) {
+		case "interview":
+			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now: introduce yourself briefly and ask them to describe what they want you to be for. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
 		case "mention":
 			return "It is your turn because a person mentioned you.";
 		case "collaboration":

@@ -25,6 +25,7 @@ export const TurnRequest = Schema.Struct({
 		"collaboration",
 		"routine",
 		"resume",
+		"interview",
 	]) satisfies Schema.Codec<TurnReason>,
 });
 export type TurnRequest = typeof TurnRequest.Type;

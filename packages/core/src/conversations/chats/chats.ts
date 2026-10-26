@@ -16,6 +16,7 @@ import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { Turns } from "../turns/turns.ts";
 import { toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 import { threadTitleFrom } from "./thread-title.ts";
 
@@ -152,6 +153,7 @@ export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const threads = yield* ThreadRepository.Service;
 	const floor = yield* FloorControl.Service;
+	const turns = yield* Turns.Service;
 
 	return Service.of({
 		open: (input) =>
@@ -167,9 +169,19 @@ export const make = Effect.gen(function* () {
 						if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 							return yield* new HostNotCrew();
 						}
-						return toConversationThread(
-							yield* threads.openConversation({ ...placement, initiatorUserId: actor.userId }),
-						);
+						const { thread, interviewMessageId } = yield* threads.openConversation({
+							...placement,
+							initiatorUserId: actor.userId,
+						});
+						if (interviewMessageId) {
+							yield* turns.ask({
+								threadId: thread.id,
+								agentId: input.hostAgentId,
+								triggerMessageId: interviewMessageId,
+								reason: "interview",
+							});
+						}
+						return toConversationThread(thread);
 					}),
 				),
 			),

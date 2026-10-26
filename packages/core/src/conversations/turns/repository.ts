@@ -354,20 +354,33 @@ export const make = Effect.gen(function* () {
 						const existing = yield* lockedTurn(onTrigger(request));
 						if (!acceptsWork) return yield* endForEndedRoutine(existing);
 						if (!existing) {
+							const replyValues = {
+								threadId: request.threadId,
+								authorAgentId: request.agentId,
+								kind: "text" as const,
+								status: "streaming" as const,
+								parts: [],
+								content: "",
+							};
+							// An interview starts with the reply itself, so it has to exist
+							// before the turn can reference it as its trigger.
+							if (request.reason === "interview") {
+								yield* query((db) =>
+									db.insert(message).values({ ...replyValues, id: request.triggerMessageId }),
+								);
+							}
 							const turnId = yield* insertTurn(request);
 							const created = yield* query((db) =>
-								db
-									.insert(message)
-									.values({
-										threadId: request.threadId,
-										authorAgentId: request.agentId,
-										kind: "text",
-										status: "streaming",
-										parts: [],
-										content: "",
-										turnId,
-									})
-									.returning(),
+								request.reason === "interview"
+									? db
+											.update(message)
+											.set({ turnId })
+											.where(eq(message.id, request.triggerMessageId))
+											.returning()
+									: db
+											.insert(message)
+											.values({ ...replyValues, turnId })
+											.returning(),
 							).pipe(Effect.flatMap(writtenRow("message")));
 							const reply = toMessage(created, request.author);
 							yield* announceStart(request, turnId, reply);
