@@ -1,7 +1,7 @@
 # The default sandbox image: Debian with what agents reach for when they work
 # on code, and the apps of the desktops Sugabots' web app draws around them,
 # each on a display of its own: a browser agents drive through Playwright
-# MCP, a file manager, and any app an agent starts. Commands run without a
+# MCP, and any app an agent starts. Commands run without a
 # screen; `sugabots-desktop start` gives one a display.
 #
 #   bun run build:sandbox
@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
 # The tools agents use on a repository, then the desktop's apps: virtual
 # displays and a window manager to keep each app filling its own, a browser,
-# a file manager, and what computer-use tools drive them with.
+# and what computer-use tools drive them with.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		bash ca-certificates curl wget git openssh-client less file procps \
@@ -31,7 +31,7 @@ RUN apt-get update \
 		nodejs npm \
 		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox xterm \
 		xfonts-base dbus-x11 \
-		pcmanfm adwaita-icon-theme librsvg2-common \
+		adwaita-icon-theme librsvg2-common \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -63,9 +63,10 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
+COPY openbox/rc.xml /usr/share/sugabots-desktop/openbox.xml
 
 # What the web app reaches a desktop through besides its displays: the
-# browser's tabs, the terminal, and which windows the desktop has. Its
+# browser's tabs, the terminal, the files, and which windows the desktop has. Its
 # terminal is node-pty's, built here against the image's Node.
 COPY desktop-server/package.json desktop-server/package-lock.json desktop-server/*.mjs /usr/local/lib/sugabots-desktop-server/
 RUN cd /usr/local/lib/sugabots-desktop-server && npm ci --omit=dev && npm cache clean --force

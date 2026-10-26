@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Openbox for a display that holds one app, shown in a window the web app
+     draws: the app's windows fill the display without a frame of their own,
+     since the web app's window has the title bar. Dialogs keep theirs, to be
+     moved and closed. -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <margins><top>0</top><bottom>0</bottom><left>0</left><right>0</right></margins>
+  <desktops><number>1</number></desktops>
+  <applications>
+    <application type="normal">
+      <decor>no</decor>
+      <maximized>yes</maximized>
+    </application>
+  </applications>
+</openbox_config>

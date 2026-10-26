@@ -1,12 +1,12 @@
-// The desktop's windows besides its terminal: the browser, the file manager,
-// and the apps an agent started, each on a display of its own, as
-// `sugabots-desktop windows` says. Viewers are told when they change, and a
-// viewer in control can open the file manager and close a window.
+// The desktop's windows that run on displays: the browser, and the apps an
+// agent started, each on a display of its own, as `sugabots-desktop windows`
+// says. Viewers are told when they change, and a viewer in control can close
+// an app's window, which stops its display.
 //
 // To the viewer, as JSON text:
-//   {type:"windows", windows:[{id, kind:"browser"|"files"|"app", title}]}
+//   {type:"windows", windows:[{id, kind:"browser"|"app", title}]}
 // From a viewer in control:
-//   {type:"open", app:"files"} | {type:"close", id}
+//   {type:"close", id}
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,8 +17,8 @@ const run = promisify(execFile);
 /** How often the desktop's displays are looked at for windows that opened, closed or changed title. */
 const WINDOWS_CHECK_MS = 1000;
 
-/** The windows of the desktop of `session`, whose file manager opens in `folder`. */
-export function makeWindows(session, folder) {
+/** The windows of the desktop of `session`. */
+export function makeWindows(session) {
 	const viewers = new Set();
 	let windows = [];
 	let lastSent = "";
@@ -51,9 +51,6 @@ export function makeWindows(session, folder) {
 	};
 
 	const act = (message) => {
-		if (message?.type === "open" && message.app === "files") {
-			return run("sugabots-desktop", ["files", session, folder]);
-		}
 		if (message?.type === "close") {
 			const window = windows.find(({ id }) => id === message.id);
 			// The browser is the agent's, and stays open while the desktop does.

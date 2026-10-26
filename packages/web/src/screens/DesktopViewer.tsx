@@ -137,7 +137,7 @@ export function LiveScreen({
 }: {
 	threadId: string;
 	agentId: string;
-	/** `browser`, `files`, or the number of a display the agent started. */
+	/** `browser`, or the number of a display the agent started. */
 	window: string;
 }) {
 	const root = useRef<HTMLDivElement>(null);

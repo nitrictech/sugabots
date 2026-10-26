@@ -14,15 +14,18 @@ const desktopServer = (channel: string) =>
 const windowsChannel = desktopServer("windows");
 const tabsChannel = desktopServer("tabs");
 const terminalChannel = desktopServer("terminal");
+const filesChannel = desktopServer("files");
 
 const windows: DisplayWindow[] = [
 	{ id: "browser", kind: "browser", title: "Pricing · Example - Chromium" },
-	{ id: "files", kind: "files", title: "threads" },
 	{ id: "4", kind: "app", title: "Chart preview" },
 ];
 const sentToWindows = fn();
 
-/** Handlers for a desktop server with the browser, the file manager and an app the agent started open. */
+/**
+ * Handlers for a desktop server with the browser and an app the agent
+ * started open, and a thread folder with a file and a folder in it.
+ */
 const desktopServerHandlers = () => [
 	windowsChannel.addEventListener("connection", ({ client }) => {
 		client.send(JSON.stringify({ type: "windows", windows }));
@@ -39,6 +42,20 @@ const desktopServerHandlers = () => [
 	}),
 	terminalChannel.addEventListener("connection", ({ client }) => {
 		client.send("agent@sandbox:/workspace/threads/t1$ ");
+	}),
+	filesChannel.addEventListener("connection", ({ client }) => {
+		client.addEventListener("message", () =>
+			client.send(
+				JSON.stringify({
+					type: "listing",
+					path: "/workspace/threads/t1",
+					entries: [
+						{ name: "report.md", kind: "file", size: 2048, modified: "2026-10-20T09:00:00.000Z" },
+						{ name: "site", kind: "folder", size: 0, modified: "2026-10-20T09:00:00.000Z" },
+					],
+				}),
+			),
+		);
 	}),
 ];
 
@@ -62,9 +79,9 @@ const meta = preview.meta({
 });
 
 /**
- * The agent's desktop being watched: a window for each app, the browser's
- * with its tabs, and a dock. The windows' pages come over VNC, which a
- * preview has no sandbox for, so each says it couldn't be reached.
+ * The agent's desktop being watched: a window for each app on a display, the
+ * browser's with its tabs, and a dock. The windows' pages come over VNC,
+ * which a preview has no sandbox for, so each says it couldn't be reached.
  */
 export const Watching = meta.story({
 	play: async ({ canvas }) => {
@@ -72,7 +89,6 @@ export const Watching = meta.story({
 		await expect(
 			await within(browser).findByRole("tab", { name: "Pricing · Example" }),
 		).toBeVisible();
-		await expect(canvas.getByRole("region", { name: "Files: threads" })).toBeVisible();
 		await expect(canvas.getByRole("region", { name: "Chart preview" })).toBeVisible();
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await expect(within(dock).getByRole("button", { name: "Chart preview" })).toBeVisible();
@@ -81,8 +97,9 @@ export const Watching = meta.story({
 });
 
 /**
- * A person in control: they open the terminal from the dock, and close the
- * file manager, which the desktop server is asked to do.
+ * A person in control: they open the terminal and the files from the dock,
+ * and close the app the agent started, which the desktop server is asked to
+ * do.
  */
 export const InControl = meta.story({
 	args: { viewOnly: false },
@@ -91,9 +108,13 @@ export const InControl = meta.story({
 		await userEvent.click(within(dock).getByRole("button", { name: "Terminal" }));
 		await expect(await canvas.findByRole("region", { name: "Terminal" })).toBeVisible();
 
-		const files = await canvas.findByRole("region", { name: "Files: threads" });
-		await userEvent.click(within(files).getByRole("button", { name: "Close" }));
-		await waitFor(() => expect(sentToWindows).toHaveBeenCalledWith({ type: "close", id: "files" }));
+		await userEvent.click(within(dock).getByRole("button", { name: "Files" }));
+		const files = await canvas.findByRole("region", { name: "Files" });
+		await expect(await within(files).findByRole("button", { name: /report\.md/ })).toBeVisible();
+
+		const app = canvas.getByRole("region", { name: "Chart preview" });
+		await userEvent.click(within(app).getByRole("button", { name: "Close" }));
+		await waitFor(() => expect(sentToWindows).toHaveBeenCalledWith({ type: "close", id: "4" }));
 	},
 });
 

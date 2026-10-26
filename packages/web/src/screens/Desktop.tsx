@@ -12,6 +12,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { BrowserBar } from "./BrowserBar.tsx";
 import wallpaper from "./desktop-wallpaper.svg";
+import { FilesView } from "./FilesView.tsx";
 import { TerminalView } from "./TerminalView.tsx";
 import {
 	desktopServerUrl,
@@ -23,15 +24,18 @@ import {
 
 /** One of the desktop's windows that runs on a display in the sandbox, as its server lists them. */
 export interface DisplayWindow {
-	/** `browser`, `files`, or the number of a display the agent started. */
+	/** `browser`, or the number of a display the agent started. */
 	id: string;
-	kind: "browser" | "files" | "app";
+	kind: "browser" | "app";
 	/** The title of the window in front on its display, if it has one. */
 	title: string;
 }
 
-/** Every window the desktop can show: those on displays, and its terminal. */
-type DesktopWindowKind = DisplayWindow["kind"] | "terminal";
+/** The desktop's windows drawn here rather than shown from a display: its terminal and file browser. */
+type LocalWindowKind = "terminal" | "files";
+
+/** Every window the desktop can show. */
+type DesktopWindowKind = DisplayWindow["kind"] | LocalWindowKind;
 
 interface ShownWindow {
 	id: string;
@@ -56,7 +60,6 @@ interface WindowsMessage {
 	windows: DisplayWindow[];
 }
 
-const TERMINAL_ID = "terminal";
 const MIN_WINDOW_WIDTH = 320;
 const MIN_WINDOW_HEIGHT = 200;
 /** How far each window opens below and to the right of the one before, in pixels. */
@@ -65,9 +68,9 @@ const CASCADE_STEP = 28;
 /**
  * The agent's desktop, drawn here rather than in the sandbox: a wallpaper,
  * a dock, and a window for each of its apps, each app on a display of its
- * own and shown over VNC, sized to its window; its terminal is a terminal
- * here. Unless `viewOnly`, the person's mouse and keys go to the windows'
- * apps, and they can open the terminal and file manager and close them. It
+ * own and shown over VNC, sized to its window; its terminal and file browser
+ * are drawn here. Unless `viewOnly`, the person's mouse and keys go to the
+ * windows' apps, and they can close the windows of apps the agent started. It
  * lets go of every connection after the idle time a single screen does.
  */
 export function AgentDesktop({
@@ -115,7 +118,7 @@ function DesktopSurface({
 	const socket = useRef<WebSocket | undefined>(undefined);
 	const [displayWindows, setDisplayWindows] = useState<DisplayWindow[] | undefined>(undefined);
 	const [serverLost, setServerLost] = useState(false);
-	const [terminalOpen, setTerminalOpen] = useState(false);
+	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 
 	useEffect(() => {
@@ -132,14 +135,14 @@ function DesktopSurface({
 		};
 	}, [threadId, agentId]);
 
-	const send = (message: { type: "open"; app: "files" } | { type: "close"; id: string }) => {
+	const send = (message: { type: "close"; id: string }) => {
 		if (viewOnly || socket.current?.readyState !== WebSocket.OPEN) return;
 		socket.current.send(JSON.stringify(message));
 	};
 
 	const windows: ShownWindow[] = [
 		...(displayWindows ?? []),
-		...(terminalOpen ? [{ id: TERMINAL_ID, kind: "terminal" as const, title: "" }] : []),
+		...[...localOpen].map((kind) => ({ id: kind, kind, title: "" })),
 	];
 
 	// A window opening for the first time is placed by kind, in front of the rest.
@@ -184,11 +187,16 @@ function DesktopSurface({
 		focus(id);
 	};
 	const close = (window: ShownWindow) => {
-		if (window.kind === "terminal") setTerminalOpen(false);
-		else send({ type: "close", id: window.id });
+		if (window.kind === "terminal" || window.kind === "files") {
+			const kind = window.kind;
+			setLocalOpen((current) => new Set([...current].filter((open) => open !== kind)));
+		} else {
+			send({ type: "close", id: window.id });
+		}
 	};
 
-	const filesOpen = windows.some((window) => window.kind === "files");
+	const openLocal = (kind: LocalWindowKind) => () =>
+		setLocalOpen((current) => new Set([...current, kind]));
 	const appWindows = windows.filter((window) => window.kind === "app");
 
 	return (
@@ -237,16 +245,15 @@ function DesktopSurface({
 				</DockItem>
 				<DockItem
 					label="Terminal"
-					open={terminalOpen}
-					onClick={() => toggle(TERMINAL_ID, () => setTerminalOpen(true))}
+					open={localOpen.has("terminal")}
+					onClick={() => toggle("terminal", openLocal("terminal"))}
 				>
 					<SquareTerminal />
 				</DockItem>
 				<DockItem
 					label="Files"
-					open={filesOpen}
-					disabled={viewOnly && !filesOpen}
-					onClick={() => toggle("files", () => send({ type: "open", app: "files" }))}
+					open={localOpen.has("files")}
+					onClick={() => toggle("files", openLocal("files"))}
 				>
 					<Folder />
 				</DockItem>
@@ -265,7 +272,7 @@ function DesktopSurface({
 	);
 }
 
-/** What a window shows: its app's display over VNC, with the browser's bar over the browser, or the terminal. */
+/** What a window shows: its app's display over VNC, with the browser's bar over the browser, or the terminal or files. */
 function WindowContent({
 	window,
 	threadId,
@@ -280,6 +287,7 @@ function WindowContent({
 	if (window.kind === "terminal") {
 		return <TerminalView threadId={threadId} agentId={agentId} viewOnly={viewOnly} />;
 	}
+	if (window.kind === "files") return <FilesView threadId={threadId} agentId={agentId} />;
 	const display = (
 		<WindowDisplay
 			url={windowUrl(threadId, agentId, window.id)}
@@ -458,7 +466,7 @@ function WindowIcon({ kind }: { kind: DesktopWindowKind }) {
 function windowTitle(window: ShownWindow) {
 	if (window.kind === "terminal") return "Terminal";
 	if (window.kind === "browser") return "Browser";
-	if (window.kind === "files") return window.title ? `Files: ${window.title}` : "Files";
+	if (window.kind === "files") return "Files";
 	return window.title || `Display ${window.id}`;
 }
 

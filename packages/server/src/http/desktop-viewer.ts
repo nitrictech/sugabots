@@ -99,7 +99,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 );
 
 /** What the desktop's server serves, each at its own path. */
-const DESKTOP_SERVER_CHANNELS = ["tabs", "terminal", "windows"] as const;
+const DESKTOP_SERVER_CHANNELS = ["tabs", "terminal", "files", "windows"] as const;
 
 /**
  * The desktop's server in the sandbox as a WebSocket at `channel`, logged in

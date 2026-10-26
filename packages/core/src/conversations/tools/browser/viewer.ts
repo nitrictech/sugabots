@@ -37,8 +37,8 @@ export interface Interface {
 	) => Effect.Effect<OpenServer, OpenFailure, OpenRequirements>;
 	/**
 	 * Where the display of one of the desktop's windows takes a WebSocket over
-	 * VNC, and its password, for as long as the scope is open: `browser`,
-	 * `files`, or the number of a display the agent started.
+	 * VNC, and its password, for as long as the scope is open: `browser`, or
+	 * the number of a display the agent started.
 	 */
 	readonly openWindow: (
 		input: AgentInThread & { window: string },

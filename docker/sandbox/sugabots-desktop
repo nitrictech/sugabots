@@ -7,7 +7,6 @@
 #   sugabots-desktop start [display]                      start a bare display, print its DISPLAY
 #   sugabots-desktop stop display                         stop it, and what runs on it
 #   sugabots-desktop session name profile output folder   the browser and desktop server for `name`
-#   sugabots-desktop files name folder                    the file manager for `name`, in `folder`
 #   sugabots-desktop windows name                         the windows of `name`'s desktop, one a line
 #   sugabots-desktop display name id                      where viewers reach one of those windows
 #
@@ -19,11 +18,13 @@
 #
 # Each display holds one app, at the size of the window the web app shows it
 # in: viewers resize the display, and its window manager keeps the app
-# filling it. The browser draws no tabs or address bar of its own; the web
+# filling it, without a frame of its own: the web app's window has the
+# title bar. The browser draws no tabs or address bar of its own; the web
 # app draws them, from the desktop server, which also runs the desktop's
-# terminal and says which windows it has. A display an agent starts, run
-# with SUGABOTS_DESKTOP_SESSION set to its `name`, is one of its windows too.
-# `windows` prints `id=ID kind=browser|files|app display=N title=T` a line,
+# terminal, lists its files, and says which windows it has. A display an
+# agent starts, run with SUGABOTS_DESKTOP_SESSION set to its `name`, is one
+# of its windows too.
+# `windows` prints `id=ID kind=browser|app display=N title=T` a line,
 # the title last and to the end of its line; `display` prints `viewer=PORT
 # password=P watch-password=P` for the window with that id.
 #
@@ -59,7 +60,7 @@ free_display() {
 	echo "$n"
 }
 
-# Whether every program of display N's `part`, display, browser or app, is running.
+# Whether every program of display N's `part`, display or browser, is running.
 running() {
 	local pids="$state/$1.$2.pids"
 	[ -f "$pids" ] || return 1
@@ -96,7 +97,7 @@ display() {
 	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
 	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	openbox >>"$log" 2>&1 &
+	openbox --config-file /usr/share/sugabots-desktop/openbox.xml >>"$log" 2>&1 &
 	echo $! >>"$pids"
 }
 
@@ -192,6 +193,10 @@ browser() {
 	done
 	node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	for _ in $(seq 100); do
+		curl -s -o /dev/null "http://localhost:$((9530 + n))/" && break
+		sleep 0.1
+	done
 }
 
 stop_part() {
@@ -203,7 +208,6 @@ stop_part() {
 
 stop() {
 	local n="${1:?which display}"
-	stop_part "$n" app
 	stop_part "$n" browser
 	stop_part "$n" display
 	rm -f "$state/started/$n"
@@ -235,15 +239,6 @@ session() {
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) server=$((9530 + n)) started=$started $(passwords "$n")"
 }
 
-files() {
-	local name="${1:?name}" folder="${2:?folder}"
-	named_display "$name.files"
-	running "$n" app && return 0
-	stop_part "$n" app
-	DISPLAY=":$n" pcmanfm "$folder" >>"$state/$n.log" 2>&1 &
-	echo $! >"$state/$n.app.pids"
-}
-
 # The title of the window in front on display N, if it has one.
 title() {
 	local active
@@ -258,10 +253,6 @@ windows() {
 	if [ -f "$file" ] && n="$(cat "$file")" && running "$n" browser; then
 		echo "id=browser kind=browser display=$n title=$(title "$n")"
 	fi
-	file="$state/sessions/$name.files"
-	if [ -f "$file" ] && n="$(cat "$file")" && running "$n" app; then
-		echo "id=files kind=files display=$n title=$(title "$n")"
-	fi
 	for file in "$state"/started/*; do
 		[ -f "$file" ] && [ "$(cat "$file")" = "$name" ] || continue
 		n="${file##*/}"
@@ -274,7 +265,6 @@ display_of() {
 	local name="$1" id="$2" file
 	case "$id" in
 	browser) file="$state/sessions/$name" ;;
-	files) file="$state/sessions/$name.files" ;;
 	*[!0-9]* | "") return 1 ;;
 	*)
 		[ "$(cat "$state/started/$id" 2>/dev/null)" = "$name" ] || return 1
@@ -298,7 +288,7 @@ display_viewer() {
 # the lock, which flock -o keeps from what it starts, or a display or browser
 # left running would hold it for good.
 case "${1:-}" in
-start | stop | session | files)
+start | stop | session)
 	if [ -z "${SUGABOTS_DESKTOP_LOCKED:-}" ]; then
 		SUGABOTS_DESKTOP_LOCKED=1 exec flock -o "$state/lock" "$0" "$@"
 	fi
@@ -317,11 +307,10 @@ start)
 	;;
 stop) stop "${2:-}" ;;
 session) session "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
-files) files "${2:-}" "${3:-}" ;;
 windows) windows "${2:-}" ;;
 display) display_viewer "${2:-}" "${3:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | files name folder | windows name | display name window" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | windows name | display name window" >&2
 	exit 2
 	;;
 esac

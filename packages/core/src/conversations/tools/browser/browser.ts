@@ -107,8 +107,8 @@ export const startBrowser = (
 
 /**
  * Where viewers reach the window `window` of the agent's desktop in the
- * thread, over VNC: `browser`, `files`, or the number of a display the agent
- * started. Fails if the desktop has no such window running.
+ * thread, over VNC: `browser`, or the number of a display the agent started.
+ * Fails if the desktop has no such window running.
  */
 export const windowViewers = (
 	sandbox: Sandboxes.Sandbox,
