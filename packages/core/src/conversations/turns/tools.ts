@@ -15,6 +15,7 @@ import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { podThreadTools } from "../tools/pod-threads/tool.ts";
 import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import {
@@ -230,6 +231,14 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		}),
 		recording,
 	);
+	const podThreads = podThreadTools({
+		podId: prepared.context.agent.podId,
+		threadId: prepared.context.thread.id,
+		run: deps.run,
+	});
+	for (const [key, tool] of Object.entries(podThreads)) {
+		tools[key] = recorded(key, tool, recording);
+	}
 	tools[READ_THREAD_FILE_TOOL] = recorded(
 		READ_THREAD_FILE_TOOL,
 		readThreadFileTool({

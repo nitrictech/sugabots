@@ -89,6 +89,15 @@ export function describeAttachment(
 	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}) as file ${file.id}, ${reads}]`;
 }
 
+/**
+ * A file attached to a message in another thread, as one bracketed line. The
+ * thread tools read only the agent's own thread's files, so it is told what
+ * the file is and not how to read it.
+ */
+export function describeAttachmentElsewhere(file: FilePart): string {
+	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}), which can be read only in its own thread]`;
+}
+
 /** A file's size as people write it, such as 2.1 MB. */
 function sizeOf(bytes: number): string {
 	if (bytes < 1024) return `${bytes} bytes`;
