@@ -236,7 +236,8 @@ export const NewThread = meta.story({
 			{ name: `New thread in ${revenue.name}`, level: 2 },
 			{ timeout: 10_000 },
 		);
-		await userEvent.click(await canvas.findByRole("button", { name: growthDesk.name }));
+		const bots = await canvas.findByRole("list", { name: "Bots" });
+		await userEvent.click(within(bots).getByRole("button", { name: growthDesk.name }));
 		await expect(
 			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
 		).toBeInTheDocument();
@@ -453,7 +454,11 @@ export const PodOnAPhone = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: new RegExp(growthDesk.name) }, { timeout: 10_000 }),
+			await canvas.findByRole(
+				"link",
+				{ name: new RegExp(`^Conversation with ${growthDesk.name}`) },
+				{ timeout: 10_000 },
+			),
 		).toBeVisible();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
 	},

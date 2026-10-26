@@ -1,4 +1,5 @@
 import {
+	type Agent,
 	type ChatList,
 	type ChatListItem,
 	FIRST_CHAT_NAME,
@@ -7,18 +8,29 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Library, Plus, Settings2, Users } from "lucide-react";
-import { useState } from "react";
+import {
+	ChevronRight,
+	Library,
+	ListFilter,
+	MessageSquare,
+	Plus,
+	RefreshCw,
+	Settings2,
+	Users,
+} from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList, useStartChat } from "@/lib/chats.ts";
 import {
 	agentChatLink,
 	artifactsLink,
 	conversationLink,
+	newThreadLink,
 	podChatLink,
 	podSettingsLink,
 	routineThreadLink,
 } from "@/lib/links.ts";
+import { type ListGrouping, useFoldedBots, useListGrouping } from "@/lib/list-grouping.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -28,6 +40,13 @@ import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
@@ -41,7 +60,7 @@ export type ListedChat = ChatList["chats"][number];
 
 /**
  * The column of conversations for the pod chosen on the rail: a shared pod's
- * chat first, then its threads, newest message first.
+ * chat first, then its threads, newest message first or under their bots.
  */
 export function ConversationList({
 	pod,
@@ -56,6 +75,7 @@ export function ConversationList({
 	const [creating, setCreating] = useState(false);
 	const [namingChat, setNamingChat] = useState(false);
 	const startChat = useStartChat(pod);
+	const [grouping, setGrouping] = useListGrouping(pod.id);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
 	const { agents } = useAgents();
@@ -77,6 +97,8 @@ export function ConversationList({
 				rows={list.data?.threads ?? []}
 				routines={list.data?.routines ?? []}
 				hasBots={hasBots}
+				grouping={grouping}
+				onGroupingChange={setGrouping}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selected={selected}
 				onNewBot={newBot}
@@ -122,6 +144,8 @@ export function ConversationListView({
 	rows,
 	routines,
 	hasBots,
+	grouping,
+	onGroupingChange,
 	status,
 	selected,
 	onNewBot,
@@ -140,6 +164,12 @@ export function ConversationListView({
 	routines: readonly ListedRoutine[];
 	/** Whether the pod has bots; one without says so, with the way to make the first. */
 	hasBots: boolean;
+	/**
+	 * Newest first, or a section for each bot holding its open threads and
+	 * routines. A Personal pod's list is already one row for each bot, so has no choice.
+	 */
+	grouping: ListGrouping;
+	onGroupingChange: (grouping: ListGrouping) => void;
 	status: "loading" | "ready" | "failed";
 	selected?: ListSelection;
 	/** Absent when the viewer may not make a bot here. */
@@ -153,6 +183,8 @@ export function ConversationListView({
 	const open = direct ? rows : rows.filter((row) => row.conversation.doneAt === null);
 	const done = direct ? [] : rows.filter((row) => row.conversation.doneAt !== null);
 	const [doneShown, setDoneShown] = useState(false);
+	const byBot = !direct && grouping === "bot";
+	const [foldedBots, toggleBot] = useFoldedBots(pod.id);
 	// Folded until opened, unless a routine has failed, which opens it.
 	const [routinesChosen, setRoutinesShown] = useState<boolean>();
 	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
@@ -200,6 +232,9 @@ export function ConversationListView({
 			className={className}
 			actions={
 				<>
+					{!direct && !empty && (
+						<GroupingMenu grouping={grouping} onGroupingChange={onGroupingChange} />
+					)}
 					{onNewBot && !empty && (
 						<IconButton label={`New bot in ${pod.name}`} variant="bar" onClick={onNewBot}>
 							<Plus size={17} strokeWidth={2.2} />
@@ -243,19 +278,58 @@ export function ConversationListView({
 									<PodChatRow pod={pod} chat={chat} selected={isChatSelected(chat)} />
 								</li>
 							))}
-							{open.length > 0 && (
+							{!byBot && open.length > 0 && (
 								<li className="px-2.5 pt-3.5 pb-1 font-medium text-[12px] text-subtle-foreground">
-									Threads
+									Active threads
 								</li>
 							)}
 						</>
 					)}
-					{open.map((row) => (
-						<li key={row.conversation.id}>
-							<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
-						</li>
-					))}
-					{routines.length > 0 && (
+					{byBot &&
+						groupByBot(open, routines).map((group) => {
+							// The open thread's section shows it, so the viewer can see where they are.
+							const holdsSelected =
+								group.threads.some((row) => isSelected(row.conversation.id)) ||
+								group.routines.some((row) => isSelected(row.conversation?.id));
+							const folded = foldedBots.has(group.key) && !holdsSelected;
+							return (
+								<BotSection
+									key={group.key}
+									pod={pod}
+									group={group}
+									folded={folded}
+									onToggle={() => toggleBot(group.key)}
+								>
+									{group.threads.map((row) => (
+										<li key={row.conversation.id}>
+											<ConversationRow
+												row={row}
+												pod={pod}
+												selected={isSelected(row.conversation.id)}
+												grouped
+											/>
+										</li>
+									))}
+									{group.routines.map((row) => (
+										<li key={row.routine.id}>
+											<RoutineRow
+												row={row}
+												pod={pod}
+												selected={isSelected(row.conversation?.id)}
+												grouped
+											/>
+										</li>
+									))}
+								</BotSection>
+							);
+						})}
+					{!byBot &&
+						open.map((row) => (
+							<li key={row.conversation.id}>
+								<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
+							</li>
+						))}
+					{!byBot && routines.length > 0 && (
 						<li className="pt-3.5">
 							<SectionToggle
 								label="Routines"
@@ -265,7 +339,8 @@ export function ConversationListView({
 							/>
 						</li>
 					)}
-					{routinesShown &&
+					{!byBot &&
+						routinesShown &&
 						routines.map((row) => (
 							<li key={row.routine.id}>
 								<RoutineRow row={row} pod={pod} selected={isSelected(row.conversation?.id)} />
@@ -340,10 +415,13 @@ function ConversationRow({
 	row,
 	pod,
 	selected,
+	grouped = false,
 }: {
 	row: ChatListItem;
 	pod: Pod;
 	selected: boolean;
+	/** Under its bot's heading, so marked as a thread rather than by whose it is. */
+	grouped?: boolean;
 }) {
 	const { agent } = row;
 	const needsYou = row.needsApproval || row.mentionsYou;
@@ -357,7 +435,11 @@ function ConversationRow({
 			aria-current={selected ? "page" : undefined}
 			className={rowClassName(selected)}
 		>
-			{agent ? (
+			{grouped ? (
+				<RowIcon>
+					<MessageSquare />
+				</RowIcon>
+			) : agent ? (
 				<AgentAvatar
 					color={agent.color}
 					face={agent.face}
@@ -426,7 +508,18 @@ function SectionToggle({
  * dot when its latest run failed, that it is paused, or a dot when a message
  * in its thread mentions the viewer.
  */
-function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; selected: boolean }) {
+function RoutineRow({
+	row,
+	pod,
+	selected,
+	grouped = false,
+}: {
+	row: ListedRoutine;
+	pod: Pod;
+	selected: boolean;
+	/** Under its bot's heading, so marked as a routine rather than by whose it is. */
+	grouped?: boolean;
+}) {
 	const { agent, routine } = row;
 	return (
 		<Link
@@ -436,13 +529,19 @@ function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; sele
 			aria-current={selected ? "page" : undefined}
 			className={rowClassName(selected)}
 		>
-			<AgentAvatar
-				color={agent.color}
-				face={agent.face}
-				shape={agent.shape}
-				size={26}
-				className="shrink-0"
-			/>
+			{grouped ? (
+				<RowIcon>
+					<RefreshCw />
+				</RowIcon>
+			) : (
+				<AgentAvatar
+					color={agent.color}
+					face={agent.face}
+					shape={agent.shape}
+					size={26}
+					className="shrink-0"
+				/>
+			)}
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-[14.5px]",
@@ -463,6 +562,165 @@ function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; sele
 				<ChatMarker needsYou={row.mentionsYou} unreadMessages={0} />
 			)}
 		</Link>
+	);
+}
+
+/** What a row is, in the place of the face its bot's heading already shows. */
+function RowIcon({ children }: { children: ReactNode }) {
+	return (
+		<span
+			aria-hidden
+			className="grid size-[26px] shrink-0 place-items-center text-subtle-foreground [&_svg]:size-[15px]"
+		>
+			{children}
+		</span>
+	);
+}
+
+/** The header button that chooses between newest first and a section for each bot. */
+function GroupingMenu({
+	grouping,
+	onGroupingChange,
+}: {
+	grouping: ListGrouping;
+	onGroupingChange: (grouping: ListGrouping) => void;
+}) {
+	return (
+		<DropdownMenu>
+			<IconButton label="Group threads" variant="bar" render={<DropdownMenuTrigger />}>
+				<ListFilter size={16} strokeWidth={2} />
+			</IconButton>
+			<DropdownMenuContent align="end" className="min-w-44">
+				<DropdownMenuRadioGroup
+					value={grouping}
+					onValueChange={(value: ListGrouping) => onGroupingChange(value)}
+				>
+					<DropdownMenuRadioItem value="recent">Most recent</DropdownMenuRadioItem>
+					<DropdownMenuRadioItem value="bot">By bot</DropdownMenuRadioItem>
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** A bot's open threads, newest first, then its routines; or threads between people, when `agent` is null. */
+interface BotGroup {
+	key: string;
+	agent: Agent | null;
+	threads: ChatListItem[];
+	routines: ListedRoutine[];
+}
+
+const PEOPLE_GROUP_KEY = "people";
+
+/**
+ * Sections for each bot with an open thread or a routine, in order of the
+ * bots' names so each stays where it was as threads move, then the threads
+ * between people.
+ */
+function groupByBot(
+	threads: readonly ChatListItem[],
+	routines: readonly ListedRoutine[],
+): BotGroup[] {
+	const groups = new Map<string, BotGroup>();
+	const groupFor = (agent: Agent | null) => {
+		const key = agent?.id ?? PEOPLE_GROUP_KEY;
+		const existing = groups.get(key);
+		if (existing) return existing;
+		const group: BotGroup = { key, agent, threads: [], routines: [] };
+		groups.set(key, group);
+		return group;
+	};
+	for (const row of threads) groupFor(row.agent).threads.push(row);
+	for (const row of routines) groupFor(row.agent).routines.push(row);
+	return [...groups.values()].sort((a, b) => {
+		if (!a.agent) return 1;
+		if (!b.agent) return -1;
+		return a.agent.name.localeCompare(b.agent.name);
+	});
+}
+
+/**
+ * A bot's heading, with its face and name, that folds its rows away, and a +
+ * that starts a new thread with the bot. Folded, it says how many rows there
+ * are, and with a dot whether a routine failed or a thread needs the viewer.
+ */
+function BotSection({
+	pod,
+	group,
+	folded,
+	onToggle,
+	children,
+}: {
+	pod: Pod;
+	group: BotGroup;
+	folded: boolean;
+	onToggle: () => void;
+	children: ReactNode;
+}) {
+	const { agent } = group;
+	const count = group.threads.length + group.routines.length;
+	const failed = group.routines.some((row) => row.routine.failed);
+	const needsYou =
+		group.threads.some((row) => row.needsApproval || row.mentionsYou) ||
+		group.routines.some((row) => row.mentionsYou);
+	return (
+		<>
+			<li className="flex items-center gap-1 pt-3.5 pr-1.5 pb-0.5">
+				<button
+					type="button"
+					aria-expanded={!folded}
+					onClick={onToggle}
+					className="focus-ring flex min-w-0 flex-1 items-center gap-2 rounded-tail py-1 pl-2.5 text-left font-semibold text-[13px] text-muted-foreground hover:text-foreground"
+				>
+					{agent ? (
+						<AgentAvatar
+							color={agent.color}
+							face={agent.face}
+							shape={agent.shape}
+							size={18}
+							className="shrink-0"
+						/>
+					) : (
+						<Users aria-hidden size={15} strokeWidth={2} className="shrink-0" />
+					)}
+					<span className="min-w-0 flex-1 truncate">{agent ? agent.name : "People"}</span>
+					{folded && (
+						<span className="flex shrink-0 items-center gap-2 font-medium text-[12px] text-subtle-foreground">
+							{count}
+							{failed ? (
+								<span className="size-2 rounded-full bg-destructive-text">
+									<span className="sr-only">Failed</span>
+								</span>
+							) : (
+								needsYou && (
+									<span className="size-2 rounded-full bg-primary">
+										<span className="sr-only">Needs you</span>
+									</span>
+								)
+							)}
+						</span>
+					)}
+					<ChevronRight
+						aria-hidden
+						size={12}
+						strokeWidth={2.6}
+						className={cn(
+							"shrink-0 text-subtle-foreground transition-transform duration-150",
+							!folded && "rotate-90",
+						)}
+					/>
+				</button>
+				<IconButton
+					label={agent ? `New thread with ${agent.name}` : "New thread with people"}
+					size="sm"
+					render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+				>
+					<Plus strokeWidth={2.4} />
+				</IconButton>
+			</li>
+			{!folded && children}
+		</>
 	);
 }
 

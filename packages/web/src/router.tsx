@@ -1381,15 +1381,22 @@ function NavigateWhenOpened({
 	);
 }
 
-/** Starting a thread in a pod, from its first message. */
+/** Starting a thread in a pod, from its first message, with the bot `?agent=` names by its handle. */
 const newThreadRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/threads/new",
+	validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
+		agent: optionalString(search.agent),
+	}),
 	component: () => {
 		const { pod: podSlug } = newThreadRoute.useParams();
+		const { agent } = newThreadRoute.useSearch();
 		const pod = findPod(usePods().data, podSlug);
 		const { user } = useSession();
-		return pod && user ? <NewThread pod={pod} userId={user.id} /> : null;
+		// Keyed so a + on another bot starts its draft afresh.
+		return pod && user ? (
+			<NewThread key={agent} pod={pod} userId={user.id} agentHandle={agent} />
+		) : null;
 	},
 });
 
