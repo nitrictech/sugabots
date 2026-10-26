@@ -69,5 +69,14 @@ export function TerminalView({
 		};
 	}, [threadId, agentId]);
 
-	return <div ref={element} className="absolute inset-0 bg-panel p-2" />;
+	return (
+		<>
+			<div ref={element} className="absolute inset-0 bg-panel p-2" />
+			{viewOnly && (
+				<p className="pointer-events-none absolute right-3 bottom-3 m-0 rounded-full bg-chip px-3 py-1 text-muted-foreground text-xs">
+					Take over to type here
+				</p>
+			)}
+		</>
+	);
 }

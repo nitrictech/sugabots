@@ -114,6 +114,7 @@ function DesktopSurface({
 	const surface = useRef<HTMLDivElement>(null);
 	const socket = useRef<WebSocket | undefined>(undefined);
 	const [displayWindows, setDisplayWindows] = useState<DisplayWindow[] | undefined>(undefined);
+	const [serverLost, setServerLost] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 
@@ -122,6 +123,9 @@ function DesktopSurface({
 		socket.current = opened;
 		opened.onmessage = (event) =>
 			setDisplayWindows((JSON.parse(String(event.data)) as WindowsMessage).windows);
+		opened.onclose = () => {
+			if (socket.current === opened) setServerLost(true);
+		};
 		return () => {
 			socket.current = undefined;
 			opened.close();
@@ -213,8 +217,12 @@ function DesktopSurface({
 					</DesktopWindow>
 				);
 			})}
-			{displayWindows === undefined && (
-				<StandingOverlay standing="connecting" what="desktop" onReconnect={() => {}} />
+			{(serverLost || displayWindows === undefined) && (
+				<StandingOverlay
+					standing={serverLost ? "ended" : "connecting"}
+					what="desktop"
+					onReconnect={() => {}}
+				/>
 			)}
 			<nav
 				aria-label="Dock"

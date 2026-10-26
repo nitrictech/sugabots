@@ -292,6 +292,21 @@ display_viewer() {
 	echo "viewer=$((5900 + n)) $(passwords "$n")"
 }
 
+# One command at a time starts or stops what runs: a desktop opened by
+# several viewers at once, as the web app opens it, would otherwise be
+# started by each of them, on the same display. The command runs again under
+# the lock, which flock -o keeps from what it starts, or a display or browser
+# left running would hold it for good.
+case "${1:-}" in
+start | stop | session | files)
+	if [ -z "${SUGABOTS_DESKTOP_LOCKED:-}" ]; then
+		SUGABOTS_DESKTOP_LOCKED=1 exec flock -o "$state/lock" "$0" "$@"
+	fi
+	# What it starts takes the lock for itself.
+	unset SUGABOTS_DESKTOP_LOCKED
+	;;
+esac
+
 case "${1:-}" in
 start)
 	n="${2:-$(free_display)}"
