@@ -14,16 +14,25 @@ import { firstBotNamed, mentionableIn } from "./mentions.tsx";
 /**
  * Starting a thread in a pod from its first message: with the bot it names,
  * which a chip puts in the message, or between people when it names none.
- * Sending starts the thread and opens it.
+ * Sending starts the thread and opens it. Started from a bot, its message
+ * names that bot to begin with.
  */
-export function NewThread({ pod, userId }: { pod: Pod; userId: string }) {
+export function NewThread({
+	pod,
+	userId,
+	agentHandle,
+}: {
+	pod: Pod;
+	userId: string;
+	agentHandle?: string;
+}) {
 	const podChat = useOpenPodChat(pod);
 	const details = useThread(podChat.data?.id).data;
 	// Files are uploaded to the pod's chat, and move to the thread when it starts.
 	const attachments = useComposerAttachments(podChat.data?.id);
 	const threads = useThreadStarter(podChat.data?.id, attachments);
 	const navigate = useNavigate();
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useState(agentHandle ? `@${agentHandle} ` : "");
 	const [failed, setFailed] = useState(false);
 	const header = <PeopleChatHeader title={`New thread in ${pod.name}`} back={{ to: "pod", pod }} />;
 

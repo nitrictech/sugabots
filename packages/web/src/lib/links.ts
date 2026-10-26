@@ -110,12 +110,13 @@ export function conversationLink(
 	});
 }
 
-/** Starting a thread in a pod, from its first message. */
-export function newThreadLink(pod: Pick<Pod, "slug">) {
+/** Starting a thread in a pod, from its first message, which names `agent` when one is given. */
+export function newThreadLink(pod: Pick<Pod, "slug">, agent?: Pick<Agent, "handle">) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./pods/$pod/threads/new",
 		params: { pod: pod.slug },
+		search: { agent: agent?.handle },
 	});
 }
 

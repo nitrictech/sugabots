@@ -26,7 +26,7 @@ it("keeps the rail and conversation list visible while the chat screen loads", a
 	mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 	const rail = await screen.findByRole("navigation", { name: "Pods" });
-	await screen.findByRole("link", { name: new RegExp(linear.name) });
+	await screen.findByRole("link", { name: new RegExp(`Conversation with ${linear.name}`) });
 
 	// React Query hands the answer to components on a zero-delay timer. Until it
 	// runs, nothing has suspended, and these checks would pass even if the frame vanished.
@@ -39,7 +39,9 @@ it("keeps the rail and conversation list visible while the chat screen loads", a
 	// Role queries exclude DOM hidden by the enclosing Suspense boundary.
 	expect(screen.getByRole("navigation", { name: "Pods" })).toBe(rail);
 	expect(
-		screen.getByRole("link", { name: new RegExp(linear.name) }).getAttribute("aria-current"),
+		screen
+			.getByRole("link", { name: new RegExp(`Conversation with ${linear.name}`) })
+			.getAttribute("aria-current"),
 	).toBe("page");
 	expect(screen.queryAllByRole("heading", { name: linear.name })).toHaveLength(0);
 

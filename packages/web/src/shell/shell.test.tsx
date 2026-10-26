@@ -478,6 +478,7 @@ describe("the rail", () => {
 
 describe("the conversation list", () => {
 	it("lists a pod's threads newest first, under its chat, marking the open one", async () => {
+		localStorage.setItem(`sugabots-list-grouping:${pods[0]?.id}`, "recent");
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
@@ -512,6 +513,34 @@ describe("the conversation list", () => {
 		});
 	});
 
+	it("keeps a bot's section folded after the page is reloaded", async () => {
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({
+				chats: [],
+				routines: [],
+				threads: [{ agent: linear, conversation: conversationWith(linear), lastMessage: null }],
+			}),
+		);
+		mount("/suga/pods/suga-team");
+		const list = await screen.findByRole("region", { name: "Suga-Team" });
+		fireEvent.click(await within(list).findByRole("button", { name: linear.name }));
+		expect(
+			within(list).queryByRole("link", { name: `Conversation with ${linear.name}` }),
+		).toBeNull();
+
+		cleanup();
+		mount("/suga/pods/suga-team");
+
+		const reloaded = await screen.findByRole("region", { name: "Suga-Team" });
+		const heading = await within(reloaded).findByRole("button", {
+			name: new RegExp(`^${linear.name}`),
+		});
+		expect(heading.getAttribute("aria-expanded")).toBe("false");
+		expect(
+			within(reloaded).queryByRole("link", { name: `Conversation with ${linear.name}` }),
+		).toBeNull();
+	});
+
 	it("loads a thread while the pointer is on its row", async () => {
 		const linearChat = {
 			kind: "thread" as const,
@@ -535,7 +564,7 @@ describe("the conversation list", () => {
 		mount("/suga/pods/suga-team");
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
 
-		fireEvent.mouseEnter(await within(list).findByRole("link", { name: /Linear Handler/ }));
+		fireEvent.mouseEnter(await within(list).findByRole("link", { name: linearChat.title }));
 
 		await waitFor(() =>
 			expect(client.api.chats.messages).toHaveBeenCalledWith(
