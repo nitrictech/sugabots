@@ -233,16 +233,17 @@ export function useOpenConversation(pod: Pod, hostAgentId: string) {
 			? async ({ signal }) => {
 					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
 					const listed = list.threads.find((item) => item.agent?.id === hostAgentId)?.conversation;
-					return (
-						listed ??
-						Effect.runPromise(
-							client.api.chats.open({
-								params: { workspace: workspaceId },
-								payload: { podId: pod.id, hostAgentId },
-							}),
-							{ signal },
-						)
+					if (listed) return listed;
+					const opened = await Effect.runPromise(
+						client.api.chats.open({
+							params: { workspace: workspaceId },
+							payload: { podId: pod.id, hostAgentId },
+						}),
+						{ signal },
 					);
+					// The list was loaded without the thread just opened.
+					void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
+					return opened;
 				}
 			: skipToken,
 	});
