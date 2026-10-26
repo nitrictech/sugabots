@@ -2,16 +2,17 @@ export * as Chats from "./chats.ts";
 
 import type { ConversationThread, Message, PodChat, RoutineFeed } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, not, notExists, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, message, pod, routine } from "../../database/schema.ts";
-import { isUuid } from "../../ids/ids.ts";
+import { agent, message, pod, routine, type ThreadRow } from "../../database/schema.ts";
+import { Ids, isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
@@ -29,7 +30,8 @@ export interface Interface {
 	/**
 	 * The newest conversation with the pod's crew agent, opened on first use, in a workspace
 	 * named by its id or its slug. Refused unless the actor reaches the pod and
-	 * the agent is its crew.
+	 * the agent is its crew. Starts the creator's interview when the conversation
+	 * is empty, the bot has a model, and no turn is already queued.
 	 */
 	readonly open: (input: {
 		workspace: string;
@@ -154,6 +156,40 @@ export const make = Effect.gen(function* () {
 	const threads = yield* ThreadRepository.Service;
 	const floor = yield* FloorControl.Service;
 	const turns = yield* Turns.Service;
+	const ids = yield* Ids.Service;
+
+	const startInterview = (conversation: ThreadRow, userId: string) =>
+		Effect.gen(function* () {
+			const hostAgentId = conversation.hostAgentId;
+			if (!hostAgentId || conversation.originMessageId) return;
+			const [eligible] = yield* query((db) =>
+				db
+					.select({ id: agent.id })
+					.from(agent)
+					.where(
+						and(
+							eq(agent.id, hostAgentId),
+							eq(agent.createdById, userId),
+							eq(agent.prompt, INTERVIEW_PROMPT),
+							isNotNull(agent.model),
+							notExists(
+								db
+									.select({ id: message.id })
+									.from(message)
+									.where(eq(message.threadId, conversation.id)),
+							),
+							not(Turns.busyIn(sql`${conversation.id}`)),
+						),
+					),
+			);
+			if (!eligible) return;
+			yield* turns.ask({
+				threadId: conversation.id,
+				agentId: hostAgentId,
+				triggerMessageId: yield* ids.next,
+				reason: "interview",
+			});
+		});
 
 	return Service.of({
 		open: (input) =>
@@ -169,18 +205,11 @@ export const make = Effect.gen(function* () {
 						if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 							return yield* new HostNotCrew();
 						}
-						const { thread, interviewMessageId } = yield* threads.openConversation({
+						const thread = yield* threads.openConversation({
 							...placement,
 							initiatorUserId: actor.userId,
 						});
-						if (interviewMessageId) {
-							yield* turns.ask({
-								threadId: thread.id,
-								agentId: input.hostAgentId,
-								triggerMessageId: interviewMessageId,
-								reason: "interview",
-							});
-						}
+						yield* startInterview(thread, actor.userId);
 						return toConversationThread(thread);
 					}),
 				),

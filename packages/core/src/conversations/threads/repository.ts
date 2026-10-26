@@ -25,7 +25,6 @@ import {
 } from "../../database/schema.ts";
 import { Ids } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
@@ -57,14 +56,14 @@ export interface Interface {
 	 * The newest thread with the pod's crew agent `hostAgentId`, whether or not
 	 * it was started from one of the pod's chats, created on first use. The
 	 * agent is in a created one, and so is `initiatorUserId` when a person
-	 * opened it. A newly opened interview returns the id reserved for its opening reply.
+	 * opened it.
 	 */
 	readonly openConversation: (placement: {
 		workspaceId: string;
 		podId: string;
 		hostAgentId: string;
 		initiatorUserId: string | null;
-	}) => Effect.Effect<{ thread: schema.ThreadRow; interviewMessageId?: string }>;
+	}) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * The thread hanging off the message `originMessageId` in the pod's chat
 	 * `podChat`, opened and announced when it has none: with the bot
@@ -354,15 +353,10 @@ export const make = Effect.gen(function* () {
 								.orderBy(desc(thread.createdAt), desc(thread.id))
 								.limit(1),
 						);
-						if (existing) return { thread: existing };
+						if (existing) return existing;
 						const [host] = yield* query((db) =>
 							db
-								.select({
-									name: agent.name,
-									prompt: agent.prompt,
-									createdById: agent.createdById,
-									model: agent.model,
-								})
+								.select({ name: agent.name })
 								.from(agent)
 								.where(eq(agent.id, placement.hostAgentId))
 								.limit(1),
@@ -393,13 +387,7 @@ export const make = Effect.gen(function* () {
 									{ threadId: created.id, agentId: placement.hostAgentId },
 								]),
 						);
-						const interviewMessageId =
-							host?.prompt === INTERVIEW_PROMPT &&
-							host.createdById === placement.initiatorUserId &&
-							host.model !== null
-								? yield* ids.next
-								: undefined;
-						return { thread: created, interviewMessageId };
+						return created;
 					}),
 				),
 			),

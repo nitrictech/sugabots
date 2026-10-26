@@ -876,6 +876,53 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 	});
 
+	it("starts the interview when its creator visits after someone else", async () => {
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ prompt: INTERVIEW_PROMPT, createdById: administratorId })
+				.where(eq(agent.id, agentId)),
+		);
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		const creator = onPostgresAs(administratorId)(Context.get(conversations, Chats.Service));
+		expect((await creator.open(input)).id).toBe(opened.id);
+		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
+	});
+
+	it("starts the interview after a missing model is configured", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT, model: null }).where(eq(agent.id, agentId)),
+		);
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		await onDatabase((db) =>
+			db.update(agent).set({ model: "test/model" }).where(eq(agent.id, agentId)),
+		);
+		expect((await chats.open(input)).id).toBe(opened.id);
+		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
+	});
+
+	it("does not start an interview in a conversation that already has a message", async () => {
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: opened.id,
+				authorUserId: userId,
+				kind: "text",
+				status: "complete",
+				content: "An earlier conversation",
+				parts: [{ type: "text", text: "An earlier conversation" }],
+			}),
+		);
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
+		);
+		await chats.open(input);
+		expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
+	});
+
 	it("leaves an interview unopened when someone other than its creator visits", async () => {
 		await onDatabase((db) =>
 			db
