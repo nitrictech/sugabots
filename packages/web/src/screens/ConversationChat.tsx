@@ -409,15 +409,16 @@ export function ConversationChat({
 		);
 
 	const mentionable = mentionableIn(details);
-	// With other people in a bot's thread, the bot replies only when somebody mentions it.
-	const otherPeople = details.participants.filter(
-		(participant) => participant.kind === "person" && participant.id !== user.id,
-	);
-	const botWaitsForMention = host !== undefined && otherPeople.length > 0;
-	const callsBot = botWaitsForMention && mentionedHandles(draft).includes(host.handle);
+	// A bot's thread goes to its bot unless the message mentions only people.
+	const draftHandles = mentionedHandles(draft);
+	const draftMentions = mentionable.filter((member) => draftHandles.includes(member.handle));
+	const botStaysOut =
+		host !== undefined &&
+		draftHandles.length > 0 &&
+		!draftMentions.some((member) => member.kind === "agent");
 	const composerLabel =
-		botWaitsForMention && !callsBot
-			? `Message ${listNames(otherPeople.map((person) => person.name))}`
+		botStaysOut && draftMentions.length > 0
+			? `Message ${listNames(draftMentions.map((person) => person.name))}`
 			: `Message ${agent?.name ?? (isPodChat ? podChatName : pod.name)}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
 	const contents: ThreadContents = {
@@ -431,10 +432,8 @@ export function ConversationChat({
 		? threadWith
 			? `Sending starts a thread with ${threadWith.name}.`
 			: "Mention a bot to start a thread."
-		: botWaitsForMention
-			? callsBot
-				? `${host.name} will reply.`
-				: `Mention ${host.name} to have it reply.`
+		: botStaysOut
+			? `${host.name} won't reply.`
 			: undefined;
 
 	return (

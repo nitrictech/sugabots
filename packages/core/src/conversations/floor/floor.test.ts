@@ -13,7 +13,6 @@ const scout = "0199a3a0-0000-7000-8000-000000000009";
 function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
 		threadType: "conversation",
-		peopleInThread: 1,
 		content: "Hello",
 		hostAgentId: host,
 		crew: [
@@ -62,15 +61,8 @@ describe("a person's message", () => {
 		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
 	});
 
-	it("goes to nobody in a conversation other people are in, unless its bot is mentioned", () => {
-		const shared = { peopleInThread: 2 };
-		expect(decideFloor(input({ ...shared, content: "Shall we ship it?" }))).toEqual({
-			kind: "nobody",
-		});
-		expect(
-			decideFloor(input({ ...shared, content: "Should we let @reviewer take this?" })),
-		).toEqual({ kind: "nobody" });
-		expect(decideFloor(input({ ...shared, content: "@host-agent can you check?" }))).toEqual({
+	it("goes to the conversation's bot when it is mentioned", () => {
+		expect(decideFloor(input({ content: "@host-agent can you check?" }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "mention" }],
 		});
