@@ -188,9 +188,7 @@ export function PeopleChatHeader({
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
 			<HeaderBack back={back} />
 			{tile}
-			<h1 className="m-0 min-w-0 truncate font-semibold text-[16px] text-foreground">
-				{title}
-			</h1>
+			<h1 className="m-0 min-w-0 truncate font-semibold text-[16px] text-foreground">{title}</h1>
 			{description ? (
 				<>
 					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
