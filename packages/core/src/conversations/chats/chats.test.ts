@@ -35,6 +35,7 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Reactions } from "../reactions/reactions.ts";
 import { Routines } from "../routines/routines.ts";
@@ -43,6 +44,7 @@ import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ThreadView } from "../thread-view.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
+	modelPrompt,
 	prepareRunnable,
 	queueTurnForTests,
 	runningTurns,
@@ -827,6 +829,119 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await listed(view)).toEqual(["Assistant mine"]);
 		expect(await listed(asAdministrator)).toEqual(["Assistant theirs"]);
 	});
+
+	it("starts the creator's interview once without posting a user message", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
+		);
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const [opened, again] = await Promise.all([chats.open(input), chats.open(input)]);
+		expect(again.id).toBe(opened.id);
+		expect((await view.messages(opened.id)).items).toEqual([]);
+		const runs = await runOnPostgres(runningTurns(opened.id));
+		expect(runs).toHaveLength(1);
+		const run = runs[0];
+		if (!run) throw new Error("The interview did not start");
+		const execution = onPostgres({
+			prepare: Context.get(conversations, TurnExecution.Service).prepare,
+		});
+		const prepared = await prepareRunnable(execution, run);
+		expect(prepared.responseMessage.id).toBe(run.request.triggerMessageId);
+		const prompt = modelPrompt(prepared.context, {
+			now: new Date("2026-10-26T00:00:00Z"),
+			builtInTools: [],
+			toolCatalog: undefined,
+			sandbox: undefined,
+		});
+		expect(prompt.messages).toHaveLength(1);
+		expect(prompt.messages[0]?.content).toContain("Start the interview now");
+		expect(prompt.messages[0]?.content).toContain("They have not sent a message yet");
+		await chats.open(input);
+		const resumed = await prepareRunnable(execution, run);
+		expect(resumed.responseMessage.id).toBe(prepared.responseMessage.id);
+		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(laneRequest)
+					.where(eq(laneRequest.laneKey, `turn:${opened.id}:${agentId}`)),
+			),
+		).toEqual([]);
+		const messages = (await view.messages(opened.id)).items;
+		expect(messages).toHaveLength(1);
+		expect(messages[0]).toMatchObject({
+			kind: "message",
+			message: { author: { kind: "agent", id: agentId } },
+		});
+	});
+
+	it("starts the interview when its creator visits after someone else", async () => {
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ prompt: INTERVIEW_PROMPT, createdById: administratorId })
+				.where(eq(agent.id, agentId)),
+		);
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		const creator = onPostgresAs(administratorId)(Context.get(conversations, Chats.Service));
+		expect((await creator.open(input)).id).toBe(opened.id);
+		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
+	});
+
+	it("starts the interview after a missing model is configured", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT, model: null }).where(eq(agent.id, agentId)),
+		);
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		await onDatabase((db) =>
+			db.update(agent).set({ model: "test/model" }).where(eq(agent.id, agentId)),
+		);
+		expect((await chats.open(input)).id).toBe(opened.id);
+		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
+	});
+
+	it("does not start an interview in a conversation that already has a message", async () => {
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
+		const opened = await chats.open(input);
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: opened.id,
+				authorUserId: userId,
+				kind: "text",
+				status: "complete",
+				content: "An earlier conversation",
+				parts: [{ type: "text", text: "An earlier conversation" }],
+			}),
+		);
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
+		);
+		await chats.open(input);
+		expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
+	});
+
+	it("leaves an interview unopened when someone other than its creator visits", async () => {
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ prompt: INTERVIEW_PROMPT, createdById: administratorId })
+				.where(eq(agent.id, agentId)),
+		);
+		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
+	});
+
+	it.each(["", "Help with releases"])(
+		"does not start a bot with written instructions %j",
+		async (prompt) => {
+			await onDatabase((db) => db.update(agent).set({ prompt }).where(eq(agent.id, agentId)));
+			const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
+		},
+	);
 
 	it("opens one conversation when asked twice at once, and queues its messages in it", async () => {
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
