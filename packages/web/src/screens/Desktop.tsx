@@ -282,7 +282,7 @@ function DesktopSurface({
 							key={window.id}
 							{...frame}
 							label={windowTitle(window)}
-							title={<WindowTitle>{windowTitle(window)}</WindowTitle>}
+							strip={{ title: <WindowTitle>{windowTitle(window)}</WindowTitle> }}
 							onClose={() => closeLocal(kind)}
 						>
 							{kind === "terminal" ? (
@@ -298,7 +298,7 @@ function DesktopSurface({
 						key={window.id}
 						{...frame}
 						label={windowTitle(window)}
-						title={<WindowTitle>{windowTitle(window)}</WindowTitle>}
+						strip={{ title: <WindowTitle>{windowTitle(window)}</WindowTitle> }}
 						onClose={closable ? () => closeDisplay(window.id) : undefined}
 					>
 						<WindowDisplay

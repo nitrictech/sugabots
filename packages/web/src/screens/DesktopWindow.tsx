@@ -28,19 +28,21 @@ export interface WindowFrame {
 export const MIN_WINDOW_WIDTH = 320;
 export const MIN_WINDOW_HEIGHT = 200;
 const TITLE_STRIP_HEIGHT = 36;
+const TAB_STRIP_HEIGHT = 40;
 /** How much of a window stays on the desktop when it's dragged off an edge, in pixels. */
 const KEPT_VISIBLE = 80;
 
 /**
  * A window on the desktop: a title strip to drag it by, with traffic lights
  * to close it (given `onClose`), tuck it into the dock and fill the desktop,
- * and a corner to resize it by. `title` sits in the middle of the strip: the
- * window's name, or the browser's address bar. Clicking anywhere in it
- * brings it to the front.
+ * and a corner to resize it by. The strip holds the window's name in its
+ * middle, or tabs filling it from the lights, which run into the window's
+ * content, as the browser's do. Clicking anywhere in it brings it to the
+ * front.
  */
 export function DesktopWindow({
 	label,
-	title,
+	strip,
 	placement,
 	front,
 	surface,
@@ -52,7 +54,7 @@ export function DesktopWindow({
 }: WindowFrame & {
 	/** Names the window for assistive technology. */
 	label: string;
-	title: ReactNode;
+	strip: { title: ReactNode } | { tabs: ReactNode };
 	children: ReactNode;
 }) {
 	/** Follows the pointer from where it went down until it comes up, with `change` saying how the window moves. */
@@ -103,21 +105,31 @@ export function DesktopWindow({
 			<header
 				onPointerDown={track((dx, dy, from) => ({ x: from.x + dx, y: from.y + dy }))}
 				className={cn(
-					"grid shrink-0 touch-none select-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-border border-b bg-aside px-3",
+					"grid shrink-0 touch-none select-none gap-3 bg-aside px-3",
+					"title" in strip
+						? "grid-cols-[auto_minmax(0,1fr)_auto] items-center border-border border-b"
+						: "grid-cols-[auto_minmax(0,1fr)] items-end",
 					!placement.maximized && "cursor-grab active:cursor-grabbing",
 				)}
-				style={{ height: TITLE_STRIP_HEIGHT }}
+				style={{ height: "title" in strip ? TITLE_STRIP_HEIGHT : TAB_STRIP_HEIGHT }}
 			>
 				<TrafficLights
+					className="self-center"
 					lit={front}
 					onClose={onClose}
 					onMinimize={onMinimize}
 					onMaximize={() => onPlace({ maximized: !placement.maximized })}
 					maximized={placement.maximized}
 				/>
-				<div className="flex min-w-0 justify-center">{title}</div>
-				{/* Balances the lights, so the title sits in the middle of the strip. */}
-				<span aria-hidden className="w-[52px]" />
+				{"title" in strip ? (
+					<>
+						<div className="flex min-w-0 justify-center">{strip.title}</div>
+						{/* Balances the lights, so the title sits in the middle of the strip. */}
+						<span aria-hidden className="w-[52px]" />
+					</>
+				) : (
+					<div className="flex min-w-0 items-end">{strip.tabs}</div>
+				)}
 			</header>
 			<div className="relative min-h-0 flex-1">{children}</div>
 			{!placement.maximized && (
@@ -151,12 +163,14 @@ const LIGHTS = {
  * greyed and out of reach.
  */
 function TrafficLights({
+	className,
 	lit,
 	maximized,
 	onClose,
 	onMinimize,
 	onMaximize,
 }: {
+	className?: string;
 	lit: boolean;
 	maximized: boolean;
 	onClose?: () => void;
@@ -175,7 +189,7 @@ function TrafficLights({
 		/>
 	);
 	return (
-		<div className="flex w-[52px] items-center gap-2">
+		<div className={cn("flex w-[52px] items-center gap-2", className)}>
 			{light("Close", LIGHTS.close, onClose)}
 			{light("Minimize", LIGHTS.minimize, onMinimize)}
 			{light(maximized ? "Restore" : "Fill the desktop", LIGHTS.maximize, onMaximize)}
@@ -185,7 +199,7 @@ function TrafficLights({
 
 /** Whether a pointer went down on a control in the title strip, which drags nothing. */
 function isControl(target: EventTarget) {
-	return target instanceof Element && target.closest("button, input, a, [role='tab']") !== null;
+	return target instanceof Element && target.closest("button, input, a") !== null;
 }
 
 /** `next`, moved so the window's title strip stays on the desktop. */
