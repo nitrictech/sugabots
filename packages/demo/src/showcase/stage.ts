@@ -8,6 +8,8 @@ import {
 } from "@sugabots/contracts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
+import { toConversationThread } from "@sugabots/core/conversations/chats/conversation";
+import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
 import { ConversationEvents } from "@sugabots/core/conversations/conversation-events";
 import { ConversationEvent, type ToolCallChange } from "@sugabots/core/conversations/events";
 import { ThreadFeed } from "@sugabots/core/conversations/thread-feed";
@@ -31,7 +33,6 @@ import {
 	type AgentRow,
 	agent,
 	artifact,
-	chat,
 	collaboration,
 	connection,
 	message,
@@ -51,7 +52,7 @@ import {
 } from "@sugabots/core/database/schema";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
-import { and, desc, eq, gt, inArray, isNotNull, max } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { STAGED_TURN_OWNER } from "./conversations.ts";
 
@@ -62,25 +63,30 @@ import { STAGED_TURN_OWNER } from "./conversations.ts";
  * them on the open page as it would real ones.
  *
  *   node --env-file=.env packages/demo/src/showcase/stage.ts reset
- *   node --env-file=.env packages/demo/src/showcase/stage.ts send <chatId> <messageId> bot|people <text>
+ *   node --env-file=.env packages/demo/src/showcase/stage.ts start <podChatId> <messageId> <botId> <text>
+ *   node --env-file=.env packages/demo/src/showcase/stage.ts send <conversationId> <messageId> <text>
  *   node --env-file=.env packages/demo/src/showcase/stage.ts allow <toolCallId>
- *   node --env-file=.env packages/demo/src/showcase/stage.ts cue review
+ *   node --env-file=.env packages/demo/src/showcase/stage.ts cue mention
  *
- * `reset` takes the story's chats back to where it starts. `send` posts the
- * owner's message to a chat, prints it as the API would answer, then plays
- * what follows: the bot's part, or the people's when it was to them only.
- * `allow` plays what follows an allowed approval, and `cue review` has the
- * engineers answer Code Reviewer when the demo is looking.
+ * `reset` takes Support's chat back to where the story starts. `start` posts
+ * the owner's message in a pod's chat and starts a thread from it with the
+ * bot it mentions, prints them as the API would answer, then plays the
+ * bot's part in the thread. `send` posts the owner's message in a pod's chat
+ * or a thread, and plays whoever answers her there. `allow` plays what follows an allowed
+ * approval, and `cue mention` has Doreen ask Anita something when the demo
+ * is looking.
  *
- * The story: Ticket Desk's morning queue flagged Kestrel Freight's double charge.
- * Anita asks Ticket Desk to refund it, and Code Reviewer why it happened.
- * Ticket Desk checks Stripe and asks to refund; Code Reviewer runs the tests
- * in its sandbox, asks Researcher about Stripe's retries and writes the
- * incident up. Each finishes while Anita is in the other chat, and the pods'
- * people answer as she goes.
+ * The story: Ticket Desk's morning queue, in Support's chat, flagged Kestrel
+ * Freight's double charge. Anita starts a thread from it asking Ticket Desk
+ * to refund it, and Ticket Desk offers to find out why too. Told to go ahead,
+ * it checks Stripe and hands the why to Billing Engineer, which runs the
+ * billing tests in its sandbox and writes the incident up; then it asks to
+ * refund. Support's people answer as she goes.
  */
 
 const WORKSPACE_SLUG = "fieldnote";
+/** The pod whose chat the story is told in, by slug. */
+const SUPPORT_POD = "support";
 
 /** Pauses that make the staged work read as a model's pace. */
 const BEFORE_REPLY_STARTS = 1_200;
@@ -98,6 +104,9 @@ const STRIPE = "stripe";
 
 const TICKET_DESK = {
 	bot: "Ticket Desk",
+	/** Its first answer, before it does anything: a question back to Anita. */
+	question:
+		"Happy to. Two charges on one invoice is usually a retry gone wrong. Want me to ask Billing Engineer to find out why while I sort the refund?",
 	lookup: {
 		tool: "list_payment_intents",
 		input: { customer: "Kestrel Freight", created: "2026-10-03" },
@@ -108,6 +117,8 @@ const TICKET_DESK = {
 			],
 		},
 	},
+	found:
+		"There are two charges of $1,280 on 3 Oct, a minute apart. I've asked Billing Engineer why, and I'll refund the second once you allow it.\n\n",
 	refund: {
 		tool: "create_refund",
 		input: {
@@ -118,11 +129,15 @@ const TICKET_DESK = {
 		output: { id: "re_3QhF8kLz2mN4", status: "succeeded", amount: 128_000, currency: "usd" },
 	},
 	reply:
-		"Found two charges of $1,280 on 3 Oct, a minute apart, so I refunded the second. It should reach their card in 5 to 10 days, and I've replied on the ticket to let them know.",
+		"Refunded. It should reach their card in 5 to 10 days, and I've replied on the ticket.\n\nWhy it happened: a charge to Stripe timed out and the billing job retried it without an idempotency key, so Stripe took the retry as a new charge. Billing Engineer has opened #491 with the fix and written the incident up.",
 } as const;
 
-const CODE_REVIEWER = {
-	bot: "Code Reviewer",
+const BILLING_ENGINEER = {
+	bot: "Billing Engineer",
+	title: "Why Kestrel Freight was charged twice",
+	brief:
+		"Kestrel Freight was charged $1,280 twice on 3 Oct, a minute apart (pi_3QhF7uLz2mN4 and pi_3QhF8kLz2mN4). Can you find out why in the billing code?",
+	opening: "Reproducing it against the billing code.\n\n",
 	tests: {
 		input: { command: "npm test -- billing", timeout_seconds: 300 },
 		output: {
@@ -138,12 +153,6 @@ const CODE_REVIEWER = {
 			stderr: "",
 		},
 	},
-	collaborator: "Researcher",
-	collaborationTitle: "Stripe retries and idempotency keys",
-	brief:
-		"Our billing job retries a charge when Stripe times out. Does Stripe treat the retry as a new charge if the request has no idempotency key?",
-	answer:
-		"Yes. Without an Idempotency-Key header, Stripe treats every request as new, even an identical retry. Send the same key and a retry within 24 hours returns the original charge instead of making another.",
 	incident: {
 		title: "Incident: Kestrel Freight charged twice",
 		content: [
@@ -166,28 +175,21 @@ const CODE_REVIEWER = {
 			"- Alert when one invoice has two successful charges.",
 		].join("\n"),
 	},
-	reply:
+	answer:
 		"Found it. When a charge to Stripe times out, the billing job retries it without an idempotency key, so Stripe takes the retry as a second charge. That's what happened to Kestrel on 3 Oct. The fix is to pass the invoice id as the idempotency key in `chargeInvoice`: I've opened #491 with it, and written the incident up.",
 } as const;
 
-/** What the pods' people do while Anita works through the story. */
+/** What Support's people do while Anita works through the story. */
 const PEOPLE = {
-	/** Lorraine, in Support, once the refund is through. */
+	/** Lorraine, in the thread, once the refund is through. */
 	thanks: { person: "Lorraine Delgado", emoji: "🙏", text: "Thanks! I'll let Kestrel know." },
-	/** Gary and Rob, in Engineering, once Code Reviewer has explained. */
-	review: {
-		person: "Gary Lum",
-		text: "Nice catch. I'll review #491 this afternoon.",
-		reactor: "Rob Mendoza",
-		emoji: "👀",
-	},
-	/** Lorraine, in Support, asking Anita what to tell Kestrel: written after Anita's handle. */
+	/** Doreen, in Support's chat, asking Anita what to tell Kestrel: written after Anita's handle. */
 	mention: {
-		person: "Lorraine Delgado",
+		person: "Doreen Nakamura",
 		text: "Kestrel are asking whether this could happen again. Anything I can tell them?",
 	},
-	/** Lorraine again, answering Anita's wrap-up. */
-	closing: { person: "Lorraine Delgado", text: "Great, I've closed the ticket with Kestrel." },
+	/** Doreen again, answering Anita. */
+	closing: { person: "Doreen Nakamura", text: "Great, I've closed the ticket with Kestrel." },
 } as const;
 
 /** How long someone shows as typing before their message arrives. */
@@ -226,17 +228,17 @@ const botNamed = (workspaceId: string, name: string) =>
 		([row]) => (row ? Effect.succeed(row) : Effect.die(new Error(`No bot named ${name}`))),
 	);
 
-/** The bot's chat in its pod, with its main thread. */
-const chatOf = (bot: AgentRow) =>
+/** The chat of the showcase pod whose slug is `podSlug`, which every shared pod has. */
+const podChatOf = (workspaceId: string, podSlug: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ chat, thread })
-				.from(chat)
-				.innerJoin(thread, eq(thread.id, chat.mainThreadId))
-				.where(eq(chat.hostAgentId, bot.id)),
+				.select({ thread })
+				.from(thread)
+				.innerJoin(pod, eq(pod.id, thread.podId))
+				.where(and(eq(pod.workspaceId, workspaceId), eq(pod.slug, podSlug), eq(thread.main, true))),
 		),
-		([row]) => (row ? Effect.succeed(row) : Effect.die(new Error(`${bot.name} has no chat`))),
+		([row]) => (row ? Effect.succeed(row.thread) : Effect.die(new Error(`${podSlug} has no chat`))),
 	);
 
 function agentAuthor(bot: AgentRow): ParticipantRow {
@@ -507,7 +509,7 @@ const callTool = (
 							executionInput: call.input,
 							input: call.input,
 							mutating: call.mutating,
-							atOffset: 0,
+							atOffset: textOf(reply.parts).length,
 							...(call.awaitsApproval
 								? {
 										status: "awaiting_approval" as const,
@@ -541,13 +543,17 @@ const finishCall = (callId: string, output: JsonValue, decidedByName: string | n
 		decidedByName,
 	);
 
-/** The reply's text, typed in a few words at a time, then the turn completed. */
-const finishReply = (reply: Reply, text: string) =>
+/** The text of a reply's parts, run together, as its content is. */
+function textOf(parts: readonly StoredMessagePart[]): string {
+	return parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+}
+
+/** The reply writes `text` after what it holds so far, typed in a few words at a time. */
+const say = (reply: Reply, text: string) =>
 	Effect.gen(function* () {
-		const { emit } = yield* ConversationEvents.Service;
 		const bus = yield* EventBus.Service;
 		const words = text.split(/(?<= )/);
-		let written = "";
+		let offset = textOf(reply.parts).length;
 		for (let start = 0; start < words.length; start += WORDS_PER_DELTA) {
 			const delta = words.slice(start, start + WORDS_PER_DELTA).join("");
 			yield* Effect.promise(() =>
@@ -556,25 +562,33 @@ const finishReply = (reply: Reply, text: string) =>
 					streamEvent("message.delta", {
 						threadId: reply.thread.id,
 						messageId: reply.messageId,
-						offset: written.length,
+						offset,
 						text: delta,
 					}),
 				),
 			);
-			written += delta;
+			offset += delta.length;
 			yield* wait(DELTA_MILLISECONDS);
 		}
+		reply.parts.push({ type: "text", text });
+		yield* query((db) =>
+			db
+				.update(message)
+				.set({ parts: reply.parts, content: textOf(reply.parts) })
+				.where(eq(message.id, reply.messageId)),
+		);
+	});
+
+/** The reply's last words, then the turn completed. Returns all the reply says. */
+const finishReply = (reply: Reply, text: string) =>
+	Effect.gen(function* () {
+		const { emit } = yield* ConversationEvents.Service;
+		yield* say(reply, text);
+		const content = textOf(reply.parts);
 		yield* transaction(
 			Effect.gen(function* () {
 				yield* query((db) =>
-					db
-						.update(message)
-						.set({
-							parts: [...reply.parts, { type: "text", text }],
-							content: text,
-							status: "complete",
-						})
-						.where(eq(message.id, reply.messageId)),
+					db.update(message).set({ status: "complete" }).where(eq(message.id, reply.messageId)),
 				);
 				yield* query((db) =>
 					db
@@ -589,33 +603,31 @@ const finishReply = (reply: Reply, text: string) =>
 						podId: reply.thread.podId,
 						turnId: reply.turnId,
 						agentId: reply.bot.id,
-						reason: "default",
 						messageId: reply.messageId,
-						content: text,
+						content,
 						contextTokens: undefined,
 						contextCapacity: CONTEXT_CAPACITY,
 						readKeptFrom: null,
-						answeredCollaboration: false,
 					}),
 				]);
 			}),
 		);
+		return content;
 	});
 
 /**
  * The reply asks `collaborator` for help: the bots' own thread under it, the
- * brief, the collaborator's answer typed in there, and the answer recorded.
+ * brief, the collaborator's turn there played by `answer`, and what it said
+ * recorded as the answer.
  */
-const collaborate = (
+const collaborate = <E, R>(
 	reply: Reply,
 	collaborator: AgentRow,
-	ask: { title: string; brief: string; answer: string },
+	ask: { title: string; brief: string },
+	answer: (answering: Reply) => Effect.Effect<string, E, R>,
 ) =>
 	Effect.gen(function* () {
 		const { emit } = yield* ConversationEvents.Service;
-		const [recipient] = yield* query((db) =>
-			db.select({ id: chat.id }).from(chat).where(eq(chat.hostAgentId, collaborator.id)),
-		);
 		const opened = yield* transaction(
 			Effect.gen(function* () {
 				const [child] = yield* query((db) =>
@@ -625,7 +637,7 @@ const collaborate = (
 							workspaceId: reply.thread.workspaceId,
 							podId: reply.thread.podId,
 							hostAgentId: collaborator.id,
-							chatId: reply.thread.chatId,
+							conversationId: reply.thread.conversationId,
 							type: "collaboration",
 							title: ask.title,
 							parentThreadId: reply.thread.id,
@@ -665,7 +677,7 @@ const collaborate = (
 							collaboratorAgentId: collaborator.id,
 							brief: ask.brief,
 							status: "waiting",
-							atOffset: 0,
+							atOffset: textOf(reply.parts).length,
 						})
 						.returning(),
 				);
@@ -679,7 +691,6 @@ const collaborate = (
 						collaboration: toCollaborationPart(row, collaborator.name),
 						workspaceId: reply.thread.workspaceId,
 						podId: reply.thread.podId,
-						recipientChatId: recipient?.id ?? null,
 						collaboratorAgentId: collaborator.id,
 						briefMessageId: briefRow.id,
 					}),
@@ -689,22 +700,22 @@ const collaborate = (
 		);
 		yield* wait(BETWEEN_STEPS);
 		const answering = yield* startReply(collaborator, opened.child, opened.briefId);
-		yield* finishReply(answering, ask.answer);
+		const answered = yield* answer(answering);
 		yield* transaction(
 			Effect.gen(function* () {
-				const [answered] = yield* query((db) =>
+				const [row] = yield* query((db) =>
 					db
 						.update(collaboration)
-						.set({ status: "answered", answer: ask.answer })
+						.set({ status: "answered", answer: answered })
 						.where(eq(collaboration.id, opened.collaborationId))
 						.returning(),
 				);
-				if (!answered) return yield* Effect.die(new Error("The collaboration went missing"));
+				if (!row) return yield* Effect.die(new Error("The collaboration went missing"));
 				yield* emit([
 					ConversationEvent.CollaborationAnswered({
 						parentThreadId: reply.thread.id,
 						parentMessageId: reply.messageId,
-						collaboration: toCollaborationPart(answered, collaborator.name),
+						collaboration: toCollaborationPart(row, collaborator.name),
 						askingAgentId: reply.bot.id,
 						askerMovedOn: false,
 					}),
@@ -713,8 +724,21 @@ const collaborate = (
 		);
 	});
 
-/** Ticket Desk looks the charges up in Stripe, then asks to refund the second. */
+/** Ticket Desk answers Anita's ask with a question, before it does anything. */
 const playTicketDesk = (bot: AgentRow, inThread: ThreadRow, triggerId: string) =>
+	Effect.gen(function* () {
+		yield* wait(BEFORE_REPLY_STARTS);
+		const reply = yield* startReply(bot, inThread, triggerId);
+		yield* finishReply(reply, TICKET_DESK.question);
+	});
+
+/**
+ * Told to go ahead, Ticket Desk looks the charges up in Stripe, says what it
+ * found, asks Billing Engineer why there were two, then asks to refund the
+ * second. What it says stands apart from its calls, so the app shows it rather
+ * than folding it into a call's line as narration.
+ */
+const playTicketDeskWork = (bot: AgentRow, inThread: ThreadRow, triggerId: string) =>
 	Effect.gen(function* () {
 		const { emit } = yield* ConversationEvents.Service;
 		const [stripe] = yield* query((db) =>
@@ -740,6 +764,15 @@ const playTicketDesk = (bot: AgentRow, inThread: ThreadRow, triggerId: string) =
 		});
 		yield* wait(STRIPE_LOOKUP);
 		yield* finishCall(lookup, TICKET_DESK.lookup.output);
+		yield* say(reply, TICKET_DESK.found);
+		yield* wait(BETWEEN_STEPS);
+		const billingEngineer = yield* botNamed(inThread.workspaceId, BILLING_ENGINEER.bot);
+		yield* collaborate(
+			reply,
+			billingEngineer,
+			{ title: BILLING_ENGINEER.title, brief: BILLING_ENGINEER.brief },
+			playBillingEngineer,
+		);
 		yield* wait(BETWEEN_STEPS);
 		yield* callTool(reply, {
 			...stripeCall(TICKET_DESK.refund.tool),
@@ -764,75 +797,39 @@ const playTicketDesk = (bot: AgentRow, inThread: ThreadRow, triggerId: string) =
 		);
 	});
 
-/** Code Reviewer runs the billing tests in its sandbox, asks Researcher about Stripe, and explains. */
-const playCodeReviewer = (bot: AgentRow, inThread: ThreadRow, triggerId: string) =>
+/** Billing Engineer runs the billing tests in its sandbox, writes the incident up, and answers. */
+const playBillingEngineer = (reply: Reply) =>
 	Effect.gen(function* () {
-		yield* wait(BEFORE_REPLY_STARTS);
-		const reply = yield* startReply(bot, inThread, triggerId);
-		yield* wait(BETWEEN_STEPS);
+		yield* say(reply, BILLING_ENGINEER.opening);
 		const tests = yield* callTool(reply, {
 			tool: "run_command",
-			input: CODE_REVIEWER.tests.input,
+			input: BILLING_ENGINEER.tests.input,
 			mutating: true,
 		});
 		yield* wait(TEST_RUN);
-		yield* finishCall(tests, CODE_REVIEWER.tests.output);
-		yield* wait(BETWEEN_STEPS);
-		const researcher = yield* botNamed(inThread.workspaceId, CODE_REVIEWER.collaborator);
-		yield* collaborate(reply, researcher, {
-			title: CODE_REVIEWER.collaborationTitle,
-			brief: CODE_REVIEWER.brief,
-			answer: CODE_REVIEWER.answer,
-		});
+		yield* finishCall(tests, BILLING_ENGINEER.tests.output);
 		yield* wait(BETWEEN_STEPS);
 		yield* writeIncident(reply);
 		yield* wait(BETWEEN_STEPS);
-		yield* finishReply(reply, CODE_REVIEWER.reply);
+		return yield* finishReply(reply, BILLING_ENGINEER.answer);
 	});
 
-/**
- * Gary answers Code Reviewer, and Rob reacts to it. Cued by the demo rather
- * than timed, so it happens while Anita is looking at the chat.
- */
-const cueReview = Effect.gen(function* () {
-	const { workspace: showcaseWorkspace } = yield* showcase;
-	const codeReviewer = yield* chatOf(yield* botNamed(showcaseWorkspace.id, CODE_REVIEWER.bot));
-	const [latest] = yield* query((db) =>
-		db
-			.select({ id: message.id })
-			.from(message)
-			.innerJoin(agent, eq(agent.id, message.authorAgentId))
-			.where(and(eq(message.threadId, codeReviewer.thread.id), eq(agent.name, CODE_REVIEWER.bot)))
-			.orderBy(desc(message.createdAt))
-			.limit(1),
-	);
-	if (!latest) return yield* Effect.die(new Error("Code Reviewer hasn't replied yet"));
-	const reviewer = yield* personNamed(showcaseWorkspace.id, PEOPLE.review.person);
-	yield* typeAndPost(reviewer, codeReviewer.thread, PEOPLE.review.text);
-	const reactor = yield* personNamed(showcaseWorkspace.id, PEOPLE.review.reactor);
-	yield* react(reactor, codeReviewer.thread, latest.id, PEOPLE.review.emoji);
-});
-
-/** Lorraine mentions Anita in Support, which brings it to Anita's Activity wherever she is. */
+/** Doreen mentions Anita in Support's chat, which brings it to Anita's Activity wherever she is. */
 const cueMention = Effect.gen(function* () {
 	const { workspace: showcaseWorkspace, owner } = yield* showcase;
-	const support = yield* chatOf(yield* botNamed(showcaseWorkspace.id, TICKET_DESK.bot));
+	const support = yield* podChatOf(showcaseWorkspace.id, SUPPORT_POD);
 	const asking = yield* personNamed(showcaseWorkspace.id, PEOPLE.mention.person);
-	yield* typeAndPost(
-		asking,
-		support.thread,
-		`@${handleFromName(owner.name)} ${PEOPLE.mention.text}`,
-	);
+	yield* typeAndPost(asking, support, `@${handleFromName(owner.name)} ${PEOPLE.mention.text}`);
 });
 
 /**
- * Code Reviewer writes the incident up: the artifact, made as its artifact
+ * Billing Engineer writes the incident up: the artifact, made as its artifact
  * tool makes one, and the `artifact_write` call that shows it under the reply.
  */
 const writeIncident = (reply: Reply) =>
 	Effect.gen(function* () {
 		const authoring = yield* Artifacts.Authoring;
-		const { title, content } = CODE_REVIEWER.incident;
+		const { title, content } = BILLING_ENGINEER.incident;
 		const input = { kind: "document", title, content };
 		const call = yield* callTool(reply, { tool: ARTIFACT_WRITE_TOOL, input, mutating: true });
 		const written = yield* authoring
@@ -856,16 +853,16 @@ const writeIncident = (reply: Reply) =>
 		});
 	});
 
-/** What each bot in the story does when Anita writes to it. */
-const PARTS = new Map([
-	[TICKET_DESK.bot as string, playTicketDesk],
-	[CODE_REVIEWER.bot as string, playCodeReviewer],
-]);
+/** What each bot in the story does when Anita starts a thread with it. */
+const PARTS = new Map([[TICKET_DESK.bot as string, playTicketDesk]]);
 
-/** What happens when Anita writes to a chat's people only: who answers her. */
+/** What each bot in the story does when Anita answers it in its thread. */
+const THREAD_PARTS = new Map([[TICKET_DESK.bot as string, playTicketDeskWork]]);
+
+/** Who answers Anita when she writes in a pod's chat without mentioning a bot, by the pod's slug. */
 const PEOPLE_PARTS = new Map([
 	[
-		TICKET_DESK.bot as string,
+		SUPPORT_POD,
 		(inThread: ThreadRow) =>
 			Effect.gen(function* () {
 				const answering = yield* personNamed(inThread.workspaceId, PEOPLE.closing.person);
@@ -874,32 +871,96 @@ const PEOPLE_PARTS = new Map([
 	],
 ]);
 
+/** The conversation `conversationId`, a pod's chat or a thread, with its pod's slug and its bot, if it has one. */
+const conversationById = (conversationId: string) =>
+	Effect.flatMap(
+		query((db) =>
+			db
+				.select({ thread, podSlug: pod.slug, bot: agent })
+				.from(thread)
+				.innerJoin(pod, eq(pod.id, thread.podId))
+				.leftJoin(agent, eq(agent.id, thread.hostAgentId))
+				.where(eq(thread.id, conversationId)),
+		),
+		([row]) =>
+			row ? Effect.succeed(row) : Effect.die(new Error(`No conversation ${conversationId}`)),
+	);
+
 /**
- * Posts the owner's message to the chat, prints it as the API answers a send,
- * then plays what follows: the bot's part, or with `toPeople`, the people's.
+ * Posts the owner's message in the pod's chat and starts a thread from it with
+ * `botId`, as the API does, prints them as it answers, then plays the bot's
+ * part in the thread, answering the message.
  */
-const send = (chatId: string, messageId: string, text: string, toPeople: boolean) =>
+const start = (podChatId: string, messageId: string, botId: string, text: string) =>
 	Effect.gen(function* () {
 		const { owner } = yield* showcase;
-		const [found] = yield* query((db) =>
-			db
-				.select({ thread, bot: agent })
-				.from(chat)
-				.innerJoin(thread, eq(thread.id, chat.mainThreadId))
-				.innerJoin(agent, eq(agent.id, chat.hostAgentId))
-				.where(eq(chat.id, chatId)),
+		const { emit } = yield* ConversationEvents.Service;
+		const { thread: podChat } = yield* conversationById(podChatId);
+		const [bot] = yield* query((db) => db.select().from(agent).where(eq(agent.id, botId)));
+		if (!bot) return yield* Effect.die(new Error(`No bot ${botId}`));
+		const posted = yield* postAs(owner, podChat, text, messageId);
+		const started = yield* transaction(
+			Effect.gen(function* () {
+				const id = crypto.randomUUID();
+				const [row] = yield* query((db) =>
+					db
+						.insert(thread)
+						.values({
+							id,
+							workspaceId: podChat.workspaceId,
+							podId: podChat.podId,
+							hostAgentId: bot.id,
+							conversationId: id,
+							parentThreadId: podChat.id,
+							type: "conversation",
+							title: threadTitleFrom(text),
+							initiatorUserId: owner.id,
+							originMessageId: messageId,
+						})
+						.returning(),
+				);
+				if (!row) return yield* Effect.die(new Error("The thread wasn't opened"));
+				yield* query((db) =>
+					db.insert(threadParticipant).values([
+						{ threadId: id, userId: owner.id },
+						{ threadId: id, agentId: bot.id },
+					]),
+				);
+				yield* emit([
+					ConversationEvent.ThreadOpened({
+						workspaceId: row.workspaceId,
+						podId: row.podId,
+						podChatId: podChat.id,
+						threadId: row.id,
+					}),
+				]);
+				return row;
+			}),
 		);
-		if (!found) return yield* Effect.die(new Error(`No chat ${chatId}`));
+		// The first line out is the start's answer, which the autopilot hands the page.
+		console.log(JSON.stringify({ conversation: toConversationThread(started), message: posted }));
+		const part = PARTS.get(bot.name);
+		if (part) yield* part(bot, started, messageId);
+	});
+
+/**
+ * Posts the owner's message in the conversation, prints it as the API answers
+ * a send, then plays who answers her: in a pod's chat its people, and in a
+ * thread its bot.
+ */
+const send = (conversationId: string, messageId: string, text: string) =>
+	Effect.gen(function* () {
+		const { owner } = yield* showcase;
+		const found = yield* conversationById(conversationId);
 		const posted = yield* postAs(owner, found.thread, text, messageId);
-		// The first line out is the send's answer, which the autopilot hands the page.
 		console.log(JSON.stringify(posted));
-		if (toPeople) {
-			const answer = PEOPLE_PARTS.get(found.bot.name);
-			if (answer) yield* answer(found.thread);
+		if (found.bot) {
+			const part = THREAD_PARTS.get(found.bot.name);
+			if (part) yield* part(found.bot, found.thread, messageId);
 			return;
 		}
-		const part = PARTS.get(found.bot.name);
-		if (part) yield* part(found.bot, found.thread, messageId);
+		const answer = PEOPLE_PARTS.get(found.podSlug);
+		if (answer) yield* answer(found.thread);
 	});
 
 /** The refund goes ahead: the decision, the call running and returning, and Ticket Desk's reply. */
@@ -961,65 +1022,50 @@ const allow = (toolCallId: string) =>
 	});
 
 /**
- * Takes the story's chats back to where it starts: Ticket Desk's ends with
- * the morning queue's result, and Code Reviewer's with what the seed wrote.
- * Everything after goes, the collaborations and artifacts it made included,
- * and the pods' people have read what's left.
+ * Takes the story's pod chats back to where it starts: what the seed wrote.
+ * Everything after goes, the threads started from them and the
+ * collaborations and artifacts made in those included, and the pods' people
+ * have read what's left.
  */
 const reset = Effect.gen(function* () {
 	const { workspace: showcaseWorkspace } = yield* showcase;
-	const ticketDesk = yield* chatOf(yield* botNamed(showcaseWorkspace.id, TICKET_DESK.bot));
-	const codeReviewer = yield* chatOf(yield* botNamed(showcaseWorkspace.id, CODE_REVIEWER.bot));
-	const [morningQueue] = yield* query((db) =>
-		db
-			.select({ at: max(message.createdAt) })
-			.from(message)
-			.where(
-				and(eq(message.threadId, ticketDesk.thread.id), isNotNull(message.routineExecutionId)),
-			),
-	);
 	const seeded = showcaseWorkspace.setupCompletedAt;
-	if (!morningQueue?.at || !seeded) {
+	if (!seeded)
 		return yield* Effect.die(new Error("The showcase isn't seeded as the story expects"));
-	}
-	const starts = [
-		{ threadId: ticketDesk.thread.id, after: morningQueue.at },
-		{ threadId: codeReviewer.thread.id, after: seeded },
-	];
+	const podChats = [yield* podChatOf(showcaseWorkspace.id, SUPPORT_POD)];
+	const podChatIds = podChats.map((podChat) => podChat.id);
 	const removed = yield* transaction(
 		Effect.gen(function* () {
-			let count = 0;
-			for (const { threadId, after } of starts) {
+			const started = yield* query((db) =>
+				db
+					.select({ id: thread.id })
+					.from(thread)
+					.where(and(inArray(thread.parentThreadId, podChatIds), gt(thread.createdAt, seeded))),
+			);
+			const startedIds = started.map(({ id }) => id);
+			if (startedIds.length > 0) {
 				yield* query((db) =>
 					db
 						.delete(artifact)
-						.where(and(eq(artifact.createdInThreadId, threadId), gt(artifact.createdAt, after))),
+						.where(
+							and(eq(artifact.workspaceId, showcaseWorkspace.id), gt(artifact.createdAt, seeded)),
+						),
 				);
-				yield* query((db) =>
-					db
-						.delete(thread)
-						.where(and(eq(thread.parentThreadId, threadId), gt(thread.createdAt, after))),
-				);
-				const gone = yield* query((db) =>
-					db
-						.delete(message)
-						.where(and(eq(message.threadId, threadId), gt(message.createdAt, after)))
-						.returning({ id: message.id }),
-				);
-				count += gone.length;
+				// A thread's messages, turns, calls and collaborations' threads go with it.
+				yield* query((db) => db.delete(thread).where(inArray(thread.id, startedIds)));
 			}
+			const gone = yield* query((db) =>
+				db
+					.delete(message)
+					.where(and(inArray(message.threadId, podChatIds), gt(message.createdAt, seeded)))
+					.returning({ id: message.id }),
+			);
 			const readers = yield* query((db) =>
 				db
 					.select({ threadId: thread.id, userId: podMember.userId })
 					.from(thread)
-					.innerJoin(pod, eq(pod.id, thread.podId))
-					.innerJoin(podMember, eq(podMember.podId, pod.id))
-					.where(
-						inArray(
-							thread.id,
-							starts.map(({ threadId }) => threadId),
-						),
-					),
+					.innerJoin(podMember, eq(podMember.podId, thread.podId))
+					.where(inArray(thread.id, podChatIds)),
 			);
 			const now = new Date();
 			if (readers.length > 0) {
@@ -1033,10 +1079,12 @@ const reset = Effect.gen(function* () {
 						}),
 				);
 			}
-			return count;
+			return { threads: startedIds.length, messages: gone.length };
 		}),
 	);
-	console.log(`The story is back at its start (${removed} later messages removed).`);
+	console.log(
+		`The story is back at its start (${removed.threads} threads and ${removed.messages} messages removed).`,
+	);
 });
 
 /**
@@ -1071,7 +1119,7 @@ const conversationEvents = Layer.effect(
 );
 
 const USAGE =
-	"Usage: stage.ts reset | send <chatId> <messageId> bot|people <text> | allow <toolCallId> | cue review|mention | sign-in-connections";
+	"Usage: stage.ts reset | start <podChatId> <messageId> <botId> <text> | send <conversationId> <messageId> <text> | allow <toolCallId> | cue mention | sign-in-connections";
 const [command, ...args] = process.argv.slice(2);
 
 const program = Effect.gen(function* () {
@@ -1079,13 +1127,16 @@ const program = Effect.gen(function* () {
 	if (installation.isProduction) {
 		return yield* Effect.die(new Error("The showcase stage cannot run in production."));
 	}
-	const [first = "", second = "", audience = "", ...words] = args;
+	const [first = "", second = "", ...rest] = args;
 	if (command === "reset") return yield* reset;
-	if (command === "send" && first && second && words.length > 0) {
-		return yield* send(first, second, words.join(" "), audience === "people");
+	const [botId = "", ...words] = rest;
+	if (command === "start" && first && second && botId && words.length > 0) {
+		return yield* start(first, second, botId, words.join(" "));
+	}
+	if (command === "send" && first && second && rest.length > 0) {
+		return yield* send(first, second, rest.join(" "));
 	}
 	if (command === "allow" && first) return yield* allow(first);
-	if (command === "cue" && first === "review") return yield* cueReview;
 	if (command === "cue" && first === "mention") return yield* cueMention;
 	if (command === "sign-in-connections") return yield* signInConnections;
 	return yield* Effect.die(new Error(USAGE));

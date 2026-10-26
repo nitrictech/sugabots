@@ -37,25 +37,29 @@ const SHOTS: Shot[] = [
 		name: "one-thread",
 		backdrop: { form: "swoop", family: "green" },
 		async prepare(stage) {
-			await stage.open(`/${WORKSPACE}/pods/growth/agents/growth-desk`);
-			await stage.app.getByText("Nice. Send it").waitFor();
+			// Growth's chat, where its people talk and start threads with its bots.
+			await openPodChat(stage, "growth");
+			await stage.app.getByText("Brightwater signed!").waitFor();
 		},
 	},
 	{
 		name: "routines",
 		backdrop: { form: "rings", family: "purple" },
 		async prepare(stage) {
-			await stage.open(`/${WORKSPACE}/settings/routines`);
 			// Ticket Desk's, so the slide's purple matches its bot.
-			await stage.app.getByText("Morning queue").first().click();
-			await stage.app.getByText("Recent runs").waitFor();
+			await stage.open(`/${WORKSPACE}/pods/support`);
+			await stage.app
+				.getByRole("link", { name: /^Morning queue/ })
+				.first()
+				.click();
+			await stage.app.getByText("Morning queue: 7 new tickets overnight.").last().waitFor();
 		},
 	},
 	{
 		name: "artifacts",
 		backdrop: { form: "sur", family: "blue" },
 		async prepare(stage) {
-			await stage.open(`/${WORKSPACE}/pods/engineering/agents/researcher`);
+			await openSeededThread(stage, "engineering", "What changed in Postgres 18");
 			await stage.app.getByRole("button", { name: "Preview" }).last().click();
 			await stage.app.waitForTimeout(600);
 			await scrollToTop(stage.app.getByText("Graphile Worker fits best").last());
@@ -83,15 +87,15 @@ const SHOTS: Shot[] = [
 ];
 
 /**
- * Code Reviewer's desktop, open beside its chat. Taken in a context of its
+ * Code Reviewer's desktop, open beside its thread. Taken in a context of its
  * own: showing the desktop says sandboxes are on, which puts the desktop's
- * button on every chat with a bot that uses one.
+ * button on every thread with a bot that uses one.
  */
 const SANDBOXES: Shot = {
 	name: "sandboxes",
 	backdrop: { form: "petals", family: "red" },
 	async prepare(stage) {
-		await stage.open(`/${WORKSPACE}/pods/engineering/agents/code-reviewer`);
+		await openSeededThread(stage, "engineering", "Can you review PR #482");
 		await stage.app.getByRole("button", { name: "Sandbox desktop" }).click();
 		await stage.app.locator("canvas").first().waitFor();
 		await stage.app.getByText("Starting the desktop…").waitFor({ state: "detached" });
@@ -145,6 +149,36 @@ async function take(stage: Stage, shot: Shot, work: string) {
 			join(OUTPUT, `${shot.name}-${chrome}.webp`),
 		]);
 	}
+}
+
+/**
+ * The pod's chat. A pod opens on what was last open in it, which the video
+ * leaves on a thread, so this goes to General from there.
+ */
+async function openPodChat(stage: Stage, pod: string) {
+	await stage.open(`/${WORKSPACE}/pods/${pod}`);
+	await stage.app.getByRole("link", { name: "General", exact: true }).first().click();
+	await stage.app.getByRole("heading", { name: "General" }).first().waitFor();
+}
+
+/**
+ * Opens the seeded thread whose title starts `title` from its line in the
+ * pod's chat. A long title is cut short, so the start is what to match.
+ */
+async function openSeededThread(stage: Stage, pod: string, title: string) {
+	await openPodChat(stage, pod);
+	// Named for where it stands and when it last moved, after its title.
+	await stage.app
+		.getByRole("button", { name: new RegExp(`^Open thread: ${escapeRegExp(title)}`) })
+		.click();
+	await stage.app
+		.getByRole("heading", { name: new RegExp(`^${escapeRegExp(title)}`) })
+		.first()
+		.waitFor();
+}
+
+function escapeRegExp(text: string) {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Scrolls the chat so `locator` sits near the top of it, leaving the page itself where it is. */

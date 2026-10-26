@@ -41,6 +41,7 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ensureAccount, seedAccountsLayer } from "../accounts.ts";
 import {
+	type ChatScene,
 	ensureConnections,
 	ensureConversations,
 	type RoutineRun,
@@ -57,11 +58,11 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * Everyone signs in with `PASSWORD`, and has an Unsplash portrait for a face.
  * Anita owns the workspace; sign in as her.
  *
- * The pods' chats come already written (see `conversations.ts`):
- * people and bots talking, a collaboration, an artifact, and routine runs.
- * Ticket Desk's chat stops at the morning queue, where the demo's story
- * starts (see `stage.ts`). The pods' connections are added too,
- * signed out.
+ * The pods' chats come already written (see `conversations.ts`): people
+ * talking, the threads they started there by mentioning a bot, a
+ * collaboration, an artifact, and routine runs in their routines' threads.
+ * Support's chat holds only the morning queue, where the demo's story starts
+ * (see `stage.ts`). The pods' connections are added too, signed out.
  *
  * Each bot goes on the first model the workspace offers that it prefers,
  * else the workspace's default. A new workspace offers none, so connect
@@ -253,7 +254,7 @@ const BOTS: readonly SeedBot[] = [
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
 		prompt:
-			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the pod. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason.",
+			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the pod. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
 		models: [CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 41,
 	},
@@ -268,6 +269,19 @@ const BOTS: readonly SeedBot[] = [
 			"You sort the support inbox. Label each email as bug, billing, how-to or sales, flag anything urgent, and post a short list of what needs a person today.",
 		models: [GEMINI_FLASH, CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 28,
+	},
+	{
+		name: "Billing Engineer",
+		pod: "support",
+		color: "red",
+		face: "square",
+		shape: "antenna",
+		description: "Digs into billing bugs in its sandbox.",
+		prompt:
+			"You find out why billing went wrong for a customer. Reproduce it in your sandbox against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
+		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
+		usesSandbox: true,
+		requestsPerWeekday: 7,
 	},
 	{
 		name: "Code Reviewer",
@@ -383,168 +397,211 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 ];
 
 /**
- * The chats the screenshots show. Times are on the morning of the day they
- * happen (see `conversations.ts`), and a reply quotes by `key`.
+ * What the pods' people said in their chats, and the threads they started
+ * there by mentioning a bot. Times are on the morning of the day they happen
+ * (see `conversations.ts`), and a reply quotes by `key`. Support's chat has
+ * only Ticket Desk's morning queue, where the demo's story starts.
  */
-const SCENES: readonly Scene<PersonKey>[] = [
+const CHATS: readonly ChatScene<PersonKey>[] = [
 	{
 		pod: "growth",
-		bot: "Growth Desk",
 		messages: [
+			{
+				at: { time: "9:02" },
+				from: { person: "lorraine" },
+				parts: [{ text: "Morning! Pipeline review has moved to 2pm today." }],
+			},
 			{
 				at: { time: "9:12" },
 				from: { person: "gary" },
 				parts: [
-					{ text: "Fernhill Outfitters replied about pricing. Can someone draft the answer?" },
-				],
-			},
-			{
-				key: "northwind-draft",
-				at: { time: "9:13" },
-				from: { bot: "Growth Desk" },
-				parts: [
 					{
-						text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
+						text: "@growth-desk Fernhill Outfitters replied about pricing. Can you draft the answer?",
 					},
 				],
-				reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
-			},
-			{
-				at: { time: "9:15" },
-				from: { person: "lorraine" },
-				replyTo: "northwind-draft",
-				parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
-			},
-			{
-				at: { time: "9:16" },
-				from: { person: "gary" },
-				parts: [{ text: "Makes sense. I'll leave it in drafts." }],
+				thread: {
+					bot: "Growth Desk",
+					messages: [
+						{
+							key: "fernhill-draft",
+							at: { time: "9:13" },
+							from: { bot: "Growth Desk" },
+							parts: [
+								{
+									text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
+								},
+							],
+							reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
+						},
+						{
+							at: { time: "9:15" },
+							from: { person: "lorraine" },
+							replyTo: "fernhill-draft",
+							parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
+						},
+						{
+							at: { time: "9:16" },
+							from: { person: "gary" },
+							parts: [{ text: "Makes sense. I'll leave it in drafts." }],
+						},
+					],
+				},
 			},
 			{
 				at: { time: "10:02" },
 				from: { person: "gary" },
-				parts: [{ text: "Brightwater Supply wants 25% off the annual tier. Can we do it?" }],
-			},
-			{
-				at: { time: "10:04" },
-				from: { bot: "Growth Desk" },
 				parts: [
-					{ text: "I'll check the margin with Pricing Analyst." },
-					{
-						collaboration: {
-							with: "Pricing Analyst",
-							title: "Margin check for Brightwater Supply",
-							brief:
-								"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
-							answer:
-								"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
-							answeredAt: { time: "10:03" },
-						},
-					},
-					{
-						text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
-					},
+					{ text: "@growth-desk Brightwater Supply wants 25% off the annual tier. Can we do it?" },
 				],
-				reactions: [{ emoji: "🎉", by: ["gary"] }],
+				thread: {
+					bot: "Growth Desk",
+					messages: [
+						{
+							at: { time: "10:04" },
+							from: { bot: "Growth Desk" },
+							parts: [
+								{ text: "I'll check the margin with Pricing Analyst." },
+								{
+									collaboration: {
+										with: "Pricing Analyst",
+										title: "Margin check for Brightwater Supply",
+										brief:
+											"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
+										answer:
+											"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
+										answeredAt: { time: "10:04" },
+									},
+								},
+								{
+									text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
+								},
+							],
+							reactions: [{ emoji: "🎉", by: ["gary"] }],
+						},
+						{
+							at: { time: "10:06" },
+							from: { person: "lorraine" },
+							parts: [{ text: "Nice. Send it, and copy me in." }],
+						},
+					],
+				},
 			},
-			{
-				at: { time: "10:06" },
-				from: { person: "lorraine" },
-				parts: [{ text: "Nice. Send it, and copy me in." }],
-			},
-		],
-	},
-	{
-		pod: "growth",
-		bot: "Copywriter",
-		messages: [
 			{
 				at: { time: "10:40" },
 				from: { person: "lorraine" },
-				parts: [{ text: "Can you draft a short post announcing invoices in AUD?" }],
+				parts: [{ text: "@copywriter Can you draft a short post announcing invoices in AUD?" }],
+				thread: {
+					bot: "Copywriter",
+					messages: [
+						{
+							at: { time: "10:41" },
+							from: { bot: "Copywriter" },
+							parts: [
+								{
+									text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
+								},
+							],
+							reactions: [{ emoji: "❤️", by: ["lorraine"] }],
+						},
+					],
+				},
 			},
 			{
-				at: { time: "10:41" },
-				from: { bot: "Copywriter" },
-				parts: [
-					{
-						text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
-					},
-				],
-				reactions: [{ emoji: "❤️", by: ["lorraine"] }],
+				at: { time: "10:52" },
+				from: { person: "gary" },
+				parts: [{ text: "Brightwater signed! Quote's accepted, 40 seats annual." }],
+				reactions: [{ emoji: "🎉", by: ["lorraine", "anita"] }],
+			},
+			{
+				at: { time: "10:55" },
+				from: { person: "lorraine" },
+				parts: [{ text: "Great work. I'll book their onboarding call for next week." }],
 			},
 		],
 	},
 	{
 		pod: "engineering",
-		bot: "Code Reviewer",
 		messages: [
+			{
+				at: { time: "9:40" },
+				from: { person: "rob" },
+				parts: [{ text: "The new export queue is live on staging." }],
+				reactions: [{ emoji: "🚀", by: ["gary"] }],
+			},
 			{
 				at: { time: "10:20" },
 				from: { person: "rob" },
 				parts: [
 					{
-						text: "Can you review PR #482 before I merge? It moves the export job onto the new queue.",
+						text: "@code-reviewer Can you review PR #482 before I merge? It moves the export job onto the new queue.",
 					},
 				],
+				thread: {
+					bot: "Code Reviewer",
+					messages: [
+						{
+							at: { time: "10:26" },
+							from: { bot: "Code Reviewer" },
+							parts: [
+								{
+									text: "Reviewed #482 and ran the tests in my sandbox: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
+								},
+							],
+							reactions: [{ emoji: "👀", by: ["gary"] }],
+						},
+						{
+							at: { time: "10:31" },
+							from: { person: "rob" },
+							parts: [{ text: "Good catch on the timeout. Fixing both now." }],
+						},
+					],
+				},
 			},
-			{
-				at: { time: "10:26" },
-				from: { bot: "Code Reviewer" },
-				parts: [
-					{
-						text: "Reviewed #482 and ran the tests in my sandbox: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
-					},
-				],
-				reactions: [{ emoji: "👀", by: ["gary"] }],
-			},
-			{
-				at: { time: "10:31" },
-				from: { person: "rob" },
-				parts: [{ text: "Good catch on the timeout. Fixing both now." }],
-			},
-		],
-	},
-	{
-		pod: "engineering",
-		bot: "Researcher",
-		messages: [
 			{
 				at: { time: "11:05" },
 				from: { person: "gary" },
-				parts: [{ text: "What changed in Postgres 18 that matters for us?" }],
-			},
-			{
-				at: { time: "11:07" },
-				from: { bot: "Researcher" },
-				parts: [
-					{
-						text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
-					},
-				],
-			},
-			{
-				at: { time: "11:12" },
-				from: { person: "gary" },
-				parts: [
-					{
-						text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
-					},
-				],
-			},
-			{
-				at: { time: "11:16" },
-				from: { bot: "Researcher" },
-				parts: [
-					{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
-					{
-						text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
-					},
-				],
-				reactions: [{ emoji: "🙌", by: ["rob"] }],
+				parts: [{ text: "@researcher What changed in Postgres 18 that matters for us?" }],
+				thread: {
+					bot: "Researcher",
+					messages: [
+						{
+							at: { time: "11:07" },
+							from: { bot: "Researcher" },
+							parts: [
+								{
+									text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
+								},
+							],
+						},
+						{
+							at: { time: "11:12" },
+							from: { person: "gary" },
+							parts: [
+								{
+									text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
+								},
+							],
+						},
+						{
+							at: { time: "11:16" },
+							from: { bot: "Researcher" },
+							parts: [
+								{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
+								{
+									text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
+								},
+							],
+							reactions: [{ emoji: "🙌", by: ["rob"] }],
+						},
+					],
+				},
 			},
 		],
 	},
+];
+
+/** Conversations with a bot alone, outside any pod's chat: a personal pod has no chat. */
+const CONVERSATIONS: readonly Scene<PersonKey>[] = [
 	{
 		pod: "personal",
 		bot: "Journal",
@@ -571,7 +628,7 @@ const SCENES: readonly Scene<PersonKey>[] = [
 	},
 ];
 
-/** Past runs of routines that post to their bot's chat, so their chats and run lists have history. */
+/** Past runs of routines, so their threads, run lists and the pods' chats have history. */
 const ROUTINE_RUNS: readonly RoutineRun[] = [
 	{
 		pod: "support",
@@ -813,8 +870,7 @@ const seed = Effect.gen(function* () {
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		SCENES,
-		ROUTINE_RUNS,
+		{ chats: CHATS, conversations: CONVERSATIONS, runs: ROUTINE_RUNS },
 	);
 
 	const ledgerRows = yield* fillLedger({ workspaceId, podIds, botIds });

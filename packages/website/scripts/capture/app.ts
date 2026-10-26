@@ -1,5 +1,4 @@
 import type { Locator } from "playwright";
-import { WORKSPACE } from "./browser.ts";
 import type { Stage } from "./stage.ts";
 
 /**
@@ -107,25 +106,19 @@ export async function click(stage: Stage, locator: Locator) {
 	await stage.page.mouse.up();
 }
 
-/** How a bot is addressed in the app's paths: `Growth Desk` is `growth-desk`. */
-const handleOf = (name: string) => name.toLowerCase().replaceAll(" ", "-");
+/** Opens the thread titled `title` from its line under the message it was started from. */
+export async function openThread(stage: Stage, title: string) {
+	const line = stage.app
+		.getByRole("button", { name: new RegExp(`^Open thread: ${escapeRegExp(title)}`) })
+		.last();
+	await line.waitFor({ timeout: 20_000 });
+	await wait(stage, 600);
+	await click(stage, line);
+	await wait(stage, 800);
+}
 
-/**
- * The chat with `bot`: through the pod's rail tile, unless it's open already,
- * then the bot in the pod's list, unless the pod opened on it.
- */
-export async function openChat(stage: Stage, pod: string, bot: string) {
-	const podPath = `/${WORKSPACE}/pods/${handleOf(pod)}/`;
-	const chatPath = `${podPath}agents/${handleOf(bot)}`;
-	if (stage.app.url().endsWith(chatPath)) return;
-	if (!stage.app.url().includes(podPath)) {
-		await click(stage, stage.app.getByRole("link", { name: new RegExp(`^${pod}`) }).first());
-		await wait(stage, 600);
-	}
-	if (!stage.app.url().endsWith(chatPath)) {
-		await click(stage, stage.app.getByRole("link", { name: bot, exact: true }).first());
-		await wait(stage, 800);
-	}
+function escapeRegExp(text: string) {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Closes the panel open over the chat, as its close button does. */
@@ -136,23 +129,20 @@ export async function closePanel(stage: Stage) {
 	await wait(stage, 800);
 }
 
-/** Brisk, so the typing doesn't hold up the cut, and uneven, so it reads as a person's. */
-const TYPING_MILLISECONDS = { least: 14, spread: 26 };
+/** A steady typing pace a viewer can read along with, and uneven, so it reads as a person's. */
+const TYPING_MILLISECONDS = { least: 38, spread: 40 };
 /** How far the camera moves in on the composer while a message is typed. */
 const TYPING_ZOOM = 1.5;
 
 /**
- * Types into the chat's composer at a typing pace and sends it, with the
- * camera in on the composer meanwhile; `toPeople` switches to people only first.
+ * Types into the composer at a typing pace and sends it, with the camera in
+ * on the composer meanwhile. A mention is typed out in full, and becomes its
+ * chip at the space after it.
  */
-export async function write(stage: Stage, text: string, { toPeople = false } = {}) {
+export async function write(stage: Stage, text: string) {
 	const composer = stage.app.getByRole("textbox", { name: /^Message/ }).first();
 	await click(stage, composer);
 	await stage.zoomTo(composer, TYPING_ZOOM);
-	if (toPeople) {
-		await stage.page.keyboard.press("Tab");
-		await wait(stage, 500);
-	}
 	for (const character of text) {
 		await stage.page.keyboard.type(character);
 		await wait(stage, TYPING_MILLISECONDS.least + Math.random() * TYPING_MILLISECONDS.spread);

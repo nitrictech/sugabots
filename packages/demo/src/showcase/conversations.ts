@@ -1,21 +1,23 @@
 import { randomUUID } from "node:crypto";
 import type { ArtifactKind, ConnectionTool, JsonValue } from "@sugabots/contracts";
-import { CONNECTION_TOOL_SEPARATOR } from "@sugabots/contracts";
+import { CONNECTION_TOOL_SEPARATOR, FIRST_CHAT_NAME } from "@sugabots/contracts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
 import { ARTIFACT_WRITE_TOOL } from "@sugabots/core/conversations/tools/artifacts/tool";
 import { query } from "@sugabots/core/database/database";
 import {
 	artifact,
 	artifactVersion,
-	chat,
 	collaboration,
 	connection,
 	message,
 	messageReaction,
+	pod,
 	podMember,
 	routine,
 	routineExecution,
 	type StoredMessagePart,
+	type ThreadRow,
 	thread,
 	threadParticipant,
 	threadRead,
@@ -23,7 +25,7 @@ import {
 	turn,
 } from "@sugabots/core/database/schema";
 import type { ToolAccess } from "@sugabots/core/providers/sql";
-import { and, eq, isNull, max } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Effect } from "effect";
 
 /**
@@ -31,8 +33,8 @@ import { Effect } from "effect";
  * them from, so the screenshots need no model, no second login and no waiting.
  * Nothing is announced: the app shows them when it next loads.
  *
- * Each chat is written once: one that already has messages is left alone, and
- * so is a routine that already has runs.
+ * Each chat and conversation is written once: one that already has
+ * messages is left alone, and so is a routine that already has runs.
  */
 
 /** Who the conversations name, by the keys `seed.ts` gives them. */
@@ -91,14 +93,30 @@ interface ScriptedMessage<Person extends string> {
 	reactions?: readonly { emoji: string; by: readonly Person[] }[];
 }
 
-/** One chat: a pod's bot, and what was said to and by it. */
+/** One conversation: a pod's bot, and what was said to and by it. */
 export interface Scene<Person extends string> {
 	pod: string;
 	bot: string;
 	messages: readonly ScriptedMessage<Person>[];
 }
 
-/** One past run of a routine that posts its result to its bot's chat. */
+/**
+ * A message in a pod's chat. With `thread`, it mentions `thread.bot` and
+ * starts a thread with it, which hangs off the message in the chat and holds
+ * what was said next there: the bot answers the message itself.
+ */
+export interface ChatMessage<Person extends string> extends ScriptedMessage<Person> {
+	from: { person: Person };
+	thread?: { bot: string; messages: readonly ScriptedMessage<Person>[] };
+}
+
+/** What the people of a shared pod said in its chat, and the threads they started there. */
+export interface ChatScene<Person extends string> {
+	pod: string;
+	messages: readonly ChatMessage<Person>[];
+}
+
+/** One past run of a routine, which posts its result in the routine's thread. */
 export interface RoutineRun {
 	pod: string;
 	bot: string;
@@ -182,83 +200,260 @@ export const ensureConnections = (input: {
 
 export const ensureConversations = <Person extends string>(
 	cast: Cast<Person>,
-	scenes: readonly Scene<Person>[],
-	runs: readonly RoutineRun[],
+	written: {
+		chats: readonly ChatScene<Person>[];
+		conversations: readonly Scene<Person>[];
+		runs: readonly RoutineRun[];
+	},
 ) =>
 	Effect.gen(function* () {
 		const day = conversationDay(new Date());
-		let written = 0;
-		for (const run of runs) {
-			if (yield* writeRoutineRun(cast, day, run)) written += 1;
+		let count = 0;
+		for (const run of written.runs) {
+			if (yield* writeRoutineRun(cast, day, run)) count += 1;
 		}
-		for (const scene of scenes) {
-			if (yield* writeScene(cast, day, scene)) written += 1;
+		for (const chat of written.chats) {
+			if (yield* writeChatScene(cast, day, chat)) count += 1;
+		}
+		for (const scene of written.conversations) {
+			if (yield* writeScene(cast, day, scene)) count += 1;
 		}
 		yield* markEverythingRead(cast);
-		return written;
+		return count;
 	});
 
-/** The pod's chat with `bot`, made if it is not there yet, with its main thread. */
-const chatWith = (cast: Cast<string>, pod: string, bot: string) =>
+/** The pod's conversation with `bot`, made if it is not there yet. */
+const conversationWith = (cast: Cast<string>, pod: string, bot: string) =>
 	Effect.gen(function* () {
 		const podId = podIdOf(cast.podIds, pod);
 		const agentId = idOf(cast.botIds, bot);
 		const [existing] = yield* query((db) =>
 			db
 				.select()
-				.from(chat)
-				.where(and(eq(chat.podId, podId), eq(chat.hostAgentId, agentId))),
+				.from(thread)
+				.where(
+					and(
+						eq(thread.type, "conversation"),
+						eq(thread.podId, podId),
+						eq(thread.hostAgentId, agentId),
+					),
+				),
 		);
 		if (existing) return existing;
-		const [main] = yield* query((db) =>
+		const id = randomUUID();
+		const [created] = yield* query((db) =>
 			db
 				.insert(thread)
 				.values({
+					id,
 					workspaceId: cast.workspaceId,
 					podId,
 					hostAgentId: agentId,
-					type: "chat",
-					title: "Chat",
+					conversationId: id,
+					type: "conversation",
+					title: `Conversation with ${bot}`,
 				})
 				.returning(),
 		);
-		if (!main) return yield* Effect.die(new Error(`Could not open ${bot}'s chat`));
-		const [created] = yield* query((db) =>
-			db
-				.insert(chat)
-				.values({
-					workspaceId: cast.workspaceId,
-					podId,
-					hostAgentId: agentId,
-					mainThreadId: main.id,
-				})
-				.returning(),
-		);
-		if (!created) return yield* Effect.die(new Error(`Could not open ${bot}'s chat`));
-		yield* query((db) =>
-			db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
-		);
-		yield* query((db) => db.insert(threadParticipant).values({ threadId: main.id, agentId }));
+		if (!created)
+			return yield* Effect.die(new Error(`Could not open the conversation with ${bot}`));
+		yield* query((db) => db.insert(threadParticipant).values({ threadId: id, agentId }));
 		return created;
 	});
 
-/** Writes the scene into its chat, unless the chat already has messages. */
+/** The pod's chat, its people's, made if it is not there yet. */
+const podChatOf = (cast: Cast<string>, podId: string) =>
+	Effect.gen(function* () {
+		const id = randomUUID();
+		yield* query((db) =>
+			db
+				.insert(thread)
+				.values({
+					id,
+					workspaceId: cast.workspaceId,
+					podId,
+					hostAgentId: null,
+					conversationId: id,
+					type: "pod_chat",
+					main: true,
+					title: FIRST_CHAT_NAME,
+				})
+				.onConflictDoNothing({ target: thread.podId, where: sql`${thread.main}` }),
+		);
+		const [podChat] = yield* query((db) =>
+			db
+				.select()
+				.from(thread)
+				.where(and(eq(thread.main, true), eq(thread.podId, podId))),
+		);
+		if (!podChat) return yield* Effect.die(new Error("Could not open the pod's chat"));
+		return podChat;
+	});
+
+/** A routine's own thread, where each of its runs posts its result, made if it is not there yet. */
+const routineThreadOf = (
+	cast: Cast<string>,
+	routineRow: { id: string; agentId: string; name: string },
+	podId: string,
+) =>
+	Effect.gen(function* () {
+		const [existing] = yield* query((db) =>
+			db.select().from(thread).where(eq(thread.routineId, routineRow.id)),
+		);
+		if (existing) return existing;
+		const id = randomUUID();
+		const [created] = yield* query((db) =>
+			db
+				.insert(thread)
+				.values({
+					id,
+					workspaceId: cast.workspaceId,
+					podId,
+					hostAgentId: routineRow.agentId,
+					conversationId: id,
+					routineId: routineRow.id,
+					type: "routine_feed",
+					title: routineRow.name,
+				})
+				.returning(),
+		);
+		if (!created) return yield* Effect.die(new Error(`Could not open ${routineRow.name}'s thread`));
+		yield* query((db) =>
+			db.insert(threadParticipant).values({ threadId: id, agentId: routineRow.agentId }),
+		);
+		return created;
+	});
+
+/** Writes the scene into its conversation, unless the conversation already has messages. */
 const writeScene = <Person extends string>(cast: Cast<Person>, day: Date, scene: Scene<Person>) =>
 	Effect.gen(function* () {
-		const opened = yield* chatWith(cast, scene.pod, scene.bot);
+		const opened = yield* conversationWith(cast, scene.pod, scene.bot);
+		const [said] = yield* query((db) =>
+			db.select({ id: message.id }).from(message).where(eq(message.threadId, opened.id)).limit(1),
+		);
+		if (said) return false;
+		yield* writeMessages(cast, day, { inThread: opened, messages: scene.messages });
+		yield* touch(opened.id);
+		return true;
+	});
+
+/**
+ * Writes the scene into its pod's chat, and each thread started there,
+ * unless somebody has already written in the chat.
+ */
+const writeChatScene = <Person extends string>(
+	cast: Cast<Person>,
+	day: Date,
+	scene: ChatScene<Person>,
+) =>
+	Effect.gen(function* () {
+		const podChat = yield* podChatOf(cast, podIdOf(cast.podIds, scene.pod));
 		const [said] = yield* query((db) =>
 			db
 				.select({ id: message.id })
 				.from(message)
-				.where(and(eq(message.threadId, opened.mainThreadId), isNull(message.routineExecutionId)))
+				.where(and(eq(message.threadId, podChat.id), isNotNull(message.authorUserId)))
 				.limit(1),
 		);
 		if (said) return false;
-
-		const threadId = opened.mainThreadId;
 		const keyed = new Map<string, string>();
-		let lastPersonMessage: string | undefined;
 		for (const scripted of scene.messages) {
+			const at = timeOn(day, scripted.at);
+			const text = textOf(scripted.parts);
+			const initiatorUserId = cast.people[scripted.from.person];
+			const messageId = yield* writePersonMessage({
+				threadId: podChat.id,
+				userId: initiatorUserId,
+				text,
+				at,
+				replyToMessageId: scripted.replyTo ? keyed.get(scripted.replyTo) : undefined,
+			});
+			if (scripted.key) keyed.set(scripted.key, messageId);
+			yield* writeReactions(cast, messageId, at, scripted.reactions);
+			if (!scripted.thread) continue;
+			const started = yield* openThreadFrom(cast, {
+				podChat,
+				originMessageId: messageId,
+				bot: scripted.thread.bot,
+				title: threadTitleFrom(text),
+				initiatorUserId,
+				at,
+			});
+			yield* writeMessages(cast, day, {
+				inThread: started,
+				messages: scripted.thread.messages,
+				triggerMessageId: messageId,
+			});
+			yield* touch(started.id);
+		}
+		yield* touch(podChat.id);
+		return true;
+	});
+
+/**
+ * Opens a thread with `bot` from a message in the pod's chat, as mentioning
+ * the bot there does: it hangs off the message, which the bot answers in it.
+ */
+const openThreadFrom = (
+	cast: Cast<string>,
+	input: {
+		podChat: ThreadRow;
+		originMessageId: string;
+		bot: string;
+		title: string;
+		initiatorUserId: string;
+		at: Date;
+	},
+) =>
+	Effect.gen(function* () {
+		const id = randomUUID();
+		const agentId = idOf(cast.botIds, input.bot);
+		const [started] = yield* query((db) =>
+			db
+				.insert(thread)
+				.values({
+					id,
+					workspaceId: input.podChat.workspaceId,
+					podId: input.podChat.podId,
+					hostAgentId: agentId,
+					conversationId: id,
+					parentThreadId: input.podChat.id,
+					type: "conversation",
+					title: input.title,
+					initiatorUserId: input.initiatorUserId,
+					originMessageId: input.originMessageId,
+					createdAt: input.at,
+				})
+				.returning(),
+		);
+		if (!started) return yield* Effect.die(new Error(`Could not open a thread with ${input.bot}`));
+		yield* query((db) =>
+			db.insert(threadParticipant).values([
+				{ threadId: id, userId: input.initiatorUserId, createdAt: input.at },
+				{ threadId: id, agentId, createdAt: input.at },
+			]),
+		);
+		return started;
+	});
+
+/**
+ * Writes the scripted messages into the thread, each bot reply answering the
+ * person's message before it, or `triggerMessageId` until someone has written.
+ */
+const writeMessages = <Person extends string>(
+	cast: Cast<Person>,
+	day: Date,
+	input: {
+		inThread: ThreadRow;
+		messages: readonly ScriptedMessage<Person>[];
+		triggerMessageId?: string;
+	},
+) =>
+	Effect.gen(function* () {
+		const threadId = input.inThread.id;
+		const keyed = new Map<string, string>();
+		let lastPersonMessage = input.triggerMessageId;
+		for (const scripted of input.messages) {
 			const at = timeOn(day, scripted.at);
 			const replyToMessageId = scripted.replyTo ? keyed.get(scripted.replyTo) : undefined;
 			const messageId =
@@ -272,8 +467,8 @@ const writeScene = <Person extends string>(cast: Cast<Person>, day: Date, scene:
 						})
 					: yield* writeBotReply(cast, day, {
 							threadId,
-							chatId: opened.id,
-							podId: opened.podId,
+							conversationId: input.inThread.conversationId ?? threadId,
+							podId: input.inThread.podId,
 							bot: scripted.from.bot,
 							triggerMessageId: lastPersonMessage,
 							parts: scripted.parts,
@@ -282,22 +477,31 @@ const writeScene = <Person extends string>(cast: Cast<Person>, day: Date, scene:
 						});
 			if ("person" in scripted.from) lastPersonMessage = messageId;
 			if (scripted.key) keyed.set(scripted.key, messageId);
-			for (const reaction of scripted.reactions ?? []) {
-				yield* query((db) =>
-					db.insert(messageReaction).values(
-						reaction.by.map((person) => ({
-							messageId,
-							userId: cast.people[person],
-							emoji: reaction.emoji,
-							createdAt: new Date(at.getTime() + REACTION_DELAY_MILLISECONDS),
-						})),
-					),
-				);
-			}
+			yield* writeReactions(cast, messageId, at, scripted.reactions);
 		}
-		yield* touch(threadId, opened.id);
-		return true;
 	});
+
+const writeReactions = <Person extends string>(
+	cast: Cast<Person>,
+	messageId: string,
+	at: Date,
+	reactions: ScriptedMessage<Person>["reactions"],
+) =>
+	Effect.forEach(
+		reactions ?? [],
+		(reaction) =>
+			query((db) =>
+				db.insert(messageReaction).values(
+					reaction.by.map((person) => ({
+						messageId,
+						userId: cast.people[person],
+						emoji: reaction.emoji,
+						createdAt: new Date(at.getTime() + REACTION_DELAY_MILLISECONDS),
+					})),
+				),
+			),
+		{ discard: true },
+	);
 
 const REACTION_DELAY_MILLISECONDS = 60_000;
 /** How long a scripted bot takes to reply, from its turn starting to its message being done. */
@@ -343,7 +547,7 @@ const writeBotReply = <Person extends string>(
 	day: Date,
 	input: {
 		threadId: string;
-		chatId: string;
+		conversationId: string;
 		podId: string;
 		bot: string;
 		triggerMessageId: string | undefined;
@@ -388,7 +592,7 @@ const writeBotReply = <Person extends string>(
 					id,
 					parentThreadId: input.threadId,
 					parentMessageId: messageId,
-					chatId: input.chatId,
+					conversationId: input.conversationId,
 					podId: input.podId,
 					askingBot: input.bot,
 					turnId,
@@ -466,7 +670,7 @@ const writeCollaboration = (
 		id: string;
 		parentThreadId: string;
 		parentMessageId: string;
-		chatId: string;
+		conversationId: string;
 		podId: string;
 		askingBot: string;
 		turnId: string;
@@ -490,7 +694,7 @@ const writeCollaboration = (
 					workspaceId: cast.workspaceId,
 					podId: input.podId,
 					hostAgentId: collaboratorId,
-					chatId: input.chatId,
+					conversationId: input.conversationId,
 					type: "collaboration",
 					title: input.title,
 					parentThreadId: input.parentThreadId,
@@ -700,8 +904,10 @@ const writeArtifact = (
 	});
 
 /**
- * A finished run, as the routine runner leaves one: its thread, what started
- * it, the bot's reply there, and that reply posted to the bot's chat.
+ * A finished run, as the routine runner leaves one: its thread in the
+ * routine's own, what started it, the bot's reply there, and that reply
+ * posted as the run's result in the routine's thread and, when the routine
+ * says so, in the pod's chat.
  * Skipped when the routine already has a run.
  */
 const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
@@ -734,16 +940,17 @@ const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
 		);
 		if (ranAlready) return false;
 
-		const opened = yield* chatWith(cast, run.pod, run.bot);
+		const podId = podIdOf(cast.podIds, run.pod);
+		const routineThread = yield* routineThreadOf(cast, defined, podId);
 		const finishedAt = timeOn(day, run.finishedAt);
 		const [runThread] = yield* query((db) =>
 			db
 				.insert(thread)
 				.values({
 					workspaceId: cast.workspaceId,
-					podId: opened.podId,
+					podId,
 					hostAgentId: agentId,
-					chatId: opened.id,
+					conversationId: routineThread.id,
 					type: "routine",
 					title: `${run.routine} - ${scheduledAt.toISOString()}`,
 					createdAt: scheduledAt,
@@ -803,30 +1010,38 @@ const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
 			triggerMessageId: triggerId,
 			at: finishedAt,
 		});
-		for (const [threadId, routineExecutionId] of [
-			[runThread.id, null],
-			[opened.mainThreadId, executionId],
-		] as const) {
+		const [placed] = yield* query((db) =>
+			db.select({ kind: pod.kind }).from(pod).where(eq(pod.id, podId)),
+		);
+		const podChat =
+			defined.results === "post_to_chat" && placed?.kind === "shared"
+				? yield* podChatOf(cast, podId)
+				: undefined;
+		const posts = [
+			{ threadId: runThread.id, routineExecutionId: null, turnId },
+			{ threadId: routineThread.id, routineExecutionId: executionId, turnId: null },
+			...(podChat ? [{ threadId: podChat.id, routineExecutionId: null, turnId: null }] : []),
+		];
+		for (const post of posts) {
 			yield* query((db) =>
 				db.insert(message).values({
-					threadId,
+					...post,
 					authorAgentId: agentId,
 					kind: "text",
 					status: "complete",
 					parts: [{ type: "text", text: run.result }],
 					content: run.result,
-					turnId,
-					routineExecutionId,
 					createdAt: finishedAt,
 				}),
 			);
 		}
-		yield* touch(opened.mainThreadId, opened.id);
+		yield* touch(routineThread.id);
+		if (podChat) yield* touch(podChat.id);
 		return true;
 	});
 
-/** Stamps the thread and its chat with the thread's latest message, so they sort where it happened. */
-const touch = (threadId: string, chatId: string) =>
+/** Stamps the thread with its latest message, so it sorts where that happened. */
+const touch = (threadId: string) =>
 	Effect.gen(function* () {
 		const [latest] = yield* query((db) =>
 			db
@@ -837,7 +1052,6 @@ const touch = (threadId: string, chatId: string) =>
 		if (!latest?.at) return;
 		const at = latest.at;
 		yield* query((db) => db.update(thread).set({ updatedAt: at }).where(eq(thread.id, threadId)));
-		yield* query((db) => db.update(chat).set({ updatedAt: at }).where(eq(chat.id, chatId)));
 	});
 
 /** Everyone has read every thread in their pods, so nothing seeded shows as unread. */
