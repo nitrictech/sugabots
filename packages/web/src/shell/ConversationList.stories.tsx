@@ -3,7 +3,15 @@ import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
-import { accountManager, design, growthDesk, leadResearcher, revenue } from "./story-fixtures.ts";
+import {
+	accountManager,
+	chief,
+	design,
+	growthDesk,
+	leadResearcher,
+	personal,
+	revenue,
+} from "./story-fixtures.ts";
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000).toISOString();
@@ -323,6 +331,33 @@ export const FailedRoutine = meta.story({
 		await expect(canvas.getByRole("link", { name: /Overnight outbound/ })).toHaveTextContent(
 			"Failed",
 		);
+	},
+});
+
+/**
+ * A Personal pod lists each conversation by its bot's name, with no Done
+ * section: one marked done before stays among the rest.
+ */
+export const PersonalPod = meta.story({
+	args: {
+		pod: personal,
+		selected: undefined,
+		rows: [
+			{
+				agent: chief,
+				conversation: { ...storyConversationFor(chief), doneAt: "2026-09-18T07:00:00.000Z" },
+				unreadMessages: 0,
+				needsApproval: false,
+				mentionsYou: false,
+				lastMessage: null,
+				waitingOn: null,
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: chief.name })).toBeVisible();
+		await expect(canvas.queryByText(`Conversation with ${chief.name}`)).toBeNull();
+		await expect(canvas.queryByRole("button", { name: /Done/ })).toBeNull();
 	},
 });
 

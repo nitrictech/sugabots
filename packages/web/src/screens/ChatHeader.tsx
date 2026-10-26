@@ -52,6 +52,7 @@ export function ChatHeader({
 	routine,
 	conversationId,
 	onOpenDesktop,
+	onlyYou = false,
 	back,
 	trailing,
 	details,
@@ -65,7 +66,12 @@ export function ChatHeader({
 	routine?: RoutineStanding;
 	conversationId: string;
 	onOpenDesktop: () => void;
+	/** The conversation is the viewer's alone, as in their Personal pod, which the header says. */
+	onlyYou?: boolean;
 }) {
+	const description = [agent.description?.replace(/\.$/, ""), onlyYou && "Only you can see this"]
+		.filter(Boolean)
+		.join(". ");
 	const name = (
 		<>
 			<AgentAvatar
@@ -94,11 +100,11 @@ export function ChatHeader({
 					<span className="flex min-w-0 items-center gap-3">{name}</span>
 				)}
 			</h1>
-			{agent.description ? (
+			{description ? (
 				<>
 					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
 					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
-						{agent.description}
+						{description}
 					</p>
 				</>
 			) : (

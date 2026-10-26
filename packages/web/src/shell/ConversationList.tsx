@@ -148,8 +148,10 @@ export function ConversationListView({
 	className?: string;
 }) {
 	const backToChat = useBackToHere("Chat");
-	const open = rows.filter((row) => row.conversation.doneAt === null);
-	const done = rows.filter((row) => row.conversation.doneAt !== null);
+	// A Personal pod's conversations are its person's own with their bots, never done.
+	const direct = pod.kind === "personal";
+	const open = direct ? rows : rows.filter((row) => row.conversation.doneAt === null);
+	const done = direct ? [] : rows.filter((row) => row.conversation.doneAt !== null);
 	const [doneShown, setDoneShown] = useState(false);
 	// Folded until opened, unless a routine has failed, which opens it.
 	const [routinesChosen, setRoutinesShown] = useState<boolean>();
@@ -346,7 +348,9 @@ function ConversationRow({
 	const { agent } = row;
 	const needsYou = row.needsApproval || row.mentionsYou;
 	const lit = selected || needsYou || row.unreadMessages > 0;
-	const done = row.conversation.doneAt !== null;
+	// In a Personal pod a conversation is with the bot, so goes by its name and is never done.
+	const direct = pod.kind === "personal";
+	const done = !direct && row.conversation.doneAt !== null;
 	return (
 		<Link
 			{...conversationLink({ pod, conversationId: row.conversation.id })}
@@ -371,7 +375,7 @@ function ConversationRow({
 					lit && !done ? "text-foreground" : "text-muted-foreground",
 				)}
 			>
-				{row.conversation.title}
+				{direct && agent ? agent.name : row.conversation.title}
 			</span>
 			<ChatMarker needsYou={needsYou} unreadMessages={row.unreadMessages} />
 		</Link>

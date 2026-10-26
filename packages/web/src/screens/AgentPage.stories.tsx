@@ -459,17 +459,19 @@ export const PodOnAPhone = meta.story({
 	},
 });
 
-/** A bot nobody has written to yet: the start of the chat, with its face and name. */
+/** Your own bot in your Personal pod, nobody has written to yet: the start of the chat, saying it is yours alone. */
 export const FirstMessage = meta.story({
 	render: () => <StoryApp path={chatPath(chief)} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(
-				`This is the start of your conversation with ${chief.name}.`,
-				{ exact: false },
+				"Your own bot. It works for you only and nobody else in the workspace can see this conversation.",
+				{},
 				{ timeout: 10_000 },
 			),
 		).toBeInTheDocument();
+		await expect(canvas.getByText(/Only you can see this$/)).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 	},
 });
 
