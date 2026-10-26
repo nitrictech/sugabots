@@ -110,6 +110,11 @@ export function conversationLink(
 	});
 }
 
+/** A pod's chat, opened first when nobody has opened it yet. */
+export function podChatLink(pod: Pick<Pod, "slug">) {
+	return linkOptions({ from: "/$workspace", to: "./pods/$pod/chat", params: { pod: pod.slug } });
+}
+
 /**
  * A bot's newest conversation in its pod, started if it has none, with
  * `thread` open beside it, or `artifact` open large.

@@ -140,10 +140,11 @@ export const thread = pgTable(
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		podId: uuid("pod_id").notNull(),
-		hostAgentId: uuid("host_agent_id").notNull(),
+		/** The bot the thread is with. Null on a pod's chat, which is the pod's people's. */
+		hostAgentId: uuid("host_agent_id"),
 		/**
-		 * The conversation this thread belongs to: its own id on a conversation,
-		 * and the conversation it was opened from on a collaboration or a routine
+		 * The conversation this thread belongs to: its own id on a conversation
+		 * or a pod's chat, and the conversation it was opened from on a collaboration or a routine
 		 * run. Null on a system agent's thread, which serves a thread rather than
 		 * belonging to one.
 		 */
@@ -164,13 +165,25 @@ export const thread = pgTable(
 		initiatorUserId: uuid("initiator_user_id").references(() => user.id, {
 			onDelete: "restrict",
 		}),
+		/** On a thread started from a pod's chat: the message in the chat it hangs off. */
+		originMessageId: uuid("origin_message_id").references((): AnyPgColumn => message.id, {
+			onDelete: "set null",
+		}),
+		/** When somebody marked the conversation done, until it is reopened. */
+		doneAt: timestamp("done_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'collaboration', 'routine', 'system_agent')`,
+			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'system_agent')`,
+		),
+		// A pod's chat is its people's, a conversation may be with a bot or only
+		// people, and every other thread is some bot's.
+		check(
+			"thread_host_valid",
+			sql`case ${table.type} when 'pod_chat' then ${table.hostAgentId} is null when 'conversation' then true else ${table.hostAgentId} is not null end`,
 		),
 		foreignKey({
 			columns: [table.podId, table.workspaceId],
@@ -183,11 +196,15 @@ export const thread = pgTable(
 			name: "thread_host_agent_workspace_fkey",
 		}).onDelete("cascade"),
 		uniqueIndex("thread_system_agent_key_idx").on(table.parentThreadId, table.systemAgentKey),
+		// One thread per message in a pod's chat.
+		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
 		index("thread_workspace_created_at_idx").on(table.workspaceId, table.createdAt),
 		index("thread_pod_host_created_at_idx").on(table.podId, table.hostAgentId, table.createdAt),
 		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
 		index("thread_pod_host_updated_at_idx").on(table.podId, table.hostAgentId, table.updatedAt),
 		index("thread_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
+		// One chat per pod.
+		uniqueIndex("thread_pod_chat_idx").on(table.podId).where(sql`${table.type} = 'pod_chat'`),
 	],
 );
 

@@ -98,6 +98,25 @@ export function ChatHeader({
 	);
 }
 
+/**
+ * The bar across the top of a pod's chat: what it is and who is in it. Shown
+ * away from its own page, as Activity shows it, it has the way to the chat
+ * itself at the right.
+ */
+export function PodChatHeader({ pod, place }: { pod: Pod; place: ChatPlace }) {
+	return (
+		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
+			<HeaderBack back={place.kind === "away" ? place.back : { to: "pod", pod }} />
+			<h1 className="m-0 shrink-0 font-semibold text-[16px] text-foreground">Pod chat</h1>
+			<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
+			<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
+				Everyone in {pod.name}.
+			</p>
+			{place.kind === "away" && place.trailing}
+		</header>
+	);
+}
+
 /** The round Back a phone shows at the left of a page's header, to the list the page covers. */
 export function HeaderBack({ back }: { back: BackTo }) {
 	const className =

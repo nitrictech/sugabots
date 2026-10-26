@@ -192,7 +192,18 @@ export const make = Effect.gen(function* () {
 							},
 						];
 					});
-					return { items: items.sort(byLatestMessage) };
+					const [podChat] = yield* query((db) => podChats(db, [podId]));
+					const podChatUnread = podChat
+						? ((yield* query((db) => unreadMessageCounts(db, userId, [podChat.id]))).get(
+								podChat.id,
+							) ?? 0)
+						: 0;
+					return {
+						podChat: podChat
+							? { conversation: toConversation(podChat), unreadMessages: podChatUnread }
+							: null,
+						items: items.sort(byLatestMessage),
+					};
 				}),
 			),
 
@@ -209,6 +220,19 @@ export const make = Effect.gen(function* () {
 					const bots = yield* query((db) => listedBots(db, listing));
 					const marksOf = yield* conversationMarks(workspaceId, bots);
 					const pods: Record<string, { unreadMessages: number; needsApproval: boolean }> = {};
+					const { userId } = yield* CurrentActor.Service;
+					const chats = yield* query((db) => podChatsReached(db, listing));
+					const chatUnread = yield* query((db) =>
+						unreadMessageCounts(
+							db,
+							userId,
+							chats.map((chat) => chat.id),
+						),
+					);
+					for (const chat of chats) {
+						const unreadMessages = chatUnread.get(chat.id) ?? 0;
+						if (unreadMessages > 0) pods[chat.podId] = { unreadMessages, needsApproval: false };
+					}
 					for (const row of bots) {
 						const crew = crewAgentRow(row.agent);
 						if (!crew) continue;
@@ -440,6 +464,34 @@ function newestConversationWith(podId: SQLWrapper, hostAgentId: SQLWrapper): SQL
 	)`;
 }
 
+/** The chats of the pods `podIds` that have one. */
+const podChats = Effect.fn("ChatView.podChats")(function* (
+	db: Executor,
+	podIds: readonly string[],
+) {
+	return yield* db
+		.select()
+		.from(thread)
+		.where(and(eq(thread.type, "pod_chat"), inArray(thread.podId, [...podIds])));
+});
+
+/** The chats of every pod the listing reaches that has one. */
+const podChatsReached = Effect.fn("ChatView.podChatsReached")(function* (
+	db: Executor,
+	input: Listing,
+) {
+	return yield* db
+		.select({ id: thread.id, podId: thread.podId })
+		.from(thread)
+		.where(
+			and(
+				eq(thread.type, "pod_chat"),
+				eq(thread.workspaceId, input.workspaceId),
+				input.reachesPod(thread.podId),
+			),
+		);
+});
+
 /** The newest message with words in it on each thread, in one query. */
 const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 	db: Executor,
@@ -614,7 +666,10 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 			unread: sql<boolean>`${unread}`,
 		})
 		.from(message)
-		.innerJoin(thread, and(eq(thread.id, message.threadId), eq(thread.type, "conversation")))
+		.innerJoin(
+			thread,
+			and(eq(thread.id, message.threadId), inArray(thread.type, ["conversation", "pod_chat"])),
+		)
 		.leftJoin(user, eq(user.id, message.authorUserId))
 		.leftJoin(author, eq(author.id, message.authorAgentId))
 		.where(
@@ -998,7 +1053,11 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	before: CursorPoint | undefined,
 ) {
 	const conversation = yield* db.query.thread.findFirst({
-		where: { id: conversationId, type: "conversation", RAW: (row) => reachesPod(row.podId) },
+		where: {
+			id: conversationId,
+			type: { in: ["conversation", "pod_chat"] },
+			RAW: (row) => reachesPod(row.podId),
+		},
 		columns: { id: true },
 		with: {
 			messages: {
@@ -1141,7 +1200,11 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 		},
 	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["thread"]>;
 	return yield* db.query.thread.findFirst({
-		where: { id: conversationId, type: "conversation", RAW: (row) => reachesPod(row.podId) },
+		where: {
+			id: conversationId,
+			type: { in: ["conversation", "pod_chat"] },
+			RAW: (row) => reachesPod(row.podId),
+		},
 		columns: { id: true },
 		with: { conversationThreads: sideThreads, hostCollaborationThreads: sideThreads },
 	});

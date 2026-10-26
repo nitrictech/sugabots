@@ -7,9 +7,9 @@ import { client } from "@/test-client.ts";
 const chatModule = vi.hoisted(() => Promise.withResolvers<void>());
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
-vi.mock("@/screens/AgentPage.tsx", async (importOriginal) => {
+vi.mock("@/screens/ConversationPage.tsx", async (importOriginal) => {
 	await chatModule.promise;
-	return importOriginal<typeof import("@/screens/AgentPage.tsx")>();
+	return importOriginal<typeof import("@/screens/ConversationPage.tsx")>();
 });
 
 afterEach(() => {
@@ -45,7 +45,7 @@ it("keeps the rail and conversation list visible while the chat screen loads", a
 
 	await act(async () => {
 		chatModule.resolve();
-		await import("@/screens/AgentPage.tsx");
+		await import("@/screens/ConversationPage.tsx");
 	});
 	// The bot's name heads more than one part of the chat screen.
 	expect(await screen.findAllByRole("heading", { name: linear.name })).not.toHaveLength(0);

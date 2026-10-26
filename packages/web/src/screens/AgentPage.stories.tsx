@@ -16,6 +16,7 @@ import {
 	StoryApp,
 	storyBots,
 	storyConversationFor,
+	storyPodChatFor,
 	storyUser,
 	storyWorkspace,
 } from "../story-app.tsx";
@@ -94,17 +95,67 @@ export const Conversation = meta.story({
 	},
 });
 
-/** A pod opened from the rail opens the chat at the top of its list. */
+/** A shared pod opened from the rail opens its chat. */
 export const PodOpensTopChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: growthDesk.name, level: 1 }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Pod chat", level: 1 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		const list = canvas.getByRole("region", { name: revenue.name });
+		await expect(within(list).getByRole("link", { name: /Pod chat/ })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+	},
+});
+
+/** The pod's people, writing to each other: a chat with no bot in it, addressed to the pod. */
+const podChat: Message[] = [
+	{
+		...said(
+			"21",
+			"you",
+			"Northwind signed. Thanks for the push, everyone.",
+			"2026-09-18T06:12:00.000Z",
+		),
+		threadId: storyPodChatFor(revenue).id,
+	},
+	{
+		...said("22", "you", "Drinks on Friday?", "2026-09-18T06:13:00.000Z"),
+		threadId: storyPodChatFor(revenue).id,
+		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Jay Young" }),
+	},
+];
+
+/** A pod's chat: everyone in the pod, no bot, and a composer addressed to the pod. */
+export const PodChat = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...appHandlers({ podChatMessages: { [revenue.id]: podChat } }));
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
+		await expect(canvas.getByText(`Everyone in ${revenue.name}.`)).toBeInTheDocument();
 		await expect(
-			within(list).getByRole("link", { name: new RegExp(growthDesk.name) }),
-		).toHaveAttribute("aria-current", "page");
+			canvas.getByRole("textbox", { name: `Message ${revenue.name}` }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
+	},
+});
+
+/** On a phone the pod's chat takes the screen, with Back to the pod's list. */
+export const PodChatOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...appHandlers({ podChatMessages: { [revenue.id]: podChat } }));
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("link", { name: `Back to ${revenue.name}` }, { timeout: 10_000 }),
+		).toBeVisible();
 	},
 });
 

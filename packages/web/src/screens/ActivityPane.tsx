@@ -3,10 +3,10 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useChatHistory } from "@/lib/chats.ts";
 import { conversationLink } from "@/lib/links.ts";
-import type { Staged } from "./AgentChat.tsx";
-import { AgentPage } from "./AgentPage.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
+import type { Staged } from "./ConversationChat.tsx";
+import { ConversationPage } from "./ConversationPage.tsx";
 
 const BACK_TO_ACTIVITY: BackTo = { to: "activity" };
 
@@ -30,7 +30,8 @@ export function ActivityPane({
 	onStagedChange,
 }: {
 	pod: Pod;
-	agent: Agent;
+	/** The bot the conversation is with; null in the pod's chat. */
+	agent: Agent | null;
 	/** The conversation the item is in, which is with `agent`. */
 	conversationId: string;
 	user: SessionUser;
@@ -53,7 +54,7 @@ export function ActivityPane({
 			Open chat
 		</Link>
 	);
-	if (threadPageId) {
+	if (threadPageId && agent) {
 		return (
 			<ActivityThread
 				agent={agent}
@@ -65,7 +66,7 @@ export function ActivityPane({
 		);
 	}
 	return (
-		<AgentPage
+		<ConversationPage
 			agent={agent}
 			pod={pod}
 			conversationId={conversationId}

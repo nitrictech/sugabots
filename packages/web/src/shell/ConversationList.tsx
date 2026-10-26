@@ -1,10 +1,16 @@
-import type { ChatListItem, Pod } from "@sugabots/contracts";
+import type { ChatList, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Library, Plus, Settings2 } from "lucide-react";
+import { Library, Plus, Settings2, Users } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, artifactsLink, conversationLink, podSettingsLink } from "@/lib/links.ts";
+import {
+	agentChatLink,
+	artifactsLink,
+	conversationLink,
+	podChatLink,
+	podSettingsLink,
+} from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListColumn } from "@/shell/ListColumn.tsx";
@@ -13,17 +19,20 @@ import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
+/** Which row of the list is open: the pod's chat, or a bot's conversation. */
+export type ListSelection = { kind: "podChat" } | { kind: "bot"; agentId: string };
+
 /**
- * The column of conversations for the pod chosen on the rail: one row per bot,
- * newest message first.
+ * The column of conversations for the pod chosen on the rail: a shared pod's
+ * chat first, then one row per bot, newest message first.
  */
 export function ConversationList({
 	pod,
-	selectedAgentId,
+	selected,
 	className,
 }: {
 	pod: Pod;
-	selectedAgentId?: string;
+	selected?: ListSelection;
 	className?: string;
 }) {
 	const list = useChatList(pod.slug);
@@ -41,9 +50,10 @@ export function ConversationList({
 		<>
 			<ConversationListView
 				pod={pod}
+				podChat={pod.kind === "shared" ? (list.data?.podChat ?? "unopened") : undefined}
 				rows={rows}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
-				selectedAgentId={selectedAgentId}
+				selected={selected}
 				onNewBot={newBot}
 				emptyState={emptyState}
 				className={className}
@@ -72,17 +82,20 @@ export interface EmptyList {
 
 export function ConversationListView({
 	pod,
+	podChat,
 	rows,
 	status,
-	selectedAgentId,
+	selected,
 	onNewBot,
 	emptyState,
 	className,
 }: {
 	pod: Pod;
+	/** The pod's chat, `unopened` until somebody first opens it. Absent from a Personal pod. */
+	podChat?: NonNullable<ChatList["podChat"]> | "unopened";
 	rows: readonly ChatListItem[];
 	status: "loading" | "ready" | "failed";
-	selectedAgentId?: string;
+	selected?: ListSelection;
 	/** Absent when the viewer may not make a bot here. */
 	onNewBot?: () => void;
 	emptyState: EmptyList;
@@ -91,6 +104,29 @@ export function ConversationListView({
 	const backToChat = useBackToHere("Chat");
 	const title = pod.name;
 	const empty = status === "ready" && rows.length === 0;
+	const noBots = (
+		// A little above the middle, as the design sets it, with the one next step under it.
+		<div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-6 pb-[18%] text-center">
+			<div className="flex flex-col gap-1.5">
+				<p className="m-0 font-medium text-[14.5px] text-muted-foreground">{emptyState.title}</p>
+				{emptyState.hint && (
+					<p className="m-0 max-w-[240px] text-[13px] text-subtle-foreground leading-normal">
+						{emptyState.hint}
+					</p>
+				)}
+			</div>
+			{emptyState.action && (
+				<button
+					type="button"
+					onClick={emptyState.action.onClick}
+					className="focus-ring flex h-10 items-center gap-[7px] rounded-[20px] bg-switch-on px-[18px] font-semibold text-[14px] text-white transition-colors hover:bg-primary"
+				>
+					<Plus size={15} strokeWidth={2.6} />
+					{emptyState.action.label}
+				</button>
+			)}
+		</div>
+	);
 
 	return (
 		<ListColumn
@@ -116,43 +152,83 @@ export function ConversationListView({
 				</>
 			}
 		>
-			{empty ? (
-				// A little above the middle, as the design sets it, with the one next step under it.
-				<div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-6 pb-[18%] text-center">
-					<div className="flex flex-col gap-1.5">
-						<p className="m-0 font-medium text-[14.5px] text-muted-foreground">
-							{emptyState.title}
-						</p>
-						{emptyState.hint && (
-							<p className="m-0 max-w-[240px] text-[13px] text-subtle-foreground leading-normal">
-								{emptyState.hint}
-							</p>
-						)}
-					</div>
-					{emptyState.action && (
-						<button
-							type="button"
-							onClick={emptyState.action.onClick}
-							className="focus-ring flex h-10 items-center gap-[7px] rounded-[20px] bg-switch-on px-[18px] font-semibold text-[14px] text-white transition-colors hover:bg-primary"
-						>
-							<Plus size={15} strokeWidth={2.6} />
-							{emptyState.action.label}
-						</button>
+			{(podChat || !empty) && (
+				<ul
+					className={cn(
+						"m-0 flex min-h-0 list-none flex-col gap-px overflow-y-auto px-2 pt-2.5 pb-3",
+						!empty && "flex-1",
 					)}
-				</div>
-			) : (
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-y-auto px-2 pt-2.5 pb-3">
+				>
 					{status === "failed" && (
 						<li className="px-2.5 py-3 text-muted-foreground">Could not load these chats.</li>
 					)}
+					{podChat && (
+						<>
+							<li>
+								<PodChatRow pod={pod} podChat={podChat} selected={selected?.kind === "podChat"} />
+							</li>
+							{rows.length > 0 && (
+								<li className="px-2.5 pt-3.5 pb-1 font-medium text-[12px] text-subtle-foreground">
+									Threads
+								</li>
+							)}
+						</>
+					)}
 					{rows.map((row) => (
 						<li key={row.agent.id}>
-							<ConversationRow row={row} pod={pod} selected={row.agent.id === selectedAgentId} />
+							<ConversationRow
+								row={row}
+								pod={pod}
+								selected={selected?.kind === "bot" && row.agent.id === selected.agentId}
+							/>
 						</li>
 					))}
 				</ul>
 			)}
+			{empty && noBots}
 		</ListColumn>
+	);
+}
+
+/** The pod's chat on one line, bright while something there is new, with how much. */
+function PodChatRow({
+	pod,
+	podChat,
+	selected,
+}: {
+	pod: Pod;
+	podChat: NonNullable<ChatList["podChat"]> | "unopened";
+	selected: boolean;
+}) {
+	const unreadMessages = podChat === "unopened" ? 0 : podChat.unreadMessages;
+	const lit = selected || unreadMessages > 0;
+	return (
+		<Link
+			{...(podChat === "unopened"
+				? podChatLink(pod)
+				: conversationLink({ pod, conversationId: podChat.conversation.id }))}
+			aria-current={selected ? "page" : undefined}
+			className={cn(
+				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
+				selected ? "bg-row-selected" : "hover:bg-row-hover",
+			)}
+		>
+			<span
+				aria-hidden
+				className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip-strong text-muted-foreground"
+			>
+				<Users size={14} strokeWidth={2} />
+			</span>
+			<span
+				className={cn(
+					"min-w-0 flex-1 truncate text-[14.5px]",
+					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+				)}
+			>
+				Pod chat
+			</span>
+			<ChatMarker needsApproval={false} unreadMessages={unreadMessages} />
+		</Link>
 	);
 }
 

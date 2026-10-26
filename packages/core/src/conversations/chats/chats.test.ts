@@ -615,6 +615,47 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
 	});
 
+	it("opens one chat per pod, where no bot answers, even one named in it", async () => {
+		const input = { workspace: workspaceId, podId };
+		const [first, again] = await Promise.all([chats.openPodChat(input), chats.openPodChat(input)]);
+		expect(again.id).toBe(first.id);
+		expect(first).toMatchObject({ podId, hostAgentId: null, title: "Pod chat" });
+		const [host] = await onDatabase((db) =>
+			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
+		);
+
+		await chats.post({
+			conversationId: first.id,
+			messageId: crypto.randomUUID(),
+			content: `@${host?.handle} can you look at this?`,
+		});
+
+		expect(await runOnPostgres(runningTurns(first.id))).toHaveLength(0);
+		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
+	});
+
+	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: podChat.id,
+				authorUserId: administratorId,
+				kind: "text",
+				status: "complete",
+				parts: [{ type: "text", text: "Lunch?" }],
+				content: "Lunch?",
+			}),
+		);
+
+		expect((await view.list({ workspace: workspaceId, pod: podId }))?.podChat).toEqual({
+			conversation: expect.objectContaining({ id: podChat.id }),
+			unreadMessages: 1,
+		});
+		expect(await view.podMarkers(workspaceId)).toEqual({
+			pods: { [podId]: { unreadMessages: 1, needsApproval: false } },
+		});
+	});
+
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });

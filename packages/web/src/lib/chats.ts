@@ -242,9 +242,15 @@ export function useOpenConversation(pod: Pod, hostAgentId: string) {
 	});
 }
 
+/** A conversation's pod, and the bot it is with: null when it is the pod's chat. */
+export interface ConversationPlace {
+	pod: Pod;
+	agent: Agent | null;
+}
+
 /**
- * The pod at `podSlug` and the bot the conversation `conversationId` is with;
- * `undefined` when the conversation is not one in that pod. Read from the
+ * The pod at `podSlug` and the bot the conversation `conversationId` is with,
+ * or null for the pod's chat; `undefined` when it is not one in that pod. Read from the
  * pod's conversation list, which the screen loads anyway, and from the
  * conversation itself only when the list does not have it, so the screen does
  * not wait on the conversation to know whose it is.
@@ -252,23 +258,26 @@ export function useOpenConversation(pod: Pod, hostAgentId: string) {
 export function useConversationPlace(
 	podSlug: string,
 	conversationId: string,
-): { found: { pod: Pod; agent: Agent } | undefined; isPending: boolean; error: unknown } {
+): { found: ConversationPlace | undefined; isPending: boolean; error: unknown } {
 	const pods = usePods();
 	const roster = useAgents();
 	const list = useChatList(podSlug);
-	const listed = list.data?.items.find((item) => item.conversation?.id === conversationId);
+	const isPodChat = list.data?.podChat?.conversation.id === conversationId;
+	const listed =
+		isPodChat || list.data?.items.some((item) => item.conversation?.id === conversationId);
+	const listedBot = list.data?.items.find((item) => item.conversation?.id === conversationId);
 	const unlisted = useQuery({
 		...threadQuery(conversationId),
 		enabled: list.isSuccess && !listed,
 	});
 	const pod = findPod(pods.data, podSlug);
-	const thread = unlisted.data?.thread;
+	const thread = unlisted.data?.thread?.podId === pod?.id ? unlisted.data?.thread : undefined;
 	const hostAgentId =
-		listed?.agent.id ??
-		(thread?.type === "conversation" && thread.podId === pod?.id ? thread.hostAgentId : undefined);
+		listedBot?.agent.id ?? (thread?.type === "conversation" ? thread.hostAgentId : undefined);
 	const agent = roster.agents?.find((candidate) => candidate.id === hostAgentId);
+	const inPodChat = isPodChat || thread?.type === "pod_chat";
 	return {
-		found: pod && agent ? { pod, agent } : undefined,
+		found: pod && (agent || inPodChat) ? { pod, agent: agent ?? null } : undefined,
 		isPending:
 			pods.isPending ||
 			roster.isPending ||
@@ -276,6 +285,30 @@ export function useConversationPlace(
 			(list.isSuccess && !listed && unlisted.isPending),
 		error: pods.error ?? roster.error ?? list.error ?? unlisted.error,
 	};
+}
+
+/**
+ * The pod's chat, read from its conversation list when somebody has opened it,
+ * and otherwise opened with a request.
+ */
+export function useOpenPodChat(pod: Pod) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["pod-chat", workspaceId, pod.id],
+		queryFn: workspaceId
+			? async ({ signal }) => {
+					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					return (
+						list.podChat?.conversation ??
+						Effect.runPromise(
+							client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
+							{ signal },
+						)
+					);
+				}
+			: skipToken,
+	});
 }
 
 /**

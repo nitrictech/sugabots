@@ -20,8 +20,8 @@ import { crewOf } from "../threads/participants.ts";
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
  * applies it, and asks for the turns. Precedence, top wins:
  *
- * 1. Writing for people only, or mentioning only people: nobody. They are
- *    talking to each other.
+ * 1. Writing in a pod's chat, for people only, or mentioning only people:
+ *    nobody. They are talking to each other.
  * 2. Writing in a conversation: its agent, whichever agents they mention. A
  *    conversation is with one agent, so another agent the person names is
  *    reached by that agent collaborating, not by joining.
@@ -35,7 +35,8 @@ export interface FloorInput {
 	peopleOnly: boolean;
 	/** What the message says, for mentions. */
 	content: string;
-	hostAgentId: string;
+	/** The bot the thread is with; null in a pod's chat. */
+	hostAgentId: string | null;
 	/** Crew placed in the pod, addressable by handle. */
 	crew: ReadonlyArray<{ id: string; handle: string }>;
 	/** Agents already in the thread. */
@@ -51,7 +52,11 @@ export type FloorDecision =
 export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
-	if (input.peopleOnly || (mentioned.length > 0 && mentionedAgents.length === 0)) {
+	if (
+		input.hostAgentId === null ||
+		input.peopleOnly ||
+		(mentioned.length > 0 && mentionedAgents.length === 0)
+	) {
 		return { kind: "nobody" };
 	}
 	if (input.threadType === "conversation") {

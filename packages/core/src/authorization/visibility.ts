@@ -1,6 +1,6 @@
 export * as Visibility from "./visibility.ts";
 
-import { and, eq, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, eq, inArray, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
@@ -33,7 +33,7 @@ export interface Interface {
 	readonly thread: (
 		threadId: string,
 	) => Effect.Effect<ThreadStanding, ResourceHidden, CurrentActor.Service>;
-	/** The conversation, by its id: a thread whose type is `conversation`. */
+	/** The conversation or pod's chat, by its id. */
 	readonly conversation: (
 		conversationId: string,
 	) => Effect.Effect<schema.ThreadRow, ResourceHidden, CurrentActor.Service>;
@@ -88,7 +88,7 @@ export const make = Effect.gen(function* () {
 									.where(
 										and(
 											eq(thread.id, conversationId),
-											eq(thread.type, "conversation"),
+											inArray(thread.type, ["conversation", "pod_chat"]),
 											reachesPodFor(thread.podId, userId),
 										),
 									)

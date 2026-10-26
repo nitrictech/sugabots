@@ -444,6 +444,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);
 		return Effect.succeed({
+			podChat: null,
 			items: agents
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({
@@ -463,6 +464,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			? Effect.succeed(conversationWith(agent))
 			: Effect.fail(new NotFound({ message: userText`No conversation fixture` }));
 	});
+	client.api.chats.openPodChat.mockReturnValue(
+		Effect.fail(new NotFound({ message: userText`No pod chat fixture` })),
+	);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {

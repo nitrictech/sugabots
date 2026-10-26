@@ -4,12 +4,13 @@ import type { Conversation, Message } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { agent, pod } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
@@ -37,6 +38,15 @@ export interface Interface {
 		AuthorizationDenied | ChatPlacementRejected,
 		CurrentActor.Service
 	>;
+	/**
+	 * The shared pod's chat, opened on first use, in a workspace named by its
+	 * id or its slug. Hidden unless the actor reaches the pod; a Personal pod
+	 * is one person's, so it has no chat.
+	 */
+	readonly openPodChat: (input: {
+		workspace: string;
+		podId: string;
+	}) => Effect.Effect<Conversation, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Posts the actor's message into the conversation, with the files
 	 * they uploaded to it, and gives the floor. Posting the same message again
@@ -98,6 +108,44 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		openPodChat: (input) =>
+			operation(
+				"openPodChat",
+				transaction(
+					Effect.gen(function* () {
+						const { workspaceId, actor } = yield* authorization.workspace(
+							input.workspace,
+							"workspace.read",
+						);
+						const reachesPod = yield* visibility.reachesPod;
+						const [reached] = isUuid(input.podId)
+							? yield* query((db) =>
+									db
+										.select({ id: pod.id })
+										.from(pod)
+										.where(
+											and(
+												eq(pod.id, input.podId),
+												eq(pod.workspaceId, workspaceId),
+												eq(pod.kind, "shared"),
+												reachesPod(pod.id),
+											),
+										)
+										.limit(1),
+								)
+							: [];
+						if (!reached) return yield* new ResourceHidden({ resource: "pod" });
+						return toConversation(
+							yield* threads.openPodChat({
+								workspaceId,
+								podId: reached.id,
+								initiatorUserId: actor.userId,
+							}),
+						);
+					}),
+				),
+			),
+
 		post: (input) =>
 			operation(
 				"post",
@@ -117,7 +165,7 @@ export const make = Effect.gen(function* () {
 						if (posted._tag === "AlreadyPosted") return posted.message;
 						// Checked once the message is known to be new, so sending it again
 						// still returns it; refusing here rolls the post back.
-						if ((yield* hostModelOf(visible.hostAgentId)) === null) {
+						if (visible.hostAgentId && (yield* hostModelOf(visible.hostAgentId)) === null) {
 							return yield* new ChatAgentHasNoModel();
 						}
 						yield* floor.giveFloor({

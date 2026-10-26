@@ -23,7 +23,7 @@ import {
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
+import { POD_CHAT, useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	useChatHistory,
@@ -52,7 +52,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { ChatHeader, type ChatPlace } from "./ChatHeader.tsx";
+import { ChatHeader, type ChatPlace, PodChatHeader } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
@@ -85,7 +85,7 @@ export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
 	| { kind: "desktop" };
 
-export function AgentChat({
+export function ConversationChat({
 	agent,
 	pod,
 	conversationId,
@@ -97,7 +97,8 @@ export function AgentChat({
 	staged,
 	onStagedChange,
 }: {
-	agent: Agent;
+	/** The bot the conversation is with; null in the pod's chat, which is its people's. */
+	agent: Agent | null;
 	pod: Pod;
 	/** The conversation shown, which is with `agent`. */
 	conversationId: string;
@@ -123,8 +124,8 @@ export function AgentChat({
 	const send = useSendChatMessage(conversationId, user);
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
-	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
-	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent.id);
+	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent?.id ?? POD_CHAT);
+	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, agent?.id ?? POD_CHAT);
 	const attachments = useComposerAttachments(conversationId);
 	const [peopleOnly, setPeopleOnly] = useState(false);
 	useTypingSignal(conversationId, draft);
@@ -138,10 +139,12 @@ export function AgentChat({
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
 	const details = mainThread.data;
-	const host = details?.participants.find(
-		(participant): participant is AgentParticipant =>
-			participant.kind === "agent" && participant.id === agent.id,
-	);
+	const host = agent
+		? details?.participants.find(
+				(participant): participant is AgentParticipant =>
+					participant.kind === "agent" && participant.id === agent.id,
+			)
+		: undefined;
 	const entries = history.entries;
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
@@ -262,7 +265,7 @@ export function AgentChat({
 		onThreadChange(nextThreadId);
 	}
 
-	const header = (
+	const header = agent ? (
 		<ChatHeader
 			agent={agent}
 			pod={pod}
@@ -271,8 +274,10 @@ export function AgentChat({
 			staged={staged !== undefined}
 			onOpenDesktop={openDesktop}
 		/>
+	) : (
+		<PodChatHeader pod={pod} place={place} />
 	);
-	if (!details || !host)
+	if (!details || (agent && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
 				{header}
@@ -288,17 +293,17 @@ export function AgentChat({
 	// The people here and this chat's own bot, not yourself; the pod's other bots are not offered.
 	const composerMentionable = mentionable.filter(
 		(candidate) =>
-			candidate.id !== user.id && (candidate.kind === "person" || candidate.id === host.id),
+			candidate.id !== user.id && (candidate.kind === "person" || candidate.id === host?.id),
 	);
 	// The pod's people, not only those who have written here, so a new bot's chat can start people-only.
 	const otherPeople = mentionable.filter(
 		(candidate) => candidate.kind === "person" && candidate.id !== user.id,
 	);
-	const writingToPeople = peopleOnly && otherPeople.length > 0;
+	const writingToPeople = agent !== null && peopleOnly && otherPeople.length > 0;
 	// Written to the people here rather than the bot: their names, with the rest counted.
 	const composerLabel = writingToPeople
 		? `Message ${listNames(otherPeople.map((person) => person.name))}`
-		: `Message ${agent.name}`;
+		: `Message ${agent?.name ?? pod.name}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
 
 	return (
@@ -312,7 +317,7 @@ export function AgentChat({
 			>
 				{header}
 				<FileDropTarget
-					onDropFiles={agent.model === null ? undefined : attachments.attach}
+					onDropFiles={agent?.model === null ? undefined : attachments.attach}
 					className="flex min-h-0 flex-1 flex-col"
 				>
 					<div
@@ -347,7 +352,7 @@ export function AgentChat({
 									{messages.isFetchingNextPage ? "Loading…" : "Load older messages"}
 								</Button>
 							)}
-							{messages.isSuccess && !messages.hasNextPage && <ChatIntro agent={agent} />}
+							{messages.isSuccess && !messages.hasNextPage && agent && <ChatIntro agent={agent} />}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
 									{group.separated && <DaySeparator at={group.at} />}
@@ -376,12 +381,14 @@ export function AgentChat({
 											reacting={reacting}
 										/>
 									) : (
-										<ActivityLine
-											item={group.item}
-											host={host}
-											entry={entries.find((entry) => entry.threadId === group.item.threadId)}
-											onOpen={() => openThread(group.item.threadId)}
-										/>
+										host && (
+											<ActivityLine
+												item={group.item}
+												host={host}
+												entry={entries.find((entry) => entry.threadId === group.item.threadId)}
+												onOpen={() => openThread(group.item.threadId)}
+											/>
+										)
 									)}
 								</Fragment>
 							))}
@@ -397,7 +404,7 @@ export function AgentChat({
 						</div>
 					</div>
 					<div className="shrink-0 px-4 md:px-5">
-						{agent.model === null ? (
+						{agent?.model === null ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
 							<ChatComposer
@@ -411,7 +418,7 @@ export function AgentChat({
 								className="w-full"
 								mentionable={composerMentionable}
 								peopleOnly={
-									otherPeople.length > 0
+									host && otherPeople.length > 0
 										? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
 										: undefined
 								}
@@ -437,14 +444,14 @@ export function AgentChat({
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "desktop" ? (
+			) : staged?.kind === "desktop" && agent ? (
 				<DesktopStage
 					threadId={details.thread.id}
 					agent={agent}
 					mayUse={pod.permissions.useDesktops}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : threadId ? (
+			) : threadId && agent ? (
 				<ChatThreadPanel
 					conversationId={conversationId}
 					chatAgentId={agent.id}
@@ -456,6 +463,7 @@ export function AgentChat({
 					onOpenArtifact={openArtifact}
 				/>
 			) : (
+				agent &&
 				place.kind === "own" &&
 				place.detailsOpen && (
 					<DetailsSidebar

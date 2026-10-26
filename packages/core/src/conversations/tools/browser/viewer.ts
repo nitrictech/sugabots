@@ -62,7 +62,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("DesktopViewer");
 
 	/** Whether the agent is the thread's host or was added to it. */
-	const takesPart = (thread: { id: string; hostAgentId: string }, agentId: string) =>
+	const takesPart = (thread: { id: string; hostAgentId: string | null }, agentId: string) =>
 		thread.hostAgentId === agentId
 			? Effect.succeed(true)
 			: operation(

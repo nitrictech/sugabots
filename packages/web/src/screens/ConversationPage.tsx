@@ -2,11 +2,12 @@ import { botColorVariables } from "@sugabots/avatars";
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import type { ReactNode } from "react";
 import { useDetailsOpen } from "@/lib/details-open.ts";
-import { AgentChat, type Staged } from "./AgentChat.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
+import { ConversationChat, type Staged } from "./ConversationChat.tsx";
 
-interface AgentPageProps {
-	agent: Agent;
+interface ConversationPageProps {
+	/** The bot the conversation is with; null in the pod's chat. */
+	agent: Agent | null;
 	pod: Pod;
 	/** The conversation shown, which is with `agent`. */
 	conversationId: string;
@@ -25,14 +26,14 @@ interface AgentPageProps {
 	onStagedChange: (staged: Staged | undefined) => void;
 }
 
-export function AgentPage({ away, ...chat }: AgentPageProps) {
+export function ConversationPage({ away, ...chat }: ConversationPageProps) {
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"
-			style={botColorVariables(chat.agent.color)}
+			style={chat.agent ? botColorVariables(chat.agent.color) : undefined}
 		>
 			{away ? (
-				<AgentChat key={chatKey(chat)} {...chat} place={{ kind: "away", ...away }} />
+				<ConversationChat key={chatKey(chat)} {...chat} place={{ kind: "away", ...away }} />
 			) : (
 				<OwnPageChat {...chat} />
 			)}
@@ -44,10 +45,10 @@ export function AgentPage({ away, ...chat }: AgentPageProps) {
  * The chat on its own page, with Details open or closed as this device last
  * left them. Details stay as they are from one chat to the next.
  */
-function OwnPageChat(chat: Omit<AgentPageProps, "away">) {
+function OwnPageChat(chat: Omit<ConversationPageProps, "away">) {
 	const [detailsOpen, setDetailsOpen] = useDetailsOpen();
 	return (
-		<AgentChat
+		<ConversationChat
 			key={chatKey(chat)}
 			{...chat}
 			place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen }}

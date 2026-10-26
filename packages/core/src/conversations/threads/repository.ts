@@ -61,6 +61,12 @@ export interface Interface {
 		hostAgentId: string;
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
+	/** The pod's chat, created on first use, with `initiatorUserId` in it. */
+	readonly openPodChat: (placement: {
+		workspaceId: string;
+		podId: string;
+		initiatorUserId: string;
+	}) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
 	 * participant, and announces it. Posting a message again with the same
@@ -162,6 +168,9 @@ export interface Interface {
 	/** Takes the person's reaction back, announcing it as `addReaction` does, if it was there. */
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
 }
+
+/** What a pod's chat is called. */
+export const POD_CHAT_TITLE = "Pod chat";
 
 /** What a conversation is called until its first summary gives it a title of its own. */
 export const conversationTitle = (botName: string) => `Conversation with ${botName}`;
@@ -267,6 +276,43 @@ export const make = Effect.gen(function* () {
 								]),
 						);
 						return created;
+					}),
+				),
+			),
+
+		openPodChat: (placement) =>
+			operation(
+				"openPodChat",
+				transaction(
+					Effect.gen(function* () {
+						const id = yield* ids.next;
+						yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: placement.workspaceId,
+									podId: placement.podId,
+									hostAgentId: null,
+									conversationId: id,
+									type: "pod_chat",
+									title: POD_CHAT_TITLE,
+									initiatorUserId: placement.initiatorUserId,
+								})
+								.onConflictDoNothing({
+									target: thread.podId,
+									where: sql`${thread.type} = 'pod_chat'`,
+								}),
+						);
+						const [podChat] = yield* query((db) =>
+							db
+								.select()
+								.from(thread)
+								.where(and(eq(thread.type, "pod_chat"), eq(thread.podId, placement.podId)))
+								.limit(1),
+						);
+						if (!podChat) return yield* Effect.die(new Error("The pod's chat was not opened"));
+						return podChat;
 					}),
 				),
 			),
