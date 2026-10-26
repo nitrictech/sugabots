@@ -1,0 +1,6 @@
+# Depot's runners, which actionlint doesn't know.
+self-hosted-runner:
+  labels:
+    - depot-ubuntu-24.04
+    - depot-ubuntu-24.04-4
+    - depot-ubuntu-24.04-8

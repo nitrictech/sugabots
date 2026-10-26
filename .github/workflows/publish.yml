@@ -13,19 +13,16 @@ concurrency:
 jobs:
   image:
     name: Publish image to GHCR and Docker Hub
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
 
     permissions:
       contents: read
       packages: write
+      # Depot exchanges the run's OIDC token for access to the project's builders.
+      id-token: write
 
     steps:
       - uses: actions/checkout@v5
-
-      # Emulates arm64 so one runner can build both platforms.
-      - uses: docker/setup-qemu-action@v4
-
-      - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
         with:
@@ -58,8 +55,11 @@ jobs:
             type=edge,branch=main
             type=sha,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - uses: docker/build-push-action@v7
+      - uses: depot/build-push-action@v1
         with:
+          # Depot builds each platform natively, arm64 on arm64, rather than
+          # emulating it, and keeps the layer cache between builds.
+          project: ${{ vars.DEPOT_PROJECT_ID }}
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
@@ -70,23 +70,19 @@ jobs:
           build-args: |
             SUGABOTS_VERSION=${{ steps.meta.outputs.version }}
             SUGABOTS_COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   sandbox-image:
     name: Publish the sandbox image to GHCR and Docker Hub
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
 
     permissions:
       contents: read
       packages: write
+      # Depot exchanges the run's OIDC token for access to the project's builders.
+      id-token: write
 
     steps:
       - uses: actions/checkout@v5
-
-      - uses: docker/setup-qemu-action@v4
-
-      - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
         with:
@@ -119,8 +115,11 @@ jobs:
             type=edge,branch=main
             type=sha,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - uses: docker/build-push-action@v7
+      - uses: depot/build-push-action@v1
         with:
+          # Depot builds each platform natively, arm64 on arm64, rather than
+          # emulating it, and keeps the layer cache between builds.
+          project: ${{ vars.DEPOT_PROJECT_ID }}
           context: docker/sandbox
           platforms: linux/amd64,linux/arm64
           push: true
