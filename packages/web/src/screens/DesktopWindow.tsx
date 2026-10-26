@@ -18,7 +18,6 @@ export interface Placement {
 export interface WindowFrame {
 	placement: Placement;
 	front: boolean;
-	ringColor: string | undefined;
 	surface: RefObject<HTMLDivElement | null>;
 	onFocus: () => void;
 	onPlace: (change: Partial<Placement>) => void;
@@ -36,16 +35,14 @@ const KEPT_VISIBLE = 80;
  * A window on the desktop: a title strip to drag it by, with traffic lights
  * to close it (given `onClose`), tuck it into the dock and fill the desktop,
  * and a corner to resize it by. `title` sits in the middle of the strip: the
- * window's name, or the browser's address bar. The window in front is ringed
- * in `ringColor`, the colour of whoever is driving the desktop, if anyone.
- * Clicking anywhere in it brings it to the front.
+ * window's name, or the browser's address bar. Clicking anywhere in it
+ * brings it to the front.
  */
 export function DesktopWindow({
 	label,
 	title,
 	placement,
 	front,
-	ringColor,
 	surface,
 	onFocus,
 	onPlace,
@@ -88,7 +85,8 @@ export function DesktopWindow({
 			className={cn(
 				"absolute flex flex-col overflow-hidden bg-panel",
 				placement.maximized ? "rounded-none" : "rounded-[12px]",
-				front ? "shadow-2xl" : "border border-border-strong shadow-lg",
+				"border border-border-strong",
+				front ? "shadow-2xl" : "shadow-lg",
 			)}
 			style={{
 				...(placement.maximized
@@ -100,10 +98,6 @@ export function DesktopWindow({
 							height: placement.height,
 						}),
 				zIndex: placement.order,
-				...(front && {
-					outline: `2px solid ${ringColor ?? "var(--border-strong)"}`,
-					outlineOffset: -1,
-				}),
 			}}
 		>
 			<header

@@ -85,8 +85,8 @@ const meta = preview.meta({
 
 /**
  * The agent's desktop being watched while the agent works: a window for each
- * app on a display, the front one ringed in the agent's colour, the browser's
- * with its address bar, and a dock. The windows' pages come over VNC,
+ * app on a display, the browser's with its address bar, and a dock whose dots
+ * take the agent's colour. The windows' pages come over VNC,
  * which a preview has no sandbox for, so each says it couldn't be reached.
  */
 export const Watching = meta.story({
@@ -98,15 +98,13 @@ export const Watching = meta.story({
 		await expect(canvas.getByRole("region", { name: "Chart preview" })).toBeVisible();
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await expect(within(dock).getByRole("button", { name: "Chart preview" })).toBeVisible();
-		for (const close of canvas.getAllByRole("button", { name: "Close" })) {
-			await expect(close).toBeDisabled();
-		}
+		const app = canvas.getByRole("region", { name: "Chart preview" });
+		await expect(within(app).getByRole("button", { name: "Close" })).toBeDisabled();
 	},
 });
 
 /**
- * A person in control, the front window ringed neutrally: they open the
- * terminal and the files from the dock,
+ * A person in control: they open the terminal and the files from the dock,
  * and close the app the agent started, which the desktop server is asked to
  * do.
  */
@@ -137,5 +135,21 @@ export const Minimizing = meta.story({
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await userEvent.click(within(dock).getByRole("button", { name: "Chart preview" }));
 		await expect(await canvas.findByRole("region", { name: "Chart preview" })).toBeVisible();
+	},
+});
+
+/**
+ * The browser closed, which only hides it, since the agent works in it, and
+ * opened again from the dock.
+ */
+export const ClosingTheBrowser = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		const browser = await canvas.findByRole("region", { name: "Browser" });
+		await userEvent.click(within(browser).getByRole("button", { name: "Close" }));
+		await expect(canvas.queryByRole("region", { name: "Browser" })).toBeNull();
+
+		const dock = canvas.getByRole("navigation", { name: "Dock" });
+		await userEvent.click(within(dock).getByRole("button", { name: "Browser" }));
+		await expect(await canvas.findByRole("region", { name: "Browser" })).toBeVisible();
 	},
 });

@@ -77,8 +77,8 @@ const DOCK_TINTS: Record<DesktopWindowKind, AgentColor | undefined> = {
  * with the agent's face in it, so it's plain whose desktop it is, a dock,
  * and a window for each of its apps, each app on a display of its own and
  * shown over VNC, sized to its window; its terminal and file browser are
- * drawn here. The window in front, and the dock's dots, take the colour of
- * whoever is driving: the agent's own, or neutral for a person. Unless
+ * drawn here. The dock's dots take the colour of whoever is driving: the
+ * agent's own, or neutral for a person. Unless
  * `viewOnly`, the person's mouse and keys go to the windows' apps, and they
  * can close the windows of apps the agent started. It lets go of every
  * connection after the idle time a single screen does.
@@ -130,7 +130,7 @@ export function AgentDesktop({
 					threadId={threadId}
 					agentId={agent.id}
 					viewOnly={viewOnly}
-					ringColor={
+					driverColor={
 						driver === "agent"
 							? botColors[agent.color].face
 							: driver === "person"
@@ -148,12 +148,12 @@ function DesktopSurface({
 	threadId,
 	agentId,
 	viewOnly,
-	ringColor,
+	driverColor,
 }: {
 	threadId: string;
 	agentId: string;
 	viewOnly: boolean;
-	ringColor: string | undefined;
+	driverColor: string | undefined;
 }) {
 	const surface = useRef<HTMLDivElement>(null);
 	const socket = useRef<WebSocket | undefined>(undefined);
@@ -249,7 +249,6 @@ function DesktopSurface({
 				const frame: WindowFrame = {
 					placement,
 					front: window.id === frontId,
-					ringColor,
 					surface,
 					onFocus: () => focus(window.id),
 					onPlace: (change) => place(window.id, change),
@@ -261,6 +260,8 @@ function DesktopSurface({
 						<BrowserWindow
 							key={window.id}
 							{...frame}
+							// The browser is the agent's, at work in it, so closing it only hides it.
+							onClose={frame.onMinimize}
 							threadId={threadId}
 							agentId={agentId}
 							viewOnly={viewOnly}
@@ -323,21 +324,21 @@ function DesktopSurface({
 					label="Browser"
 					kind="browser"
 					open={isOpen("browser")}
-					dotColor={ringColor}
+					dotColor={driverColor}
 					onClick={() => toggle("browser", () => {})}
 				/>
 				<DockItem
 					label="Terminal"
 					kind="terminal"
 					open={isOpen("terminal")}
-					dotColor={ringColor}
+					dotColor={driverColor}
 					onClick={() => toggle("terminal", openLocal("terminal"))}
 				/>
 				<DockItem
 					label="Files"
 					kind="files"
 					open={isOpen("files")}
-					dotColor={ringColor}
+					dotColor={driverColor}
 					onClick={() => toggle("files", openLocal("files"))}
 				/>
 				{appWindows.map((window) => (
@@ -346,7 +347,7 @@ function DesktopSurface({
 						label={windowTitle(window)}
 						kind="app"
 						open
-						dotColor={ringColor}
+						dotColor={driverColor}
 						onClick={() => toggle(window.id, () => {})}
 					/>
 				))}
