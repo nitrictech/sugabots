@@ -99,6 +99,8 @@ const PLACE_ICONS: Record<Place["kind"], ReactNode> = {
 
 /** How much of a file goes in each message while it uploads: small enough to show progress, big enough to be quick. */
 const UPLOAD_CHUNK_BYTES = 512 * 1024;
+/** How long to wait for the sandbox to take a piece of an upload before giving up on it. */
+const UPLOAD_ANSWER_TIMEOUT_MS = 30_000;
 
 /**
  * The files of the agent's sandbox, as the agents' user sees them, laid out
@@ -293,7 +295,11 @@ function useFiles(threadId: string, agentId: string, viewOnly: boolean) {
 		socket.current = opened;
 		setShowing({ kind: "loading" });
 		setPlaces([]);
-		opened.onopen = () => ask(here.current);
+		// Asked for rather than sent on connecting, which the API's relay may not be passing on yet.
+		opened.onopen = () => {
+			opened.send(JSON.stringify({ type: "places" }));
+			ask(here.current);
+		};
 		opened.onmessage = (event) => {
 			const message = JSON.parse(String(event.data)) as FilesMessage;
 			if (message.type === "places") return setPlaces(message.places);
@@ -331,7 +337,12 @@ function useFiles(threadId: string, agentId: string, viewOnly: boolean) {
 	/** Sends `message` and waits for the sandbox's answer about upload `id`. */
 	const exchange = (id: string, message: object) =>
 		new Promise<UploadReply>((resolve, reject) => {
+			const giveUp = setTimeout(() => {
+				awaiting.current.delete(id);
+				reject(new Error("The sandbox didn't answer."));
+			}, UPLOAD_ANSWER_TIMEOUT_MS);
 			awaiting.current.set(id, (reply) => {
+				clearTimeout(giveUp);
 				awaiting.current.delete(id);
 				if (!reply) return reject(new Error("The files couldn't be reached."));
 				if (reply.type === "upload-failed") return reject(new Error(reply.reason));

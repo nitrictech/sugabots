@@ -54,7 +54,7 @@ const filesServer = ({ inControl }: { inControl: boolean }) =>
 		const folders = structuredClone(FOLDERS);
 		const send = (message: object) => client.send(JSON.stringify(message));
 		const uploads = new Map<string, { folder: string; name: string; size: number; got: number }>();
-		if (inControl) {
+		const sendPlaces = () =>
 			send({
 				type: "places",
 				places: [
@@ -64,7 +64,6 @@ const filesServer = ({ inControl }: { inControl: boolean }) =>
 					{ kind: "computer", path: "/" },
 				],
 			});
-		}
 		client.addEventListener("message", (event) => {
 			const message = JSON.parse(String(event.data));
 			sentToFiles(message.type === "upload-chunk" ? { ...message, data: "…" } : message);
@@ -72,6 +71,7 @@ const filesServer = ({ inControl }: { inControl: boolean }) =>
 			if (!inControl) {
 				return send({ type: "refused", path, reason: "Take over to browse the files." });
 			}
+			if (message.type === "places") return sendPlaces();
 			if (message.type === "list") {
 				return send({ type: "listing", path, entries: folders[path] ?? [] });
 			}

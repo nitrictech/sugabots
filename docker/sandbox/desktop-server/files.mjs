@@ -3,13 +3,12 @@
 // them, and files the viewer puts there. A viewer who only watches is told to
 // take over, since a file browser reads whatever it's pointed at.
 //
-// To a viewer in control, once connected:
-//   {type:"places", places:[{kind:"thread"|"workspace"|"home"|"computer", path}]}
 // From a viewer in control, as JSON text:
-//   {type:"list", path} | {type:"read", path}
+//   {type:"places"} | {type:"list", path} | {type:"read", path}
 //   {type:"upload", id, folder, name, size}    then the file's bytes, in order:
 //   {type:"upload-chunk", id, data:<base64>}   each answered with upload-received
 // To the viewer:
+//   {type:"places", places:[{kind:"thread"|"workspace"|"home"|"computer", path}]}
 //   {type:"listing", path, entries:[{name, kind:"folder"|"file", size, modified}]}
 //       again whenever the folder last listed changes, until a file is read
 //   {type:"file", path, mediaType, data:<base64>, truncated}
@@ -49,19 +48,18 @@ export function serveFiles(viewer, mayUse, folder) {
 		watched.stop();
 		uploads.abandon();
 	});
-	if (mayUse) {
-		send({
-			type: "places",
-			places: [
-				{ kind: "thread", path: folder },
-				{ kind: "workspace", path: WORKSPACE },
-				{ kind: "home", path: homedir() },
-				{ kind: "computer", path: "/" },
-			],
-		});
-	}
-
 	const answer = async (message) => {
+		if (message?.type === "places") {
+			return send({
+				type: "places",
+				places: [
+					{ kind: "thread", path: folder },
+					{ kind: "workspace", path: WORKSPACE },
+					{ kind: "home", path: homedir() },
+					{ kind: "computer", path: "/" },
+				],
+			});
+		}
 		if (message?.type === "upload") return uploads.start(message, folder);
 		if (message?.type === "upload-chunk") return uploads.write(message);
 		const path = resolve(folder, String(message?.path ?? "."));
