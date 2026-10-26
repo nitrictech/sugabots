@@ -99,6 +99,11 @@ display() {
 	echo $! >>"$pids"
 	openbox --config-file /usr/share/sugabots-desktop/openbox.xml >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	# GTK apps take their theme, light or dark as the desktop's viewers have it,
+	# from here, and follow it as the desktop server changes it.
+	[ -f "$state/xsettings" ] || echo 'Net/ThemeName "Adwaita-dark"' >"$state/xsettings"
+	xsettingsd -c "$state/xsettings" >>"$log" 2>&1 &
+	echo $! >>"$pids"
 	keep_maximized "$n" >>"$log" 2>&1 &
 	echo $! >>"$pids"
 }
@@ -213,7 +218,7 @@ browser() {
 		curl -s -o /dev/null "http://localhost:$((8930 + n))/mcp" && break
 		sleep 0.1
 	done
-	node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" >>"$log" 2>&1 &
+	node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" "$state/xsettings" >>"$log" 2>&1 &
 	echo $! >>"$pids"
 	for _ in $(seq 100); do
 		curl -s -o /dev/null "http://localhost:$((9530 + n))/" && break

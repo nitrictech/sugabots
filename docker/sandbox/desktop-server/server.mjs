@@ -2,7 +2,7 @@
 // displays, which it reaches over VNC: the browser's tabs, the terminal, the
 // files, and which windows the desktop has.
 //
-//   node server.mjs port devtools-port passwords-file session folder
+//   node server.mjs port devtools-port passwords-file session folder xsettings-file
 //
 // Viewers open a WebSocket on `port`, at /tabs, /terminal, /files or
 // /windows, with `Authorization: Bearer <password>`, one of the two in
@@ -12,7 +12,8 @@
 // never speak DevTools themselves, so a viewer can't read the browser's
 // cookies or run script in its pages.
 // `session` is the desktop's name to sugabots-desktop, and `folder` where its
-// terminal and file browser start.
+// terminal and file browser start. `xsettings-file` is what the desktop's
+// displays' xsettingsd serve GTK apps their theme from.
 
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -21,16 +22,19 @@ import { WebSocketServer } from "ws";
 import { serveFiles } from "./files.mjs";
 import { serveTabs } from "./tabs.mjs";
 import { makeTerminal } from "./terminal.mjs";
+import { makeTheme } from "./theme.mjs";
 import { makeWindows } from "./windows.mjs";
 
-const [port, devtoolsPort, passwordsFile, session, folder] = process.argv.slice(2);
-if (!port || !devtoolsPort || !passwordsFile || !session || !folder) {
-	console.error("usage: node server.mjs port devtools-port passwords-file session folder");
+const [port, devtoolsPort, passwordsFile, session, folder, xsettingsFile] = process.argv.slice(2);
+if (!port || !devtoolsPort || !passwordsFile || !session || !folder || !xsettingsFile) {
+	console.error(
+		"usage: node server.mjs port devtools-port passwords-file session folder xsettings-file",
+	);
 	process.exit(2);
 }
 
 const terminal = makeTerminal(folder, session);
-const windows = makeWindows(session);
+const windows = makeWindows(session, await makeTheme(devtoolsPort, xsettingsFile));
 const channels = {
 	"/tabs": (viewer, mayUse) => serveTabs(viewer, mayUse, devtoolsPort),
 	"/terminal": (viewer, mayUse) => terminal.serve(viewer, mayUse),

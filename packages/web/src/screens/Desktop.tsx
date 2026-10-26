@@ -2,6 +2,7 @@ import { botColors } from "@sugabots/avatars";
 import type { Agent } from "@sugabots/contracts";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useViewerIdle } from "@/lib/desktop.ts";
+import { useResolvedTheme } from "@/lib/theme.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { BrowserWindow } from "./BrowserWindow.tsx";
@@ -153,9 +154,20 @@ function DesktopSurface({
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 
+	// The desktop's apps take on the person's light or dark look, as the app does.
+	const scheme = useResolvedTheme();
+	const schemeNow = useRef(scheme);
+	useEffect(() => {
+		schemeNow.current = scheme;
+		if (socket.current?.readyState === WebSocket.OPEN) {
+			socket.current.send(themeMessage(scheme));
+		}
+	}, [scheme]);
+
 	useEffect(() => {
 		const opened = new WebSocket(desktopServerUrl(threadId, agentId, "windows"));
 		socket.current = opened;
+		opened.onopen = () => opened.send(themeMessage(schemeNow.current));
 		opened.onmessage = (event) =>
 			setDisplayWindows((JSON.parse(String(event.data)) as WindowsMessage).windows);
 		opened.onclose = () => {
@@ -345,6 +357,11 @@ function DesktopSurface({
 			</nav>
 		</div>
 	);
+}
+
+/** What tells the desktop server which look the person is viewing the desktop in. */
+function themeMessage(scheme: "light" | "dark") {
+	return JSON.stringify({ type: "theme", scheme });
 }
 
 /** A window's display, saying so while it connects or if it can't be reached. */

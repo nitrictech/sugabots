@@ -55,3 +55,32 @@ function apply(theme: Theme): void {
 		document.documentElement.dataset.theme = theme;
 	}
 }
+
+/**
+ * Whether the app is showing light or dark right now: the person's choice,
+ * or the machine's when they chose `system`. Follows either as it changes.
+ */
+export function useResolvedTheme(): "light" | "dark" {
+	const [resolved, setResolved] = useState(resolve);
+	useEffect(() => {
+		const update = () => setResolved(resolve());
+		const chosen = new MutationObserver(update);
+		chosen.observe(document.documentElement, { attributeFilter: ["data-theme"] });
+		const machine = matchMedia(DARK_QUERY);
+		machine.addEventListener("change", update);
+		return () => {
+			chosen.disconnect();
+			machine.removeEventListener("change", update);
+		};
+	}, []);
+	return resolved;
+}
+
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function resolve(): "light" | "dark" {
+	const chosen = document.documentElement.dataset.theme;
+	if (chosen === "light") return "light";
+	if (chosen === "system") return matchMedia(DARK_QUERY).matches ? "dark" : "light";
+	return "dark";
+}

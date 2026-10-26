@@ -98,7 +98,8 @@ const meta = preview.meta({
 });
 
 /**
- * The agent's desktop being watched while the agent works: a window for each
+ * The agent's desktop being watched while the agent works, its apps told to
+ * take on the viewer's light or dark look: a window for each
  * app on a display, the browser's with its address bar, and a dock whose dots
  * take the agent's colour. The windows' pages come over VNC,
  * which a preview has no sandbox for, so each says it couldn't be reached.
@@ -114,6 +115,10 @@ export const Watching = meta.story({
 		await expect(within(dock).getByRole("button", { name: "Chart preview" })).toBeVisible();
 		const app = canvas.getByRole("region", { name: "Chart preview" });
 		await expect(within(app).getByRole("button", { name: "Close" })).toBeDisabled();
+		// The desktop's apps are told to look as the app does, dark in this preview.
+		await waitFor(() =>
+			expect(sentToWindows).toHaveBeenCalledWith({ type: "theme", scheme: "dark" }),
+		);
 	},
 });
 

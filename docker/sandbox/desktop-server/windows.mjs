@@ -1,10 +1,13 @@
 // The desktop's windows that run on displays: the browser, and the apps an
 // agent started, each on a display of its own, as `sugabots-desktop windows`
 // says. Viewers are told when they change, and a viewer in control can close
-// an app's window, which stops its display.
+// an app's window, which stops its display. Any viewer says which look, light
+// or dark, it shows the desktop in.
 //
 // To the viewer, as JSON text:
 //   {type:"windows", windows:[{id, kind:"browser"|"app", title}]}
+// From any viewer:
+//   {type:"theme", scheme:"light"|"dark"}
 // From a viewer in control:
 //   {type:"close", id}
 
@@ -18,7 +21,7 @@ const run = promisify(execFile);
 const WINDOWS_CHECK_MS = 1000;
 
 /** The windows of the desktop of `session`. */
-export function makeWindows(session) {
+export function makeWindows(session, theme) {
 	const viewers = new Set();
 	let windows = [];
 	let lastSent = "";
@@ -77,13 +80,14 @@ export function makeWindows(session) {
 			});
 			check().catch(report);
 			viewer.on("message", (raw) => {
-				if (!mayUse) return;
 				let message;
 				try {
 					message = JSON.parse(String(raw));
 				} catch {
 					return;
 				}
+				if (message?.type === "theme") return theme.set(message.scheme);
+				if (!mayUse) return;
 				act(message)
 					?.then(() => check())
 					.catch(report);
