@@ -72,7 +72,7 @@ import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { routineExecutionIdOf } from "../routines/routines.ts";
+import { latestRunFailed, routineExecutionIdOf } from "../routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -210,7 +210,12 @@ export const make = Effect.gen(function* () {
 						if (!crew) return [];
 						return [
 							{
-								routine: { id: row.routine.id, name: row.routine.name, state: row.routine.state },
+								routine: {
+									id: row.routine.id,
+									name: row.routine.name,
+									state: row.routine.state,
+									failed: row.failed,
+								},
 								agent: toAgent(crew),
 								conversation: row.feed && toConversation(row.feed),
 								mentionsYou: row.feed !== null && feedMentions.has(row.feed.id),
@@ -250,15 +255,21 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						counted.map(({ id }) => id),
 					);
-					const pods: Record<string, { unreadMessages: number; needsApproval: boolean }> = {};
+					const failed = yield* query((db) => failedRoutinesByPod(db, listing));
+					const pods: Record<string, PodChatMarkers["pods"][string]> = {};
+					const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
 					for (const { id, podId } of counted) {
 						const { unreadMessages, needsApproval } = marksOf(id);
 						if (unreadMessages === 0 && !needsApproval) continue;
-						const marked = pods[podId] ?? { unreadMessages: 0, needsApproval: false };
+						const marked = pods[podId] ?? nothing;
 						pods[podId] = {
+							...marked,
 							unreadMessages: marked.unreadMessages + unreadMessages,
 							needsApproval: marked.needsApproval || needsApproval,
 						};
+					}
+					for (const [podId, failedRoutines] of failed) {
+						pods[podId] = { ...(pods[podId] ?? nothing), failedRoutines };
 					}
 					return { pods };
 				}),
@@ -473,7 +484,7 @@ const listedRoutines = Effect.fn("ChatView.listedRoutines")(function* (
 ) {
 	const feed = alias(thread, "feed");
 	return yield* db
-		.select({ routine, agent, feed })
+		.select({ routine, agent, feed, failed: latestRunFailed(routine.id) })
 		.from(routine)
 		.innerJoin(agent, eq(agent.id, routine.agentId))
 		.leftJoin(feed, eq(feed.routineId, routine.id))
@@ -778,6 +789,27 @@ function runReportPreview(reply: Reply): string {
 function spokenText(reply: Reply): string {
 	return textWithoutNarration(reply.parts) || reply.content;
 }
+
+/** The pods of `listing` with routines whose latest run failed, and how many each has. */
+const failedRoutinesByPod = Effect.fn("ChatView.failedRoutinesByPod")(function* (
+	db: Executor,
+	input: Listing,
+) {
+	const rows = yield* db
+		.select({ podId: agent.podId, count: sql<number>`count(*)::int` })
+		.from(routine)
+		.innerJoin(agent, eq(agent.id, routine.agentId))
+		.where(
+			and(
+				eq(routine.workspaceId, input.workspaceId),
+				isNull(routine.deletedAt),
+				input.reachesPod(agent.podId),
+				latestRunFailed(routine.id),
+			),
+		)
+		.groupBy(agent.podId);
+	return new Map(rows.flatMap((row) => (row.podId ? [[row.podId, row.count] as const] : [])));
+});
 
 /** The routine runs in the conversations `userId` reaches since `since`, newest first, with their last replies. */
 const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
@@ -1146,12 +1178,38 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 			routineName: true,
 			triggerKind: true,
 			acceptedAt: true,
+			state: true,
+			error: true,
 		},
 	});
-	return { ...conversation, routineExecutions };
+	const [paused] = yield* db
+		.select({ routineId: routine.id, at: routine.pausedAfterFailuresAt })
+		.from(routine)
+		.innerJoin(thread, eq(thread.routineId, routine.id))
+		.where(eq(thread.id, conversationId))
+		.limit(1);
+	// On the page whose span it falls in: the first, or one before where it happened.
+	const pausedAfterFailures =
+		paused?.at && (!before || paused.at < before.at)
+			? { routineId: paused.routineId, at: paused.at }
+			: null;
+	return { ...conversation, routineExecutions, pausedAfterFailures };
 });
 
 type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
+
+/** The routine `routineId` pausing itself at `at`, as a page lists it, by the routine's id. */
+function pausedCandidate(routineId: string, at: Date) {
+	return {
+		id: routineId,
+		createdAt: at,
+		item: (): ChatMessageItem => ({
+			kind: "routine_paused",
+			id: routineId,
+			createdAt: at.toISOString(),
+		}),
+	};
+}
 
 /** The three sources merged newest first, cut to the page, and put back in reading order. */
 function toMainPage(row: MainPage, limit: number) {
@@ -1162,6 +1220,9 @@ function toMainPage(row: MainPage, limit: number) {
 			createdAt: stored.createdAt,
 			item: (): ChatMessageItem => ({ kind: "message", message: messageFromRelations(stored) }),
 		})),
+		...(row.pausedAfterFailures
+			? [pausedCandidate(row.pausedAfterFailures.routineId, row.pausedAfterFailures.at)]
+			: []),
 		...row.openedThreads.map((opened) => ({
 			id: opened.id,
 			createdAt: opened.createdAt,
@@ -1189,6 +1250,8 @@ function toMainPage(row: MainPage, limit: number) {
 					threadId: execution.threadId,
 					routineName: execution.routineName,
 					triggerKind: execution.triggerKind,
+					state: execution.state,
+					error: execution.error,
 					createdAt: execution.acceptedAt.toISOString(),
 				}),
 			})),

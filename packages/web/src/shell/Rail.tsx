@@ -6,6 +6,7 @@ import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -42,9 +43,9 @@ export function Rail() {
 	const [making, setMaking] = useState<Making>();
 	const navigate = useNavigate();
 	const selected = useRailSelection();
-	const { agent } = useParams({ strict: false });
+	const { agent, conversation } = useParams({ strict: false });
 	// On a phone an open chat, and settings, take the whole screen, as the design has them.
-	const covered = agent !== undefined || selected === "settings";
+	const covered = agent !== undefined || conversation !== undefined || selected === "settings";
 
 	return (
 		<>
@@ -54,6 +55,7 @@ export function Rail() {
 					bots: crewIn(agents, pod),
 					unreadMessages: markers?.pods[pod.id]?.unreadMessages ?? 0,
 					needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
+					failedRoutines: markers?.pods[pod.id]?.failedRoutines ?? 0,
 				}))}
 				selected={selected}
 				waitingApprovals={waitingApprovals}
@@ -110,6 +112,7 @@ export function RailView({
 		bots: readonly Agent[];
 		unreadMessages?: number;
 		needsApproval?: boolean;
+		failedRoutines?: number;
 	}[];
 	/** A pod's slug, `activity`, `approvals`, `settings`, or undefined when none is open. */
 	selected: string | undefined;
@@ -177,7 +180,7 @@ export function RailView({
 				selected={selected === "approvals"}
 			/>
 			<span aria-hidden className="h-px w-7 shrink-0 bg-border-strong" />
-			{shared.map(({ pod, bots, unreadMessages, needsApproval }) => (
+			{shared.map(({ pod, bots, unreadMessages, needsApproval, failedRoutines }) => (
 				<RailItem
 					key={pod.id}
 					label={pod.name}
@@ -185,6 +188,7 @@ export function RailView({
 					pod={pod}
 					unreadMessages={unreadMessages}
 					needsApproval={needsApproval}
+					failedRoutines={failedRoutines}
 					menu={podMenu(pod)}
 				>
 					<PodTile bots={bots} color={pod.color} size={44} />
@@ -213,6 +217,7 @@ export function RailView({
 						pod={personal.pod}
 						unreadMessages={personal.unreadMessages}
 						needsApproval={personal.needsApproval}
+						failedRoutines={personal.failedRoutines}
 						menu={podMenu(personal.pod)}
 					>
 						{/* A pod like the others, with you on its corner: only you are in it. */}
@@ -347,21 +352,20 @@ function RailViewTile({
 	);
 }
 
-function unreadMessagesWords(count: number): string {
-	return count === 1 ? "1 unread message" : `${count} unread messages`;
+/** What a pod's tile counts, in words: its unread messages and its failed routines. */
+function markerWords(unreadMessages: number, failedRoutines: number): string {
+	return [
+		...(unreadMessages > 0 ? [countOf(unreadMessages, "unread message", "unread messages")] : []),
+		...(failedRoutines > 0 ? [countOf(failedRoutines, "failed routine", "failed routines")] : []),
+	].join(", ");
 }
 
 /**
  * What a pod's tile says of its chats, top right: a hand when one waits on the
- * viewer, otherwise how many are unread. Ringed in the rail's colour.
+ * viewer, otherwise `count`, of its unread messages and failed routines.
+ * Ringed in the rail's colour.
  */
-function ChatMarkerBadge({
-	unreadMessages,
-	needsApproval,
-}: {
-	unreadMessages: number;
-	needsApproval: boolean;
-}) {
+function ChatMarkerBadge({ count, needsApproval }: { count: number; needsApproval: boolean }) {
 	if (needsApproval) {
 		return (
 			<span
@@ -372,10 +376,10 @@ function ChatMarkerBadge({
 			</span>
 		);
 	}
-	if (unreadMessages === 0) return null;
+	if (count === 0) return null;
 	return (
 		<CountBadge
-			count={unreadMessages}
+			count={count}
 			size="lg"
 			className="absolute -top-1.5 -right-1.5 z-10 shadow-[0_0_0_3px_var(--rail)]"
 		/>
@@ -392,6 +396,7 @@ function RailItem({
 	pod,
 	unreadMessages = 0,
 	needsApproval = false,
+	failedRoutines = 0,
 	menu,
 	children,
 }: {
@@ -403,6 +408,8 @@ function RailItem({
 	unreadMessages?: number;
 	/** Whether a chat in the pod waits on the viewer, which the tile shows instead of the count. */
 	needsApproval?: boolean;
+	/** How many of the pod's routines failed their latest run, counted with the unread messages. */
+	failedRoutines?: number;
 	/** What right-clicking it offers; without it, the browser's own menu. */
 	menu?: ReactNode;
 	children: ReactElement;
@@ -410,8 +417,8 @@ function RailItem({
 	const props = {
 		"aria-label": needsApproval
 			? `${label}, waiting for your approval`
-			: unreadMessages > 0
-				? `${label}, ${unreadMessagesWords(unreadMessages)}`
+			: unreadMessages + failedRoutines > 0
+				? `${label}, ${markerWords(unreadMessages, failedRoutines)}`
 				: label,
 		"aria-current": selected ? ("page" as const) : undefined,
 		className: "focus-ring relative flex shrink-0 items-center rounded-tile",
@@ -419,7 +426,7 @@ function RailItem({
 	const content = (
 		<>
 			<SelectionBar selected={selected} className="-left-[10px] md:-left-[14px]" />
-			<ChatMarkerBadge unreadMessages={unreadMessages} needsApproval={needsApproval} />
+			<ChatMarkerBadge count={unreadMessages + failedRoutines} needsApproval={needsApproval} />
 			{children}
 		</>
 	);

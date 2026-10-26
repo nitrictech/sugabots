@@ -399,6 +399,8 @@ export const make = Effect.gen(function* () {
 							name: input.name ?? current.name,
 							instructions: input.instructions ?? current.instructions,
 							state,
+							// Turned on or off by hand, it is no longer one that paused itself.
+							...(input.state && { pausedAfterFailuresAt: null }),
 							results: input.results ?? current.results,
 						});
 						if (!row) return yield* new RoutineNotFound();
@@ -548,22 +550,31 @@ export const make = Effect.gen(function* () {
 		run: ({ agentId, routineId, requestId }) =>
 			operation(
 				"run",
-				Effect.gen(function* () {
-					const { agent: owner, actor } = yield* authorization.agent(agentId, "routine.run");
-					return yield* acceptTrigger({
-						workspaceId: owner.workspaceId,
-						agentId: owner.id,
-						routineId,
-						triggerId: null,
-						triggerIdentity: requestId,
-						trigger: {
-							kind: "manual",
-							requestId,
-							requestedAt: DateTime.formatIso(yield* DateTime.now),
-							requestedByUserId: actor.userId,
-						},
-					});
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const { agent: owner, actor } = yield* authorization.agent(agentId, "routine.run");
+						const accepted = yield* acceptTrigger({
+							workspaceId: owner.workspaceId,
+							agentId: owner.id,
+							routineId,
+							triggerId: null,
+							triggerIdentity: requestId,
+							trigger: {
+								kind: "manual",
+								requestId,
+								requestedAt: DateTime.formatIso(yield* DateTime.now),
+								requestedByUserId: actor.userId,
+							},
+						});
+						if (accepted.duplicate) return accepted;
+						// Running one that paused itself after failing is trying again: it is turned back on.
+						if (yield* repository.resumeAfterFailures(routineId)) {
+							// A schedule it was saved with is one that has a next time.
+							yield* Effect.orDie(reschedule(routineId, "enabled"));
+						}
+						return accepted;
+					}),
+				),
 			),
 	});
 });
@@ -587,7 +598,7 @@ export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnecti
 	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
 );
 
-export { routineExecutionIdOf, toRoutineExecution } from "./execution.ts";
+export { latestRunFailed, routineExecutionIdOf, toRoutineExecution } from "./execution.ts";
 export { InvalidRoutineExecutionCursor } from "./routine-view.ts";
 /** Accepts the runs of cron routines as they fall due. */
 export { layer as schedulerLayer } from "./scheduler.ts";

@@ -1,5 +1,5 @@
 import type { RoutineExecution } from "@sugabots/contracts";
-import { eq, type SQLWrapper, sql } from "drizzle-orm";
+import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
@@ -111,3 +111,13 @@ export const routineAcceptsWork = Effect.fn("RoutineExecution.routineAcceptsWork
 		(execution.state === "queued" || execution.state === "running")
 	);
 });
+
+/** Whether the latest run of the routine `routineId` failed, as a value for a query. */
+export function latestRunFailed(routineId: SQLWrapper): SQL<boolean> {
+	return sql<boolean>`coalesce((
+		select ${routineExecution.state} = 'failed' from ${routineExecution}
+		where ${routineExecution.routineId} = ${routineId}
+		order by ${routineExecution.acceptedAt} desc, ${routineExecution.id} desc
+		limit 1
+	), false)`;
+}

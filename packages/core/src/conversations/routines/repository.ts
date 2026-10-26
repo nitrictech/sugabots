@@ -35,10 +35,13 @@ export interface Interface {
 		definition: Definition &
 			Pick<schema.RoutineRow, "workspaceId" | "agentId" | "createdById" | "createdByAgentId">,
 	) => Effect.Effect<schema.RoutineRow, RoutineNameTaken>;
-	/** Changes a routine's definition. `undefined` when there is no such routine. */
+	/**
+	 * Changes a routine's definition, and clears that it paused itself when
+	 * `pausedAfterFailuresAt` is null. `undefined` when there is no such routine.
+	 */
 	readonly update: (
 		scope: Scope,
-		definition: Definition,
+		definition: Definition & { pausedAfterFailuresAt?: null },
 	) => Effect.Effect<schema.RoutineRow | undefined, RoutineNameTaken>;
 	/**
 	 * Removes a routine, pausing it and cancelling the runs still queued, and
@@ -115,14 +118,21 @@ export interface Interface {
 	readonly recordEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<boolean>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
-	 * was not running.
+	 * was not running. A failure pauses its routine when it is the
+	 * `FAILURES_THAT_PAUSE`th in a row.
 	 */
 	readonly settle: (executionId: string, settled: Settled) => Effect.Effect<boolean>;
 	/**
 	 * Records a run that has not ended as failed, telling people
-	 * `userMessage`, and announces it. Does nothing once the run has ended.
+	 * `userMessage`, and announces it, pausing its routine as `settle` does.
+	 * Does nothing once the run has ended.
 	 */
 	readonly fail: (executionId: string, userMessage: UserText) => Effect.Effect<void>;
+	/**
+	 * Turns on again the routine `routineId` when it paused itself after
+	 * failing. `true` when it did, so its schedules are due to be set again.
+	 */
+	readonly resumeAfterFailures: (routineId: string) => Effect.Effect<boolean>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -150,6 +160,46 @@ export const make = Effect.gen(function* () {
 			return { conversationId: root.conversationId, podId: root.podId };
 		});
 
+	/**
+	 * Pauses the routine `routineId` when its last `FAILURES_THAT_PAUSE`
+	 * finished runs all failed and it is still on, recording that it paused
+	 * itself, and clears when its schedules next run.
+	 */
+	const pauseAfterFailures = (routineId: string) =>
+		Effect.gen(function* () {
+			const paused = yield* query((db) =>
+				db
+					.update(routine)
+					.set({ state: "paused", pausedAfterFailuresAt: sql`now()` })
+					.where(
+						and(
+							eq(routine.id, routineId),
+							eq(routine.state, "enabled"),
+							isNull(routine.deletedAt),
+							sql`(
+							select count(*) from (
+								select ${routineExecution.state} as state from ${routineExecution}
+								where ${routineExecution.routineId} = ${routineId}
+									and ${routineExecution.finishedAt} is not null
+								order by ${routineExecution.acceptedAt} desc, ${routineExecution.id} desc
+								limit ${FAILURES_THAT_PAUSE}
+							) as latest
+							where latest.state = 'failed'
+						) = ${FAILURES_THAT_PAUSE}`,
+						),
+					)
+					.returning({ id: routine.id }),
+			);
+			if (paused.length === 0) return;
+			// A paused routine's schedules have no next time.
+			yield* query((db) =>
+				db
+					.update(routineTrigger)
+					.set({ nextScheduledAt: null })
+					.where(eq(routineTrigger.routineId, routineId)),
+			);
+		});
+
 	/** Tells the workspace that a run's thread changed because the run ended. */
 	const announceEnded = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
@@ -163,6 +213,27 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
+		resumeAfterFailures: (routineId) =>
+			operation(
+				"resumeAfterFailures",
+				Effect.map(
+					query((db) =>
+						db
+							.update(routine)
+							.set({ state: "enabled", pausedAfterFailuresAt: null })
+							.where(
+								and(
+									eq(routine.id, routineId),
+									sql`${routine.pausedAfterFailuresAt} is not null`,
+									isNull(routine.deletedAt),
+								),
+							)
+							.returning({ id: routine.id }),
+					),
+					(resumed) => resumed.length > 0,
+				),
+			),
+
 		create: (definition) =>
 			operation(
 				"create",
@@ -422,6 +493,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (!recorded) return false;
 						yield* announceEnded(recorded);
+						if (recorded.state === "failed") yield* pauseAfterFailures(recorded.routineId);
 						return true;
 					}),
 				),
@@ -451,7 +523,9 @@ export const make = Effect.gen(function* () {
 								)
 								.returning(),
 						);
-						if (failed) yield* announceEnded(failed);
+						if (!failed) return;
+						yield* announceEnded(failed);
+						yield* pauseAfterFailures(failed.routineId);
 					}),
 				),
 			),
@@ -477,6 +551,9 @@ const ofRoutine = (scope: Scope, triggerId: string) =>
 		eq(routineTrigger.workspaceId, scope.workspaceId),
 		sql`exists (select 1 from ${routine} where ${inScope(scope)})`,
 	);
+
+/** Failed runs in a row after which a routine pauses itself. */
+export const FAILURES_THAT_PAUSE = 2;
 
 /** How a run's work ended. */
 export type Settled = Turns.Ended | { readonly state: "completed" };

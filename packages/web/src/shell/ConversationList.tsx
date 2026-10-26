@@ -117,7 +117,9 @@ export function ConversationListView({
 	const open = rows.filter((row) => row.conversation.doneAt === null);
 	const done = rows.filter((row) => row.conversation.doneAt !== null);
 	const [doneShown, setDoneShown] = useState(false);
-	const [routinesShown, setRoutinesShown] = useState(false);
+	// Folded until opened, unless a routine has failed, which opens it.
+	const [routinesChosen, setRoutinesShown] = useState<boolean>();
+	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
 	const isSelected = (row: ChatListItem) =>
 		selected?.kind === "thread" && row.conversation.id === selected.conversationId;
 	const title = pod.name;
@@ -362,8 +364,9 @@ function SectionToggle({
 }
 
 /**
- * A routine on one line: the bot that runs it, its name, and at the end that
- * it is paused, or a dot when a message in its thread mentions the viewer.
+ * A routine on one line: the bot that runs it, its name, and at the end a red
+ * dot when its latest run failed, that it is paused, or a dot when a message
+ * in its thread mentions the viewer.
  */
 function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; selected: boolean }) {
 	const { agent, routine } = row;
@@ -395,7 +398,11 @@ function RoutineRow({ row, pod, selected }: { row: ListedRoutine; pod: Pod; sele
 			>
 				{routine.name}
 			</span>
-			{routine.state === "paused" ? (
+			{routine.failed ? (
+				<span className="mr-1.5 size-2 shrink-0 rounded-full bg-destructive-text">
+					<span className="sr-only">Failed</span>
+				</span>
+			) : routine.state === "paused" ? (
 				<span className="shrink-0 text-[12px] text-subtle-foreground">Paused</span>
 			) : (
 				<ChatMarker needsYou={row.mentionsYou} unreadMessages={0} />

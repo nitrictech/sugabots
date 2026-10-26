@@ -239,6 +239,7 @@ export const Routines = meta.story({
 					id: "0199a3a0-0000-7000-8000-0000000003a1",
 					name: "Overnight outbound",
 					state: "enabled",
+					failed: false,
 				},
 				agent: growthDesk,
 				conversation: null,
@@ -249,6 +250,7 @@ export const Routines = meta.story({
 					id: "0199a3a0-0000-7000-8000-0000000003a2",
 					name: "Inbox triage",
 					state: "paused",
+					failed: false,
 				},
 				agent: accountManager,
 				conversation: null,
@@ -264,6 +266,31 @@ export const Routines = meta.story({
 			expect.stringMatching(/\/pods\/revenue\/routines\/0199a3a0-0000-7000-8000-0000000003a1$/),
 		);
 		await expect(canvas.getByRole("link", { name: /Inbox triage/ })).toHaveTextContent("Paused");
+	},
+});
+
+/** A routine whose latest run failed opens the Routines section by itself, with a red dot. */
+export const FailedRoutine = meta.story({
+	args: {
+		podChat: revenueChat,
+		routines: [
+			{
+				routine: {
+					id: "0199a3a0-0000-7000-8000-0000000003a3",
+					name: "Overnight outbound",
+					state: "enabled",
+					failed: true,
+				},
+				agent: growthDesk,
+				conversation: null,
+				mentionsYou: false,
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: /Overnight outbound/ })).toHaveTextContent(
+			"Failed",
+		);
 	},
 });
 

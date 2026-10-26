@@ -108,6 +108,11 @@
 	 */
 	--destructive-text: light-dark(#c42d45, #f47a8a);
 	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
+	/* A routine's failed run: its card, its edge, its heading, and why it failed. */
+	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
+	--failed-card-border: light-dark(#f3c4cc, oklch(0.36 0.09 20));
+	--failed-card-heading: light-dark(#8e1f31, #fbd5da);
+	--failed-card-text: light-dark(#7a2b38, #e3c3c8);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
 	/* A dot for something that went ahead, such as an allowed request. */
 	--success: #22c55e;
@@ -175,6 +180,10 @@
 	--color-switch-on: var(--switch-on);
 	--color-destructive-text: var(--destructive-text);
 	--color-destructive-hover: var(--destructive-hover);
+	--color-failed-card: var(--failed-card);
+	--color-failed-card-border: var(--failed-card-border);
+	--color-failed-card-heading: var(--failed-card-heading);
+	--color-failed-card-text: var(--failed-card-text);
 	--color-scrim: var(--scrim);
 	--color-foreground: var(--foreground);
 	--color-body-foreground: var(--body-foreground);

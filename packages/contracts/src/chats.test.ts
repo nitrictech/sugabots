@@ -52,6 +52,8 @@ describe("chat contracts", () => {
 						threadId: "0199a3a0-0000-7000-8000-000000000002",
 						routineName: "Overnight review",
 						triggerKind: "webhook",
+						state: "completed",
+						error: null,
 						createdAt: "2026-09-18T00:00:00.000Z",
 					},
 				],

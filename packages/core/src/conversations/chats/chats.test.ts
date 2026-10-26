@@ -663,7 +663,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			expect(await view.podMarkers(workspaceId)).toEqual({
-				pods: { [podId]: { unreadMessages: 3, needsApproval: false } },
+				pods: { [podId]: { unreadMessages: 3, needsApproval: false, failedRoutines: 0 } },
 			});
 		});
 
@@ -721,7 +721,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				lastMessage: { preview: "File it" },
 			});
 			expect(await view.podMarkers(workspaceId)).toEqual({
-				pods: { [podId]: { unreadMessages: 0, needsApproval: true } },
+				pods: { [podId]: { unreadMessages: 0, needsApproval: true, failedRoutines: 0 } },
 			});
 		});
 	});
@@ -893,7 +893,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			unreadMessages: 1,
 		});
 		expect(await view.podMarkers(workspaceId)).toEqual({
-			pods: { [podId]: { unreadMessages: 1, needsApproval: false } },
+			pods: { [podId]: { unreadMessages: 1, needsApproval: false, failedRoutines: 0 } },
 		});
 	});
 

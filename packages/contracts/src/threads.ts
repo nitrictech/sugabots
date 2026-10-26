@@ -11,6 +11,7 @@ import { emailSchema } from "./email.ts";
 import {
 	routineExecutionSchema,
 	routineResultOfSchema,
+	routineStateSchema,
 	routineTriggerAuthorSchema,
 } from "./routines.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -539,6 +540,18 @@ export const threadDetailsSchema = Schema.Struct({
 		}),
 	),
 	routineExecution: Schema.NullOr(routineExecutionSchema),
+	/** On a routine's own thread: the routine, how it stands, and the bot that runs it. */
+	routine: Schema.optional(
+		Schema.Struct({
+			id: uuidSchema,
+			agentId: uuidSchema,
+			state: routineStateSchema,
+			/** Its latest run failed, and nothing has run it since. */
+			failed: Schema.Boolean,
+			/** It paused itself after failing twice in a row. */
+			pausedAfterFailures: Schema.Boolean,
+		}),
+	),
 	/** The message in a pod's chat that this thread was started from, which stays there. */
 	startedFrom: Schema.NullOr(messageSchema),
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),

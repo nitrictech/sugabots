@@ -14,6 +14,7 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
+import { CircleAlert, Pause } from "lucide-react";
 import {
 	Fragment,
 	type RefObject,
@@ -33,6 +34,7 @@ import {
 	useChatMessages,
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
+	useRoutineControls,
 	useSendChatMessage,
 	useSetDone,
 	useStartThread,
@@ -40,7 +42,7 @@ import {
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
-import { agentSettingsLink, conversationLink } from "@/lib/links.ts";
+import { agentSettingsLink, conversationLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { listNames } from "@/lib/name-list.ts";
 import { useReactions } from "@/lib/reactions.ts";
@@ -135,6 +137,10 @@ export function ConversationChat({
 	const send = useSendChatMessage(conversationId, user);
 	const startThread = useStartThread(conversationId);
 	const setDone = useSetDone(conversationId);
+	const routineControls = useRoutineControls(
+		conversationId,
+		mainThread.data?.routine ?? { id: "", agentId: "" },
+	);
 	const threadFrom = useThreadFrom(conversationId);
 	const navigate = useNavigate();
 	const [startError, setStartError] = useState<string>();
@@ -337,6 +343,13 @@ export function ConversationChat({
 			agent={agent}
 			title={title}
 			done={done}
+			routine={
+				details?.routine && {
+					paused: details.routine.state === "paused",
+					pending: routineControls.pending,
+					onPausedChange: (paused) => void routineControls.setPaused(paused),
+				}
+			}
 			pod={pod}
 			conversationId={conversationId}
 			place={place}
@@ -493,6 +506,19 @@ export function ConversationChat({
 												onOpen={openPodThread.bind(null, group.item.threadId)}
 											/>
 										</div>
+									) : group.item.kind === "routine_paused" ? (
+										<PausedLine at={group.item.createdAt} />
+									) : group.item.kind === "routine" &&
+										group.item.state === "failed" &&
+										details.routine ? (
+										<FailedRunCard
+											item={group.item}
+											pod={pod}
+											routine={details.routine}
+											conversationId={conversationId}
+											latest={details.routine.failed && group.item.id === latestRunId(items)}
+											onOpenThread={openThread}
+										/>
 									) : (
 										<ActivityLine item={group.item} entries={entries} onOpenThread={openThread} />
 									)}
@@ -604,7 +630,7 @@ function sendFailureMessage(failure: unknown): string {
 	return "Message not sent. Your draft is still here.";
 }
 
-type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "thread" }>;
+type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "thread" | "routine_paused" }>;
 
 /** A routine run as a row among the messages. */
 function ActivityLine({
@@ -814,6 +840,85 @@ function useJumpToMessage({
 }
 
 /** The top of a chat, once there is nothing older to load: whom it is with, and what they do. */
+/** The newest routine run in `items`, which is the one that can be tried again. */
+function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
+	return items.findLast((item) => item.kind === "routine")?.id;
+}
+
+/** In a routine's thread: that it paused itself after failing twice in a row, and when. */
+function PausedLine({ at }: { at: string }) {
+	return (
+		<p className="m-0 flex items-center gap-2 px-5 py-2 pl-[70px] font-medium text-[13.5px] text-muted-foreground">
+			<Pause aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+			Paused after two failed runs in a row.
+			<span className="font-normal text-[12px] text-subtle-foreground">
+				{formatListTime(new Date(at), new Date())}
+			</span>
+		</p>
+	);
+}
+
+/**
+ * A routine run that failed: when, and why. The latest, while the routine is
+ * still failing, offers to try again or to see to the connection it needs.
+ */
+function FailedRunCard({
+	item,
+	pod,
+	routine,
+	conversationId,
+	latest,
+	onOpenThread,
+}: {
+	item: Extract<ChatMessageItem, { kind: "routine" }>;
+	pod: Pod;
+	routine: NonNullable<ThreadDetails["routine"]>;
+	conversationId: string;
+	latest: boolean;
+	onOpenThread: (threadId: string) => void;
+}) {
+	const controls = useRoutineControls(conversationId, routine);
+	return (
+		<div className="px-5 py-1.5 pl-[70px]">
+			<article
+				aria-label={`Run failed: ${item.routineName}`}
+				className="flex max-w-[520px] gap-3 rounded-[10px] border border-failed-card-border bg-failed-card px-3.5 py-3"
+			>
+				<CircleAlert
+					aria-hidden
+					size={17}
+					strokeWidth={2}
+					className="mt-px shrink-0 text-destructive-text"
+				/>
+				<div className="flex min-w-0 flex-1 flex-col gap-1">
+					<button
+						type="button"
+						onClick={() => onOpenThread(item.threadId)}
+						className="focus-ring self-start rounded-sm text-left font-semibold text-[14px] text-failed-card-heading"
+					>
+						Run failed · {formatListTime(new Date(item.createdAt), new Date())}
+					</button>
+					{item.error && <p className="m-0 text-[13.5px] text-failed-card-text">{item.error}</p>}
+					{latest && (
+						<div className="mt-1.5 flex gap-2">
+							<Button
+								size="sm"
+								disabled={controls.pending}
+								onClick={() => void controls.runAgain()}
+							>
+								Retry
+							</Button>
+							<Button size="sm" variant="secondary" render={<Link {...podSettingsLink(pod)} />}>
+								Fix connection
+							</Button>
+						</div>
+					)}
+				</div>
+			</article>
+		</div>
+	);
+}
+
 /**
  * A thread started from the pod's chat, on one line in it: what it is called
  * and how many replies it has, opening it.
