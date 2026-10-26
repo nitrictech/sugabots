@@ -8,6 +8,7 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../threads/message-text.ts";
+import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { ROUTINES_KEY, spokenTimeZone } from "../tools/routines/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
@@ -245,6 +246,7 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 	);
 	return [
 		`[Turn] In the thread now: ${participants}. ${whyYou(context)}`,
+		`You can read the rest of this pod: its other threads and its pod chats. Find them with ${LIST_THREADS_TOOL} and read them with ${READ_THREAD_TOOL}, rather than asking another agent what was said there or saying you can't see it.`,
 		context.crew.length > 0
 			? [
 					"Other agents in this pod, and what each one knows:",
