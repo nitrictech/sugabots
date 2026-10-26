@@ -1,0 +1,14 @@
+/* The web app's dark colours, from `packages/web/src/app.css`; change them together. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+
+@define-color sugabots_aside #0d0e11;
+@define-color sugabots_panel #15161a;
+@define-color sugabots_chip #1d1f25;
+@define-color sugabots_foreground #eceef2;
+@define-color sugabots_border #1d1f25;
+@define-color sugabots_border_strong #2a2c33;
+/* --primary, oklch(0.52 0.17 268): GTK reads no oklch. */
+@define-color sugabots_primary #405ec9;
+@define-color sugabots_primary_foreground #ffffff;
+
+@import url("../../sugabots.css");

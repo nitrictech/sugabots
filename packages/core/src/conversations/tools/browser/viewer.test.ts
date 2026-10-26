@@ -227,17 +227,22 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"shows the page the agent's browser is on in the desktop's tabs",
+		"titles the browser's window by the page the agent's browser is on",
 		async () => {
 			const navigate = tools.browser_navigate?.execute as (
 				input: object,
 				options: object,
 			) => Promise<unknown>;
-			await navigate({ url: "data:text/html,<h1>Watched</h1>" }, { toolCallId: "1", messages: [] });
+			await navigate(
+				{ url: "data:text/html,<title>Watched</title>" },
+				{ toolCallId: "1", messages: [] },
+			);
 
 			const server = succeeded(await openAs(ownerId));
 
-			expect(await tabsOf(server)).toContain("data:text/html,<h1>Watched</h1>");
+			expect(await windowsOf(server)).toContainEqual(
+				expect.objectContaining({ id: "browser", title: expect.stringContaining("Watched") }),
+			);
 		},
 		SLOW,
 	);
@@ -283,7 +288,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			const server = succeeded(await openAs(ownerId));
 
 			expect(await logsIn({ ...window, password: "guessed!" })).toBe(false);
-			await expect(tabsOf({ ...server, password: "guessed!" })).rejects.toThrow();
+			await expect(windowsOf({ ...server, password: "guessed!" })).rejects.toThrow();
 		},
 		SLOW,
 	);
@@ -380,16 +385,13 @@ async function firstMessage({ endpoint, password }: DesktopViewer.OpenServer, ch
 	}
 }
 
-/** The addresses of the browser's tabs. */
-async function tabsOf(server: DesktopViewer.OpenServer) {
-	const { tabs } = (await firstMessage(server, "tabs")) as { tabs: { url: string }[] };
-	return tabs.map((tab) => tab.url);
-}
-
 /** The desktop's windows besides its terminal. */
 async function windowsOf(server: DesktopViewer.OpenServer) {
-	return ((await firstMessage(server, "windows")) as { windows: { id: string; kind: string }[] })
-		.windows;
+	return (
+		(await firstMessage(server, "windows")) as {
+			windows: { id: string; kind: string; title: string }[];
+		}
+	).windows;
 }
 
 /** The desktop closed the socket before saying all it would. */

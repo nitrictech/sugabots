@@ -59,15 +59,25 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 # browser connects as the rest of the sandbox does, so its egress rules,
 # which allow hosts by the name a TLS connection gives, let it through: over
 # TCP rather than QUIC, and without Encrypted Client Hello, which hides that
-# name behind the CDN's own (Cloudflare's cloudflare-ech.com).
+# name behind the CDN's own (Cloudflare's cloudflare-ech.com). Nobody signs
+# in to it, so it doesn't offer to.
 COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
 COPY openbox/rc.xml /usr/share/sugabots-desktop/openbox.xml
 
+# The desktop's apps in the web app's colours and font: GTK themes, light
+# and dark, which Chromium's tabs and toolbar take on too, and Rubik, the web
+# app's font, for their menus, tabs and labels.
+COPY gtk/ /usr/share/themes/
+ADD --checksum=sha256:1b3a7437ba2af80e465e773ed60c5036d1ba6ace492d89046dbcf18fb31e4e88 \
+	https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/rubik/Rubik%5Bwght%5D.ttf \
+	/usr/share/fonts/truetype/rubik/Rubik.ttf
+RUN chmod 644 /usr/share/fonts/truetype/rubik/Rubik.ttf && fc-cache -f
+
 # What the web app reaches a desktop through besides its displays: the
-# browser's tabs, the terminal, the files, and which windows the desktop has. Its
-# terminal is node-pty's, built here against the image's Node.
+# terminal, the files, and which windows the desktop has. Its terminal is
+# node-pty's, built here against the image's Node.
 COPY desktop-server/package.json desktop-server/package-lock.json desktop-server/*.mjs /usr/local/lib/sugabots-desktop-server/
 RUN cd /usr/local/lib/sugabots-desktop-server && npm ci --omit=dev && npm cache clean --force
 

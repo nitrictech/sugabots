@@ -19,7 +19,7 @@ import { DesktopUnavailable, startBrowser, type ViewerServers, windowViewers } f
 /**
  * An agent's desktop in a thread, opened by a person to watch and use: the
  * web app draws it, and shows each of its windows, each app on a display of
- * its own, over VNC, with the browser's tabs, the terminal and the list of
+ * its own, over VNC, with the terminal, the files and the list of
  * windows from the desktop's server. Anyone who can read the thread and see
  * the agent may open it, while the agent takes part in the thread and uses
  * the pod's sandbox. Those holding `sandbox.desktop.use` may click and type

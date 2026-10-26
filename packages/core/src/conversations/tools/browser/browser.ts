@@ -65,7 +65,7 @@ export interface Browser {
 	/** Whether it had to start, so its tabs from before are gone. */
 	readonly started: boolean;
 	/**
-	 * Where viewers reach the agent's desktop server: its browser's tabs, its
+	 * Where viewers reach the agent's desktop server: its files, its
 	 * terminal, and its windows. Absent in sandboxes made from images from
 	 * before desktops were drawn by the web app.
 	 */

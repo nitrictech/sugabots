@@ -5,7 +5,6 @@ import { useViewerIdle } from "@/lib/desktop.ts";
 import { useResolvedTheme } from "@/lib/theme.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { BrowserWindow } from "./BrowserWindow.tsx";
 import {
 	DesktopWindow,
 	MIN_WINDOW_HEIGHT,
@@ -269,30 +268,6 @@ function DesktopSurface({
 					onPlace: (change) => place(window.id, change),
 					onMinimize: () => place(window.id, { minimized: true }),
 				};
-				const closable = !viewOnly;
-				if (window.kind === "browser") {
-					return (
-						<BrowserWindow
-							key={window.id}
-							{...frame}
-							// The browser is the agent's, at work in it, so closing it only hides it.
-							onClose={frame.onMinimize}
-							threadId={threadId}
-							agentId={agentId}
-							viewOnly={viewOnly}
-							display={
-								<WindowDisplay
-									url={windowUrl(threadId, agentId, window.id)}
-									viewOnly={viewOnly}
-									what="browser"
-									onResize={resizeDisplay(window.id)}
-									clipboard={clipboard}
-									onClipboard={copied}
-								/>
-							}
-						/>
-					);
-				}
 				if (window.kind === "files") {
 					return (
 						<FilesWindow
@@ -318,18 +293,22 @@ function DesktopSurface({
 						</DesktopWindow>
 					);
 				}
+				const isBrowser = window.kind === "browser";
 				return (
 					<DesktopWindow
 						key={window.id}
 						{...frame}
-						label={windowTitle(window)}
+						label={isBrowser ? "Browser" : windowTitle(window)}
 						strip={{ title: <WindowTitle>{windowTitle(window)}</WindowTitle> }}
-						onClose={closable ? () => closeDisplay(window.id) : undefined}
+						// The browser is the agent's, at work in it, so closing it only hides it.
+						onClose={
+							isBrowser ? frame.onMinimize : viewOnly ? undefined : () => closeDisplay(window.id)
+						}
 					>
 						<WindowDisplay
 							url={windowUrl(threadId, agentId, window.id)}
 							viewOnly={viewOnly}
-							what="window"
+							what={isBrowser ? "browser" : "window"}
 							onResize={resizeDisplay(window.id)}
 							clipboard={clipboard}
 							onClipboard={copied}
@@ -494,7 +473,7 @@ function AppIconFor({ kind }: { kind: DesktopWindowKind }): ReactNode {
 
 function windowTitle(window: ShownWindow) {
 	if (window.kind === "terminal") return "Terminal";
-	if (window.kind === "browser") return "Browser";
+	if (window.kind === "browser") return window.title || "Browser";
 	if (window.kind === "files") return "Files";
 	return window.title || `Display ${window.id}`;
 }

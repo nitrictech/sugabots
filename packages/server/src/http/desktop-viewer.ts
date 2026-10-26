@@ -17,7 +17,7 @@ import { Authentication } from "../auth/authentication.ts";
  * opens, relayed to servers in the sandbox. Each window's is noVNC's,
  * relayed to the VNC server of the window's display: the relay logs in to
  * the server with its password and offers the viewer no authentication, then
- * passes frames both ways untouched. The browser's tabs, the terminal and the
+ * passes frames both ways untouched. The terminal, the files and the
  * list of windows are relayed to the desktop's server, with the password in
  * the upgrade request. Neither the passwords nor the sandbox's address reach
  * the person's browser.
@@ -99,7 +99,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 );
 
 /** What the desktop's server serves, each at its own path. */
-const DESKTOP_SERVER_CHANNELS = ["tabs", "terminal", "files", "windows"] as const;
+const DESKTOP_SERVER_CHANNELS = ["terminal", "files", "windows"] as const;
 
 /**
  * The desktop's server in the sandbox as a WebSocket at `channel`, logged in

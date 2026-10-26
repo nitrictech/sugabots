@@ -170,7 +170,7 @@ export function windowUrl(threadId: string, agentId: string, window: string) {
 export function desktopServerUrl(
 	threadId: string,
 	agentId: string,
-	channel: "tabs" | "terminal" | "files" | "windows",
+	channel: "terminal" | "files" | "windows",
 ) {
 	return webSocketUrl(`/threads/${threadId}/agents/${agentId}/desktop/${channel}`);
 }

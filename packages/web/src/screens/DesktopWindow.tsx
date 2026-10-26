@@ -28,7 +28,6 @@ export interface WindowFrame {
 export const MIN_WINDOW_WIDTH = 320;
 export const MIN_WINDOW_HEIGHT = 200;
 const TITLE_STRIP_HEIGHT = 36;
-const TAB_STRIP_HEIGHT = 40;
 const TOOLBAR_STRIP_HEIGHT = 46;
 /** How much of a window stays on the desktop when it's dragged off an edge, in pixels. */
 const KEPT_VISIBLE = 80;
@@ -37,10 +36,8 @@ const KEPT_VISIBLE = 80;
  * A window on the desktop: a title strip to drag it by, with traffic lights
  * to close it (given `onClose`), tuck it into the dock and fill the desktop,
  * and a corner to resize it by. The strip holds the window's name in its
- * middle, tabs filling it from the lights, which run into the window's
- * content, as the browser's do, or the window's own controls, as the file
- * browser's do. Clicking anywhere in it brings it to the
- * front.
+ * middle, or the window's own controls, as the file browser's do. Clicking
+ * anywhere in it brings it to the front.
  */
 export function DesktopWindow({
 	label,
@@ -56,7 +53,7 @@ export function DesktopWindow({
 }: WindowFrame & {
 	/** Names the window for assistive technology. */
 	label: string;
-	strip: { title: ReactNode } | { tabs: ReactNode } | { toolbar: ReactNode };
+	strip: { title: ReactNode } | { toolbar: ReactNode };
 	children: ReactNode;
 }) {
 	/** Follows the pointer from where it went down until it comes up, with `change` saying how the window moves. */
@@ -110,7 +107,6 @@ export function DesktopWindow({
 					"grid shrink-0 touch-none select-none gap-3 bg-aside px-3",
 					"title" in strip &&
 						"grid-cols-[auto_minmax(0,1fr)_auto] items-center border-border border-b",
-					"tabs" in strip && "grid-cols-[auto_minmax(0,1fr)] items-end",
 					"toolbar" in strip &&
 						"grid-cols-[auto_minmax(0,1fr)] items-center border-border border-b",
 					!placement.maximized && "cursor-grab active:cursor-grabbing",
@@ -132,7 +128,6 @@ export function DesktopWindow({
 						<span aria-hidden className="w-[52px]" />
 					</>
 				)}
-				{"tabs" in strip && <div className="flex min-w-0 items-end">{strip.tabs}</div>}
 				{"toolbar" in strip && <div className="flex min-w-0 items-center">{strip.toolbar}</div>}
 			</header>
 			<div className="relative min-h-0 flex-1">{children}</div>
@@ -150,10 +145,8 @@ export function DesktopWindow({
 	);
 }
 
-function stripHeight(strip: { title: ReactNode } | { tabs: ReactNode } | { toolbar: ReactNode }) {
-	if ("title" in strip) return TITLE_STRIP_HEIGHT;
-	if ("tabs" in strip) return TAB_STRIP_HEIGHT;
-	return TOOLBAR_STRIP_HEIGHT;
+function stripHeight(strip: { title: ReactNode } | { toolbar: ReactNode }) {
+	return "title" in strip ? TITLE_STRIP_HEIGHT : TOOLBAR_STRIP_HEIGHT;
 }
 
 /** The window's name, in the middle of its title strip. */

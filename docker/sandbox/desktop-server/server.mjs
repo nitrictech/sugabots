@@ -1,11 +1,11 @@
 // What Sugabots' web app reaches an agent's desktop through besides its
-// displays, which it reaches over VNC: the browser's tabs, the terminal, the
-// files, and which windows the desktop has.
+// displays, which it reaches over VNC: the terminal, the files, and which
+// windows the desktop has, and the look its apps take on.
 //
 //   node server.mjs port devtools-port passwords-file session folder xsettings-file
 //
-// Viewers open a WebSocket on `port`, at /tabs, /terminal, /files or
-// /windows, with `Authorization: Bearer <password>`, one of the two in
+// Viewers open a WebSocket on `port`, at /terminal, /files or /windows,
+// with `Authorization: Bearer <password>`, one of the two in
 // `passwords-file`, as sugabots-desktop writes them: the first lets the
 // viewer change things, the second only watch. The file is read on every
 // connection, because a display that starts again makes new ones. Viewers
@@ -20,7 +20,6 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { serveFiles } from "./files.mjs";
-import { serveTabs } from "./tabs.mjs";
 import { makeTerminal } from "./terminal.mjs";
 import { makeTheme } from "./theme.mjs";
 import { makeWindows } from "./windows.mjs";
@@ -36,7 +35,6 @@ if (!port || !devtoolsPort || !passwordsFile || !session || !folder || !xsetting
 const terminal = makeTerminal(folder, session);
 const windows = makeWindows(session, await makeTheme(devtoolsPort, xsettingsFile));
 const channels = {
-	"/tabs": (viewer, mayUse) => serveTabs(viewer, mayUse, devtoolsPort),
 	"/terminal": (viewer, mayUse) => terminal.serve(viewer, mayUse),
 	"/files": (viewer, mayUse) => serveFiles(viewer, mayUse, folder),
 	"/windows": (viewer, mayUse) => windows.serve(viewer, mayUse),

@@ -12,7 +12,6 @@ const desktopServer = (channel: string) =>
 		`${(import.meta.env.VITE_API_URL as string).replace(/^http/, "ws")}/threads/${threadId}/agents/${agentId}/desktop/${channel}`,
 	);
 const windowsChannel = desktopServer("windows");
-const tabsChannel = desktopServer("tabs");
 const terminalChannel = desktopServer("terminal");
 const filesChannel = desktopServer("files");
 
@@ -21,25 +20,6 @@ const windows: DisplayWindow[] = [
 	{ id: "4", kind: "app", title: "Chart preview" },
 ];
 const sentToWindows = fn();
-const sentToTabs = fn();
-const browserTabs = [
-	{
-		id: "tab-1",
-		title: "Pricing · Example",
-		url: "https://example.com/pricing",
-		loading: false,
-		canGoBack: true,
-		canGoForward: false,
-	},
-	{
-		id: "tab-2",
-		title: "",
-		url: "https://search.example/?q=competitors",
-		loading: true,
-		canGoBack: false,
-		canGoForward: false,
-	},
-];
 
 /**
  * Handlers for a desktop server with the browser and an app the agent
@@ -49,10 +29,6 @@ const desktopServerHandlers = () => [
 	windowsChannel.addEventListener("connection", ({ client }) => {
 		client.send(JSON.stringify({ type: "windows", windows }));
 		client.addEventListener("message", (event) => sentToWindows(JSON.parse(String(event.data))));
-	}),
-	tabsChannel.addEventListener("connection", ({ client }) => {
-		client.send(JSON.stringify({ type: "tabs", tabs: browserTabs, activeId: "tab-1" }));
-		client.addEventListener("message", (event) => sentToTabs(JSON.parse(String(event.data))));
 	}),
 	terminalChannel.addEventListener("connection", ({ client }) => {
 		client.send("agent@sandbox:/workspace/threads/t1$ ");
@@ -100,16 +76,16 @@ const meta = preview.meta({
 /**
  * The agent's desktop being watched while the agent works, its apps told to
  * take on the viewer's light or dark look: a window for each
- * app on a display, the browser's with its address bar, and a dock whose dots
+ * app on a display, the browser's titled by its page, and a dock whose dots
  * take the agent's colour. The windows' pages come over VNC,
  * which a preview has no sandbox for, so each says it couldn't be reached.
  */
 export const Watching = meta.story({
 	play: async ({ canvas }) => {
 		const browser = await canvas.findByRole("region", { name: "Browser" });
-		await expect(await within(browser).findByRole("textbox", { name: "Address" })).toHaveValue(
-			"example.com/pricing",
-		);
+		await expect(
+			within(browser).getByRole("heading", { name: "Pricing · Example - Chromium" }),
+		).toBeVisible();
 		await expect(canvas.getByRole("region", { name: "Chart preview" })).toBeVisible();
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await expect(within(dock).getByRole("button", { name: "Chart preview" })).toBeVisible();
@@ -176,33 +152,5 @@ export const ClosingTheBrowser = meta.story({
 		const dock = canvas.getByRole("navigation", { name: "Dock" });
 		await userEvent.click(within(dock).getByRole("button", { name: "Browser" }));
 		await expect(await canvas.findByRole("region", { name: "Browser" })).toBeVisible();
-	},
-});
-
-/**
- * The browser's tabs in control: one tab in front and one still loading,
- * switched between, closed and added to, each asked of the desktop server.
- */
-export const BrowserTabs = meta.story({
-	args: { viewOnly: false, driver: "person" },
-	play: async ({ canvas, userEvent }) => {
-		const browser = await canvas.findByRole("region", { name: "Browser" });
-		const front = await within(browser).findByRole("button", { name: "Pricing · Example" });
-		await expect(front).toHaveAttribute("aria-current", "true");
-		await expect(within(browser).getByRole("button", { name: "Back" })).toBeEnabled();
-		await expect(within(browser).getByRole("button", { name: "Forward" })).toBeDisabled();
-
-		await userEvent.click(
-			within(browser).getByRole("button", { name: "https://search.example/?q=competitors" }),
-		);
-		await waitFor(() =>
-			expect(sentToTabs).toHaveBeenCalledWith({ type: "activate", tabId: "tab-2" }),
-		);
-		await userEvent.click(within(browser).getByRole("button", { name: "Close Pricing · Example" }));
-		await waitFor(() =>
-			expect(sentToTabs).toHaveBeenCalledWith({ type: "closeTab", tabId: "tab-1" }),
-		);
-		await userEvent.click(within(browser).getByRole("button", { name: "New tab" }));
-		await waitFor(() => expect(sentToTabs).toHaveBeenCalledWith({ type: "newTab" }));
 	},
 });

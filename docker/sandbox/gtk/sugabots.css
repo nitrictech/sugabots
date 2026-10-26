@@ -1,0 +1,44 @@
+/*
+ * Adwaita in the web app's colours, so the apps on an agent's desktop look
+ * of a piece with the window the web app draws around them. Chromium, using
+ * the GTK theme, takes its tab strip from the header bar, its toolbar from
+ * the window's background and its address bar from an entry, so its tabs
+ * sit on the same colour as the web app's title strip above them.
+ *
+ * Each theme defines the colours below, then imports this.
+ */
+
+headerbar,
+.titlebar,
+headerbar:backdrop,
+.titlebar:backdrop {
+	background: @sugabots_aside;
+	color: @sugabots_foreground;
+	border-color: @sugabots_border;
+	box-shadow: none;
+}
+
+window.background,
+.background,
+.background:backdrop {
+	background-color: @sugabots_panel;
+	color: @sugabots_foreground;
+}
+
+entry,
+entry:backdrop {
+	background-color: @sugabots_chip;
+	color: @sugabots_foreground;
+	border-color: @sugabots_border_strong;
+	box-shadow: none;
+}
+
+entry:focus {
+	border-color: @sugabots_primary;
+}
+
+*:selected,
+selection {
+	background-color: @sugabots_primary;
+	color: @sugabots_primary_foreground;
+}

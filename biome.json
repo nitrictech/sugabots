@@ -12,6 +12,7 @@
 			"!**/node_modules",
 			"!**/*.svg",
 			"!packages/core/drizzle",
+			"!docker/sandbox/gtk",
 			"!packages/web/.storybook/public/mockServiceWorker.js",
 			"!packages/website/src/routeTree.gen.ts"
 		]

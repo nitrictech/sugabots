@@ -22,7 +22,7 @@ import {
  * The desktop's WebSockets, served on real ports: the API relays the
  * person's socket for a window to its display's, here a stand-in that logs a
  * viewer in as x11vnc does, with VNC authentication, then echoes what it is
- * sent, and for the desktop server's tabs to a stand-in that echoes to a
+ * sent, and for the desktop server's windows to a stand-in that echoes to a
  * viewer with its password.
  */
 const user = {
@@ -36,7 +36,7 @@ const resolveUser: UserResolver = async (headers) =>
 const AGENT_IN_THREAD =
 	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002";
 const PATH = `${AGENT_IN_THREAD}/windows/browser`;
-const TABS_PATH = `${AGENT_IN_THREAD}/desktop/tabs`;
+const WINDOWS_PATH = `${AGENT_IN_THREAD}/desktop/windows`;
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
@@ -107,7 +107,7 @@ beforeAll(async () => {
 				const router = yield* HttpRouter.HttpRouter;
 				yield* router.add(
 					"GET",
-					"/tabs",
+					"/windows",
 					Effect.gen(function* () {
 						const request = yield* HttpServerRequest.HttpServerRequest;
 						if (request.headers.authorization !== `Bearer ${PASSWORD}`) {
@@ -206,22 +206,22 @@ describe("a desktop window's WebSocket", () => {
 
 describe("the desktop server's WebSockets", () => {
 	it("connects a signed-in person to the desktop server with its password, and relays text both ways", async () => {
-		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${TABS_PATH}`, {
+		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${WINDOWS_PATH}`, {
 			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
 		} as unknown as string[]);
 		const echoed = await new Promise<unknown>((resolve, reject) => {
-			socket.onopen = () => socket.send(JSON.stringify({ type: "reload" }));
+			socket.onopen = () => socket.send(JSON.stringify({ type: "theme", scheme: "light" }));
 			socket.onmessage = (event) => resolve(event.data);
 			socket.onerror = () => reject(new Error("The socket failed"));
 		});
 		socket.close();
 
-		expect(echoed).toBe(JSON.stringify({ type: "reload" }));
+		expect(echoed).toBe(JSON.stringify({ type: "theme", scheme: "light" }));
 	});
 
 	it("refuses a page on another origin, cookie or not", async () => {
 		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
-			new Request(`http://localhost:3000${TABS_PATH}`, {
+			new Request(`http://localhost:3000${WINDOWS_PATH}`, {
 				headers: { origin: "https://elsewhere.example", cookie: "session=good" },
 			}),
 		);

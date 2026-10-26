@@ -1,5 +1,6 @@
 {
 	"LocalNetworkAccessBlockedForUrls": ["*"],
 	"QuicAllowed": false,
-	"EncryptedClientHelloEnabled": false
+	"EncryptedClientHelloEnabled": false,
+	"BrowserSignin": 0
 }

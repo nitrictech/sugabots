@@ -19,10 +19,12 @@
 #
 # Each display holds one app, at the size of the window the web app shows it
 # in: viewers resize the display, and its window manager keeps the app
-# filling it, without a frame of its own: the web app's window has the
-# title bar. The browser draws no tabs or address bar of its own; the web
-# app draws them, from the desktop server, which also runs the desktop's
-# terminal, lists its files, and says which windows it has. A display an
+# filling it, without a frame or window buttons of its own: the web app's
+# window has the title bar. The browser keeps its own tabs and address bar,
+# as any app keeps its own toolbars. Apps take on the web app's colours and
+# font, light or dark as the viewer has it, through the Sugabots GTK themes.
+# The desktop server runs the desktop's terminal, lists its files, says
+# which windows it has, and sets its look. A display an
 # agent starts, run with SUGABOTS_DESKTOP_SESSION set to its `name`, is one
 # of its windows too.
 # `windows` prints `id=ID kind=browser|app display=N title=T` a line,
@@ -100,9 +102,20 @@ display() {
 	echo $! >>"$pids"
 	openbox --config-file /usr/share/sugabots-desktop/openbox.xml >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# GTK apps take their theme, light or dark as the desktop's viewers have it,
-	# from here, and follow it as the desktop server changes it.
-	[ -f "$state/xsettings" ] || echo 'Net/ThemeName "Adwaita-dark"' >"$state/xsettings"
+	# GTK apps, Chromium among them, take their theme from here, and follow it
+	# as the desktop server changes it between light and dark. They draw no
+	# window buttons, which the web app's window has, and draw text as the web
+	# app does: in Rubik, smoothed without colour fringes, which scaling a
+	# display to fit its window would smear.
+	[ -f "$state/xsettings" ] || cat >"$state/xsettings" <<-'SETTINGS'
+		Net/ThemeName "Sugabots-dark"
+		Gtk/DecorationLayout ":"
+		Gtk/FontName "Rubik 10"
+		Xft/Antialias 1
+		Xft/Hinting 1
+		Xft/HintStyle "hintslight"
+		Xft/RGBA "none"
+	SETTINGS
 	xsettingsd -c "$state/xsettings" >>"$log" 2>&1 &
 	echo $! >>"$pids"
 	keep_maximized "$n" >>"$log" 2>&1 &
@@ -190,6 +203,40 @@ unlock_profile() {
 	rm -f "$dir/SingletonLock" "$dir/SingletonSocket" "$dir/SingletonCookie"
 }
 
+# Has the Chromium profile under `profile` use the GTK theme, which follows
+# the desktop's light or dark look as it changes, where Chromium's own
+# follows it only when it starts. Set on every start, over whatever the
+# profile says.
+use_gtk_theme() {
+	node -e '
+		const fs = require("node:fs");
+		const path = require("node:path");
+		const file = process.argv[1];
+		let preferences = {};
+		try {
+			preferences = JSON.parse(fs.readFileSync(file, "utf8"));
+		} catch {}
+		preferences.extensions = { ...preferences.extensions };
+		preferences.extensions.theme = { ...preferences.extensions.theme, system_theme: 1 };
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify(preferences));
+	' "$1/chromium/Default/Preferences"
+}
+
+# Runs a command, and again whenever it exits, until this is stopped. The
+# browser quits with its last tab, which a person may close, but stays open
+# for the agent while its display does.
+keep_running() {
+	local child
+	trap 'kill "$child" 2>/dev/null; exit' TERM
+	while :; do
+		"$@" &
+		child=$!
+		wait "$child" || true
+		sleep 1
+	done
+}
+
 browser() {
 	local n="$1" profile="$2" output="$3" name="$4" folder="$5" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
@@ -198,14 +245,14 @@ browser() {
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
 		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
+	use_gtk_theme "$profile"
 	# Started here rather than by Playwright MCP, which closes a browser it
 	# launched when its last client disconnects: at the end of every turn.
-	# In kiosk mode: filling the display, without tabs or an address bar,
-	# which the web app draws. The profile is found through XDG_CONFIG_HOME,
-	# where profiles from before have it, rather than --user-data-dir.
-	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --kiosk \
+	# The profile is found through XDG_CONFIG_HOME, where profiles from before
+	# have it, rather than --user-data-dir.
+	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" keep_running chromium $(chromium_sandbox_flags) \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
-		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
+		--no-first-run --no-default-browser-check --hide-crash-restore-bubble about:blank >>"$log" 2>&1 &
 	echo $! >"$pids"
 	for _ in $(seq 100); do
 		curl -sf -o /dev/null "http://127.0.0.1:$devtools/json/version" && break
