@@ -118,6 +118,13 @@ desktop() {
 	echo $! >>"$pids"
 	picom --config /usr/share/sugabots-desktop/picom.conf >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	# File managers list a Desktop place, which errors on a home without a
+	# Desktop folder; it isn't listed when the desktop folder is the home.
+	if [ ! -f "$HOME/.config/user-dirs.dirs" ]; then
+		mkdir -p "$HOME/.config"
+		# shellcheck disable=SC2016 # The file names the home as $HOME itself.
+		echo 'XDG_DESKTOP_DIR="$HOME"' >"$HOME/.config/user-dirs.dirs"
+	fi
 	dock "$n"
 }
 
@@ -403,6 +410,10 @@ viewer() {
 # What the dock opens on the desktop it runs on.
 open() {
 	local n="${DISPLAY#:}"
+	# The display's session bus, which the apps' services, such as Nautilus's
+	# trash and network places, are reached through, however this was run.
+	DBUS_SESSION_BUS_ADDRESS="$(cat "$state/$n.bus")"
+	export DBUS_SESSION_BUS_ADDRESS
 	case "${1:-}" in
 	browser)
 		local profile output
@@ -425,10 +436,12 @@ open() {
 		;;
 	files)
 		# libadwaita takes light or dark from a desktop portal this sandbox
-		# hasn't, or from this.
+		# hasn't, or from this. GTK 4 draws in software rather than through
+		# the display's emulated OpenGL, which leaves some of its windows,
+		# dialogs among them, undrawn: an invisible dialog holds the window.
 		local scheme=prefer-light
 		[ "$(display_theme "$n")" = dark ] && scheme=prefer-dark
-		ADW_DEBUG_COLOR_SCHEME="$scheme" exec env -u GTK_THEME nautilus --new-window /workspace
+		ADW_DEBUG_COLOR_SCHEME="$scheme" GSK_RENDERER=cairo exec env -u GTK_THEME nautilus --new-window /workspace
 		;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2

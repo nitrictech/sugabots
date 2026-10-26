@@ -82,7 +82,12 @@ COPY picom.conf /usr/share/sugabots-desktop/picom.conf
 COPY gtk/settings.ini /etc/gtk-3.0/settings.ini
 COPY lxterminal/lxterminal.conf /usr/share/lxterminal/lxterminal.conf
 COPY lxterminal/dark/lxterminal.conf /usr/share/sugabots-desktop/dark/lxterminal/lxterminal.conf
-# Nautilus's look, a GTK 4 app's, which reads none of GTK 3's.
+# Nautilus's look, a GTK 4 app's, which reads none of GTK 3's. Without the
+# file indexer it depends on, which Nautilus would otherwise start to index
+# the sandbox in the background, its search reads folders as it goes.
+RUN rm /usr/share/dbus-1/services/org.freedesktop.LocalSearch3*.service \
+	/usr/share/dbus-1/services/org.freedesktop.Tracker3.Miner.Files*.service \
+	/usr/share/dbus-1/services/org.freedesktop.Tracker3.Writeback.service
 COPY gtk4/settings.ini /etc/gtk-4.0/settings.ini
 COPY gtk4/*.css /usr/share/sugabots-desktop/gtk-4.0/
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
