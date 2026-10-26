@@ -1,8 +1,9 @@
 import { cn } from "cn";
-import type { PointerEvent, ReactNode } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { type CallToAction, trackCallToActionClick } from "@/analytics";
 import { callToAction } from "@/landing/call-to-action";
 import { SectionHeading } from "@/landing/section-heading";
+import { WaitlistForm } from "@/landing/waitlist-form";
 import { siteColumn } from "@/layout";
 import { siteLinks } from "@/site-links";
 
@@ -37,7 +38,66 @@ export function PlansSection() {
 					</div>
 				</Plan>
 			</div>
+			<Waitlist />
 		</section>
+	);
+}
+
+/** The hosted version's waitlist, under the plans, where every "Join the waitlist" link leads. */
+function Waitlist() {
+	const band = useRef<HTMLDivElement>(null);
+	const form = useRef<HTMLDivElement>(null);
+	const [submitted, setSubmitted] = useState(false);
+	// Once the form is sent, the band's height is set explicitly, so it eases down to Parley's
+	// shorter message instead of jumping, and the page below doesn't lurch.
+	const [height, setHeight] = useState<number>();
+
+	useEffect(() => {
+		const bandElement = band.current;
+		const formElement = form.current;
+		if (!submitted || !bandElement || !formElement) return;
+		const observer = new ResizeObserver(() => {
+			const style = getComputedStyle(bandElement);
+			const chrome =
+				bandElement.offsetHeight -
+				bandElement.clientHeight +
+				Number.parseFloat(style.paddingTop) +
+				Number.parseFloat(style.paddingBottom);
+			setHeight(formElement.offsetHeight + chrome);
+		});
+		observer.observe(formElement);
+		return () => observer.disconnect();
+	}, [submitted]);
+
+	function holdHeightAndSubmit() {
+		setHeight(band.current?.offsetHeight);
+		setSubmitted(true);
+	}
+
+	return (
+		<div
+			id="waitlist"
+			ref={band}
+			style={{ height }}
+			className={cn(
+				"grid scroll-mt-[calc(var(--site-header-height)+24px)] content-center items-center gap-x-12 gap-y-6 overflow-hidden rounded-[20px] border border-landing-frame bg-landing-card p-8 transition-[height] duration-300 ease-landing motion-reduce:transition-none",
+				!submitted && "md:grid-cols-2",
+			)}
+		>
+			{!submitted && (
+				<div className="flex flex-col gap-2">
+					<h3 className="text-[21px]/[1.25] font-semibold tracking-[-0.01em]">
+						Get on the list for hosted.
+					</h3>
+					<p className="max-w-md text-[15px]/[1.55] text-pretty text-landing-muted">
+						Leave your email and we'll let you know when it opens.
+					</p>
+				</div>
+			)}
+			<div ref={form}>
+				<WaitlistForm onSubmit={holdHeightAndSubmit} />
+			</div>
+		</div>
 	);
 }
 

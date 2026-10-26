@@ -11,8 +11,8 @@ export const DISCORD_PATH = new URL(projectLinks.discord).pathname;
 export const siteLinks = {
 	docs: "/docs",
 	selfHost: "/docs/quickstart",
-	/** There is no waitlist form yet, so this goes to Discord until there is. */
-	waitlist: projectLinks.discord,
+	/** The waitlist form in the landing page's Hosted plan, from any page. */
+	waitlist: "/#waitlist",
 	github: projectLinks.repository,
 	discord: projectLinks.discord,
 } as const;
