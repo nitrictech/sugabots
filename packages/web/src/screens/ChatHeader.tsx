@@ -134,6 +134,7 @@ export function PeopleChatHeader({
 	title,
 	description,
 	done,
+	details,
 	pod,
 	place,
 }: {
@@ -141,6 +142,8 @@ export function PeopleChatHeader({
 	description?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
 	done?: DoneToggle;
+	/** Whether its Details are open, and what opens or closes them; absent where it has none. */
+	details?: { open: boolean; onChange: (open: boolean) => void };
 	pod: Pod;
 	place: ChatPlace;
 }) {
@@ -161,6 +164,17 @@ export function PeopleChatHeader({
 				<span className="flex-1" />
 			)}
 			{done && <DoneButton {...done} />}
+			{details && (
+				<IconButton
+					label="Details"
+					variant="bar"
+					aria-pressed={details.open}
+					onClick={() => details.onChange(!details.open)}
+					className="size-8 aria-pressed:bg-chip max-md:hidden"
+				>
+					<Info size={18} strokeWidth={2} />
+				</IconButton>
+			)}
 			{place.kind === "away" && place.trailing}
 		</header>
 	);

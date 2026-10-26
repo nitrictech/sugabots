@@ -122,7 +122,26 @@ const meta = preview.meta({
 	component: DetailsSidebar,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { agent: growthDesk, pod: revenue, threadId, user, onClose: fn() },
+	args: {
+		agent: growthDesk,
+		pod: revenue,
+		threadId,
+		user,
+		contents: {
+			participants: people,
+			files: [
+				{
+					type: "file" as const,
+					id: "0199a3a0-0000-7000-8000-0000000005f9",
+					name: "northwind-pricing.pdf",
+					contentType: "application/pdf",
+					size: 48_210,
+				},
+			],
+			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
+		},
+		onClose: fn(),
+	},
 	decorators: [
 		function WithQueries(Story, context) {
 			const scribeHasModel = context.parameters.scribeHasModel !== false;
@@ -172,6 +191,8 @@ export const Default = meta.story({
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
 		await expect(canvas.getByText("You")).toBeVisible();
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeVisible();
+		await expect(canvas.getByRole("heading", { name: "In this thread" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
 	},
 });
