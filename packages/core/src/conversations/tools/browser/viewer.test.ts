@@ -188,31 +188,46 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		await closeDatabase();
 	}, SLOW);
 
-	const openAs = (userId: string, of = agentId) =>
+	const asPerson = <A, E>(
+		userId: string,
+		opening: Effect.Effect<A, E, CurrentActor.Service | Scope.Scope>,
+	) =>
 		runOnPostgres(
 			Effect.exit(
-				Scope.provide(scope)(viewer.open({ threadId, agentId: of })).pipe(
+				Scope.provide(scope)(opening).pipe(
 					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
 				),
 			),
 		);
-
-	let openedFirst: string | undefined;
+	const openAs = (userId: string, of = agentId) =>
+		asPerson(userId, viewer.openDesktopServer({ threadId, agentId: of }));
+	const openWindowAs = (userId: string, window: string) =>
+		asPerson(userId, viewer.openWindow({ threadId, agentId, window }));
+	const succeeded = <A, E>(exit: Exit.Exit<A, E>) => {
+		if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+		return exit.value;
+	};
+	const run = (command: string) => {
+		const execute = tools.run_command?.execute as unknown as
+			| ((input: object, options: object) => Promise<{ stdout: string }>)
+			| undefined;
+		if (!execute) throw new Error("The agent has no run_command tool");
+		return execute({ command, timeout_seconds: 60 }, { toolCallId: "2", messages: [] });
+	};
 
 	it(
-		"starts the desktop for someone who opens it before the agent has used its browser",
+		"starts the browser for someone who opens the desktop before the agent has used it",
 		async () => {
-			const exit = await openAs(ownerId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
-			openedFirst = exit.value.endpoint.url;
+			const server = succeeded(await openAs(ownerId));
 
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await windowsOf(server)).toContainEqual(expect.objectContaining({ id: "browser" }));
+			expect(await logsIn(succeeded(await openWindowAs(ownerId, "browser")))).toBe(true);
 		},
 		SLOW,
 	);
 
 	it(
-		"gives a person the same desktop after the agent starts its browser, on a display of its own",
+		"shows the page the agent's browser is on in the desktop's tabs",
 		async () => {
 			const navigate = tools.browser_navigate?.execute as (
 				input: object,
@@ -220,67 +235,55 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			) => Promise<unknown>;
 			await navigate({ url: "data:text/html,<h1>Watched</h1>" }, { toolCallId: "1", messages: [] });
 
-			const exit = await openAs(ownerId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+			const server = succeeded(await openAs(ownerId));
 
-			expect(exit.value.endpoint.url).toBe(openedFirst);
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await tabsOf(server)).toContain("data:text/html,<h1>Watched</h1>");
 		},
 		SLOW,
 	);
 
 	it(
-		"shows the desktop to a pod's viewer to watch only, from another server",
+		"shows a display the agent starts as a window of its desktop",
 		async () => {
-			const exit = await openAs(watcherId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+			const started = await run("sugabots-desktop start");
+			const display = started.stdout.match(/DISPLAY=:(\d+)/)?.[1];
+			if (!display) throw new Error(started.stdout);
+			const server = succeeded(await openAs(ownerId));
 
-			expect(exit.value.endpoint.url).not.toBe(openedFirst);
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await windowsOf(server)).toContainEqual(
+				expect.objectContaining({ id: display, kind: "app" }),
+			);
+			expect(await logsIn(succeeded(await openWindowAs(ownerId, display)))).toBe(true);
+		},
+		SLOW,
+	);
+
+	it("refuses a window the desktop doesn't have", async () => {
+		const exit = await openWindowAs(ownerId, "99");
+
+		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");
+	});
+
+	it(
+		"shows the desktop to a pod's viewer with the password that only watches",
+		async () => {
+			const owners = succeeded(await openWindowAs(ownerId, "browser"));
+			const watchers = succeeded(await openWindowAs(watcherId, "browser"));
+
+			expect(watchers.password).not.toBe(owners.password);
+			expect(await logsIn(watchers)).toBe(true);
 		},
 		SLOW,
 	);
 
 	it(
-		"keeps the desktop from anything in the sandbox without its password",
+		"keeps the desktop from anything in the sandbox without its passwords",
 		async () => {
-			const exit = await openAs(ownerId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
+			const window = succeeded(await openWindowAs(ownerId, "browser"));
+			const server = succeeded(await openAs(ownerId));
 
-			expect(await logsIn({ ...exit.value, password: "guessed!" })).toBe(false);
-		},
-		SLOW,
-	);
-
-	const openBrowserAs = (userId: string) =>
-		runOnPostgres(
-			Effect.exit(
-				Scope.provide(scope)(viewer.openBrowser({ threadId, agentId })).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
-				),
-			),
-		);
-
-	it(
-		"shows the agent's browser on its own display, and its tabs, to someone who opens it",
-		async () => {
-			const exit = await openBrowserAs(ownerId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
-
-			expect(exit.value.screen.endpoint.url).not.toBe(openedFirst);
-			expect(await logsIn(exit.value.screen)).toBe(true);
-			expect(await tabsOf(exit.value.tabs)).toContain("data:text/html,<h1>Watched</h1>");
-		},
-		SLOW,
-	);
-
-	it(
-		"keeps the browser's tabs from anything in the sandbox without its password",
-		async () => {
-			const exit = await openBrowserAs(ownerId);
-			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
-
-			await expect(tabsOf({ ...exit.value.tabs, password: "guessed!" })).rejects.toThrow();
+			expect(await logsIn({ ...window, password: "guessed!" })).toBe(false);
+			await expect(tabsOf({ ...server, password: "guessed!" })).rejects.toThrow();
 		},
 		SLOW,
 	);
@@ -313,7 +316,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
  * (RFC 6143, 7.1), as the relay goes through it. x11vnc wants an Origin, as
  * a browser sends, before it takes a WebSocket.
  */
-async function logsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promise<boolean> {
+async function logsIn({ endpoint, password }: DesktopViewer.OpenServer): Promise<boolean> {
 	const socket = new WebSocket(endpoint.url.replace(/^http/, "ws"), {
 		protocols: ["binary"],
 		headers: { ...endpoint.headers, origin: "http://localhost" },
@@ -361,23 +364,32 @@ async function logsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promis
 	}
 }
 
-/** The tabs' addresses a viewer with the password is first told of. */
-async function tabsOf({ endpoint, password }: DesktopViewer.OpenDesktop) {
-	const socket = new WebSocket(endpoint.url.replace(/^http/, "ws"), {
+/** The first message a viewer with the password gets from the desktop server at `channel`. */
+async function firstMessage({ endpoint, password }: DesktopViewer.OpenServer, channel: string) {
+	const socket = new WebSocket(`${endpoint.url.replace(/^http/, "ws")}/${channel}`, {
 		headers: { ...endpoint.headers, authorization: `Bearer ${password}` },
 	} as unknown as string[]);
 	try {
-		return await new Promise<string[]>((resolve, reject) => {
-			socket.onmessage = (event) => {
-				const message = JSON.parse(String(event.data));
-				resolve(message.tabs.map((tab: { url: string }) => tab.url));
-			};
+		return await new Promise<Record<string, unknown>>((resolve, reject) => {
+			socket.onmessage = (event) => resolve(JSON.parse(String(event.data)));
 			socket.onerror = () => reject(new Error("The viewer's socket failed"));
-			socket.onclose = () => reject(new Error("The browser closed the socket"));
+			socket.onclose = () => reject(new Error("The desktop server closed the socket"));
 		});
 	} finally {
 		socket.close();
 	}
+}
+
+/** The addresses of the browser's tabs. */
+async function tabsOf(server: DesktopViewer.OpenServer) {
+	const { tabs } = (await firstMessage(server, "tabs")) as { tabs: { url: string }[] };
+	return tabs.map((tab) => tab.url);
+}
+
+/** The desktop's windows besides its terminal. */
+async function windowsOf(server: DesktopViewer.OpenServer) {
+	return ((await firstMessage(server, "windows")) as { windows: { id: string; kind: string }[] })
+		.windows;
 }
 
 /** The desktop closed the socket before saying all it would. */

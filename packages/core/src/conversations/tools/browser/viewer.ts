@@ -14,34 +14,35 @@ import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import { placeOf } from "../sandbox/tools.ts";
-import { DesktopUnavailable, startBrowser, startDesktop, type ViewerServers } from "./browser.ts";
+import { DesktopUnavailable, startBrowser, type ViewerServers, windowViewers } from "./browser.ts";
 
 /**
- * An agent's browser in a thread, or its whole desktop, opened by a person to
- * watch and use. Anyone who can read the thread and see the
- * agent may open it, while the agent takes part in the thread and uses the
- * pod's sandbox. Those holding `sandbox.desktop.use` may click and type on
- * it too; anyone else only watches. Opening it uses the pod's sandbox as a
+ * An agent's desktop in a thread, opened by a person to watch and use: the
+ * web app draws it, and shows each of its windows, each app on a display of
+ * its own, over VNC, with the browser's tabs, the terminal and the list of
+ * windows from the desktop's server. Anyone who can read the thread and see
+ * the agent may open it, while the agent takes part in the thread and uses
+ * the pod's sandbox. Those holding `sandbox.desktop.use` may click and type
+ * on it too; anyone else only watches. Opening it uses the pod's sandbox as a
  * turn would, resuming it, or making it if the pod has none, and starts the
- * browser or desktop if it isn't running; the sandbox stays awake while it is
- * open.
+ * browser if it isn't running; the sandbox stays awake while it is open.
  */
 export interface Interface {
 	/**
-	 * Where the desktop's VNC server takes a WebSocket, and its password, for
-	 * as long as the scope is open, which holds the sandbox awake.
+	 * Where the desktop's server takes WebSockets, and its password, for as
+	 * long as the scope is open, which holds the sandbox awake.
 	 */
-	readonly open: (
+	readonly openDesktopServer: (
 		input: AgentInThread,
-	) => Effect.Effect<OpenDesktop, OpenFailure, OpenRequirements>;
+	) => Effect.Effect<OpenServer, OpenFailure, OpenRequirements>;
 	/**
-	 * Where the agent's browser's display takes a WebSocket over VNC, and its
-	 * tabs server, each with the password that lets the person use or only
-	 * watch it, for as long as the scope is open.
+	 * Where the display of one of the desktop's windows takes a WebSocket over
+	 * VNC, and its password, for as long as the scope is open: `browser`,
+	 * `files`, or the number of a display the agent started.
 	 */
-	readonly openBrowser: (
-		input: AgentInThread,
-	) => Effect.Effect<OpenBrowser, OpenFailure, OpenRequirements>;
+	readonly openWindow: (
+		input: AgentInThread & { window: string },
+	) => Effect.Effect<OpenServer, OpenFailure, OpenRequirements>;
 }
 
 interface AgentInThread {
@@ -53,16 +54,10 @@ type OpenFailure = AuthorizationDenied | DesktopUnavailable | Sandboxes.Unavaila
 type OpenRequirements = CurrentActor.Service | Scope.Scope;
 
 /**
- * The server a person reaches the desktop or browser through, and its
- * password, for Sugabots to answer with on their behalf: they never see it.
+ * A server a person reaches the desktop through, and its password, for
+ * Sugabots to answer with on their behalf: they never see it.
  */
-/** The servers a person reaches the agent's browser through. */
-export interface OpenBrowser {
-	readonly screen: OpenDesktop;
-	readonly tabs: OpenDesktop;
-}
-
-export interface OpenDesktop {
+export interface OpenServer {
 	readonly endpoint: Sandboxes.Endpoint;
 	readonly password: string;
 }
@@ -84,7 +79,7 @@ export const make = Effect.gen(function* () {
 		thread.hostAgentId === agentId
 			? Effect.succeed(true)
 			: operation(
-					"open",
+					"openWindow",
 					query((db) =>
 						db
 							.select({ id: threadParticipant.id })
@@ -126,30 +121,30 @@ export const make = Effect.gen(function* () {
 			return { sandbox, mayUse: may("sandbox.desktop.use") };
 		});
 
+	/** The server of `servers` the person may reach, the watch one unless they may use the desktop. */
+	const reach = (sandbox: Sandboxes.Sandbox, mayUse: boolean, servers: ViewerServers) => {
+		// The watch password's viewers can't change anything, whatever their client sends.
+		const server = mayUse ? servers.control : servers.watch;
+		return Effect.map(sandbox.endpoint(server.port), (endpoint) => ({
+			endpoint,
+			password: server.password,
+		}));
+	};
+
 	return Service.of({
-		open: (turn) =>
+		openDesktopServer: (turn) =>
 			Effect.gen(function* () {
 				const { sandbox, mayUse } = yield* openSandbox(turn);
-				const desktop = yield* startDesktop(sandbox, placeOf(turn), turn);
-				// The watch server ignores input, so a viewer's mouse and keys never
-				// reach the desktop, whatever their client sends.
-				const server = mayUse ? desktop.control : desktop.watch;
-				return { endpoint: yield* sandbox.endpoint(server.port), password: server.password };
+				const { desktopServer } = yield* startBrowser(sandbox, placeOf(turn), turn);
+				if (!desktopServer)
+					return yield* new DesktopUnavailable({ reason: IMAGE_BEFORE_HTML_DESKTOP });
+				return yield* reach(sandbox, mayUse, desktopServer);
 			}),
-		openBrowser: (turn) =>
+		openWindow: ({ window, ...turn }) =>
 			Effect.gen(function* () {
 				const { sandbox, mayUse } = yield* openSandbox(turn);
-				const { viewers } = yield* startBrowser(sandbox, placeOf(turn), turn);
-				if (!viewers) return yield* new DesktopUnavailable({ reason: IMAGE_BEFORE_OWN_DISPLAY });
-				// As with the desktop, the watch password's viewers can't change anything.
-				const reach = ({ control, watch }: ViewerServers) => {
-					const server = mayUse ? control : watch;
-					return Effect.map(sandbox.endpoint(server.port), (endpoint) => ({
-						endpoint,
-						password: server.password,
-					}));
-				};
-				return { screen: yield* reach(viewers.screen), tabs: yield* reach(viewers.tabs) };
+				const servers = yield* windowViewers(sandbox, placeOf(turn), turn, window);
+				return yield* reach(sandbox, mayUse, servers);
 			}),
 	});
 });
@@ -167,5 +162,5 @@ export const layer = layerNoDeps.pipe(
 
 const NOT_IN_THIS_THREAD = userText`This agent has no desktop in this thread.`;
 const NO_SANDBOX = userText`This agent doesn't use the pod's sandbox, so it has no desktop.`;
-const IMAGE_BEFORE_OWN_DISPLAY = userText`This sandbox's image is from before the browser had a display of its own. Upgrade the pod's sandbox to open it.`;
+const IMAGE_BEFORE_HTML_DESKTOP = userText`This sandbox's image is from before desktops were drawn by the web app. Upgrade the pod's sandbox to open it.`;
 const SANDBOXES_OFF = userText`Sandboxes are switched off for this workspace, so there's no desktop to open.`;

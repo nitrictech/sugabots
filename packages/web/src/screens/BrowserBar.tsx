@@ -2,16 +2,16 @@ import { ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { PillTabs } from "@/ui/pill-tabs.tsx";
-import { LiveScreen, viewerUrl } from "./DesktopViewer.tsx";
+import { desktopServerUrl } from "./VncView.tsx";
 
-/** One of the browser's tabs, as the sandbox's tabs server reports it. */
+/** One of the browser's tabs, as the desktop server reports it. */
 export interface BrowserTab {
 	id: string;
 	title: string;
 	url: string;
 }
 
-/** What the tabs server sends: the browser's tabs, and which is in front. */
+/** What the desktop server sends about the browser's tabs, and which is in front. */
 interface TabsMessage {
 	type: "tabs";
 	tabs: BrowserTab[];
@@ -25,35 +25,11 @@ type TabsCommand =
 	| { type: "back" | "forward" | "reload" };
 
 /**
- * The agent's browser: its page over VNC, on a display of its own, with tabs
- * and an address bar drawn here, since the browser draws none. Unless
- * `viewOnly`, the person's mouse and keys go to the page, the display resizes
- * to fit, and they can switch tabs, go back, forward, reload and type an
- * address.
+ * The tabs and address bar of the agent's browser, which draws none of its
+ * own, from the desktop server while mounted. Unless `viewOnly`, the person
+ * can switch tabs, go back, forward, reload and type an address.
  */
-export function BrowserScreen({
-	threadId,
-	agentId,
-	viewOnly,
-}: {
-	threadId: string;
-	agentId: string;
-	/** Shows the browser without sending input. The sandbox enforces it either way. */
-	viewOnly: boolean;
-}) {
-	return (
-		<LiveScreen
-			threadId={threadId}
-			agentId={agentId}
-			what="browser"
-			viewOnly={viewOnly}
-			above={<BrowserBar threadId={threadId} agentId={agentId} viewOnly={viewOnly} />}
-		/>
-	);
-}
-
-/** The browser's tabs and address bar, connected to its tabs server while mounted. */
-function BrowserBar({
+export function BrowserBar({
 	threadId,
 	agentId,
 	viewOnly,
@@ -67,7 +43,7 @@ function BrowserBar({
 	const [activeId, setActiveId] = useState<string | undefined>(undefined);
 
 	useEffect(() => {
-		const opened = new WebSocket(viewerUrl(threadId, agentId, "browser/tabs"));
+		const opened = new WebSocket(desktopServerUrl(threadId, agentId, "tabs"));
 		socket.current = opened;
 		opened.onmessage = (event) => {
 			const message = JSON.parse(String(event.data)) as TabsMessage;

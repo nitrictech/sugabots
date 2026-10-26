@@ -99,7 +99,7 @@ export const make = Effect.gen(function* () {
 		attach,
 	}: Behind): Pick<Offered, "tools" | "requests"> => ({
 		tools: {
-			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
+			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place, browser.name),
 			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
 			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
 			[COPY_FILE_TO_SANDBOX_TOOL]: copyFileToSandboxTool({

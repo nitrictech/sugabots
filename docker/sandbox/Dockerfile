@@ -1,7 +1,8 @@
 # The default sandbox image: Debian with what agents reach for when they work
-# on code, and desktops with a browser they drive through Playwright MCP.
-# Commands run without a screen; `sugabots-desktop` starts a desktop, each on
-# its own display.
+# on code, and the apps of the desktops Sugabots' web app draws around them,
+# each on a display of its own: a browser agents drive through Playwright
+# MCP, a file manager, and any app an agent starts. Commands run without a
+# screen; `sugabots-desktop start` gives one a display.
 #
 #   bun run build:sandbox
 #
@@ -14,32 +15,13 @@
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 
-# The desktop's wallpaper, rendered at the display's size, so the renderer
-# doesn't ship in the image.
-FROM debian:trixie-slim AS wallpaper
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends librsvg2-bin \
-	&& rm -rf /var/lib/apt/lists/*
-COPY wallpaper.svg /wallpaper.svg
-RUN rsvg-convert --width 1280 --height 800 /wallpaper.svg --output /wallpaper.png
-
-# The dock's icons, from Papirus, without the rest of its 380 MB.
-FROM debian:trixie-slim AS dock-icons
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends papirus-icon-theme \
-	&& rm -rf /var/lib/apt/lists/*
-RUN mkdir /icons \
-	&& cd /usr/share/icons/Papirus/64x64/apps \
-	&& cp -L utilities-terminal.svg /icons/terminal.svg \
-	&& cp -L system-file-manager.svg /icons/files.svg
-
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
-# The tools agents use on a repository, then the desktop: a virtual display,
-# a window manager and dock, a browser, a file manager, and what computer-use
-# tools drive them with.
+# The tools agents use on a repository, then the desktop's apps: virtual
+# displays and a window manager to keep each app filling its own, a browser,
+# a file manager, and what computer-use tools drive them with.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		bash ca-certificates curl wget git openssh-client less file procps \
@@ -47,9 +29,9 @@ RUN apt-get update \
 		build-essential pkg-config \
 		python3 python3-pip python3-venv \
 		nodejs npm \
-		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox plank dconf-gsettings-backend dconf-cli xcompmgr xterm \
-		xfonts-base dbus-x11 hsetroot \
-		lxterminal pcmanfm adwaita-icon-theme librsvg2-common \
+		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox xterm \
+		xfonts-base dbus-x11 \
+		pcmanfm adwaita-icon-theme librsvg2-common \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -61,17 +43,6 @@ ARG PLAYWRIGHT_MCP_VERSION
 RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
 	&& npm cache clean --force
 
-COPY --from=wallpaper /wallpaper.png /usr/share/sugabots-desktop/wallpaper.png
-COPY --from=dock-icons /icons /usr/share/sugabots-desktop/icons
-# The dock's launchers stand in for the apps' own, so the dock matches their
-# windows to them, and its settings are the system's dconf defaults.
-COPY dock/*.desktop /usr/share/applications/
-COPY dock/plank/ /usr/share/sugabots-desktop/plank/
-COPY dock/plank-theme/dock.theme /usr/share/plank/themes/Sugabots/dock.theme
-COPY dock/plank.dconf /etc/dconf/db/local.d/00-plank
-RUN mkdir -p /etc/dconf/profile \
-	&& printf 'user-db:user\nsystem-db:local\n' >/etc/dconf/profile/user \
-	&& dconf update
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
 # or `nix shell nixpkgs#ffmpeg` for one command. The agents' user owns the
 # store, so it installs without root. `nixpkgs` follows a NixOS release and
@@ -93,9 +64,11 @@ COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
 
-# The server the web app reads and changes the browser's tabs through.
-COPY browser-tabs/package.json browser-tabs/package-lock.json browser-tabs/server.mjs /usr/local/lib/sugabots-browser-tabs/
-RUN cd /usr/local/lib/sugabots-browser-tabs && npm ci --omit=dev && npm cache clean --force
+# What the web app reaches a desktop through besides its displays: the
+# browser's tabs, the terminal, and which windows the desktop has. Its
+# terminal is node-pty's, built here against the image's Node.
+COPY desktop-server/package.json desktop-server/package-lock.json desktop-server/*.mjs /usr/local/lib/sugabots-desktop-server/
+RUN cd /usr/local/lib/sugabots-desktop-server && npm ci --omit=dev && npm cache clean --force
 
 RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop
 

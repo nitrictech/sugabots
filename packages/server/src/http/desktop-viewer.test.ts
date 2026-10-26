@@ -19,11 +19,11 @@ import {
 } from "./app.test-support.ts";
 
 /**
- * The desktop viewer's and browser tabs' WebSockets, served on real ports:
- * the API relays the person's socket to the desktop's, here a stand-in that
- * logs a viewer in as x11vnc does, with VNC authentication, then echoes what
- * it is sent, and to the tabs server's, a stand-in that echoes to a viewer
- * with its password.
+ * The desktop's WebSockets, served on real ports: the API relays the
+ * person's socket for a window to its display's, here a stand-in that logs a
+ * viewer in as x11vnc does, with VNC authentication, then echoes what it is
+ * sent, and for the desktop server's tabs to a stand-in that echoes to a
+ * viewer with its password.
  */
 const user = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
@@ -35,8 +35,8 @@ const resolveUser: UserResolver = async (headers) =>
 	headers.get("cookie") === "session=good" ? user : null;
 const AGENT_IN_THREAD =
 	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002";
-const PATH = `${AGENT_IN_THREAD}/desktop`;
-const TABS_PATH = `${AGENT_IN_THREAD}/browser/tabs`;
+const PATH = `${AGENT_IN_THREAD}/windows/browser`;
+const TABS_PATH = `${AGENT_IN_THREAD}/desktop/tabs`;
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
@@ -101,13 +101,13 @@ beforeAll(async () => {
 			}),
 		),
 	);
-	const tabsPort = await served(
+	const desktopServerPort = await served(
 		Layer.effectDiscard(
 			Effect.gen(function* () {
 				const router = yield* HttpRouter.HttpRouter;
 				yield* router.add(
 					"GET",
-					"/",
+					"/tabs",
 					Effect.gen(function* () {
 						const request = yield* HttpServerRequest.HttpServerRequest;
 						if (request.headers.authorization !== `Bearer ${PASSWORD}`) {
@@ -135,21 +135,15 @@ beforeAll(async () => {
 			Layer.mergeAll(
 				identifiedBy(resolveUser),
 				Layer.succeed(DesktopViewer.Service, {
-					open: () =>
+					openWindow: () =>
 						Effect.succeed({
 							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
 							password: PASSWORD,
 						}),
-					openBrowser: () =>
+					openDesktopServer: () =>
 						Effect.succeed({
-							screen: {
-								endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
-								password: PASSWORD,
-							},
-							tabs: {
-								endpoint: { url: `http://127.0.0.1:${tabsPort}`, headers: {} },
-								password: PASSWORD,
-							},
+							endpoint: { url: `http://127.0.0.1:${desktopServerPort}`, headers: {} },
+							password: PASSWORD,
 						}),
 				}),
 			),
@@ -159,8 +153,8 @@ beforeAll(async () => {
 
 afterAll(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 
-describe("the desktop viewer's WebSocket", () => {
-	it("logs a signed-in person in to the desktop without its password, then relays both ways", async () => {
+describe("a desktop window's WebSocket", () => {
+	it("logs a signed-in person in to the window's display without its password, then relays both ways", async () => {
 		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
 			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
 		} as unknown as string[]);
@@ -208,8 +202,8 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 });
 
-describe("the browser tabs' WebSocket", () => {
-	it("connects a signed-in person to the tabs server with its password, and relays text both ways", async () => {
+describe("the desktop server's WebSockets", () => {
+	it("connects a signed-in person to the desktop server with its password, and relays text both ways", async () => {
 		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${TABS_PATH}`, {
 			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
 		} as unknown as string[]);

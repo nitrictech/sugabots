@@ -30,6 +30,8 @@
 		"@sugabots/sdk": "workspace:*",
 		"@tanstack/react-query": "^5.102.8",
 		"@tanstack/react-router": "^1.170.33",
+		"@xterm/addon-fit": "^0.11.0",
+		"@xterm/xterm": "^6.0.0",
 		"class-variance-authority": "^0.7.1",
 		"cn": "^0.2.6",
 		"effect": "catalog:",

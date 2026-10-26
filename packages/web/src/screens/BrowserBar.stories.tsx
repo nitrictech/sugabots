@@ -3,12 +3,12 @@ import { ws } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { BrowserScreen } from "./BrowserViewer.tsx";
+import { BrowserBar } from "./BrowserBar.tsx";
 
 const threadId = "0199a3a0-0000-7000-8000-000000000501";
 const agentId = "0199a3a0-0000-7000-8000-000000000502";
 const browserSocket = ws.link(
-	`${(import.meta.env.VITE_API_URL as string).replace(/^http/, "ws")}/threads/${threadId}/agents/${agentId}/browser/tabs`,
+	`${(import.meta.env.VITE_API_URL as string).replace(/^http/, "ws")}/threads/${threadId}/agents/${agentId}/desktop/tabs`,
 );
 
 const tabs = [
@@ -17,8 +17,8 @@ const tabs = [
 ];
 
 const meta = preview.meta({
-	title: "Product/BrowserScreen",
-	component: BrowserScreen,
+	title: "Product/BrowserBar",
+	component: BrowserBar,
 	tags: ["ai-generated"],
 	args: { threadId, agentId, viewOnly: true },
 	decorators: [
@@ -32,10 +32,7 @@ const meta = preview.meta({
 	],
 });
 
-/**
- * The agent's browser being watched: its tabs, and the address of the one in
- * front. The page comes over VNC, which a preview has no sandbox for.
- */
+/** The agent's browser being watched: its tabs, and the address of the one in front. */
 export const Watching = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -64,17 +61,5 @@ export const InControl = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: "Back" })).toBeEnabled();
 		await expect(canvas.getByRole("textbox", { name: "Address" })).not.toHaveAttribute("readonly");
-	},
-});
-
-/**
- * A browser that can't be reached, as a preview with no sandbox behind it
- * always is: the view says to open it again.
- */
-export const Unreachable = meta.story({
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/couldn't be reached/, {}, { timeout: 10_000 }),
-		).toBeVisible();
 	},
 });

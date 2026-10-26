@@ -1,28 +1,31 @@
 #!/bin/bash
-# Desktops and browsers in this sandbox, each on its own display, so agents
-# working at the same time never click on each other's windows.
+# The windows of agents' desktops in this sandbox, each app on a display of
+# its own: Sugabots' web app draws the desktop around them, and shows each
+# display in a window of its own, sized to it. Agents working at the same
+# time never click on each other's windows.
 #
-#   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
-#   sugabots-desktop stop display                  stop it, and its browser
-#   sugabots-desktop desktop name                  the desktop for `name`
-#   sugabots-desktop session name profile output   the browser for `name`, on a display of its own
-#   sugabots-desktop viewer name                   the viewer port of `name`'s browser, if running
-#   sugabots-desktop open terminal|files           what the dock opens, on $DISPLAY
+#   sugabots-desktop start [display]                      start a bare display, print its DISPLAY
+#   sugabots-desktop stop display                         stop it, and what runs on it
+#   sugabots-desktop session name profile output folder   the browser and desktop server for `name`
+#   sugabots-desktop files name folder                    the file manager for `name`, in `folder`
+#   sugabots-desktop windows name                         the windows of `name`'s desktop, one a line
+#   sugabots-desktop display name id                      where viewers reach one of those windows
 #
-# `desktop` is what Sugabots runs when a person opens an agent's whole
-# desktop, and `session` when the agent uses its browser or a person opens
-# it. Each starts its display, or finds it running, served to VNC viewers.
-# The desktop's has a window manager and a dock, and prints `display=N
-# viewer=PORT watch=PORT started=yes|no password=P watch-password=P`.
+# `session` is what Sugabots runs when the agent uses its browser or a person
+# opens its desktop. It starts the browser's display, the browser and the
+# desktop server, or finds them running, and prints `display=N viewer=PORT
+# watch=PORT browser=PORT server=PORT started=yes|no password=P
+# watch-password=P`, where `started` says whether the browser had to start.
 #
-# The browser's display holds the browser alone, the size of the window
-# Sugabots' web app shows it in: viewers resize the display, and its window
-# manager keeps the browser filling it. The browser draws no tabs or address
-# bar of its own; the web app draws them, from a server for its tabs.
-# `session` starts the display and browser, or finds them running, and
-# prints `display=N viewer=PORT watch=PORT browser=PORT tabs=PORT
-# started=yes|no password=P watch-password=P`, where `started` says whether
-# the browser had to start.
+# Each display holds one app, at the size of the window the web app shows it
+# in: viewers resize the display, and its window manager keeps the app
+# filling it. The browser draws no tabs or address bar of its own; the web
+# app draws them, from the desktop server, which also runs the desktop's
+# terminal and says which windows it has. A display an agent starts, run
+# with SUGABOTS_DESKTOP_SESSION set to its `name`, is one of its windows too.
+# `windows` prints `id=ID kind=browser|files|app display=N title=T` a line,
+# the title last and to the end of its line; `display` prints `viewer=PORT
+# password=P watch-password=P` for the window with that id.
 #
 # The browser is Chromium driven by Playwright MCP, in Chromium's own sandbox
 # where the sandbox it runs in allows user namespaces, with its profile under
@@ -36,9 +39,9 @@
 # one to use it, and one to only watch it, which logs in a viewer whose
 # mouse and keys are ignored. Nothing else in the sandbox can use them, such
 # as a page in the browser, which can't read the files they're kept in.
-# Sugabots reads them from what `desktop` and `session` print. A browser's
-# MCP server is on port 8930+N, its DevTools on port 9230+N, and its tabs
-# server on 9530+N, behind the display's two passwords.
+# Sugabots reads them from what `session` and `display` print. A browser's
+# MCP server is on port 8930+N, its DevTools on port 9230+N, and the desktop
+# server on 9530+N, behind the browser display's two passwords.
 set -euo pipefail
 
 # Set here rather than relied on from the image: E2B runs commands without
@@ -46,17 +49,17 @@ set -euo pipefail
 export LANG="${LANG:-C.UTF-8}"
 
 state="${TMPDIR:-/tmp}/sugabots-desktop"
-mkdir -p "$state/sessions"
+mkdir -p "$state/sessions" "$state/started"
 
 free_display() {
 	local n=1
-	while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ] || [ -n "$(grep -lx "$n" "$state"/sessions/* 2>/dev/null)" ]; do
+	while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ] || [ -n "$(grep -lx "$n" "$state"/sessions/* 2>/dev/null)" ] || [ -e "$state/started/$n" ]; do
 		n=$((n + 1))
 	done
 	echo "$n"
 }
 
-# Whether every program of display N's `part`, display or browser, is running.
+# Whether every program of display N's `part`, display, browser or app, is running.
 running() {
 	local pids="$state/$1.$2.pids"
 	[ -f "$pids" ] || return 1
@@ -97,32 +100,12 @@ display() {
 	echo $! >>"$pids"
 }
 
-# Display N as a desktop: a wallpaper, and a dock of apps to open.
-desktop() {
-	local n="$1" log="$state/$1.log" pids="$state/$1.display.pids"
-	display "$n"
-	# The dock matches windows to its apps through a service on the session bus.
-	eval "$(dbus-launch --sh-syntax)"
-	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
-	hsetroot -fill /usr/share/sugabots-desktop/wallpaper.png >>"$log" 2>&1
-	# For the dock's shadows and see-through background.
-	xcompmgr -n >>"$log" 2>&1 &
-	echo $! >>"$pids"
-	# The dock's items are read from the home it runs with.
-	mkdir -p "$HOME/.config/plank/dock1/launchers"
-	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
-	# Homes from when the dock had the Browser keep its item, which opens nothing now.
-	rm -f "$HOME/.config/plank/dock1/launchers/chromium.dockitem"
-	plank >>"$log" 2>&1 &
-	echo $! >>"$pids"
-}
-
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
 new_password() {
 	head -c 6 /dev/urandom | base64 | tr '+/' '-_'
 }
 
-# The passwords of display N's VNC servers, as `desktop` and `session` print them.
+# The passwords of display N's VNC server, as `session` and `display` print them.
 passwords() {
 	local password watch_password
 	{ read -r password; read -r watch_password; } <"$state/$1.passwords"
@@ -179,7 +162,7 @@ unlock_profile() {
 }
 
 browser() {
-	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
+	local n="$1" profile="$2" output="$3" name="$4" folder="$5" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
 	unlock_profile "$profile"
@@ -207,7 +190,7 @@ browser() {
 		curl -s -o /dev/null "http://localhost:$((8930 + n))/mcp" && break
 		sleep 0.1
 	done
-	node /usr/local/lib/sugabots-browser-tabs/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" >>"$log" 2>&1 &
+	node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" >>"$log" 2>&1 &
 	echo $! >>"$pids"
 }
 
@@ -220,77 +203,110 @@ stop_part() {
 
 stop() {
 	local n="${1:?which display}"
+	stop_part "$n" app
 	stop_part "$n" browser
 	stop_part "$n" display
+	rm -f "$state/started/$n"
 }
 
-# The display named `name`, running, with `start`, `display` or `desktop`,
-# making it if it isn't. Sets `n` and `display_started`.
+# The display named `name`, running, making it if it isn't. Sets `n` and
+# `display_started`.
 named_display() {
-	local name="$1" start="$2"
+	local name="$1"
 	local file="$state/sessions/$name"
 	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
 	display_started=no
 	if ! running "$n" display; then
 		# The browser can't outlive the display it was on.
 		stop "$n"
-		"$start" "$n"
+		display "$n"
 		display_started=yes
 	fi
 }
 
-desktop_only() {
-	named_display "${1:?name}.desktop" desktop
-	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$display_started $(passwords "$n")"
-}
-
 session() {
-	named_display "${1:?name}" display
-	local profile="${2:?profile directory}" output="${3:?output directory}" started=no
+	named_display "${1:?name}"
+	local profile="${2:?profile directory}" output="${3:?output directory}" folder="${4:?folder}" started=no
 	if ! running "$n" browser; then
 		stop_part "$n" browser
-		browser "$n" "$profile" "$output"
+		browser "$n" "$profile" "$output" "$1" "$folder"
 		started=yes
 	fi
-	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) tabs=$((9530 + n)) started=$started $(passwords "$n")"
+	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) server=$((9530 + n)) started=$started $(passwords "$n")"
 }
 
-viewer() {
-	local file="$state/sessions/${1:?name}"
-	[ -f "$file" ] || exit 3
-	local n
-	n="$(cat "$file")"
-	running "$n" display || exit 3
-	echo $((5900 + n))
+files() {
+	local name="${1:?name}" folder="${2:?folder}"
+	named_display "$name.files"
+	running "$n" app && return 0
+	stop_part "$n" app
+	DISPLAY=":$n" pcmanfm "$folder" >>"$state/$n.log" 2>&1 &
+	echo $! >"$state/$n.app.pids"
 }
 
-# What the dock opens on the desktop it runs on.
-open() {
-	case "${1:-}" in
-	terminal)
-		exec lxterminal --working-directory=/workspace
-		;;
-	files) exec pcmanfm /workspace ;;
+# The title of the window in front on display N, if it has one.
+title() {
+	local active
+	active="$(DISPLAY=":$1" xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | grep -o '0x[0-9a-f]*')" || return 0
+	# _NET_WM_NAME where the app sets it, as most do; WM_NAME from older ones, such as xterm.
+	DISPLAY=":$1" xprop -id "$active" _NET_WM_NAME WM_NAME 2>/dev/null | sed -n 's/^[A-Z_]*NAME([A-Z0-9_]*) = "\(.*\)"$/\1/p' | head -n 1
+}
+
+windows() {
+	local name="${1:?name}" file n
+	file="$state/sessions/$name"
+	if [ -f "$file" ] && n="$(cat "$file")" && running "$n" browser; then
+		echo "id=browser kind=browser display=$n title=$(title "$n")"
+	fi
+	file="$state/sessions/$name.files"
+	if [ -f "$file" ] && n="$(cat "$file")" && running "$n" app; then
+		echo "id=files kind=files display=$n title=$(title "$n")"
+	fi
+	for file in "$state"/started/*; do
+		[ -f "$file" ] && [ "$(cat "$file")" = "$name" ] || continue
+		n="${file##*/}"
+		running "$n" display && echo "id=$n kind=app display=$n title=$(title "$n")"
+	done
+}
+
+# The display of the window `id` of `name`'s desktop, if it's running.
+display_of() {
+	local name="$1" id="$2" file
+	case "$id" in
+	browser) file="$state/sessions/$name" ;;
+	files) file="$state/sessions/$name.files" ;;
+	*[!0-9]* | "") return 1 ;;
 	*)
-		echo "usage: sugabots-desktop open terminal|files" >&2
-		exit 2
+		[ "$(cat "$state/started/$id" 2>/dev/null)" = "$name" ] || return 1
+		echo "$id"
+		return 0
 		;;
 	esac
+	[ -f "$file" ] && cat "$file"
+}
+
+display_viewer() {
+	local n
+	n="$(display_of "${1:?name}" "${2:?window}")" || exit 3
+	running "$n" display || exit 3
+	echo "viewer=$((5900 + n)) $(passwords "$n")"
 }
 
 case "${1:-}" in
 start)
 	n="${2:-$(free_display)}"
-	desktop "$n"
+	# Shown on the desktop of the session that started it.
+	echo "${SUGABOTS_DESKTOP_SESSION:-}" >"$state/started/$n"
+	display "$n"
 	echo "DISPLAY=:$n"
 	;;
 stop) stop "${2:-}" ;;
-desktop) desktop_only "${2:-}" ;;
-session) session "${2:-}" "${3:-}" "${4:-}" ;;
-viewer) viewer "${2:-}" ;;
-open) open "${2:-}" ;;
+session) session "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+files) files "${2:-}" "${3:-}" ;;
+windows) windows "${2:-}" ;;
+display) display_viewer "${2:-}" "${3:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name | session name profile output | viewer name | open terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | files name folder | windows name | display name window" >&2
 	exit 2
 	;;
 esac

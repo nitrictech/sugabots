@@ -37,17 +37,12 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
-const IMAGE_BEFORE_PASSWORDS = userText`This sandbox's image is from before desktops had passwords. Upgrade the pod's sandbox to open its desktop.`;
+const NO_SUCH_WINDOW = userText`This window of the desktop isn't open any more.`;
 const NO_BROWSER = userText`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** The session's name for an agent in a thread: one desktop and browser each. */
 export function sessionName(turn: { threadId: string; agentId: string }) {
 	return `${turn.threadId}-${turn.agentId}`;
-}
-
-/** An agent's desktop in a thread, running: where viewers reach it, and whether it had to start. */
-export interface Desktop extends ViewerServers {
-	readonly started: boolean;
 }
 
 /** The servers a viewer reaches one thing through: one to use it, one only to watch it. */
@@ -56,7 +51,7 @@ export interface ViewerServers {
 	readonly watch: ViewerServer;
 }
 
-/** A server a viewer reaches a desktop or browser through, which takes a WebSocket on its port. */
+/** A server a viewer reaches a window or the desktop server through, which takes a WebSocket on its port. */
 export interface ViewerServer {
 	readonly port: number;
 	/** What it asks for: Sugabots' to know, never a person's. */
@@ -70,57 +65,65 @@ export interface Browser {
 	/** Whether it had to start, so its tabs from before are gone. */
 	readonly started: boolean;
 	/**
-	 * Where people watch and use it: its display's VNC servers, and its tabs
-	 * server. Absent in sandboxes made from images from before the browser
-	 * had a display of its own.
+	 * Where viewers reach the agent's desktop server: its browser's tabs, its
+	 * terminal, and its windows. Absent in sandboxes made from images from
+	 * before desktops were drawn by the web app.
 	 */
-	readonly viewers?: { readonly screen: ViewerServers; readonly tabs: ViewerServers };
+	readonly desktopServer?: ViewerServers;
 }
 
 /**
- * Starts the agent's desktop in the thread, or finds it running: what a
- * person opening the whole desktop needs. The agent's browser isn't on it.
- */
-export const startDesktop = (
-	sandbox: Sandboxes.Sandbox,
-	place: Place,
-	turn: { threadId: string; agentId: string },
-) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "desktop"), (reported) =>
-		reported.watch === undefined || reported.passwords === undefined
-			? Effect.fail(new DesktopUnavailable({ reason: IMAGE_BEFORE_PASSWORDS }))
-			: Effect.succeed<Desktop>({
-					...serversAt(reported.viewer, reported.passwords),
-					started: reported.started,
-				}),
-	);
-
-/**
- * Starts the agent's browser in the thread, on its own display, or finds
- * them running: what the agent's browser calls and the people watching it
- * need.
+ * Starts the agent's browser in the thread, on its own display, and its
+ * desktop server, or finds them running: what the agent's browser calls and
+ * the people viewing its desktop need.
  */
 export const startBrowser = (
 	sandbox: Sandboxes.Sandbox,
 	place: Place,
 	turn: { threadId: string; agentId: string },
 ) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (reported) =>
-		reported.browser === undefined
-			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
-			: Effect.succeed<Browser>({
-					browserPort: reported.browser,
-					started: reported.started,
-					...(reported.tabs !== undefined && reported.passwords !== undefined
-						? {
-								viewers: {
-									screen: serversAt(reported.viewer, reported.passwords),
-									tabs: serversAt(reported.tabs, reported.passwords),
-								},
-							}
-						: {}),
-				}),
-	);
+	Effect.gen(function* () {
+		const directory = `${place.folder}/.browser/${turn.agentId}`;
+		const reported = yield* desktopCommand(sandbox, place, [
+			"session",
+			sessionName(turn),
+			`${directory}/profile`,
+			directory,
+			place.folder,
+		]);
+		const browser = port(reported.values.browser);
+		if (reported.exitCode !== 0 || browser === undefined) {
+			return yield* new DesktopUnavailable({ reason: NO_BROWSER });
+		}
+		const server = port(reported.values.server);
+		return {
+			browserPort: browser,
+			started: reported.values.started === "yes",
+			...(server !== undefined && reported.passwords
+				? { desktopServer: serversAt(server, reported.passwords) }
+				: {}),
+		} satisfies Browser;
+	});
+
+/**
+ * Where viewers reach the window `window` of the agent's desktop in the
+ * thread, over VNC: `browser`, `files`, or the number of a display the agent
+ * started. Fails if the desktop has no such window running.
+ */
+export const windowViewers = (
+	sandbox: Sandboxes.Sandbox,
+	place: Place,
+	turn: { threadId: string; agentId: string },
+	window: string,
+) =>
+	Effect.gen(function* () {
+		const reported = yield* desktopCommand(sandbox, place, ["display", sessionName(turn), window]);
+		const viewer = port(reported.values.viewer);
+		if (reported.exitCode !== 0 || viewer === undefined || !reported.passwords) {
+			return yield* new DesktopUnavailable({ reason: NO_SUCH_WINDOW });
+		}
+		return serversAt(viewer, reported.passwords);
+	});
 
 /** The servers on `port`, taking a display's two passwords. */
 function serversAt(port: number, passwords: { control: string; watch: string }): ViewerServers {
@@ -130,24 +133,19 @@ function serversAt(port: number, passwords: { control: string; watch: string }):
 	};
 }
 
+function port(reported: string | undefined) {
+	const parsed = Number(reported);
+	return reported !== undefined && Number.isInteger(parsed) ? parsed : undefined;
+}
+
 /**
- * Runs `sugabots-desktop desktop` or `session` for the agent in the thread,
- * and reads the ports and passwords it reports.
+ * Runs `sugabots-desktop` with `args` in the agent's home, and reads the
+ * `name=value` pairs it prints, with its passwords read from them.
  */
-const desktopCommand = (
-	sandbox: Sandboxes.Sandbox,
-	place: Place,
-	turn: { threadId: string; agentId: string },
-	command: "desktop" | "session",
-) =>
+const desktopCommand = (sandbox: Sandboxes.Sandbox, place: Place, args: readonly string[]) =>
 	Effect.gen(function* () {
-		const directory = `${place.folder}/.browser/${turn.agentId}`;
-		const browserDirectories =
-			command === "session"
-				? ` ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)}`
-				: "";
 		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))}${browserDirectories}`,
+			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${args.map(Sandboxes.shellQuoted).join(" ")}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
@@ -156,19 +154,10 @@ const desktopCommand = (
 				.split(/\s+/)
 				.map((pair) => pair.split("=")),
 		);
-		const viewer = Number(reported.viewer);
-		if (ran.exitCode !== 0 || !Number.isInteger(viewer)) {
-			return yield* new DesktopUnavailable({ reason: NO_BROWSER });
-		}
-		const port = (name: string) =>
-			reported[name] === undefined ? undefined : Number(reported[name]);
 		const { password, "watch-password": watchPassword } = reported;
 		return {
-			viewer,
-			watch: port("watch"),
-			browser: port("browser"),
-			tabs: port("tabs"),
-			started: reported.started === "yes",
+			values: reported,
+			exitCode: ran.exitCode,
 			passwords:
 				password === undefined || watchPassword === undefined
 					? undefined

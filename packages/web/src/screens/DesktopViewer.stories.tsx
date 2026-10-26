@@ -11,8 +11,7 @@ const meta = preview.meta({
 	args: {
 		threadId: "0199a3a0-0000-7000-8000-000000000501",
 		agentId: "0199a3a0-0000-7000-8000-000000000502",
-		what: "desktop",
-		viewOnly: false,
+		window: "browser",
 	},
 	decorators: [
 		(Story) => (
@@ -26,7 +25,7 @@ const meta = preview.meta({
 });
 
 /**
- * A desktop that can't be reached, as a preview with no sandbox behind it
+ * A window that can't be reached, as a preview with no sandbox behind it
  * always is: the view says to open it again.
  */
 export const Unreachable = meta.story({

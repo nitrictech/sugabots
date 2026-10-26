@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Files
-Comment=The workspace's files
-Exec=sugabots-desktop open files
-Icon=/usr/share/sugabots-desktop/icons/files.svg
-StartupWMClass=pcmanfm

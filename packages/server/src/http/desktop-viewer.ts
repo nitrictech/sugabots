@@ -13,13 +13,14 @@ import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 
 /**
- * An agent's browser and desktop in a thread, live: WebSockets the web app's
- * viewers open, relayed to servers in the sandbox. The browser's display and
- * the whole desktop are noVNC's, relayed to their VNC servers: the relay logs
- * in to the server with its password and offers the viewer no
- * authentication, then passes frames both ways untouched. The browser's tabs
- * are relayed to its tabs server, with the password in the upgrade request.
- * Neither the passwords nor the sandbox's address reach the person's browser.
+ * An agent's desktop in a thread, live: WebSockets the web app's desktop
+ * opens, relayed to servers in the sandbox. Each window's is noVNC's,
+ * relayed to the VNC server of the window's display: the relay logs in to
+ * the server with its password and offers the viewer no authentication, then
+ * passes frames both ways untouched. The browser's tabs, the terminal and the
+ * list of windows are relayed to the desktop's server, with the password in
+ * the upgrade request. Neither the passwords nor the sandbox's address reach
+ * the person's browser.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -29,18 +30,23 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 		const trusted = new Set((yield* Installation.Service).trustedOrigins);
 
 		/**
-		 * A viewer's WebSocket at `name`: what `open` gives is opened before the
-		 * person's socket is upgraded, so a refusal is an HTTP status, then
-		 * `relay` joins the two.
+		 * A viewer's WebSocket at `path`, under the agent in the thread: what
+		 * `open` gives for the path's parameters is opened before the person's
+		 * socket is upgraded, so a refusal is an HTTP status, then `relay` joins
+		 * the two.
 		 */
 		const route = (
-			name: "desktop" | "browser" | "browser/tabs",
-			open: typeof viewer.open,
-			relay: (browserSide: Socket.Socket, opened: DesktopViewer.OpenDesktop) => Effect.Effect<void>,
+			path: string,
+			open: (
+				params: { threadId: string; agentId: string } & Readonly<
+					Record<string, string | undefined>
+				>,
+			) => ReturnType<typeof viewer.openDesktopServer>,
+			relay: (browserSide: Socket.Socket, opened: DesktopViewer.OpenServer) => Effect.Effect<void>,
 		) =>
 			router.add(
 				"GET",
-				`${API_BASE_PATH}/threads/:threadId/agents/:agentId/${name}`,
+				`${API_BASE_PATH}/threads/:threadId/agents/:agentId/${path}`,
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest;
 					// Any page the browser visits can open a WebSocket here with the
@@ -50,12 +56,13 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 					}
 					const holder = yield* authentication.identify(new Headers(request.headers));
 					if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
-					const { threadId, agentId } = yield* HttpRouter.params;
+					const params = yield* HttpRouter.params;
+					const { threadId, agentId } = params;
 					if (!threadId || !agentId) return HttpServerResponse.empty({ status: 404 });
 
 					return yield* Effect.scoped(
 						Effect.gen(function* () {
-							const opened = yield* open({ threadId, agentId });
+							const opened = yield* open({ ...params, threadId, agentId });
 							const browserSide = yield* request.upgrade;
 							yield* relay(browserSide, opened);
 							return HttpServerResponse.empty();
@@ -71,40 +78,43 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 					);
 				}).pipe(
 					Effect.catchCause((cause) =>
-						Effect.logWarning(`The ${name} viewer's connection ended badly`, cause).pipe(
+						Effect.logWarning(`The desktop viewer's connection at ${path} ended badly`, cause).pipe(
 							Effect.as(HttpServerResponse.empty({ status: 502 })),
 						),
 					),
 				),
 			);
 
-		yield* route("desktop", viewer.open, (browserSide, desktop) =>
-			relay(browserSide, upstream(desktop.endpoint), desktop.password),
-		);
 		yield* route(
-			"browser",
-			(turn) => Effect.map(viewer.openBrowser(turn), ({ screen }) => screen),
-			(browserSide, screen) => relay(browserSide, upstream(screen.endpoint), screen.password),
+			"windows/:window",
+			({ window = "", ...turn }) => viewer.openWindow({ ...turn, window }),
+			(browserSide, display) => relay(browserSide, upstream(display.endpoint), display.password),
 		);
-		yield* route(
-			"browser/tabs",
-			(turn) => Effect.map(viewer.openBrowser(turn), ({ tabs }) => tabs),
-			(browserSide, tabs) => pipe(browserSide, tabsServer(tabs)),
-		);
+		for (const channel of DESKTOP_SERVER_CHANNELS) {
+			yield* route(`desktop/${channel}`, viewer.openDesktopServer, (browserSide, server) =>
+				pipe(browserSide, desktopServer(server, channel)),
+			);
+		}
 	}),
 );
 
+/** What the desktop's server serves, each at its own path. */
+const DESKTOP_SERVER_CHANNELS = ["tabs", "terminal", "windows"] as const;
+
 /**
- * The browser's tabs server in the sandbox as a WebSocket, logged in to with
- * the password as a bearer token.
+ * The desktop's server in the sandbox as a WebSocket at `channel`, logged in
+ * to with the password as a bearer token.
  */
-function tabsServer(browser: DesktopViewer.OpenDesktop) {
+function desktopServer(
+	server: DesktopViewer.OpenServer,
+	channel: (typeof DESKTOP_SERVER_CHANNELS)[number],
+) {
 	return Socket.fromWebSocket(
 		Effect.acquireRelease(
 			Effect.sync(
 				() =>
-					new WebSocket(browser.endpoint.url.replace(/^http/, "ws"), {
-						headers: { ...browser.endpoint.headers, authorization: `Bearer ${browser.password}` },
+					new WebSocket(`${server.endpoint.url.replace(/^http/, "ws")}/${channel}`, {
+						headers: { ...server.endpoint.headers, authorization: `Bearer ${server.password}` },
 					} as unknown as string[]),
 			),
 			(socket) => Effect.sync(() => socket.close()),

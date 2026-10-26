@@ -1,8 +1,9 @@
 {
-	"name": "sugabots-browser-tabs",
+	"name": "sugabots-desktop-server",
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"node-pty": "1.0.0",
 		"ws": "8.18.3"
 	}
 }
