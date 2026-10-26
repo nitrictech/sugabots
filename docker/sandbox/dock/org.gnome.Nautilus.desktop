@@ -4,4 +4,4 @@ Name=Files
 Comment=The workspace's files
 Exec=sugabots-desktop open files
 Icon=/usr/share/sugabots-desktop/icons/files.svg
-StartupWMClass=Nemo
+StartupWMClass=org.gnome.Nautilus

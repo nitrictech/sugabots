@@ -42,7 +42,7 @@ RUN apt-get update \
 		tigervnc-standalone-server tigervnc-tools websockify x11-utils x11-xserver-utils \
 		xfwm4 xfce4-panel xfce4-docklike-plugin picom xterm \
 		xfonts-base dbus-x11 hsetroot fonts-inter fonts-jetbrains-mono \
-		lxterminal nemo libglib2.0-bin adwaita-icon-theme librsvg2-common librsvg2-bin \
+		lxterminal nautilus adwaita-icon-theme librsvg2-common librsvg2-bin \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -82,10 +82,9 @@ COPY picom.conf /usr/share/sugabots-desktop/picom.conf
 COPY gtk/settings.ini /etc/gtk-3.0/settings.ini
 COPY lxterminal/lxterminal.conf /usr/share/lxterminal/lxterminal.conf
 COPY lxterminal/dark/lxterminal.conf /usr/share/sugabots-desktop/dark/lxterminal/lxterminal.conf
-# Nemo's defaults are GSettings schema defaults, overridden here: with no
-# settings backend, they're all it reads.
-COPY nemo/90_sugabots.gschema.override /usr/share/glib-2.0/schemas/
-RUN glib-compile-schemas /usr/share/glib-2.0/schemas/
+# Nautilus's look, a GTK 4 app's, which reads none of GTK 3's.
+COPY gtk4/settings.ini /etc/gtk-4.0/settings.ini
+COPY gtk4/*.css /usr/share/sugabots-desktop/gtk-4.0/
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
 # or `nix shell nixpkgs#ffmpeg` for one command. The agents' user owns the
 # store, so it installs without root. `nixpkgs` follows a NixOS release and

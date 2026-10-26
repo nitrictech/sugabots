@@ -161,6 +161,17 @@ write_theme() {
 	if [ "$theme" = dark ] || [ -n "$accent" ]; then
 		sugabots-window-theme "$theme" "$accent" "$themes/Sugabots"
 	fi
+	# Nautilus, a GTK 4 app, reads styles only from the home's gtk.css, so
+	# it names the image's, in the display's theme, and edges the focused
+	# window in the accent: GTK 4 apps draw their own frames. The home is the
+	# agent's, so its desktops share this, the last to start or change
+	# setting it.
+	mkdir -p "$HOME/.config/gtk-4.0"
+	{
+		echo '@import url("file:///usr/share/sugabots-desktop/gtk-4.0/gtk.css");'
+		echo "@import url(\"file:///usr/share/sugabots-desktop/gtk-4.0/$theme.css\");"
+		[ -z "$accent" ] || echo "window.csd:not(:backdrop) { outline: 2px solid $accent; outline-offset: -2px; }"
+	} >"$HOME/.config/gtk-4.0/gtk.css"
 }
 
 # Reads `desktop` and `session`'s look into `theme`, `wallpaper` and
@@ -413,9 +424,11 @@ open() {
 		GTK_THEME=Sugabots exec lxterminal --working-directory=/workspace
 		;;
 	files)
-		local gtk_theme=Sugabots
-		[ "$(display_theme "$n")" = dark ] && gtk_theme=Sugabots-Dark
-		GTK_THEME="$gtk_theme" exec nemo /workspace
+		# libadwaita takes light or dark from a desktop portal this sandbox
+		# hasn't, or from this.
+		local scheme=prefer-light
+		[ "$(display_theme "$n")" = dark ] && scheme=prefer-dark
+		ADW_DEBUG_COLOR_SCHEME="$scheme" exec env -u GTK_THEME nautilus --new-window /workspace
 		;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2

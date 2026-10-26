@@ -1,0 +1,16 @@
+/* Nautilus's colours on a dark desktop: the web app's dark surfaces. */
+:root {
+	--window-bg-color: #111216;
+	--window-fg-color: #eceef2;
+	--view-bg-color: #111216;
+	--view-fg-color: #eceef2;
+	--headerbar-bg-color: #111216;
+	--headerbar-fg-color: #eceef2;
+	--sidebar-bg-color: #15161a;
+	--sidebar-fg-color: #eceef2;
+	--sidebar-backdrop-color: #15161a;
+	--accent-bg-color: #4757c9;
+	--accent-color: #aebbff;
+	--accent-fg-color: #ffffff;
+	--sugabots-unlit: #3a3d45;
+}

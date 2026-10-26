@@ -2,7 +2,7 @@
 # none of the plugin's own indicators or previews. The SugabotsDock theme
 # marks running apps instead.
 [user]
-pinned=/usr/share/applications/chromium.desktop;/usr/share/applications/lxterminal.desktop;/usr/share/applications/nemo.desktop;
+pinned=/usr/share/applications/chromium.desktop;/usr/share/applications/lxterminal.desktop;/usr/share/applications/org.gnome.Nautilus.desktop;
 indicatorStyle=5
 inactiveIndicatorStyle=5
 forceIconSize=true

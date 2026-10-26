@@ -1,0 +1,28 @@
+/* Nautilus in the desktop's look: libadwaita's own style with macOS-style
+   traffic lights for its window buttons, on the colours of light.css or
+   dark.css. GTK 4 reads styles only from the user's own gtk.css, which
+   sugabots-desktop points here and to the colours of the desktop's theme:
+   libadwaita's switch to dark doesn't reach GTK's prefers-color-scheme, so
+   a media query can't choose them. */
+
+/* Each button's icon becomes a coloured disc; grey while the window isn't
+   focused. */
+windowcontrols > button {
+	min-width: 12px;
+	min-height: 12px;
+	padding: 0;
+	margin: 0 4px;
+	background: none;
+	box-shadow: none;
+}
+windowcontrols > button > image {
+	min-width: 12px;
+	min-height: 12px;
+	padding: 0;
+	border-radius: 50%;
+	-gtk-icon-size: 0;
+}
+windowcontrols > button.close > image { background-color: #ff5f57; }
+windowcontrols > button.minimize > image { background-color: #febc2e; }
+windowcontrols > button.maximize > image { background-color: #28c840; }
+window:backdrop windowcontrols > button > image { background-color: var(--sugabots-unlit); }
