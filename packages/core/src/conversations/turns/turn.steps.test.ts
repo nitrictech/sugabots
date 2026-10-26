@@ -20,6 +20,7 @@ import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
+import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
@@ -346,6 +347,8 @@ describe("runSegment", () => {
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
+			LIST_THREADS_TOOL,
+			READ_THREAD_TOOL,
 			READ_THREAD_FILE_TOOL,
 			...ROUTINE_TOOLS,
 			SAVE_INSTRUCTIONS_TOOL,
