@@ -29,6 +29,7 @@ export const MIN_WINDOW_WIDTH = 320;
 export const MIN_WINDOW_HEIGHT = 200;
 const TITLE_STRIP_HEIGHT = 36;
 const TAB_STRIP_HEIGHT = 40;
+const TOOLBAR_STRIP_HEIGHT = 46;
 /** How much of a window stays on the desktop when it's dragged off an edge, in pixels. */
 const KEPT_VISIBLE = 80;
 
@@ -36,8 +37,9 @@ const KEPT_VISIBLE = 80;
  * A window on the desktop: a title strip to drag it by, with traffic lights
  * to close it (given `onClose`), tuck it into the dock and fill the desktop,
  * and a corner to resize it by. The strip holds the window's name in its
- * middle, or tabs filling it from the lights, which run into the window's
- * content, as the browser's do. Clicking anywhere in it brings it to the
+ * middle, tabs filling it from the lights, which run into the window's
+ * content, as the browser's do, or the window's own controls, as the file
+ * browser's do. Clicking anywhere in it brings it to the
  * front.
  */
 export function DesktopWindow({
@@ -54,7 +56,7 @@ export function DesktopWindow({
 }: WindowFrame & {
 	/** Names the window for assistive technology. */
 	label: string;
-	strip: { title: ReactNode } | { tabs: ReactNode };
+	strip: { title: ReactNode } | { tabs: ReactNode } | { toolbar: ReactNode };
 	children: ReactNode;
 }) {
 	/** Follows the pointer from where it went down until it comes up, with `change` saying how the window moves. */
@@ -106,12 +108,14 @@ export function DesktopWindow({
 				onPointerDown={track((dx, dy, from) => ({ x: from.x + dx, y: from.y + dy }))}
 				className={cn(
 					"grid shrink-0 touch-none select-none gap-3 bg-aside px-3",
-					"title" in strip
-						? "grid-cols-[auto_minmax(0,1fr)_auto] items-center border-border border-b"
-						: "grid-cols-[auto_minmax(0,1fr)] items-end",
+					"title" in strip &&
+						"grid-cols-[auto_minmax(0,1fr)_auto] items-center border-border border-b",
+					"tabs" in strip && "grid-cols-[auto_minmax(0,1fr)] items-end",
+					"toolbar" in strip &&
+						"grid-cols-[auto_minmax(0,1fr)] items-center border-border border-b",
 					!placement.maximized && "cursor-grab active:cursor-grabbing",
 				)}
-				style={{ height: "title" in strip ? TITLE_STRIP_HEIGHT : TAB_STRIP_HEIGHT }}
+				style={{ height: stripHeight(strip) }}
 			>
 				<TrafficLights
 					className="self-center"
@@ -121,15 +125,15 @@ export function DesktopWindow({
 					onMaximize={() => onPlace({ maximized: !placement.maximized })}
 					maximized={placement.maximized}
 				/>
-				{"title" in strip ? (
+				{"title" in strip && (
 					<>
 						<div className="flex min-w-0 justify-center">{strip.title}</div>
 						{/* Balances the lights, so the title sits in the middle of the strip. */}
 						<span aria-hidden className="w-[52px]" />
 					</>
-				) : (
-					<div className="flex min-w-0 items-end">{strip.tabs}</div>
 				)}
+				{"tabs" in strip && <div className="flex min-w-0 items-end">{strip.tabs}</div>}
+				{"toolbar" in strip && <div className="flex min-w-0 items-center">{strip.toolbar}</div>}
 			</header>
 			<div className="relative min-h-0 flex-1">{children}</div>
 			{!placement.maximized && (
@@ -144,6 +148,12 @@ export function DesktopWindow({
 			)}
 		</section>
 	);
+}
+
+function stripHeight(strip: { title: ReactNode } | { tabs: ReactNode } | { toolbar: ReactNode }) {
+	if ("title" in strip) return TITLE_STRIP_HEIGHT;
+	if ("tabs" in strip) return TAB_STRIP_HEIGHT;
+	return TOOLBAR_STRIP_HEIGHT;
 }
 
 /** The window's name, in the middle of its title strip. */

@@ -15,7 +15,7 @@ import {
 	WindowTitle,
 } from "./DesktopWindow.tsx";
 import { AppIcon, BrowserIcon, FilesIcon, TerminalIcon } from "./DockIcons.tsx";
-import { FilesView } from "./FilesView.tsx";
+import { FilesWindow } from "./FilesWindow.tsx";
 import { TerminalView } from "./TerminalView.tsx";
 import {
 	desktopServerUrl,
@@ -293,21 +293,28 @@ function DesktopSurface({
 						/>
 					);
 				}
-				if (window.kind === "terminal" || window.kind === "files") {
-					const kind = window.kind;
+				if (window.kind === "files") {
+					return (
+						<FilesWindow
+							key={window.id}
+							{...frame}
+							threadId={threadId}
+							agentId={agentId}
+							viewOnly={viewOnly}
+							onClose={() => closeLocal("files")}
+						/>
+					);
+				}
+				if (window.kind === "terminal") {
 					return (
 						<DesktopWindow
 							key={window.id}
 							{...frame}
 							label={windowTitle(window)}
 							strip={{ title: <WindowTitle>{windowTitle(window)}</WindowTitle> }}
-							onClose={() => closeLocal(kind)}
+							onClose={() => closeLocal("terminal")}
 						>
-							{kind === "terminal" ? (
-								<TerminalView threadId={threadId} agentId={agentId} viewOnly={viewOnly} />
-							) : (
-								<FilesView threadId={threadId} agentId={agentId} />
-							)}
+							<TerminalView threadId={threadId} agentId={agentId} viewOnly={viewOnly} />
 						</DesktopWindow>
 					);
 				}
@@ -504,10 +511,11 @@ function initialPlacement(
 	surface: HTMLElement,
 ): Placement {
 	const { clientWidth: width, clientHeight: height } = surface;
-	const share =
-		kind === "browser"
-			? { x: 0.04, y: 0.05, width: 0.66, height: 0.74 }
-			: { x: 0.36, y: 0.24, width: 0.5, height: 0.56 };
+	const share = {
+		browser: { x: 0.04, y: 0.05, width: 0.66, height: 0.74 },
+		// Wide enough for its places beside the folder.
+		files: { x: 0.3, y: 0.18, width: 0.6, height: 0.64 },
+	}[kind as string] ?? { x: 0.36, y: 0.24, width: 0.5, height: 0.56 };
 	const offset = kind === "browser" ? 0 : index * CASCADE_STEP;
 	return {
 		x: Math.round(width * share.x) + offset,

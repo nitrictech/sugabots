@@ -4,6 +4,8 @@ import {
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
+	MAX_ATTACHMENT_MEGABYTES,
+	MAX_ATTACHMENTS_PER_MESSAGE,
 	type Message,
 	mentionedHandles,
 	messageAuthorName,
@@ -447,6 +449,8 @@ export function ConversationChat({
 			>
 				{header}
 				<FileDropTarget
+					heading="Drop files to attach"
+					detail={`Up to ${MAX_ATTACHMENTS_PER_MESSAGE} files, ${MAX_ATTACHMENT_MEGABYTES} MB each`}
 					onDropFiles={agent?.model === null ? undefined : attachments.attach}
 					className="flex min-h-0 flex-1 flex-col"
 				>

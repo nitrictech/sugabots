@@ -1,4 +1,3 @@
-import { MAX_ATTACHMENT_MEGABYTES, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Upload } from "lucide-react";
 import { type DragEvent, type ReactNode, useRef, useState } from "react";
@@ -6,14 +5,19 @@ import { type DragEvent, type ReactNode, useRef, useState } from "react";
 /**
  * An area that takes files dragged onto it from the computer, such as the
  * whole chat below its header, so a drop that misses the composer still lands.
- * While files are over it, a veil across it says they can be dropped. Without
+ * While files are over it, a veil across it says, in `heading` and `detail`,
+ * what dropping them does. Without
  * `onDropFiles` it takes nothing, and drags pass over it as usual.
  */
 export function FileDropTarget({
+	heading,
+	detail,
 	onDropFiles,
 	className,
 	children,
 }: {
+	heading: string;
+	detail: ReactNode;
 	onDropFiles?: (files: File[]) => void;
 	className?: string;
 	children: ReactNode;
@@ -63,10 +67,8 @@ export function FileDropTarget({
 						<span className="mb-1 grid size-12 place-items-center rounded-tile bg-primary text-primary-foreground">
 							<Upload size={22} strokeWidth={2.2} />
 						</span>
-						<span className="font-semibold text-[17px] text-foreground">Drop files to attach</span>
-						<span className="text-[13.5px] text-muted-foreground">
-							Up to {MAX_ATTACHMENTS_PER_MESSAGE} files, {MAX_ATTACHMENT_MEGABYTES} MB each
-						</span>
+						<span className="font-semibold text-[17px] text-foreground">{heading}</span>
+						<span className="text-[13.5px] text-muted-foreground">{detail}</span>
 					</div>
 				</div>
 			)}

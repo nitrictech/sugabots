@@ -1,3 +1,4 @@
+import { MAX_ATTACHMENT_MEGABYTES, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { FileDropTarget } from "./FileDropTarget.tsx";
@@ -11,6 +12,8 @@ const meta = preview.meta({
 	component: FileDropTarget,
 	tags: ["ai-generated"],
 	args: {
+		heading: "Drop files to attach",
+		detail: `Up to ${MAX_ATTACHMENTS_PER_MESSAGE} files, ${MAX_ATTACHMENT_MEGABYTES} MB each`,
 		onDropFiles: fn(),
 		className: "flex h-[420px] flex-col rounded-xl border bg-background",
 		children: (
