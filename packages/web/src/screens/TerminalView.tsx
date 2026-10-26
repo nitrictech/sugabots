@@ -2,7 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { type ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
-import { desktopServerUrl } from "./VncView.tsx";
+import { desktopServerUrl, IS_MAC } from "./VncView.tsx";
 
 /**
  * The agent's desktop's terminal, filling its parent: one shell shared by
@@ -49,6 +49,17 @@ export function TerminalView({
 		const fit = new FitAddon();
 		opened.loadAddon(fit);
 		opened.open(host);
+		// Ctrl+C is the shell's to interrupt with, so copying takes Ctrl+Shift+C, as
+		// in Linux terminals, or ⌘C on a Mac.
+		opened.attachCustomKeyEventHandler((event) => {
+			const copy =
+				event.type === "keydown" &&
+				event.key.toLowerCase() === "c" &&
+				(IS_MAC ? event.metaKey : event.ctrlKey && event.shiftKey);
+			if (!copy || !opened.hasSelection()) return true;
+			void navigator.clipboard.writeText(opened.getSelection()).catch(() => {});
+			return false;
+		});
 		const socket = new WebSocket(desktopServerUrl(threadId, agentId, "terminal"));
 		const send = (message: object) => {
 			if (!viewOnlyNow.current && socket.readyState === WebSocket.OPEN) {

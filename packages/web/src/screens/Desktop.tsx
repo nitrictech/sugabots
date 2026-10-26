@@ -153,6 +153,13 @@ function DesktopSurface({
 	const [serverLost, setServerLost] = useState(false);
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
+	// Each app is on a display of its own, with a clipboard of its own, so what
+	// one copies is put on the others, and on the person's own.
+	const [clipboard, setClipboard] = useState<string | undefined>(undefined);
+	const copied = (text: string) => {
+		setClipboard(text);
+		void navigator.clipboard.writeText(text).catch(() => {});
+	};
 
 	// The desktop's apps take on the person's light or dark look, as the app does.
 	const scheme = useResolvedTheme();
@@ -279,6 +286,8 @@ function DesktopSurface({
 									viewOnly={viewOnly}
 									what="browser"
 									onResize={resizeDisplay(window.id)}
+									clipboard={clipboard}
+									onClipboard={copied}
 								/>
 							}
 						/>
@@ -315,6 +324,8 @@ function DesktopSurface({
 							viewOnly={viewOnly}
 							what="window"
 							onResize={resizeDisplay(window.id)}
+							clipboard={clipboard}
+							onClipboard={copied}
 						/>
 					</DesktopWindow>
 				);
@@ -374,18 +385,22 @@ function themeMessage(scheme: "light" | "dark") {
 /**
  * A window's display, saying so while it connects or if it can't be reached,
  * and saying how big it's shown, in pixels, as that changes, so the display
- * can be sized to match.
+ * can be sized to match. It shares the desktop's clipboard, as `VncView` does.
  */
 function WindowDisplay({
 	url,
 	viewOnly,
 	what,
 	onResize,
+	clipboard,
+	onClipboard,
 }: {
 	url: string;
 	viewOnly: boolean;
 	what: "browser" | "window";
 	onResize: (width: number, height: number) => void;
+	clipboard: string | undefined;
+	onClipboard: (text: string) => void;
 }) {
 	const [standing, setStanding] = useState<Standing>("connecting");
 	const [attempt, setAttempt] = useState(0);
@@ -403,7 +418,14 @@ function WindowDisplay({
 	}, []);
 	return (
 		<div ref={room} className="absolute inset-0">
-			<VncView key={attempt} url={url} viewOnly={viewOnly} onStanding={setStanding} />
+			<VncView
+				key={attempt}
+				url={url}
+				viewOnly={viewOnly}
+				onStanding={setStanding}
+				clipboard={clipboard}
+				onClipboard={onClipboard}
+			/>
 			<StandingOverlay
 				standing={standing}
 				what={what}

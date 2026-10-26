@@ -13,6 +13,10 @@ declare module "@novnc/novnc" {
 		viewOnly: boolean;
 		scaleViewport: boolean;
 		background: string;
+		/** Sends a key to the display: down, up, or, with `down` left out, both. */
+		sendKey(keysym: number, code: string, down?: boolean): void;
+		/** Puts text on the display's clipboard. */
+		clipboardPasteFrom(text: string): void;
 		disconnect(): void;
 	}
 }

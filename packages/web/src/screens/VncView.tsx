@@ -9,24 +9,44 @@ export type Standing = "connecting" | "connected" | "ended" | "idle";
 /**
  * A display over VNC from the API's WebSocket at `url`, filling its parent,
  * scaled to fit, connected for as long as it's mounted. Unless `viewOnly`, it
- * takes the person's mouse and keys. The desktop server, not VNC, sizes the
- * display to its window, so it fits whether the person is in control or not.
+ * takes the person's mouse and keys, and shares a clipboard with them: what
+ * the display's apps copy is passed to `onClipboard`, `clipboard` is put on
+ * the display's, and the shortcut to paste reads the person's own clipboard
+ * first. On a Mac, ⌘ shortcuts for copying, cutting, pasting, selecting all
+ * and undoing become the Ctrl ones Linux apps know. The desktop server, not
+ * VNC, sizes the display to its window, so it fits whether the person is in
+ * control or not.
  */
 export function VncView({
 	url,
 	viewOnly,
 	onStanding,
+	clipboard,
+	onClipboard,
 }: {
 	url: string;
 	/** Shows the display without sending input. The API enforces it either way. */
 	viewOnly: boolean;
 	onStanding?: (standing: Standing) => void;
+	/** Text to put on the display's clipboard, as copied from elsewhere. */
+	clipboard?: string;
+	onClipboard?: (text: string) => void;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
 	const viewOnlyNow = useRef(viewOnly);
 	const onStandingNow = useRef(onStanding);
 	onStandingNow.current = onStanding;
+	const onClipboardNow = useRef(onClipboard);
+	onClipboardNow.current = onClipboard;
+	/** What the display's clipboard holds, as far as this viewer knows. */
+	const displayClipboard = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const viewer = connected.current;
+		if (!viewer || clipboard === undefined || clipboard === displayClipboard.current) return;
+		displayClipboard.current = clipboard;
+		viewer.clipboardPasteFrom(clipboard);
+	}, [clipboard]);
 	// Taking over or handing back switches input on the open connection, without reconnecting.
 	useEffect(() => {
 		viewOnlyNow.current = viewOnly;
@@ -48,12 +68,52 @@ export function VncView({
 			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => onStandingNow.current?.("connected"));
+			opened.addEventListener("clipboard", (event) => {
+				const { text } = (event as CustomEvent<{ text: string }>).detail;
+				displayClipboard.current = text;
+				onClipboardNow.current?.(text);
+			});
 			opened.addEventListener("disconnect", () => {
 				if (connected.current === opened) onStandingNow.current?.("ended");
 			});
 		});
+		// Caught before noVNC's own handler, which sends every key on as it is.
+		const shortcut = (event: KeyboardEvent) => {
+			const viewer = connected.current;
+			if (!viewer || viewOnlyNow.current) return;
+			const key = event.key.toLowerCase();
+			const command = IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey;
+			if (!command || event.altKey || !CTRL_SHORTCUTS.has(key)) return;
+			if (!IS_MAC && key !== "v") return;
+			event.preventDefault();
+			event.stopPropagation();
+			const pressCtrl = () => {
+				// noVNC has already sent ⌘ down, which would make it ⌘ Ctrl to the app.
+				if (IS_MAC) {
+					viewer.sendKey(XK_SUPER_L, "MetaLeft", false);
+					viewer.sendKey(XK_SUPER_R, "MetaRight", false);
+				}
+				viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
+				viewer.sendKey(key.charCodeAt(0), `Key${key.toUpperCase()}`);
+				viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
+			};
+			if (key !== "v") return pressCtrl();
+			// The display asks for the text when its app pastes, after this has put it there.
+			void navigator.clipboard
+				.readText()
+				.then((text) => {
+					if (text === displayClipboard.current) return;
+					displayClipboard.current = text;
+					viewer.clipboardPasteFrom(text);
+					onClipboardNow.current?.(text);
+				})
+				.catch(() => {})
+				.finally(pressCtrl);
+		};
+		element.addEventListener("keydown", shortcut, { capture: true });
 		return () => {
 			unmounted = true;
+			element.removeEventListener("keydown", shortcut, { capture: true });
 			const viewer = connected.current;
 			connected.current = undefined;
 			viewer?.disconnect();
@@ -62,6 +122,16 @@ export function VncView({
 
 	return <div ref={screen} className="absolute inset-0" />;
 }
+
+/** Whether the person is on a Mac, where ⌘ does what Ctrl does elsewhere. */
+export const IS_MAC =
+	typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+/** The keyboard shortcuts with Ctrl that a Mac person presses with ⌘. */
+const CTRL_SHORTCUTS = new Set(["c", "x", "v", "a", "z", "y"]);
+/** X's keysyms for Ctrl and for ⌘, as noVNC sends it. Letters are their own lowercase character codes. */
+const XK_CONTROL_L = 0xffe3;
+const XK_SUPER_L = 0xffeb;
+const XK_SUPER_R = 0xffec;
 
 /** What a viewer that isn't showing anything says instead, with a way back from idle. */
 export function StandingOverlay({
