@@ -14,7 +14,7 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
@@ -22,7 +22,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
@@ -30,7 +30,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
 
     # The migrations run against this, and the API's tests then query it, so a
     # migration that does not apply fails CI. Same major as compose.yml.
@@ -64,7 +64,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
@@ -77,14 +77,14 @@ jobs:
     name: Lint, typecheck, test
     if: always()
     needs: [lint, typecheck, test, build]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
 
   storybook:
     name: Storybook
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     timeout-minutes: 15
 
     steps:

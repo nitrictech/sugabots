@@ -25,7 +25,7 @@ jobs:
       github.event.check_run.name == 'Workers Builds: sugabots-website' &&
       github.event.check_run.conclusion == 'success' &&
       github.event.check_run.check_suite.head_branch == 'main'
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,7 +45,7 @@ jobs:
   submit-all:
     name: Submit every page
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
