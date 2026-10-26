@@ -375,8 +375,8 @@ const groupingChange = fn();
 /**
  * By bot puts each bot's open threads under its face and name, then its
  * routines, with threads between people last. A bot's heading folds its rows
- * away, saying how many there are and whether one needs you, except the one
- * holding the open thread; its + starts a thread with it.
+ * away, saying how many there are and whether one needs you, the one holding
+ * the open thread too; its + starts a thread with it.
  */
 export const ByBot = meta.story({
 	// The sections it folds are remembered, so each run starts with them all open.
@@ -446,10 +446,13 @@ export const ByBot = meta.story({
 			"3Needs you",
 		);
 		await userEvent.click(canvas.getByRole("button", { name: leadResearcher.name }));
-		await expect(canvas.getByRole("button", { name: leadResearcher.name })).toHaveAttribute(
+		await expect(canvas.getByRole("button", { name: /Lead Researcher/ })).toHaveAttribute(
 			"aria-expanded",
-			"true",
+			"false",
 		);
+		await expect(
+			canvas.queryByRole("link", { name: /Conversation with Lead Researcher/ }),
+		).toBeNull();
 
 		await expect(
 			canvas.getByRole("link", { name: `New thread with ${leadResearcher.name}` }),
@@ -463,6 +466,32 @@ export const ByBot = meta.story({
 		await userEvent.click(canvas.getByRole("button", { name: "Group threads" }));
 		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Most recent" }));
 		await expect(groupingChange).toHaveBeenCalledWith("recent");
+	},
+});
+
+/**
+ * A thread opened in a folded section shows it open, so the viewer can see
+ * where they are, and its heading still folds it.
+ */
+export const ByBotOpenThreadInAFoldedSection = meta.story({
+	beforeEach: () =>
+		localStorage.setItem(`sugabots-folded-bots:${revenue.id}`, JSON.stringify([leadResearcher.id])),
+	args: ByBot.input.args,
+	play: async ({ canvas, userEvent }) => {
+		const heading = canvas.getByRole("button", { name: leadResearcher.name });
+		await expect(heading).toHaveAttribute("aria-expanded", "true");
+		await expect(
+			canvas.getByRole("link", { name: /Conversation with Lead Researcher/ }),
+		).toBeVisible();
+
+		await userEvent.click(heading);
+		await expect(canvas.getByRole("button", { name: /Lead Researcher/ })).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+		await expect(
+			canvas.queryByRole("link", { name: /Conversation with Lead Researcher/ }),
+		).toBeNull();
 	},
 });
 

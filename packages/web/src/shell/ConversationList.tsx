@@ -185,6 +185,9 @@ export function ConversationListView({
 	const [doneShown, setDoneShown] = useState(false);
 	const byBot = !direct && grouping === "bot";
 	const [foldedBots, toggleBot] = useFoldedBots(pod.id);
+	// The open thread when the viewer folded the section holding it, which stays folded until another opens.
+	const [foldedOver, setFoldedOver] = useState<string>();
+	const selectedId = selected?.kind === "conversation" ? selected.conversationId : undefined;
 	// Folded until opened, unless a routine has failed, which opens it.
 	const [routinesChosen, setRoutinesShown] = useState<boolean>();
 	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
@@ -287,18 +290,25 @@ export function ConversationListView({
 					)}
 					{byBot &&
 						groupByBot(open, routines).map((group) => {
-							// The open thread's section shows it, so the viewer can see where they are.
+							// A thread opened in a folded section unfolds it, so the viewer can see where they are.
 							const holdsSelected =
 								group.threads.some((row) => isSelected(row.conversation.id)) ||
 								group.routines.some((row) => isSelected(row.conversation?.id));
-							const folded = foldedBots.has(group.key) && !holdsSelected;
+							const folded =
+								foldedBots.has(group.key) && (!holdsSelected || foldedOver === selectedId);
+							const toggle = () => {
+								// Still folded in storage, and only showing for the open thread.
+								if (!folded && foldedBots.has(group.key)) return setFoldedOver(selectedId);
+								toggleBot(group.key);
+								if (holdsSelected) setFoldedOver(folded ? undefined : selectedId);
+							};
 							return (
 								<BotSection
 									key={group.key}
 									pod={pod}
 									group={group}
 									folded={folded}
-									onToggle={() => toggleBot(group.key)}
+									onToggle={toggle}
 								>
 									{group.threads.map((row) => (
 										<li key={row.conversation.id}>
