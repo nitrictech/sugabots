@@ -30,11 +30,11 @@ const trial = (run: ModelTrials.Interface["run"], body: unknown) =>
 	});
 
 const report = {
-	systemAgentKey: "facilitate" as const,
+	systemAgentKey: "summarise" as const,
 	model: "llama3.2:3b",
 	rating: "terrible" as const,
 	accuracy: { passed: 0, attempts: 3, share: 0, needed: 0.9, rating: "terrible" as const },
-	speed: { typicalMs: 0, slowestMs: 0, budgetMs: 2_000, rating: "excellent" as const },
+	speed: { typicalMs: 0, slowestMs: 0, budgetMs: 20_000, rating: "excellent" as const },
 	cases: [],
 	verdict: [],
 };
@@ -43,13 +43,13 @@ describe("trying a model on a system agent", () => {
 	it("tries the model in the workspace in the path, and returns the report", async () => {
 		const run = vi.fn<ModelTrials.Interface["run"]>(() => Effect.succeed(report));
 
-		const response = await trial(run, { systemAgentKey: "facilitate", model: "llama3.2:3b" });
+		const response = await trial(run, { systemAgentKey: "summarise", model: "llama3.2:3b" });
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toMatchObject({ rating: "terrible" });
 		expect(run).toHaveBeenCalledWith({
 			workspace: WORKSPACE,
-			systemAgentKey: "facilitate",
+			systemAgentKey: "summarise",
 			model: "llama3.2:3b",
 		});
 	});
@@ -57,7 +57,7 @@ describe("trying a model on a system agent", () => {
 	it("answers somebody who may not choose the workspace's models as forbidden", async () => {
 		const response = await trial(
 			() => Effect.fail(new ActionForbidden({ permission: "workspace.providers.manage" })),
-			{ systemAgentKey: "facilitate", model: "llama3.2:3b" },
+			{ systemAgentKey: "summarise", model: "llama3.2:3b" },
 		);
 
 		expect(response.status).toBe(403);

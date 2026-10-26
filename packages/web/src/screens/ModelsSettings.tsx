@@ -192,21 +192,20 @@ export function DefaultModelSettings() {
 
 /**
  * One model for everything Sugabots does behind the scenes: thread summaries,
- * chat titles, handing a pod's floor to the right bot and compacting long chats. Choosing it sets it
- * for every system bot at once.
+ * chat titles and compacting long chats. Choosing it sets it for every system
+ * bot at once.
  */
 export function SystemModelSettings() {
 	const systemAgents = useBuiltInAgents();
 	const summarise = useChooseBuiltInAgentModel("summarise");
-	const facilitate = useChooseBuiltInAgentModel("facilitate");
 	const compact = useChooseBuiltInAgentModel("compact");
-	const choosers = { summarise, facilitate, compact };
+	const choosers = { summarise, compact };
 	return (
 		<ModelChoicePage
 			title="System agents"
-			description="The model Sugabots uses behind the scenes: summaries, chat titles, routing collaborations and compacting long chats. A fast, cheap model works best."
+			description="The model Sugabots uses behind the scenes: summaries, chat titles and compacting long chats. A fast, cheap model works best."
 			current={systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null}
-			pending={summarise.isPending || facilitate.isPending || compact.isPending}
+			pending={summarise.isPending || compact.isPending}
 			choose={(modelId) =>
 				Promise.all(BUILT_IN_AGENT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
 			}

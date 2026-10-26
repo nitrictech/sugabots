@@ -4,13 +4,11 @@ import type {
 	AgentShape,
 	AssignableWorkspaceRole,
 	PodColor,
-	PodRouting,
 	SystemAgentKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import {
 	ASSIGNABLE_WORKSPACE_ROLES,
-	DEFAULT_POD_ROUTING,
 	DEFAULT_TIME_ZONE,
 	WORKSPACE_ROLES,
 } from "@sugabots/contracts";
@@ -232,8 +230,6 @@ export const pod = pgTable(
 		// Null reads as the default colour; a Personal pod is drawn as its lock
 		// rather than a tile, so its colour is never shown.
 		color: text("color").$type<PodColor>(),
-		// Whether non-chat threads use the Facilitator to choose speakers.
-		routing: jsonb("routing").$type<PodRouting>().notNull().default(DEFAULT_POD_ROUTING),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
@@ -398,8 +394,8 @@ export const agent = pgTable(
 			sql`(${table.systemAgentKey} is null) = (${table.podId} is not null)`,
 		),
 		// Scoped by pod, so they cover crew only; a system agent's null `pod_id`
-		// makes every row distinct in them. What keeps there being one Scribe and
-		// one Facilitator is `agent_system_agent_key_idx` below, and what keeps a
+		// makes every row distinct in them. What keeps there being one of each
+		// system agent is `agent_system_agent_key_idx` below, and what keeps a
 		// pod-less row from being crew is `agent_placement_check` above.
 		uniqueIndex("agent_name_idx").on(table.podId, table.name),
 		uniqueIndex("agent_handle_idx").on(table.podId, table.handle),

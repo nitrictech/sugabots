@@ -33,25 +33,21 @@ const worse = (a: TrialRating, b: TrialRating) => (ORDER.indexOf(a) <= ORDER.ind
  * How often a system agent has to be right, and how quickly.
  *
  * A system agent runs unattended on every message, so being right nine times in ten
- * is the floor rather than a good score: the tenth is a thread that loops or a
- * summary nobody gets, and no one is watching to catch it.
+ * is the floor rather than a good score: the tenth is a summary nobody gets or a
+ * compaction a bot cannot carry on from, and no one is watching to catch it.
  *
- * The time budgets differ because the two jobs sit in different places. The
- * router runs *before* anyone can reply, so every millisecond is added to how
- * long a person waits for an answer that has not started yet. Summarising runs
- * after the reply is already on screen, so it only has to finish before someone
- * looks at the panel.
+ * Both jobs run after the reply is already on screen, so their budgets are about
+ * finishing before somebody needs the result: a summary before someone looks at
+ * the panel, a compaction before the chat outgrows what its bot can read.
  */
 export const ACCURACY_NEEDED = 0.9;
 
 export const BUDGET_MS: Record<TrialSystemAgent, number> = {
-	facilitate: 2_000,
 	summarise: 20_000,
 	compact: 60_000,
 };
 
 const WHY_IT_MATTERS: Record<TrialSystemAgent, string> = {
-	facilitate: "it runs before anyone can reply, so the wait is added to every message",
 	summarise:
 		"it runs in the background, but a summary nobody waits for is still a summary nobody reads",
 	compact: "it runs in the background, but a long chat keeps growing until it finishes",
@@ -85,7 +81,7 @@ export interface TrialSpeed {
 export interface TrialReport {
 	readonly systemAgentKey: TrialSystemAgent;
 	readonly model: string;
-	/** The worse of the two judgements: a facilitator that is slow is no use, however right. */
+	/** The worse of the two judgements: a system agent that is slow is no use, however right. */
 	readonly rating: TrialRating;
 	readonly accuracy: TrialAccuracy;
 	readonly speed: TrialSpeed;

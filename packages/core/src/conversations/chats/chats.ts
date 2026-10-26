@@ -116,7 +116,7 @@ export const make = Effect.gen(function* () {
 							id: posted.message.id,
 							threadId: visible.mainThreadId,
 							content: posted.message.content,
-							author: { kind: "person", peopleOnly },
+							peopleOnly,
 						});
 						return posted.message;
 					}),

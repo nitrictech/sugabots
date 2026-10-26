@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	agents,
 	apiAnswers,
-	facilitator,
+	compaction,
 	linear,
 	MODELS,
 	mount,
@@ -127,7 +127,7 @@ describe("what everybody sees", () => {
 			screen.getByRole("link", { name: new RegExp(linear.name) }).getAttribute("aria-current"),
 		).toBe("page");
 		// A system bot is in no pod, so it is not on the list of bots.
-		expect(screen.queryByRole("link", { name: new RegExp(facilitator.name) })).toBeNull();
+		expect(screen.queryByRole("link", { name: new RegExp(compaction.name) })).toBeNull();
 	});
 
 	it("shows the bot as a contact card: its face, name and pod first", async () => {

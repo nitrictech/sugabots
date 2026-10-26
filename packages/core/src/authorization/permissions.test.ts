@@ -252,8 +252,6 @@ describe("what the API tells a client", () => {
 		const resolved = podPermissions(actor("admin"), own);
 		expect(resolved.rename).toBe(false);
 		expect(resolved.manageMembers).toBe(false);
-		// Routing is the one part of a Personal pod its owner does change.
-		expect(resolved.changeRouting).toBe(true);
 	});
 
 	it("lets an admin rename and staff a shared pod, and not leave it", () => {

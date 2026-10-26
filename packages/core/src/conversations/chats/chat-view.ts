@@ -71,7 +71,6 @@ import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { respondingIn } from "../floor/floor.ts";
 import { routineExecutionIdOf } from "../routines/routines.ts";
 import {
 	agentColumns,
@@ -84,6 +83,7 @@ import {
 } from "../threads/participants.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
+import { Turns } from "../turns/turns.ts";
 import { toChat } from "./chat.ts";
 
 /**
@@ -1093,7 +1093,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 			...(before && { RAW: (row) => earlierThan(row.updatedAt, row.id, before) }),
 		},
 		extras: {
-			running: (row) => respondingIn(sql`${row.id}`),
+			running: (row) => Turns.busyIn(sql`${row.id}`),
 			latestTurnStatus: (row) => sql<schema.TurnRow["status"] | null>`(
 				select ${turn.status} from ${turn}
 				where ${turn.threadId} = ${row.id}

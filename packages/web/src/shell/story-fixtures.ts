@@ -6,7 +6,6 @@ import type {
 	Pod,
 	PodPermissions,
 } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
 
 /*
  * Pods and bots for the shell's stories, shaped like the design's example
@@ -16,7 +15,6 @@ import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const PERMISSIONS: PodPermissions = {
 	rename: true,
-	changeRouting: true,
 	manageMembers: true,
 	leave: false,
 	createAgents: true,
@@ -40,7 +38,6 @@ function pod(id: string, name: string, color: Pod["color"]): Pod {
 		name,
 		slug: kind === "personal" ? "personal" : name.toLowerCase(),
 		color,
-		routing: DEFAULT_POD_ROUTING,
 		permissions: PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};

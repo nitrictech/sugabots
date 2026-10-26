@@ -6,17 +6,13 @@ import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The Scribe, the Facilitator and Compaction: the agents the product ships, which the
+ * The Scribe and Compaction: the agents the product ships, which the
  * workspace owns and every pod is served by. People read them as the system
  * agents, which share one model chosen on the Models page.
  */
 
 /** The order they are shown in, and the only ones there are. */
-export const BUILT_IN_AGENT_KEYS: readonly SystemAgentKey[] = [
-	"summarise",
-	"facilitate",
-	"compact",
-];
+export const BUILT_IN_AGENT_KEYS: readonly SystemAgentKey[] = ["summarise", "compact"];
 
 /**
  * The workspace's built-in agents. Read by everyone: a chat's summary has to
@@ -51,13 +47,6 @@ export function useChooseBuiltInAgentModel(key: SystemAgentKey) {
 				}),
 			);
 		},
-		onSuccess: async () => {
-			// A pod's routing options read the Facilitator's model to decide
-			// whether they may be chosen, so pods go stale on this save too.
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ["built-in-agents", workspaceId] }),
-				queryClient.invalidateQueries({ queryKey: ["pods", workspaceId] }),
-			]);
-		},
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["built-in-agents", workspaceId] }),
 	});
 }

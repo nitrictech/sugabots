@@ -1,7 +1,6 @@
 import {
 	type Agent,
 	administersWorkspace,
-	DEFAULT_POD_ROUTING,
 	type ModelProvider,
 	type Pod,
 	type PodPermissions,
@@ -76,7 +75,6 @@ export const workspace = {
 /** Every pod permission, as an admin gets them. */
 const ADMIN_IN_POD: PodPermissions = {
 	rename: true,
-	changeRouting: true,
 	manageMembers: true,
 	leave: false,
 	createAgents: true,
@@ -94,7 +92,6 @@ const ADMIN_IN_POD: PodPermissions = {
 const MEMBER_IN_POD: PodPermissions = {
 	...ADMIN_IN_POD,
 	rename: false,
-	changeRouting: false,
 	manageMembers: false,
 	leave: true,
 	deleteAgents: false,
@@ -134,7 +131,6 @@ export const pods: Pod[] = [
 		name: "Suga-Team",
 		slug: "suga-team",
 		color: "green",
-		routing: DEFAULT_POD_ROUTING,
 		permissions: ADMIN_IN_POD,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
@@ -146,7 +142,6 @@ export const pods: Pod[] = [
 		name: "Sales",
 		slug: "sales",
 		color: "blue",
-		routing: DEFAULT_POD_ROUTING,
 		permissions: ADMIN_IN_POD,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
@@ -161,7 +156,6 @@ export const personalPod: Pod = {
 	name: "Personal",
 	slug: "personal",
 	color: null,
-	routing: DEFAULT_POD_ROUTING,
 	permissions: OWN_PERSONAL_POD,
 	createdAt: "2026-09-09T00:00:00.000Z",
 };
@@ -323,18 +317,18 @@ export const builtInAgents: SystemAgent[] = [
 		model: MODELS[1] as string,
 	},
 	{
-		key: "facilitate",
-		name: "Facilitator",
-		description: "Decides who speaks next when nobody was addressed.",
-		color: "teal",
-		face: "pill",
+		key: "compact",
+		name: "Compaction",
+		description: "Compacts long conversations so bots can keep reading them.",
+		color: "purple",
+		face: "square",
 		shape: "circle",
 		model: MODELS[0] as string,
 	},
 ];
 
 export const scribe = builtInAgents[0] as SystemAgent;
-export const facilitator = builtInAgents[1] as SystemAgent;
+export const compaction = builtInAgents[1] as SystemAgent;
 
 /** What the mocked API answers before a test says otherwise. */
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {

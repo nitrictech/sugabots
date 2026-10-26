@@ -8,12 +8,6 @@ import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import type { Chats } from "../chats/chats.ts";
-import {
-	admitFacilitation,
-	Facilitate,
-	FacilitateRequest,
-	facilitateLane,
-} from "../floor/facilitate.workflow.ts";
 import { lanesForTests } from "../testing.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
@@ -45,18 +39,14 @@ export const turnInternalsForTests = Layer.mergeAll(
 );
 
 /*
- * Turns and facilitations for the Postgres cases. They are asked for through
- * real lanes, but their workflows here only hold their lanes: a case runs a
- * turn's steps itself, with `runningTurns`, and frees the lane with
- * `releaseTurn` or `releaseFacilitation`. `lanesForTests` is read only when
+ * Turns for the Postgres cases. They are asked for through real lanes, but
+ * their workflows here only hold their lanes: a case runs a turn's steps
+ * itself, with `runningTurns`, and frees the lane with `releaseTurn`. `lanesForTests` is read only when
  * a helper runs, as `../testing.ts` imports this file.
  */
 
 export const queueTurnForTests = (request: TurnRequest) =>
 	Effect.flatMap(lanesForTests, (service) => admitTurn(service, request));
-
-export const queueFacilitationForTests = (request: FacilitateRequest) =>
-	Effect.flatMap(lanesForTests, (service) => admitFacilitation(service, request));
 
 /** The turns running in the thread, each as its workflow runs it. */
 export const runningTurns = (threadId: string) =>
@@ -88,26 +78,6 @@ export const waitingTurns = (lane: Pick<TurnRequest, "threadId" | "agentId">) =>
 export const releaseTurn = (run: TurnRun) =>
 	Effect.flatMap(lanesForTests, (service) =>
 		service.release({ key: turnLane(run.request), executionId: run.executionId }),
-	);
-
-/** The facilitation asked for while the thread's facilitation runs, if any. */
-export const waitingFacilitation = (threadId: string) =>
-	Effect.map(
-		query((db) =>
-			db
-				.select()
-				.from(laneRequest)
-				.where(eq(laneRequest.laneKey, facilitateLane({ threadId }))),
-		),
-		([row]) => row && Schema.decodeUnknownSync(FacilitateRequest)(row.payload),
-	);
-
-/** Frees the thread's facilitation lane, as its workflow's last step does. */
-export const releaseFacilitation = (request: FacilitateRequest) =>
-	Effect.flatMap(Facilitate.executionId(request), (executionId) =>
-		Effect.flatMap(lanesForTests, (service) =>
-			service.release({ key: facilitateLane(request), executionId }),
-		),
 	);
 
 /** Prepares the run, for a case that needs its turn to run. */

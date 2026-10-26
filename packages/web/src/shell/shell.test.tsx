@@ -19,8 +19,8 @@ import {
 	agents,
 	apiAnswers,
 	builtInAgents,
+	compaction,
 	controlledEventStream,
-	facilitator,
 	jye,
 	linear,
 	MODELS,
@@ -616,7 +616,7 @@ describe("the settings navigation", () => {
 		// The name carries the count, so it is read as a pair rather than "Pods2".
 		expect(await within(rail).findByRole("link", { name: "Members, 2" })).toBeDefined();
 		expect(within(rail).getByRole("link", { name: "Pods, 2" })).toBeDefined();
-		// Crew only: the Scribe and the Facilitator belong to the workspace rather
+		// Crew only: the Scribe and Compaction belong to the workspace rather
 		// than to a pod, and are counted in their own section, not this one.
 		expect(within(rail).getByRole("link", { name: "Bots, 3" })).toBeDefined();
 		// General holds nothing to count.
@@ -1410,7 +1410,7 @@ describe("workspace settings", () => {
 
 		const settings = await screen.findByRole("main");
 		await within(settings).findByText(linear.name);
-		expect(within(settings).queryByText(facilitator.name)).toBeNull();
+		expect(within(settings).queryByText(compaction.name)).toBeNull();
 	});
 
 	it("selects a pod from its settings rail", async () => {
@@ -1472,7 +1472,7 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "gpt-5" }));
 
 		await waitFor(() => {
-			for (const key of ["summarise", "facilitate"]) {
+			for (const key of ["summarise", "compact"]) {
 				expect(client.api.systemAgents.update).toHaveBeenCalledWith({
 					params: { workspace: workspace.id, key },
 					payload: { model: "gpt-5" },
@@ -2119,7 +2119,7 @@ describe("pod settings", () => {
 		expect(await screen.findByRole("link", { name: linear.name })).toBeDefined();
 		expect(screen.queryByText("User agents")).toBeNull();
 		expect(screen.queryByText("System agents")).toBeNull();
-		expect(screen.queryByRole("link", { name: facilitator.name })).toBeNull();
+		expect(screen.queryByRole("link", { name: compaction.name })).toBeNull();
 	});
 
 	it("adds somebody from the workspace", async () => {

@@ -332,7 +332,7 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 
 /**
  * crewOf is the condition on `agent` that selects the crew of the pod `podId`:
- * every agent placed in it. `agent_placement_check` keeps system agents, a
- * Scribe or a Facilitator, out of pods, so they are never selected.
+ * every agent placed in it. `agent_placement_check` keeps system agents, such
+ * as the Scribe, out of pods, so they are never selected.
  */
 export const crewOf = (podId: SQLWrapper | string) => eq(agent.podId, podId);

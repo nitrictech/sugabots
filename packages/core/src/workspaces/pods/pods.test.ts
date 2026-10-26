@@ -165,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("puts no system agent in a new pod, since the workspace owns them", async () => {
-			// A pod has nothing to place: the workspace's Scribe and Facilitator
+			// A pod has nothing to place: the workspace's Scribe and Compaction
 			// serve every pod in it, and are set up once for all of them.
 			const made = await create(adminId, { name: "Product", slug: "product" });
 
@@ -689,59 +689,5 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				),
 			).rejects.toThrow();
 		});
-	});
-
-	describe("routing through the Facilitator", () => {
-		it("refuses while the workspace has chosen no model for it", async () => {
-			const made = await create(adminId, { name: "Suga", slug: "suga" });
-			await placeFacilitator(null);
-
-			await expect(
-				administrationAs(adminId).update({
-					podId: made.id,
-					changes: { routing: { facilitator: true } },
-				}),
-			).rejects.toThrow(PodAdministration.FacilitatorNotSetUp);
-		});
-
-		it("allows it once a model has been chosen", async () => {
-			const made = await create(adminId, { name: "Suga", slug: "suga" });
-			await placeFacilitator("test-model");
-
-			const updated = await administrationAs(adminId).update({
-				podId: made.id,
-				changes: { routing: { facilitator: true } },
-			});
-
-			expect(updated.routing).toEqual({ facilitator: true });
-		});
-
-		it("still lets a pod switch routing off when there is no model", async () => {
-			const made = await create(adminId, { name: "Suga", slug: "suga" });
-			await placeFacilitator(null);
-
-			const updated = await administrationAs(adminId).update({
-				podId: made.id,
-				changes: { routing: { facilitator: false } },
-			});
-
-			expect(updated.routing).toEqual({ facilitator: false });
-		});
-
-		/** The workspace's Facilitator, set up or not. */
-		async function placeFacilitator(model: string | null) {
-			await onDatabase((db) =>
-				db.insert(agent).values({
-					workspaceId,
-					podId: null,
-					name: "Facilitator",
-					handle: "facilitator",
-					systemAgentKey: "facilitate",
-					color: "teal",
-					face: "pill",
-					model,
-				}),
-			);
-		}
 	});
 });

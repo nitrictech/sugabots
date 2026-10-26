@@ -18,7 +18,6 @@ function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
 		name: row.name,
 		slug: row.slug,
 		color: row.kind === "shared" ? podColorOf(row.color) : null,
-		routing: row.routing,
 		permissions,
 		createdAt: row.createdAt.toISOString(),
 	};

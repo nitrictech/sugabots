@@ -37,7 +37,7 @@ import { conversationsForTests } from "../testing.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ThreadView } from "../thread-view.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
+import { queueTurnForTests, runningTurns } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
@@ -1101,7 +1101,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 		await runOnPostgres(
-			queueFacilitationForTests({ threadId: running.id, triggerMessageId: crypto.randomUUID() }),
+			queueTurnForTests({
+				threadId: running.id,
+				agentId: recipientAgentId,
+				triggerMessageId: crypto.randomUUID(),
+				reason: "collaboration",
+			}),
 		);
 
 		const items = (await view.history(current.id))?.items ?? [];

@@ -21,7 +21,6 @@ export const TurnRequest = Schema.Struct({
 	triggerMessageId: Schema.String,
 	reason: Schema.Literals([
 		"mention",
-		"facilitator",
 		"default",
 		"collaboration",
 		"routine",

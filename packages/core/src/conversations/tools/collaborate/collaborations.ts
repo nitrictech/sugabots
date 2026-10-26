@@ -53,16 +53,11 @@ export interface Interface {
 	readonly collectAnswer: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
 	 * Hands the collaborator's reply in its thread `threadId` back to the
-	 * agent that asked. Floor control gives an agent that stopped waiting a
-	 * turn in the parent thread to pick the answer up.
-	 *
-	 * `true` when this reply answered an outstanding brief, which concludes
-	 * that exchange: the answer has gone to the parent and the asking agent
-	 * carries on there. `false` when there was nothing outstanding: a later
-	 * message in the same thread is an ordinary one and the floor is decided
-	 * as usual.
+	 * agent that asked, when it answers an outstanding brief. Floor control
+	 * gives an agent that stopped waiting a turn in the parent thread to pick
+	 * the answer up. A reply with nothing outstanding is an ordinary message.
 	 */
-	readonly answer: (input: { threadId: string; answer: string }) => Effect.Effect<boolean>;
+	readonly answer: (input: { threadId: string; answer: string }) => Effect.Effect<void>;
 	/**
 	 * Fails a collaboration once its collaborator's turn in its thread ends for
 	 * good without answering: failed with no retry, cancelled, or given up
@@ -153,15 +148,7 @@ export const make = Effect.gen(function* () {
 			operation("collectAnswer", repository.stopWaiting(collaborationId)),
 
 		answer: ({ threadId, answer }) =>
-			operation(
-				"answer",
-				transaction(
-					Effect.gen(function* () {
-						const answered = yield* repository.answer(threadId, answer);
-						return answered !== undefined;
-					}),
-				),
-			),
+			operation("answer", transaction(repository.answer(threadId, answer)).pipe(Effect.asVoid)),
 
 		handler: (events) =>
 			Effect.forEach(events.flatMap(unansweredBy), (ended) => repository.failUnanswered(ended), {

@@ -12,14 +12,8 @@ describe("pod request contracts", () => {
 		expect(Schema.decodeSync(newPodSchema)({ name: ` ${"x".repeat(64)} ` }).name).toHaveLength(64);
 	});
 
-	it("validates routing updates", () => {
-		for (const input of [
-			{ routing: {} },
-			{ routing: { facilitator: "yes" } },
-			{ routing: null },
-			{ name: " " },
-			{ slug: " Sales " },
-		]) {
+	it("validates pod updates", () => {
+		for (const input of [{ name: " " }, { slug: " Sales " }]) {
 			expect(Result.isFailure(Schema.decodeUnknownResult(podUpdateSchema)(input))).toBe(true);
 		}
 	});

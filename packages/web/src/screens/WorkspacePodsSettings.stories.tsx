@@ -161,7 +161,6 @@ export const AsAMember = meta.story({
 				manageConnections: false,
 				manageSandbox: false,
 				deleteAgents: false,
-				changeRouting: false,
 				leave: pod.kind === "shared",
 			},
 		}));
