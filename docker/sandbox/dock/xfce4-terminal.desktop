@@ -4,4 +4,4 @@ Name=Terminal
 Comment=A shell in the workspace
 Exec=sugabots-desktop open terminal
 Icon=/usr/share/sugabots-desktop/icons/terminal.svg
-StartupWMClass=lxterminal
+StartupWMClass=Xfce4-terminal

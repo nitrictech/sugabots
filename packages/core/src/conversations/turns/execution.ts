@@ -1,6 +1,6 @@
 export * as TurnExecution from "./execution.ts";
 
-import type { Message, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import type { AgentColor, Message, ThreadParticipant, ThreadType } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
@@ -190,6 +190,7 @@ export const make = Effect.gen(function* () {
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
+									color: speaker.color,
 									podId: loaded.podId,
 								},
 								reason: request.reason,
@@ -289,6 +290,8 @@ export interface TurnContext {
 		disabledTools: string[];
 		/** Whether an admin let this agent use its pod's sandbox. */
 		usesSandbox: boolean;
+		/** Its colour, which its desktop in the sandbox is drawn in. */
+		color: AgentColor;
 		podId: string;
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */

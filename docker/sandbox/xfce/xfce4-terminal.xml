@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The terminal: dark, in JetBrains Mono, without its menu bar, toolbar or
+     scrollbar's clutter. -->
+<channel name="xfce4-terminal" version="1.0">
+	<property name="font-name" type="string" value="JetBrains Mono 10"/>
+	<property name="font-use-system" type="bool" value="false"/>
+	<property name="color-foreground" type="string" value="#e6e6e3"/>
+	<property name="color-background" type="string" value="#141413"/>
+	<property name="color-cursor" type="string" value="#e6e6e3"/>
+	<property name="color-use-theme" type="bool" value="false"/>
+	<property name="color-palette" type="string" value="#1d1d1b;#e5534b;#57ab5a;#c69026;#539bf5;#b083f0;#39c5cf;#c4c4c0;#636e7b;#f47067;#6bc46d;#daaa3f;#6cb6ff;#dcbdfb;#56d4dd;#f4f4f2"/>
+	<property name="misc-menubar-default" type="bool" value="false"/>
+	<property name="misc-toolbar-default" type="bool" value="false"/>
+	<property name="misc-borders-default" type="bool" value="true"/>
+	<property name="misc-default-geometry" type="string" value="100x28"/>
+	<property name="scrolling-bar" type="string" value="TERMINAL_SCROLLBAR_NONE"/>
+	<property name="title-mode" type="string" value="TERMINAL_TITLE_REPLACE"/>
+</channel>

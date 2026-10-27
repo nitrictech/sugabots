@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What the settings daemon gives every GTK app: the Sugabots theme,
+     Adwaita's icons and cursors, and Inter. -->
+<channel name="xsettings" version="1.0">
+	<property name="Net" type="empty">
+		<property name="ThemeName" type="string" value="Sugabots"/>
+		<property name="IconThemeName" type="string" value="Adwaita"/>
+		<property name="EnableEventSounds" type="bool" value="false"/>
+		<property name="EnableInputFeedbackSounds" type="bool" value="false"/>
+	</property>
+	<property name="Gtk" type="empty">
+		<property name="FontName" type="string" value="Inter 10"/>
+		<property name="MonospaceFontName" type="string" value="JetBrains Mono 10"/>
+		<property name="CursorThemeName" type="string" value="Adwaita"/>
+		<property name="CursorThemeSize" type="int" value="24"/>
+		<property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
+	</property>
+	<property name="Xft" type="empty">
+		<property name="Antialias" type="int" value="1"/>
+		<property name="Hinting" type="int" value="1"/>
+		<property name="HintStyle" type="string" value="hintslight"/>
+		<property name="RGBA" type="string" value="none"/>
+	</property>
+</channel>

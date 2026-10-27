@@ -1,0 +1,59 @@
+/* The Sugabots theme for GTK 3 apps: Adwaita, with the agent's colour for
+   selections and focus, and the dock. sugabots-desktop-look defines the
+   colours again in the home's gtk.css, which GTK reads after this. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained.css");
+
+@define-color sugabots_accent #405ec9;
+@define-color sugabots_accent_ink #ffffff;
+@define-color sugabots_accent_light #a9b8e8;
+@define-color sugabots_accent_deep #344da5;
+
+*:selected, selection, .view:selected, iconview:selected, treeview.view:selected,
+row:selected, menuitem:hover, menu menuitem:hover, modelbutton.flat:hover {
+	background-color: @sugabots_accent;
+	color: @sugabots_accent_ink;
+}
+entry:focus, spinbutton:focus {
+	border-color: @sugabots_accent;
+	box-shadow: inset 0 0 0 1px @sugabots_accent;
+}
+check:checked, radio:checked, switch:checked, progressbar progress, scale highlight {
+	background-color: @sugabots_accent;
+	background-image: none;
+	border-color: @sugabots_accent_deep;
+	color: @sugabots_accent_ink;
+}
+notebook > header tab:checked { box-shadow: inset 0 -2px @sugabots_accent; }
+
+/* The dock: a panel floating above the bottom of the screen, a frosted bar
+   in the agent's colour with 46px icons, 11px of bar above and below each,
+   and a dot under each running app. The panel is 68px tall: 11 + 46 + 11. */
+.xfce4-panel.background {
+	background-color: alpha(mix(#ffffff, @sugabots_accent, 0.25), 0.55);
+	background-image: none;
+	border: 1px solid alpha(#ffffff, 0.6);
+	border-radius: 16px;
+}
+/* The docklike plugin makes each button 7px wider than its icon, on the
+   right, so the margins even out every gap at 8px. */
+.xfce4-panel button {
+	padding: 11px 0;
+	margin: 0 1px 0 0;
+	border: none;
+	border-radius: 12px;
+	background: none;
+	box-shadow: none;
+}
+.xfce4-panel button:first-child { margin-left: 9px; }
+.xfce4-panel button:last-child { margin-right: 9px; }
+.xfce4-panel button.open_group,
+.xfce4-panel button.active_group {
+	background-image: radial-gradient(circle, @sugabots_accent_deep 2.5px, transparent 3.5px);
+	background-size: 8px 8px;
+	background-repeat: no-repeat;
+	background-position: 50% 58px;
+}
+.xfce4-panel button.hover_group image {
+	-gtk-icon-effect: highlight;
+	-gtk-icon-transform: translateY(-2px);
+}

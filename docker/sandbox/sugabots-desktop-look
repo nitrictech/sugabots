@@ -1,0 +1,166 @@
+#!/bin/bash
+# Draws a desktop's look in one colour, the agent's, into the home Xfce reads
+# it from: the wallpaper, a gradient of the colour; xfwm4's window frames,
+# title bars in the colour; and the GTK colours the dock, menus and
+# selections take from it. Shapes and everything else are the Sugabots theme
+# and Xfce settings in the image; this draws only what the colour changes.
+#
+#   sugabots-desktop-look '#RRGGBB'
+#
+# Writes into $HOME, the agent's, whose desktops all share its colour:
+#   .local/share/sugabots-desktop/wallpaper-RRGGBB.png, named for the colour
+#     so the desktop sees a new one as a new file
+#   .local/share/themes/Sugabots/xfwm4/
+#   .config/gtk-3.0/gtk.css
+set -euo pipefail
+
+accent="${1:?accent colour, #RRGGBB}"
+if ! [[ "$accent" =~ ^#[0-9a-fA-F]{6}$ ]]; then
+	echo "accent must be #RRGGBB: $accent" >&2
+	exit 2
+fi
+accent="${accent,,}"
+
+# The display's size, as sugabots-desktop starts Xvnc.
+width_px=1280
+height_px=800
+
+# The colour `percent` of the way from `from` to `to`, both #rrggbb.
+mix() {
+	local from="$1" to="$2" percent="$3" channel out="#"
+	for channel in 1 3 5; do
+		out+="$(printf '%02x' $(((16#${from:channel:2} * (100 - percent) + 16#${to:channel:2} * percent) / 100)))"
+	done
+	echo "$out"
+}
+
+# Dark ink on a light colour, white on a dark one, by perceived brightness.
+ink_on() {
+	local colour="$1"
+	local brightness=$(((299 * 16#${colour:1:2} + 587 * 16#${colour:3:2} + 114 * 16#${colour:5:2}) / 1000))
+	if [ "$brightness" -gt 150 ]; then echo "#1d1b16"; else echo "#ffffff"; fi
+}
+
+light="$(mix "$accent" "#ffffff" 55)"
+deep="$(mix "$accent" "#000000" 18)"
+ink="$(ink_on "$accent")"
+# The frame of a window without focus: the colour, faded nearly to white, so
+# the focused window is the one in colour.
+quiet_title="$(mix "$accent" "#f4f4f2" 82)"
+quiet_edge="$(mix "$accent" "#e2e2df" 70)"
+quiet_ink="#6b6a66"
+
+render() {
+	local file="$1" width="$2" height="$3" content="$4"
+	printf '<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s">%s</svg>' \
+		"$width" "$height" "$content" |
+		rsvg-convert --width "$width" --height "$height" --output "$file"
+}
+
+wallpaper() {
+	local out="$HOME/.local/share/sugabots-desktop"
+	mkdir -p "$out"
+	rm -f "$out"/wallpaper-*.png
+	render "$out/wallpaper-${accent#\#}.png" "$width_px" "$height_px" "
+<defs>
+<linearGradient id=\"ground\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">
+<stop offset=\"0\" stop-color=\"$light\"/>
+<stop offset=\"0.55\" stop-color=\"$accent\"/>
+<stop offset=\"1\" stop-color=\"$deep\"/>
+</linearGradient>
+<radialGradient id=\"glow\" cx=\"0.12\" cy=\"0.55\" r=\"0.5\">
+<stop offset=\"0\" stop-color=\"#ffffff\" stop-opacity=\"0.35\"/>
+<stop offset=\"1\" stop-color=\"#ffffff\" stop-opacity=\"0\"/>
+</radialGradient>
+<filter id=\"grain\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\">
+<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.85\" numOctaves=\"2\" stitchTiles=\"stitch\"/>
+<feColorMatrix values=\"0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.04 0\"/>
+</filter>
+</defs>
+<rect width=\"$width_px\" height=\"$height_px\" fill=\"url(#ground)\"/>
+<rect width=\"$width_px\" height=\"$height_px\" fill=\"url(#glow)\"/>
+<rect width=\"$width_px\" height=\"$height_px\" filter=\"url(#grain)\"/>"
+}
+
+# xfwm4's frames: a title bar in the colour, with the window's name and
+# minimise, maximise and close glyphs in ink on it, and a thin edge of the
+# colour round the rest, its corners rounded. xfwm4's compositor keeps the
+# pieces' transparency, so the corners are antialiased.
+title_px=30
+edge_px=2
+radius_px=8
+button_px=30
+
+frame() {
+	local out="$1" state="$2" title="$3" edge="$4"
+	local corner="<path d=\"M0 $title_px V$radius_px A$radius_px $radius_px 0 0 1 $radius_px 0 H16 V$title_px Z\" fill=\"$title\"/>"
+	render "$out/top-left-$state.png" 16 "$title_px" "$corner"
+	render "$out/top-right-$state.png" 16 "$title_px" "<g transform=\"translate(16 0) scale(-1 1)\">$corner</g>"
+	local part
+	for part in 1 2 3 4 5; do
+		render "$out/title-$part-$state.png" 1 "$title_px" "<rect width=\"1\" height=\"$title_px\" fill=\"$title\"/>"
+	done
+	local side="<rect width=\"$edge_px\" height=\"1\" fill=\"$edge\"/>"
+	render "$out/left-$state.png" "$edge_px" 1 "$side"
+	render "$out/right-$state.png" "$edge_px" 1 "$side"
+	render "$out/bottom-$state.png" 1 "$edge_px" "<rect width=\"1\" height=\"$edge_px\" fill=\"$edge\"/>"
+	# A square corner as thin as the edge: the window's contents meet it
+	# square, so a rounded one would leave their corner showing past it.
+	local bottom="<rect width=\"$edge_px\" height=\"$edge_px\" fill=\"$edge\"/>"
+	render "$out/bottom-left-$state.png" "$edge_px" "$edge_px" "$bottom"
+	render "$out/bottom-right-$state.png" "$edge_px" "$edge_px" "$bottom"
+}
+
+# A button's glyph in each state xfwm4 draws, on a round shade under the
+# pointer and a darker one pressed.
+button() {
+	local out="$1" name="$2" glyph="$3"
+	local centre=$((button_px / 2))
+	local mark="<g transform=\"translate($centre $centre)\" fill=\"none\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke=\""
+	local shade="<circle cx=\"$centre\" cy=\"$centre\" r=\"10\" fill=\"$ink\" fill-opacity=\""
+	render "$out/$name-active.png" "$button_px" "$title_px" "<rect width=\"$button_px\" height=\"$title_px\" fill=\"$accent\"/>$mark$ink\">$glyph</g>"
+	render "$out/$name-inactive.png" "$button_px" "$title_px" "<rect width=\"$button_px\" height=\"$title_px\" fill=\"$quiet_title\"/>$mark$quiet_ink\">$glyph</g>"
+	render "$out/$name-prelight.png" "$button_px" "$title_px" "<rect width=\"$button_px\" height=\"$title_px\" fill=\"$accent\"/>${shade}0.12\"/>$mark$ink\">$glyph</g>"
+	render "$out/$name-pressed.png" "$button_px" "$title_px" "<rect width=\"$button_px\" height=\"$title_px\" fill=\"$accent\"/>${shade}0.22\"/>$mark$ink\">$glyph</g>"
+}
+
+window_frames() {
+	local out="$HOME/.local/share/themes/Sugabots/xfwm4"
+	rm -rf "$out"
+	mkdir -p "$out"
+	frame "$out" active "$accent" "$accent"
+	frame "$out" inactive "$quiet_title" "$quiet_edge"
+	button "$out" hide '<path d="M-4.5 0H4.5"/>'
+	button "$out" maximize '<rect x="-4" y="-4" width="8" height="8" rx="1"/>'
+	button "$out" maximize-toggled '<rect x="-4" y="-2" width="6" height="6" rx="1"/><path d="M-2 -4H3A1 1 0 0 1 4 -3V2"/>'
+	button "$out" close '<path d="M-4 -4L4 4M4 -4L-4 4"/>'
+	cat >"$out/themerc" <<-EOF
+		active_text_color=$ink
+		inactive_text_color=$quiet_ink
+		button_offset=4
+		button_spacing=0
+		full_width_title=true
+		title_vertical_offset_active=0
+		title_vertical_offset_inactive=0
+		title_shadow_active=false
+		title_shadow_inactive=false
+	EOF
+}
+
+# The colours the image's Sugabots GTK theme draws the dock, selections and
+# focus in. GTK reads a home's gtk.css after the theme, so these replace the
+# theme's own.
+gtk_colours() {
+	mkdir -p "$HOME/.config/gtk-3.0"
+	cat >"$HOME/.config/gtk-3.0/gtk.css" <<-EOF
+		/* Written by sugabots-desktop-look: this agent's colour. */
+		@define-color sugabots_accent $accent;
+		@define-color sugabots_accent_ink $ink;
+		@define-color sugabots_accent_light $light;
+		@define-color sugabots_accent_deep $deep;
+	EOF
+}
+
+wallpaper
+window_frames
+gtk_colours
