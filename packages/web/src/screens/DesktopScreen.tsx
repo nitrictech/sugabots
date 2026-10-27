@@ -142,16 +142,20 @@ function eventAt(event: MouseEvent, clientX: number, clientY: number) {
  * it where it is, so it never shows what was behind it. Unless `viewOnly`,
  * the person's mouse goes to the same point in the window on the display,
  * and their keys with it. The person's pointer takes the shape the
- * display's has, such as a text cursor over text.
+ * display's has: the person's own of its name, `cursorName`, such as their
+ * text cursor over text, or the display's own picture of a pointer with no
+ * name, which an app drew itself.
  */
 export function ScreenRegion({
 	screen,
 	bounds,
 	viewOnly,
+	cursorName,
 }: {
 	screen: VncScreen | undefined;
 	bounds: ScreenBounds;
 	viewOnly: boolean;
+	cursorName: string;
 }) {
 	const room = useRef<HTMLDivElement>(null);
 	const region = useRef<HTMLCanvasElement>(null);
@@ -231,11 +235,17 @@ export function ScreenRegion({
 
 	useEffect(() => {
 		const element = room.current;
-		if (!element || !screen) return;
-		return screen.onCursor((cursor) => {
+		if (!element) return;
+		const named = cssCursorFor(cursorName);
+		if (named) {
+			element.style.cursor = named;
+			return;
+		}
+		element.style.cursor = "";
+		return screen?.onCursor((cursor) => {
 			element.style.cursor = cursor;
 		});
-	}, [screen]);
+	}, [screen, cursorName]);
 
 	useEffect(() => {
 		const element = room.current;
@@ -276,3 +286,102 @@ function overlaps(a: DrawnArea, b: ScreenBounds) {
 function sameBounds(a: ScreenBounds, b: ScreenBounds) {
 	return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
+
+/**
+ * The CSS cursor for the X pointer named `name`: the same name, where X
+ * cursor themes follow CSS's, or the CSS name for X's older ones. None for a
+ * name CSS has nothing like, or none at all.
+ */
+function cssCursorFor(name: string): string | undefined {
+	if (CSS_CURSORS.has(name)) return name;
+	return X_CURSORS[name];
+}
+
+const CSS_CURSORS = new Set([
+	"default",
+	"none",
+	"context-menu",
+	"help",
+	"pointer",
+	"progress",
+	"wait",
+	"cell",
+	"crosshair",
+	"text",
+	"vertical-text",
+	"alias",
+	"copy",
+	"move",
+	"no-drop",
+	"not-allowed",
+	"grab",
+	"grabbing",
+	"all-scroll",
+	"col-resize",
+	"row-resize",
+	"n-resize",
+	"e-resize",
+	"s-resize",
+	"w-resize",
+	"ne-resize",
+	"nw-resize",
+	"se-resize",
+	"sw-resize",
+	"ew-resize",
+	"ns-resize",
+	"nesw-resize",
+	"nwse-resize",
+	"zoom-in",
+	"zoom-out",
+]);
+
+/** X's older pointer names, and other names cursor themes give pointers, with the CSS cursor for each. */
+const X_CURSORS: Record<string, string> = {
+	left_ptr: "default",
+	arrow: "default",
+	top_left_arrow: "default",
+	left_arrow: "default",
+	xterm: "text",
+	ibeam: "text",
+	hand1: "pointer",
+	hand2: "pointer",
+	pointing_hand: "pointer",
+	watch: "wait",
+	left_ptr_watch: "progress",
+	half_busy: "progress",
+	question_arrow: "help",
+	whats_this: "help",
+	cross: "crosshair",
+	tcross: "crosshair",
+	fleur: "move",
+	"dnd-move": "move",
+	"dnd-copy": "copy",
+	"dnd-link": "alias",
+	"dnd-none": "no-drop",
+	"dnd-ask": "context-menu",
+	openhand: "grab",
+	closedhand: "grabbing",
+	X_cursor: "not-allowed",
+	circle: "not-allowed",
+	crossed_circle: "not-allowed",
+	forbidden: "not-allowed",
+	sb_h_double_arrow: "ew-resize",
+	sb_v_double_arrow: "ns-resize",
+	h_double_arrow: "ew-resize",
+	v_double_arrow: "ns-resize",
+	size_hor: "ew-resize",
+	size_ver: "ns-resize",
+	size_fdiag: "nwse-resize",
+	size_bdiag: "nesw-resize",
+	size_all: "move",
+	split_h: "col-resize",
+	split_v: "row-resize",
+	top_side: "n-resize",
+	bottom_side: "s-resize",
+	left_side: "w-resize",
+	right_side: "e-resize",
+	top_left_corner: "nw-resize",
+	top_right_corner: "ne-resize",
+	bottom_left_corner: "sw-resize",
+	bottom_right_corner: "se-resize",
+};

@@ -7,12 +7,17 @@
 // as windows open, close, change size or title. A viewer in control resizes,
 // raises, minimizes and closes them, as it does their frames. Any viewer
 // says which look, light or dark, it shows the desktop in: the last to say
-// wins.
+// wins. Viewers are told the name of the display's pointer too, such as
+// "text" over text, so the person's own pointer can take that shape.
 //
 // To the viewer, as JSON text, windows from the back to the front:
 //   {type:"windows", windows:[{id, kind:"browser"|"app"|"popup", title, x, y, width, height, minimized, parent?}]}
 //     in pixels on the display. A popup is a menu or tooltip, drawn without a
 //     frame; `parent` is the window a dialog or popup belongs to.
+//   {type:"cursor", name}
+//     the pointer's name: as the app chose it, or the cursor theme's for a
+//     pointer from the theme that the app gave none, as Chromium does; or ""
+//     for one the app drew itself.
 // From any viewer:
 //   {type:"theme", scheme:"light"|"dark"}
 // From a viewer in control:
@@ -23,6 +28,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import x11 from "x11";
+import { fingerprintOf, themePointers } from "./cursors.mjs";
 
 const run = promisify(execFile);
 
@@ -89,6 +95,14 @@ export async function makeWindows(session, theme) {
 	};
 	display.onChange(scan);
 
+	let cursorMessage = JSON.stringify({ type: "cursor", name: "" });
+	display.onCursor((name) => {
+		cursorMessage = JSON.stringify({ type: "cursor", name });
+		for (const viewer of viewers) {
+			if (viewer.readyState === WebSocket.OPEN) viewer.send(cursorMessage);
+		}
+	});
+
 	/** What a viewer in control does to a window, if `message` is something it may do. */
 	const act = (message) => {
 		const id = Number(message?.id);
@@ -120,6 +134,7 @@ export async function makeWindows(session, theme) {
 			} else if (lastSent) {
 				viewer.send(lastSent);
 			}
+			viewer.send(cursorMessage);
 			scan();
 			viewer.on("close", () => {
 				viewers.delete(viewer);
@@ -301,7 +316,73 @@ async function connect() {
 			X.ChangeWindowAttributes(root, {
 				eventMask: x11.eventMask.SubstructureNotify | x11.eventMask.PropertyChange,
 			});
-			X.on("event", listener);
+			X.on("event", (event) => {
+				if (event.name !== CURSOR_NOTIFY) listener(event);
+			});
+		},
+		/**
+		 * Calls `listener` with the pointer's name each time the display's
+		 * pointer changes, through XFixes, whose cursor requests the x11 package
+		 * doesn't have: SelectCursorInput, the CursorNotify event, which carries
+		 * the name, and GetCursorImage, for the picture of a pointer without one.
+		 */
+		onCursor(listener) {
+			const names = new Map();
+			const theme = themePointers().catch((error) => {
+				report(error);
+				return new Map();
+			});
+			X.require("fixes", (error, fixes) => {
+				if (error) return report(error);
+				const pictureName = () =>
+					new Promise((resolve) => {
+						X.seq_num++;
+						X.pack_stream.pack("CCS", [fixes.majorOpcode, XFIXES_GET_CURSOR_IMAGE, 1]);
+						X.replies[X.seq_num] = [
+							(reply) => {
+								const width = reply.readUInt16LE(4);
+								const height = reply.readUInt16LE(6);
+								return {
+									width,
+									height,
+									hotX: reply.readUInt16LE(8),
+									hotY: reply.readUInt16LE(10),
+									pixels: reply.subarray(24, 24 + width * height * 4),
+								};
+							},
+							async (error, picture) =>
+								resolve(error ? "" : ((await theme).get(fingerprintOf(picture)) ?? "")),
+						];
+						X.pack_stream.flush();
+					});
+				const nameOf = async (atom) => {
+					if (atom === 0) return pictureName();
+					if (!names.has(atom)) names.set(atom, (await ask("GetAtomName", atom)) ?? "");
+					return names.get(atom);
+				};
+				X.eventParsers[fixes.firstEvent + XFIXES_CURSOR_NOTIFY] = (
+					type,
+					seq,
+					_window,
+					_code,
+					raw,
+				) => {
+					const [, , name] = raw.unpack("LLL");
+					return { type, seq, name: CURSOR_NOTIFY, cursorName: name };
+				};
+				X.on("event", (event) => {
+					if (event.name === CURSOR_NOTIFY) nameOf(event.cursorName).then(listener, report);
+				});
+				X.seq_num++;
+				X.pack_stream.pack("CCSLL", [
+					fixes.majorOpcode,
+					XFIXES_SELECT_CURSOR_INPUT,
+					3,
+					root,
+					XFIXES_DISPLAY_CURSOR_NOTIFY_MASK,
+				]);
+				X.pack_stream.flush();
+			});
 		},
 		/**
 		 * Moves or sizes the app window `window`, through the window manager,
@@ -327,6 +408,13 @@ async function connect() {
 		},
 	};
 }
+
+const CURSOR_NOTIFY = "CursorNotify";
+// From the XFixes protocol: https://www.x.org/releases/X11R7.7/doc/fixesproto/fixesproto.txt
+const XFIXES_SELECT_CURSOR_INPUT = 3;
+const XFIXES_GET_CURSOR_IMAGE = 4;
+const XFIXES_CURSOR_NOTIFY = 1;
+const XFIXES_DISPLAY_CURSOR_NOTIFY_MASK = 1;
 
 function report(error) {
 	console.error(error);

@@ -54,11 +54,13 @@ interface ShownWindow {
 	title: string;
 }
 
-/** What the desktop server sends about the desktop's windows. */
-interface WindowsMessage {
-	type: "windows";
-	windows: DisplayWindow[];
-}
+/**
+ * What the desktop server sends about the desktop's windows, and the name of
+ * its pointer, or "" for one an app drew itself.
+ */
+type DesktopServerMessage =
+	| { type: "windows"; windows: DisplayWindow[] }
+	| { type: "cursor"; name: string };
 
 /** Who is driving the desktop: the agent, at work in its browser, or a person who took over. */
 export type Driver = "agent" | "person";
@@ -165,6 +167,7 @@ function DesktopSurface({
 	const [serverLost, setServerLost] = useState(false);
 	const [screen, setScreen] = useState<VncScreen | undefined>(undefined);
 	const [screenStanding, setScreenStanding] = useState<Standing>("connecting");
+	const [cursorName, setCursorName] = useState("");
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 	/**
@@ -195,8 +198,11 @@ function DesktopSurface({
 		const opened = new WebSocket(desktopServerUrl(threadId, agentId, "windows"));
 		socket.current = opened;
 		opened.onopen = () => opened.send(themeMessage(schemeNow.current));
-		opened.onmessage = (event) =>
-			setDisplayWindows((JSON.parse(String(event.data)) as WindowsMessage).windows);
+		opened.onmessage = (event) => {
+			const message = JSON.parse(String(event.data)) as DesktopServerMessage;
+			if (message.type === "windows") setDisplayWindows(message.windows);
+			else setCursorName(message.name);
+		};
 		opened.onclose = () => {
 			if (socket.current === opened) setServerLost(true);
 		};
@@ -406,7 +412,14 @@ function DesktopSurface({
 									: () => send({ type: "close", id: window.id })
 						}
 					>
-						{bounds && <ScreenRegion screen={screen} bounds={bounds} viewOnly={viewOnly} />}
+						{bounds && (
+							<ScreenRegion
+								screen={screen}
+								bounds={bounds}
+								viewOnly={viewOnly}
+								cursorName={cursorName}
+							/>
+						)}
 					</DesktopWindow>
 				);
 			})}
@@ -428,7 +441,12 @@ function DesktopSurface({
 							zIndex: popupOrder,
 						}}
 					>
-						<ScreenRegion screen={screen} bounds={popup} viewOnly={viewOnly} />
+						<ScreenRegion
+							screen={screen}
+							bounds={popup}
+							viewOnly={viewOnly}
+							cursorName={cursorName}
+						/>
 					</div>
 				);
 			})}

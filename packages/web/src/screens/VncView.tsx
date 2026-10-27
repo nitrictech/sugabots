@@ -192,13 +192,21 @@ function screenOf(viewer: RFB, canvas: HTMLCanvasElement): VncScreen {
 	pointer._canvas.style.display = "none";
 	pointer.change = (rgba, hotX, hotY, width, height) => {
 		if (width === 0 || height === 0) return setCursor("none");
-		const image = document.createElement("canvas");
-		image.width = width;
-		image.height = height;
-		image
+		const drawn = document.createElement("canvas");
+		drawn.width = width;
+		drawn.height = height;
+		drawn
 			.getContext("2d")
 			?.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
-		setCursor(`url(${image.toDataURL()}) ${hotX} ${hotY}, default`);
+		// Apps' own pointers can be far bigger than a pointer is anywhere else.
+		const scale = Math.min(1, MAX_CURSOR_SIZE / Math.max(width, height));
+		const image = document.createElement("canvas");
+		image.width = Math.round(width * scale);
+		image.height = Math.round(height * scale);
+		image.getContext("2d")?.drawImage(drawn, 0, 0, image.width, image.height);
+		setCursor(
+			`url(${image.toDataURL()}) ${Math.round(hotX * scale)} ${Math.round(hotY * scale)}, default`,
+		);
 	};
 	pointer.clear = () => setCursor("none");
 
@@ -215,6 +223,9 @@ function screenOf(viewer: RFB, canvas: HTMLCanvasElement): VncScreen {
 		},
 	};
 }
+
+/** The biggest a display's pointer is shown, in pixels, as big as the pointers people have elsewhere. */
+const MAX_CURSOR_SIZE = 32;
 
 interface NoVncCursor {
 	_canvas: HTMLCanvasElement;

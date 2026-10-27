@@ -106,11 +106,15 @@ display() {
 	# as the desktop server changes it between light and dark. They draw no
 	# window buttons, which the web app's window has, and draw text as the web
 	# app does: in Rubik, smoothed without colour fringes, which scaling a
-	# display to fit its window would smear.
+	# display to fit its window would smear. Their pointers are Adwaita's,
+	# which the desktop server knows by their pictures, as Chromium gives its
+	# pointers no names.
 	[ -f "$state/xsettings" ] || cat >"$state/xsettings" <<-'SETTINGS'
 		Net/ThemeName "Sugabots-dark"
 		Gtk/DecorationLayout ":"
 		Gtk/FontName "Rubik 10"
+		Gtk/CursorThemeName "Adwaita"
+		Gtk/CursorThemeSize 24
 		Xft/Antialias 1
 		Xft/Hinting 1
 		Xft/HintStyle "hintslight"
