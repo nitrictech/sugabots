@@ -145,6 +145,16 @@ async function connect() {
 	const atoms = {
 		clients: await atom("_NET_CLIENT_LIST_STACKING"),
 		name: await atom("_NET_WM_NAME"),
+		state: await atom("_NET_WM_STATE"),
+		filling: new Set(
+			await Promise.all(
+				[
+					"_NET_WM_STATE_MAXIMIZED_VERT",
+					"_NET_WM_STATE_MAXIMIZED_HORZ",
+					"_NET_WM_STATE_FULLSCREEN",
+				].map(atom),
+			),
+		),
 	};
 	const property = (window, name) => ask("GetProperty", 0, window, name, 0, 0, 1 << 16);
 	const windowIds = (prop) =>
@@ -215,8 +225,26 @@ async function connect() {
 			});
 			X.on("event", listener);
 		},
-		/** Moves and sizes the app window `window`, through the window manager, which keeps it there. */
-		place(window, { x, y, width, height }) {
+		/**
+		 * Moves and sizes the app window `window`, through the window manager,
+		 * which keeps it there. A window maximized or full screen, as Chromium
+		 * opens one it last closed maximized, is restored first: the window
+		 * manager keeps those filling the display, and the web app's frame
+		 * fills the desktop itself.
+		 */
+		async place(window, { x, y, width, height }) {
+			if (
+				windowIds(await property(window, atoms.state)).some((state) => atoms.filling.has(state))
+			) {
+				await run("wmctrl", [
+					"-i",
+					"-r",
+					String(window),
+					"-b",
+					"remove,maximized_vert,maximized_horz",
+				]);
+				await run("wmctrl", ["-i", "-r", String(window), "-b", "remove,fullscreen"]);
+			}
 			X.ConfigureWindow(window, { x, y, width, height });
 		},
 	};
