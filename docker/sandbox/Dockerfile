@@ -60,6 +60,11 @@ RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" 
 # stand in for the apps' own, so the dock matches their windows to them.
 COPY xfce/*.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/
 COPY xfce/docklike.rc /usr/share/sugabots-desktop/docklike.rc
+# The dock's plugin runs inside the panel rather than in a process of its
+# own, whose window, embedded a pixel inside the bar, draws the bar again
+# over it and dents its rounded corners.
+RUN sed -i 's/^X-XFCE-Internal=false$/X-XFCE-Internal=true/' /usr/share/xfce4/panel/plugins/docklike.desktop \
+	&& grep -qx 'X-XFCE-Internal=true' /usr/share/xfce4/panel/plugins/docklike.desktop
 COPY --from=dock-icons /icons /usr/share/sugabots-desktop/icons
 COPY dock/*.desktop /usr/share/applications/
 # The look: Adwaita with the agent's colour for GTK apps and the dock, and
