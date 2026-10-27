@@ -90,7 +90,7 @@ desktop() {
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and agents drive the browser through
 	# Playwright, not the X server.
-	Xvnc "$DISPLAY" -geometry 1600x900 -depth 24 -ac -s 0 -nolisten tcp \
+	Xvnc "$DISPLAY" -geometry 1280x960 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
 		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
 	echo $! >"$pids"
@@ -131,6 +131,14 @@ draw_look() {
 # `session` or `start` recorded it; none for a desktop started without one.
 display_folder() {
 	cat "$state/$1.folder" 2>/dev/null || true
+}
+
+# Where display N's browser saves what people download: in the thread's
+# folder, beside the agents' work, or the agent's home without one.
+display_downloads() {
+	local thread
+	thread="$(display_folder "$1")"
+	echo "${thread:-$HOME}/Downloads"
 }
 
 # Sugabots' own accent, for a desktop no agent's colour was given.
@@ -253,13 +261,19 @@ unlock_profile() {
 }
 
 # Chromium draws its own frame around its tabs, in the colours of the theme
-# sugabots-desktop-look writes, which it loads when it starts. Set before it
-# starts: it writes its preferences back over any change while running.
-frame_browser() {
-	local preferences="$1/chromium/Default/Preferences"
-	mkdir -p "$(dirname "$preferences")"
+# sugabots-desktop-look writes, which it loads when it starts, and saves
+# downloads to `downloads` without asking. Set before it starts: it writes
+# its preferences back over any change while running.
+set_browser_preferences() {
+	local preferences="$1/chromium/Default/Preferences" downloads="$2"
+	mkdir -p "$(dirname "$preferences")" "$downloads"
 	[ -s "$preferences" ] || echo '{}' >"$preferences"
-	jq '.browser.custom_chrome_frame = true' "$preferences" >"$preferences.new"
+	jq --arg downloads "$downloads" '
+		.browser.custom_chrome_frame = true
+		| .download.default_directory = $downloads
+		| .download.prompt_for_download = false
+		| .savefile.default_directory = $downloads
+	' "$preferences" >"$preferences.new"
 	mv "$preferences.new" "$preferences"
 }
 
@@ -268,8 +282,8 @@ browser() {
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
 	unlock_profile "$profile"
-	frame_browser "$profile" >>"$log" 2>&1 ||
-		echo "The browser couldn't be set to draw its own frame." >>"$log"
+	set_browser_preferences "$profile" "$(display_downloads "$n")" >>"$log" 2>&1 ||
+		echo "The browser's frame and downloads folder couldn't be set." >>"$log"
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
 		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
@@ -359,23 +373,25 @@ viewer() {
 	echo $((5900 + n))
 }
 
-# Thunar on display N, at its thread's folder, with the places beside it:
-# This Thread, This Agent, Workspace, and its own File System. They are
+# Thunar on display N, at its thread's folder, with the places beside it: This
+# Thread, Downloads, This Agent, Workspace, and its own File System. They are
 # bookmarks, which GTK reads from the home, and the agent's home is shared by
 # its desktops in every thread, so Thunar runs with a home of its own for the
 # display. Its Home entry, that home, is hidden; it can't hide its File
 # System instead of a bookmark to `/`, as it hides entries by their folder.
 # A shell Thunar opens goes back to the agent's home.
 open_files() {
-	local n="$1" agent_home="$HOME" thread
+	local n="$1" agent_home="$HOME" thread downloads
 	local files_home="$state/$n.files"
 	thread="$(display_folder "$n")"
-	mkdir -p "$files_home/.config/gtk-3.0"
+	downloads="$(display_downloads "$n")"
+	mkdir -p "$files_home/.config/gtk-3.0" "$downloads"
 	# The agent's colours, and the image the dock's CSS names beside them.
 	ln -sf "$agent_home/.config/gtk-3.0/gtk.css" "$agent_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
 		"$files_home/.config/gtk-3.0/"
 	{
 		[ -z "$thread" ] || echo "file://$thread This Thread"
+		echo "file://$downloads Downloads"
 		echo "file://$agent_home This Agent"
 		echo "file:///workspace Workspace"
 	} >"$files_home/.config/gtk-3.0/bookmarks"

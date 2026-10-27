@@ -42,8 +42,8 @@ export function DesktopStage({
 			onClose={onClose}
 		>
 			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
-				{/* As large as the room allows, keeping the desktop's 16:9 shape, up to its own 1600 pixels across. */}
-				<div className="w-[min(1600px,100%,calc((100dvh-13rem)*16/9))]">
+				{/* As large as the room allows, keeping the desktop's 4:3 shape, up to its own 1280 pixels across. */}
+				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*4/3))]">
 					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
 				</div>
 				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
@@ -214,7 +214,7 @@ export function DesktopScreen({
 	}, [threadId, agentId, attempt]);
 
 	return (
-		<div className="relative aspect-[16/9] w-full overflow-hidden rounded-panel bg-list">
+		<div className="relative aspect-[4/3] w-full overflow-hidden rounded-panel bg-list">
 			<div ref={screen} className="absolute inset-0" />
 			{standing !== "connected" && (
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-sm">
