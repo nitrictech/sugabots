@@ -27,7 +27,8 @@ import {
 	type EgressHttpClient,
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
-import { gitHubNote, gitHubTools, type Workspace } from "./github/tools.ts";
+import type { Workspace } from "./github/push-tool.ts";
+import { gitHubNote, gitHubTools } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
 
 /**
