@@ -439,7 +439,7 @@ export type Reaction = (typeof REACTIONS)[number];
 
 /** What a reaction is on: an issue or pull request, which share their numbers, or a comment. */
 export type ReactionSubject =
-	| { readonly kind: "issue"; readonly number: number }
+	| { readonly kind: "issue" | "pull_request"; readonly number: number }
 	| { readonly kind: CommentKind; readonly commentId: number };
 
 export const react = (
@@ -449,7 +449,7 @@ export const react = (
 ) => {
 	const { repository, subject } = request;
 	const path =
-		subject.kind === "issue"
+		"number" in subject
 			? `/repos/${repository}/issues/${subject.number}`
 			: commentPath(repository, subject.kind, subject.commentId);
 	return call(http, "POST", `${path}/reactions`, {
@@ -491,7 +491,7 @@ export const openIssue = (
 	);
 
 /** Who opened issue or pull request `number`, by login, and whether it is a pull request. */
-export const issueAuthor = (
+export const findIssue = (
 	http: EgressHttpClient,
 	token: string,
 	{ repository, number }: { repository: string; number: number },
@@ -693,13 +693,12 @@ export function call(
 const LAST_PAGE_LINK = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/;
 
 /**
- * A page of a list GitHub's API gives, with the number of its last page,
- * which is this one's when GitHub links no further.
+ * A page, as large as GitHub gives, of the list at `path`, with the number
+ * of its last page, which is this one's when GitHub links no further.
  */
 export function getPage(http: EgressHttpClient, token: string, path: string, page: number) {
-	const separator = path.includes("?") ? "&" : "?";
 	return Effect.gen(function* () {
-		const response = yield* send(http, "GET", `${path}${separator}page=${page}`, {
+		const response = yield* send(http, "GET", `${path}?per_page=${PAGE_SIZE}&page=${page}`, {
 			bearer: token,
 		});
 		const lastPage = LAST_PAGE_LINK.exec(response.headers.get("link") ?? "")?.[1];

@@ -100,9 +100,8 @@ const firstAndNewestPages = <S extends Schema.Decoder<unknown>>(
 	schema: S,
 ) =>
 	Effect.gen(function* () {
-		const list = `${path}?per_page=${PAGE_SIZE}`;
 		const page = (number: number) =>
-			getPage(http, token, list, number).pipe(
+			getPage(http, token, path, number).pipe(
 				Effect.flatMap(({ body, lastPage }) =>
 					Effect.map(decoded(Schema.Array(schema))(body), (items) => ({ items, lastPage })),
 				),
@@ -110,7 +109,7 @@ const firstAndNewestPages = <S extends Schema.Decoder<unknown>>(
 		const first = yield* page(1);
 		const fromPage = Math.max(2, first.lastPage - MAX_PAGES + 2);
 		const newest = yield* Effect.forEach(
-			Array.from({ length: Math.max(0, first.lastPage - fromPage + 1) }, (_, at) => fromPage + at),
+			Array.from({ length: first.lastPage - fromPage + 1 }, (_, at) => fromPage + at),
 			page,
 			{ concurrency: "unbounded" },
 		);
@@ -140,13 +139,13 @@ export const getIssue = (
 			body: issue.body ?? "",
 			isPullRequest: issue.pull_request !== undefined,
 			comments: comments.items.map(commentOf),
-			...leftOut(comments, "comments"),
+			...leftOut(comments.olderLeftOut, "comments"),
 		};
 	});
 
-/** Says which of a read's lists had pages between their first and newest left out. */
-const leftOut = (read: { olderLeftOut: boolean }, list: string) =>
-	read.olderLeftOut
+/** A note that `list` had pages between its first and newest left out, if it had. */
+const leftOut = (olderLeftOut: boolean, list: string) =>
+	olderLeftOut
 		? { note: `Some of the ${list} between the first and the newest were left out.` }
 		: {};
 
@@ -202,7 +201,7 @@ export const listLabels = (
 				name: label.name,
 				description: label.description ?? "",
 			})),
-			...leftOut(labels, "labels"),
+			...leftOut(labels.olderLeftOut, "labels"),
 		})),
 	);
 
@@ -327,9 +326,7 @@ export const getPullRequest = (
 				at: comment.created_at,
 			})),
 			...leftOut(
-				{
-					olderLeftOut: reviews.olderLeftOut || comments.olderLeftOut || codeComments.olderLeftOut,
-				},
+				reviews.olderLeftOut || comments.olderLeftOut || codeComments.olderLeftOut,
 				"reviews and comments",
 			),
 		};
@@ -437,8 +434,8 @@ async function tailOf(response: Response, characters: number) {
 		}
 	}
 	text += decoder.decode();
-	return truncated ? { text: wholeLines(text), truncated } : { text, truncated };
+	return { text, truncated };
 }
 
-/** `text` without the partial line a cut left at its start. */
+/** `text` without the line a cut may have left partial at its start. */
 const wholeLines = (text: string) => text.slice(text.indexOf("\n") + 1);

@@ -535,22 +535,17 @@ export class Connected {
 	/** Reacts to an issue, a pull request or a comment, anyone's. */
 	react(request: {
 		repository: string;
-		subject: GitHub.ReactionSubject | { kind: "pull_request"; number: number };
+		subject: GitHub.ReactionSubject;
 		reaction: GitHub.Reaction;
 	}) {
-		const { subject } = request;
-		const onPullRequest = subject.kind === "pull_request" || subject.kind === "code_comment";
+		const { kind } = request.subject;
+		const onPullRequest = kind === "pull_request" || kind === "code_comment";
 		return Effect.flatMap(
 			this.tokenFor(
 				request.repository,
 				onPullRequest ? { pull_requests: "write" } : { issues: "write" },
 			),
-			(token) =>
-				GitHub.react(this.http, token, {
-					...request,
-					subject:
-						subject.kind === "pull_request" ? { kind: "issue", number: subject.number } : subject,
-				}),
+			(token) => GitHub.react(this.http, token, request),
 		);
 	}
 
@@ -633,7 +628,7 @@ export class Connected {
 					const changesWords = request.title !== undefined || request.body !== undefined;
 					const changesState = request.state !== undefined || request.closedReason !== undefined;
 					if (changesWords || changesState) {
-						const found = yield* GitHub.issueAuthor(http, token, request);
+						const found = yield* GitHub.findIssue(http, token, request);
 						if (found.isPullRequest) {
 							return yield* new IssueIsPullRequest({ number: request.number });
 						}

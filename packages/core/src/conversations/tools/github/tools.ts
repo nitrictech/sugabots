@@ -63,6 +63,17 @@ export function gitHubTools({
 		) as Promise<A | Failed>;
 	};
 
+	/**
+	 * `body` with the {@link attribution} of tool call `toolCallId` under it,
+	 * in place of one it already ends with, since a bot changing what it
+	 * wrote passes back what it read, signed.
+	 */
+	const sign = (toolCallId: string, did: string, body: string) =>
+		Effect.map(attribution({ agentId, turnId, sdkToolCallId: toolCallId }, did), (signature) => {
+			const unsigned = body.replace(TRAILING_SIGNATURE, "");
+			return unsigned ? `${unsigned}${SIGNATURE_DIVIDER}${signature}` : signature;
+		});
+
 	const tools: Record<string, Tool> = {
 		push_branch: tool({
 			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${GitHubConnections.BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
@@ -132,16 +143,12 @@ export function gitHubTools({
 			execute: async ({ repository, branch, base, title, body, draft = false }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"opened this pull request",
-						);
 						const opened = yield* connected.openPullRequest({
 							repository: path,
 							head: branch,
 							base,
 							title,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "opened this pull request", body),
 							draft,
 						});
 						return { status: "opened", ...opened };
@@ -170,21 +177,14 @@ export function gitHubTools({
 			execute: async ({ repository, number, title, body, base, draft, state }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const description =
-							body === undefined
-								? undefined
-								: signed(
-										body,
-										yield* attribution(
-											{ agentId, turnId, sdkToolCallId: toolCallId },
-											"wrote this description",
-										),
-									);
 						const updated = yield* connected.updatePullRequest({
 							repository: path,
 							number,
 							title,
-							body: description,
+							body:
+								body === undefined
+									? undefined
+									: yield* sign(toolCallId, "wrote this description", body),
 							base,
 							state,
 							draft,
@@ -207,21 +207,15 @@ export function gitHubTools({
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,
-				body: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60_000)).annotate({
-					description: "The comment, in Markdown",
-				}),
+				body: commentBodySchema,
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async ({ repository, number, body }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"wrote this comment",
-						);
 						const commented = yield* connected.commentOnPullRequest({
 							repository: path,
 							number,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "wrote this comment", body),
 						});
 						return { status: "commented", ...commented };
 					}),
@@ -247,10 +241,10 @@ export function gitHubTools({
 							path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
 								description: "The file, relative to the repository's root",
 							}),
-							line: lineSchema.annotate({
+							line: positiveIntegerSchema.annotate({
 								description: "The line commented on, or the last of the lines",
 							}),
-							startLine: Schema.optional(lineSchema).annotate({
+							startLine: Schema.optional(positiveIntegerSchema).annotate({
 								description: "The first of the lines, for a comment on several",
 							}),
 							side: Schema.optional(Schema.Literals(["head", "base"])).annotate({
@@ -270,15 +264,11 @@ export function gitHubTools({
 			) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"wrote this review",
-						);
 						const reviewed = yield* connected.reviewPullRequest({
 							repository: path,
 							number,
 							verdict,
-							body: body ? signed(body, signature) : signature,
+							body: yield* sign(toolCallId, "wrote this review", body),
 							commit,
 							comments: comments.map((comment) => ({
 								path: comment.path,
@@ -304,15 +294,11 @@ export function gitHubTools({
 			execute: async ({ repository, number, commentId, body }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"wrote this reply",
-						);
 						const replied = yield* connected.replyToCodeComment({
 							repository: path,
 							number,
 							commentId,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "wrote this reply", body),
 						});
 						return { status: "replied", ...replied };
 					}),
@@ -333,14 +319,10 @@ export function gitHubTools({
 			execute: async ({ repository, title, body, labels, assignees }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"opened this issue",
-						);
 						const opened = yield* connected.openIssue({
 							repository: path,
 							title,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "opened this issue", body),
 							labels,
 							assignees,
 						});
@@ -353,9 +335,7 @@ export function gitHubTools({
 				"Change an issue: label, assign, close or reopen anyone's, and change the title or description only of one a bot opened. Label and assign a pull request too; change anything else of one with update_pull_request. Leave out what stays the same.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
-				number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
-					description: "The issue's or pull request's number",
-				}),
+				number: issueOrPullRequestNumberSchema,
 				title: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
 				body: Schema.optional(Schema.String.check(Schema.isMaxLength(60_000))).annotate({
 					description: "The whole new description, in Markdown, replacing the old one",
@@ -378,21 +358,14 @@ export function gitHubTools({
 			) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const description =
-							body === undefined
-								? undefined
-								: signed(
-										body,
-										yield* attribution(
-											{ agentId, turnId, sdkToolCallId: toolCallId },
-											"wrote this description",
-										),
-									);
 						const updated = yield* connected.updateIssue({
 							repository: path,
 							number,
 							title,
-							body: description,
+							body:
+								body === undefined
+									? undefined
+									: yield* sign(toolCallId, "wrote this description", body),
 							state,
 							closedReason,
 							labels,
@@ -421,22 +394,16 @@ export function gitHubTools({
 			description: "Comment on an issue, such as to answer its author or say what you found.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
-				number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
-					description: "The issue's number",
-				}),
+				number: issueNumberSchema,
 				body: commentBodySchema,
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async ({ repository, number, body }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"wrote this comment",
-						);
 						const commented = yield* connected.commentOnIssue({
 							repository: path,
 							number,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "wrote this comment", body),
 						});
 						return { status: "commented", ...commented };
 					}),
@@ -451,9 +418,7 @@ export function gitHubTools({
 					description:
 						"What to react to: comment is one in an issue's or pull request's conversation, code_comment one on a pull request's code",
 				}),
-				number: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
-					description: "The issue's or pull request's number",
-				}),
+				number: Schema.optional(issueOrPullRequestNumberSchema),
 				commentId: Schema.optional(commentIdSchema),
 				reaction: Schema.Literals(GitHub.REACTIONS),
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
@@ -479,15 +444,11 @@ export function gitHubTools({
 			execute: async ({ repository, kind, commentId, body }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signature = yield* attribution(
-							{ agentId, turnId, sdkToolCallId: toolCallId },
-							"wrote this comment",
-						);
 						const edited = yield* connected.editComment({
 							repository: path,
 							kind,
 							commentId,
-							body: signed(body, signature),
+							body: yield* sign(toolCallId, "wrote this comment", body),
 						});
 						return { status: "edited", ...edited };
 					}).pipe(Effect.catchTag("NotBotComment", notBotComment)),
@@ -551,7 +512,7 @@ export function gitHubTools({
 		}),
 		get_issue: tool({
 			description: "Read an issue: its description, labels and comments.",
-			inputSchema: numberedSchema(repositorySchema, "The issue's number"),
+			inputSchema: numberedSchema(repositorySchema, issueNumberSchema),
 			execute: async ({ repository, number }) =>
 				onRepository(repository, (path) =>
 					connected.read((http, token) =>
@@ -572,7 +533,7 @@ export function gitHubTools({
 		get_pull_request: tool({
 			description:
 				"Read a pull request: its description, branches, reviews, comments, and comments on its code.",
-			inputSchema: numberedSchema(repositorySchema, "The pull request's number"),
+			inputSchema: numberedSchema(repositorySchema, pullRequestNumberSchema),
 			execute: async ({ repository, number }) =>
 				onRepository(repository, (path) =>
 					connected.read((http, token) =>
@@ -601,7 +562,7 @@ export function gitHubTools({
 				"Read the end of a GitHub Actions job's log, where a failure is, such as to see why a check failed. Give a checkRunId from list_check_runs whose hasLog is true.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
-				checkRunId: Schema.Int.check(Schema.isGreaterThan(0)),
+				checkRunId: positiveIntegerSchema,
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async ({ repository, checkRunId }) =>
 				onRepository(repository, (path) =>
@@ -681,11 +642,19 @@ const botBranchSchema = Schema.String.check(
 	description: `The branch, which must start with ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
 });
 
-const pullRequestNumberSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+const positiveIntegerSchema = Schema.Int.check(Schema.isGreaterThan(0));
+
+const issueNumberSchema = positiveIntegerSchema.annotate({ description: "The issue's number" });
+
+const issueOrPullRequestNumberSchema = positiveIntegerSchema.annotate({
+	description: "The issue's or pull request's number",
+});
+
+const pullRequestNumberSchema = positiveIntegerSchema.annotate({
 	description: "The pull request's number",
 });
 
-const pageSchema = Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+const pageSchema = Schema.optional(positiveIntegerSchema).annotate({
 	description: "Which page to read, from 1; the last answer's nextPage",
 });
 
@@ -701,9 +670,7 @@ const listSchema = (repository: Schema.Codec<string>) =>
 /** GitHub's most comments in one review. */
 const MAX_REVIEW_COMMENTS = 100;
 
-const lineSchema = Schema.Int.check(Schema.isGreaterThan(0));
-
-const commentIdSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+const commentIdSchema = positiveIntegerSchema.annotate({
 	description: "The comment's commentId, from get_issue, get_pull_request or the run's trigger",
 });
 
@@ -746,11 +713,11 @@ const notBotComment = (refused: GitHubConnections.NotBotComment) =>
 		failed(`That comment is ${refused.author}'s, not a bot's, so bots can't change it.`),
 	);
 
-const numberedSchema = (repository: Schema.Codec<string>, description: string) =>
-	Schema.Struct({
-		repository,
-		number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({ description }),
-	}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1);
+const numberedSchema = (repository: Schema.Codec<string>, number: Schema.Codec<number>) =>
+	Schema.Struct({ repository, number }).pipe(
+		Schema.toStandardSchemaV1,
+		Schema.toStandardJSONSchemaV1,
+	);
 
 /**
  * The line under what a bot wrote on GitHub, such as a pull request's
@@ -784,13 +751,6 @@ const SIGNATURE_DIVIDER = "\n\n---\n";
 /** An {@link attribution} at the end of what a bot wrote, as bots read it back from GitHub. */
 const TRAILING_SIGNATURE =
 	/\n\n---\n(?:\*\*[^\n]*\*\*, a bot in Sugabots,|A bot in Sugabots) [^\n]*\s*$/;
-
-/**
- * `body` with `signature` under it, in place of any signature it ends with,
- * since a bot changing what it wrote passes back what it read, signed.
- */
-const signed = (body: string, signature: string) =>
-	`${body.replace(TRAILING_SIGNATURE, "")}${SIGNATURE_DIVIDER}${signature}`;
 
 /** What the bundling script exits with when the checkout is shallow, so the bundle would lack history. */
 const SHALLOW_EXIT_CODE = 3;
