@@ -41,10 +41,12 @@ export function DesktopStage({
 			byline="Live from the sandbox"
 			onClose={onClose}
 		>
-			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
-				{/* As large as the room allows, keeping the desktop's 4:3 shape, up to its own 1280 pixels across. */}
-				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*4/3))]">
-					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+			<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
+				{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
+				<div className="@container-[size] flex min-h-0 w-full flex-1 items-center justify-center">
+					<div className="w-[min(100cqw,calc(100cqh*4/3))]">
+						<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+					</div>
 				</div>
 				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
 					<AgentAvatar
