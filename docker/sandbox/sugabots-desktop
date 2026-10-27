@@ -385,7 +385,9 @@ open_files() {
 	local files_home="$state/$n.files"
 	thread="$(display_folder "$n")"
 	downloads="$(display_downloads "$n")"
-	mkdir -p "$files_home/.config/gtk-3.0" "$downloads"
+	# A thread's folder is made by the first thing to use it, which may not
+	# have happened yet.
+	mkdir -p "$files_home/.config/gtk-3.0" ${thread:+"$thread"} "$downloads"
 	# The agent's colours, and the image the dock's CSS names beside them.
 	ln -sf "$agent_home/.config/gtk-3.0/gtk.css" "$agent_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
 		"$files_home/.config/gtk-3.0/"
