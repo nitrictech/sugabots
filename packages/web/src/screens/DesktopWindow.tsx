@@ -21,6 +21,8 @@ export interface WindowFrame {
 	surface: RefObject<HTMLDivElement | null>;
 	onFocus: () => void;
 	onPlace: (change: Partial<Placement>) => void;
+	/** When a person lets go of a window they were moving or resizing, once it's where they put it. */
+	onSettle?: () => void;
 	onMinimize: () => void;
 	onClose?: () => void;
 }
@@ -49,6 +51,7 @@ export function DesktopWindow({
 	surface,
 	onFocus,
 	onPlace,
+	onSettle,
 	onMinimize,
 	onClose,
 	children,
@@ -69,13 +72,16 @@ export function DesktopWindow({
 			const from = placement;
 			const start = { x: event.clientX, y: event.clientY };
 			const bounds = surface.current?.getBoundingClientRect();
-			const move = (moved: PointerEvent) => {
-				const next = change(moved.clientX - start.x, moved.clientY - start.y, from);
+			let moved = false;
+			const move = (event: PointerEvent) => {
+				moved = true;
+				const next = change(event.clientX - start.x, event.clientY - start.y, from);
 				onPlace(bounds ? keptInside(next, from, bounds) : next);
 			};
 			const up = () => {
 				handle.removeEventListener("pointermove", move);
 				handle.removeEventListener("pointerup", up);
+				if (moved) onSettle?.();
 			};
 			handle.addEventListener("pointermove", move);
 			handle.addEventListener("pointerup", up);

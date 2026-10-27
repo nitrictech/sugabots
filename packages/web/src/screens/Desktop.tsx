@@ -19,7 +19,13 @@ import {
 import { AppIcon, BrowserIcon, FilesIcon, TerminalIcon } from "./DockIcons.tsx";
 import { FilesWindow } from "./FilesWindow.tsx";
 import { TerminalView } from "./TerminalView.tsx";
-import { desktopServerUrl, type Standing, StandingOverlay, windowUrl } from "./VncView.tsx";
+import {
+	desktopServerUrl,
+	type Standing,
+	StandingOverlay,
+	type VncScreen,
+	windowUrl,
+} from "./VncView.tsx";
 
 /**
  * One of the windows on the desktop's display in the sandbox, as its server
@@ -157,15 +163,19 @@ function DesktopSurface({
 	const socket = useRef<WebSocket | undefined>(undefined);
 	const [displayWindows, setDisplayWindows] = useState<DisplayWindow[] | undefined>(undefined);
 	const [serverLost, setServerLost] = useState(false);
-	const [screen, setScreen] = useState<HTMLCanvasElement | undefined>(undefined);
+	const [screen, setScreen] = useState<VncScreen | undefined>(undefined);
 	const [screenStanding, setScreenStanding] = useState<Standing>("connecting");
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 	/**
-	 * When each window last moved here, as a person drags it. Where the display
-	 * says it is lags behind, so it's taken only once the window has settled.
+	 * When a person last put each window somewhere, or forever while they're
+	 * still moving it. Where the display says it is lags behind, so it's taken
+	 * only once the window has settled.
 	 */
 	const movedAt = useRef(new Map<string, number>());
+	/** The placements, with what a person has done since they were last drawn. */
+	const latestPlacements = useRef(placements);
+	latestPlacements.current = placements;
 
 	// The desktop's apps take on the person's light or dark look, as the app does.
 	const scheme = useResolvedTheme();
@@ -269,15 +279,27 @@ function DesktopSurface({
 		});
 	}, [displayWindows, localOpen]);
 
+	/** Moves a window on the display to where its frame is. */
+	const sendPlacement = (id: string) => {
+		const placement = latestPlacements.current.get(id);
+		const element = surface.current;
+		if (!placement || !element || viewOnly || !onDisplay(id)) return;
+		movedAt.current.set(id, Date.now());
+		send({ type: "place", id, ...contentOf(placement, element) });
+	};
+	/**
+	 * Moves a window's frame. A window on the display follows once the person
+	 * lets go, or straight away when it fills the desktop or stops filling it:
+	 * moving it there at every step makes the app draw it again at every step.
+	 */
 	const place = (id: string, change: Partial<Placement>) => {
-		const placement = placements.get(id);
+		const placement = latestPlacements.current.get(id);
 		if (!placement) return;
 		const next = { ...placement, ...change };
-		setPlacements((current) => new Map(current).set(id, next));
-		if (viewOnly || !onDisplay(id) || change.minimized !== undefined) return;
-		movedAt.current.set(id, Date.now());
-		const element = surface.current;
-		if (element) send({ type: "place", id, ...contentOf(next, element) });
+		latestPlacements.current = new Map(latestPlacements.current).set(id, next);
+		setPlacements((current) => new Map(current).set(id, { ...current.get(id), ...next }));
+		if (change.maximized !== undefined) return sendPlacement(id);
+		if (change.minimized === undefined) movedAt.current.set(id, Number.POSITIVE_INFINITY);
 	};
 	const focus = (id: string) => {
 		const placement = placements.get(id);
@@ -349,6 +371,7 @@ function DesktopSurface({
 					surface,
 					onFocus: () => focus(window.id),
 					onPlace: (change) => place(window.id, change),
+					onSettle: () => sendPlacement(window.id),
 					onMinimize: () => minimize(window.id),
 				};
 				if (window.kind === "files") {

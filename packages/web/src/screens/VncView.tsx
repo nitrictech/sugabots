@@ -9,7 +9,7 @@ export type Standing = "connecting" | "connected" | "ended" | "idle";
 /**
  * A display over VNC from the API's WebSocket at `url`, filling its parent,
  * scaled to fit unless not `scaled`, connected for as long as it's mounted,
- * and giving `onScreen` the canvas it draws into once connected. Unless `viewOnly`, it
+ * and giving `onScreen` what it draws once connected. Unless `viewOnly`, it
  * takes the person's mouse and keys, and shares a clipboard with them: what
  * the display's apps copy is passed to `onClipboard`, `clipboard` is put on
  * the display's, and the shortcut to paste reads the person's own clipboard
@@ -32,7 +32,7 @@ export function VncView({
 	viewOnly: boolean;
 	scaled?: boolean;
 	onStanding?: (standing: Standing) => void;
-	onScreen?: (screen: HTMLCanvasElement | undefined) => void;
+	onScreen?: (screen: VncScreen | undefined) => void;
 	/** Text to put on the display's clipboard, as copied from elsewhere. */
 	clipboard?: string;
 	onClipboard?: (text: string) => void;
@@ -77,7 +77,8 @@ export function VncView({
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => {
 				onStandingNow.current?.("connected");
-				onScreenNow.current?.(element.querySelector("canvas") ?? undefined);
+				const canvas = element.querySelector("canvas");
+				if (canvas) onScreenNow.current?.(screenOf(opened, canvas));
 			});
 			opened.addEventListener("clipboard", (event) => {
 				const { text } = (event as CustomEvent<{ text: string }>).detail;
@@ -134,6 +135,54 @@ export function VncView({
 	}, [url]);
 
 	return <div ref={screen} className="absolute inset-0" />;
+}
+
+/** A display as noVNC draws it: its canvas, and the areas of it each update draws. */
+export interface VncScreen {
+	canvas: HTMLCanvasElement;
+	/** Calls `listener` with each area of the canvas drawn, in pixels, until the returned function is called. */
+	onDraw: (listener: (area: DrawnArea) => void) => () => void;
+}
+
+export interface DrawnArea {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * What `viewer` draws into `canvas`. noVNC says nothing when it draws, so
+ * this wraps its display's `flip`, which copies each update's damaged area
+ * to the canvas. That is noVNC's private API, as of 1.7: check it when
+ * upgrading noVNC.
+ */
+function screenOf(viewer: RFB, canvas: HTMLCanvasElement): VncScreen {
+	const display = (viewer as unknown as { _display: NoVncDisplay })._display;
+	const listeners = new Set<(area: DrawnArea) => void>();
+	const flip = display.flip.bind(display);
+	display.flip = (fromQueue) => {
+		// A flip asked for while updates are queued is queued itself, and drawn later.
+		const drawsNow = display._renderQ.length === 0 || fromQueue;
+		const { left, top, right, bottom } = display._damageBounds;
+		flip(fromQueue);
+		if (!drawsNow || right <= left || bottom <= top) return;
+		const area = { x: left, y: top, width: right - left, height: bottom - top };
+		for (const listener of listeners) listener(area);
+	};
+	return {
+		canvas,
+		onDraw: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+}
+
+interface NoVncDisplay {
+	flip: (fromQueue?: boolean) => void;
+	_renderQ: unknown[];
+	_damageBounds: { left: number; top: number; right: number; bottom: number };
 }
 
 /** Whether the person is on a Mac, where ⌘ does what Ctrl does elsewhere. */
