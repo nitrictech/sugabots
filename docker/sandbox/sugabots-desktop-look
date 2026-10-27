@@ -169,8 +169,9 @@ window_frames() {
 # focus in, and the dot under each running app in the dock. GTK reads a
 # home's gtk.css after the theme, so these replace the theme's own. The dot
 # is an image because GTK draws a small CSS radial gradient square. The
-# dock's border colour is here too: xfce4-panel gives its bar a border of the
-# bar's colour darkened, over the theme's, and only the home's CSS outranks it.
+# dock's bar has no border, which only the home's CSS can say: xfce4-panel
+# gives the bar a border over the theme's, and GTK draws a thin one thicker
+# along its sides than round its corners.
 gtk_colours() {
 	local out="$HOME/.config/gtk-3.0"
 	mkdir -p "$out"
@@ -188,7 +189,7 @@ gtk_colours() {
 			background-image: url("sugabots-dock-dot.svg");
 		}
 		.xfce4-panel.background {
-			border-color: alpha(#ffffff, 0.6);
+			border-style: none;
 		}
 	EOF
 	mv "$out/gtk.css.$$" "$out/gtk.css"

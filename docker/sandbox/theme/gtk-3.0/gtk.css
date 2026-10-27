@@ -31,7 +31,6 @@ notebook > header tab:checked { box-shadow: inset 0 -2px @sugabots_accent; }
 .xfce4-panel.background {
 	background-color: alpha(mix(#ffffff, @sugabots_accent, 0.25), 0.55);
 	background-image: none;
-	border: 1px solid;
 	border-radius: 16px;
 }
 /* The docklike plugin makes each button 7px wider than its icon, on the
