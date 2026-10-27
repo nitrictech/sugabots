@@ -49,6 +49,7 @@ RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" 
 # `nixpkgs-unstable` its newer versions, by branch, so the image never needs
 # moving forward; whatever pins exact versions records the commit it used.
 COPY nix/nix.conf nix/registry.json /etc/nix/
+COPY nix/profile.sh /etc/profile.d/nix-profile.sh
 # Nix looks for its state here, and without it falls back to a store in the
 # user's home that needs namespaces the agents' user can't make.
 RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
