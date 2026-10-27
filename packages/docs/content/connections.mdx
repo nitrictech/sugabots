@@ -34,8 +34,8 @@ Pick one, then **Connect** and sign in to the app.
 Choose **Something else**, then **Connect by URL**, and fill in:
 
 - **Name**: what it's called in Sugabots.
-- **Address**: the server's URL. Sugabots connects to remote servers over
-  Streamable HTTP. It doesn't run servers itself.
+- **Server URL**: Sugabots connects to remote servers over Streamable HTTP.
+  It doesn't run servers itself.
   A plain-HTTP or local-network address needs
   [`ALLOW_UNSAFE_WORKSPACE_URLS=true`](/docs/configuration#network) in
   production.
@@ -160,7 +160,7 @@ service first, which the OAuth standard calls dynamic client registration. Some
 servers only accept apps registered another way, so their sign-in can't be used
 yet. Connect with an access token from the server instead.
 
-### The address isn't allowed
+### The server URL isn't allowed
 
 By default, an installation only connects to `https://` addresses on the public
 internet, so that one workspace can't reach other services on the network or

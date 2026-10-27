@@ -339,7 +339,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 		>
 			{(local || custom) && (
 				<EditableRow
-					label={custom ? "Address" : "Server URL"}
+					label="Server URL"
 					value={provider.baseUrl}
 					placeholder={local ? "http://localhost:11434" : "https://llm.example.com/v1"}
 					pending={actions.update.isPending}

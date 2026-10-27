@@ -539,7 +539,7 @@ function CustomProviderStep({
 						placeholder="e.g. Company gateway"
 					/>
 					<SettingsFieldRow
-						label="Address"
+						label="Server URL"
 						value={baseUrl}
 						onChange={setBaseUrl}
 						placeholder="https://llm.example.com/v1"

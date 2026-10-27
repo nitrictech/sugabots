@@ -140,7 +140,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
 		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
 		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
 		fireEvent.change(within(step).getByLabelText("Access token"), {
@@ -172,7 +172,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /HTTP endpoint/ }));
 		const step = await screen.findByRole("dialog", { name: "HTTP endpoint" });
 		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Alerts" } });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: "https://alerts.example.com/v2" },
 		});
 		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
@@ -192,7 +192,7 @@ describe("the Connections settings", () => {
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
 		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
 		fireEvent.change(within(step).getByLabelText("Access token"), { target: { value: "abc123" } });
@@ -220,7 +220,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
 		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
 		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
 		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
@@ -244,7 +244,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
 		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
 		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
-		fireEvent.change(within(step).getByLabelText("Address"), {
+		fireEvent.change(within(step).getByLabelText("Server URL"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
 		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
