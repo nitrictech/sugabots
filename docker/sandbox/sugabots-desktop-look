@@ -8,7 +8,7 @@
 #   sugabots-desktop-look '#RRGGBB'
 #
 # Writes into $HOME, the agent's, whose desktops all share its colour:
-#   .local/share/sugabots-desktop/wallpaper-RRGGBB.png, named for the colour
+#   .local/share/sugabots-desktop/wallpaper-RRGGBB.png, named for the colour given
 #     so the desktop sees a new one as a new file
 #   .local/share/themes/Sugabots/xfwm4/
 #   .config/gtk-3.0/gtk.css
@@ -41,6 +41,18 @@ ink_on() {
 	if [ "$brightness" -gt 150 ]; then echo "#1d1b16"; else echo "#ffffff"; fi
 }
 
+# The colour half way to a grey as bright as it, so the desktop is calm
+# around whatever the agent is working on.
+mute() {
+	local colour="$1" brightness
+	brightness=$(((299 * 16#${colour:1:2} + 587 * 16#${colour:3:2} + 114 * 16#${colour:5:2}) / 1000))
+	mix "$colour" "$(printf '#%02x%02x%02x' "$brightness" "$brightness" "$brightness")" "$MUTED_PERCENT"
+}
+MUTED_PERCENT=50
+
+# The wallpaper is named for the colour given, which sugabots-desktop knows.
+given="$accent"
+accent="$(mute "$accent")"
 light="$(mix "$accent" "#ffffff" 55)"
 deep="$(mix "$accent" "#000000" 18)"
 ink="$(ink_on "$accent")"
@@ -50,18 +62,21 @@ quiet_title="$(mix "$accent" "#f4f4f2" 82)"
 quiet_edge="$(mix "$accent" "#e2e2df" 70)"
 quiet_ink="#6b6a66"
 
+# Every file here is written under another name and moved into place: the
+# agent's desktops in other threads share the home, and may be reading it.
 render() {
 	local file="$1" width="$2" height="$3" content="$4"
 	printf '<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s">%s</svg>' \
 		"$width" "$height" "$content" |
-		rsvg-convert --width "$width" --height "$height" --output "$file"
+		rsvg-convert --width "$width" --height "$height" --output "$file.$$"
+	mv "$file.$$" "$file"
 }
 
 wallpaper() {
 	local out="$HOME/.local/share/sugabots-desktop"
 	mkdir -p "$out"
-	rm -f "$out"/wallpaper-*.png
-	render "$out/wallpaper-${accent#\#}.png" "$width_px" "$height_px" "
+	find "$out" -name 'wallpaper-*.png' ! -name "wallpaper-${given#\#}.png" -delete
+	render "$out/wallpaper-${given#\#}.png" "$width_px" "$height_px" "
 <defs>
 <linearGradient id=\"ground\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">
 <stop offset=\"0\" stop-color=\"$light\"/>
@@ -125,8 +140,8 @@ button() {
 }
 
 window_frames() {
-	local out="$HOME/.local/share/themes/Sugabots/xfwm4"
-	rm -rf "$out"
+	local theme="$HOME/.local/share/themes/Sugabots/xfwm4"
+	local out="$theme.$$"
 	mkdir -p "$out"
 	frame "$out" active "$accent" "$accent"
 	frame "$out" inactive "$quiet_title" "$quiet_edge"
@@ -145,20 +160,37 @@ window_frames() {
 		title_shadow_active=false
 		title_shadow_inactive=false
 	EOF
+	rm -rf "$theme"
+	mv "$out" "$theme"
 }
 
 # The colours the image's Sugabots GTK theme draws the dock, selections and
-# focus in. GTK reads a home's gtk.css after the theme, so these replace the
-# theme's own.
+# focus in, and the dot under each running app in the dock. GTK reads a
+# home's gtk.css after the theme, so these replace the theme's own. The dot
+# is an image because GTK draws a small CSS radial gradient square. The
+# dock's border colour is here too: xfce4-panel gives its bar a border of the
+# bar's colour darkened, over the theme's, and only the home's CSS outranks it.
 gtk_colours() {
-	mkdir -p "$HOME/.config/gtk-3.0"
-	cat >"$HOME/.config/gtk-3.0/gtk.css" <<-EOF
+	local out="$HOME/.config/gtk-3.0"
+	mkdir -p "$out"
+	printf '<svg xmlns="http://www.w3.org/2000/svg" width="6" height="6"><circle cx="3" cy="3" r="3" fill="%s"/></svg>' \
+		"$deep" >"$out/sugabots-dock-dot.svg.$$"
+	mv "$out/sugabots-dock-dot.svg.$$" "$out/sugabots-dock-dot.svg"
+	cat >"$out/gtk.css.$$" <<-EOF
 		/* Written by sugabots-desktop-look: this agent's colour. */
 		@define-color sugabots_accent $accent;
 		@define-color sugabots_accent_ink $ink;
 		@define-color sugabots_accent_light $light;
 		@define-color sugabots_accent_deep $deep;
+		.xfce4-panel button.open_group,
+		.xfce4-panel button.active_group {
+			background-image: url("sugabots-dock-dot.svg");
+		}
+		.xfce4-panel.background {
+			border-color: alpha(#ffffff, 0.6);
+		}
 	EOF
+	mv "$out/gtk.css.$$" "$out/gtk.css"
 }
 
 wallpaper

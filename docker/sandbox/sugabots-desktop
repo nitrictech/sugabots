@@ -4,9 +4,9 @@
 #
 #   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
 #   sugabots-desktop stop display                  stop it, and its browser
-#   sugabots-desktop desktop name profile output [--accent #RRGGBB]
+#   sugabots-desktop desktop name profile output [--accent #RRGGBB] [--folder dir]
 #                                                  the desktop for `name`, without a browser
-#   sugabots-desktop session name profile output [--accent #RRGGBB]
+#   sugabots-desktop session name profile output [--accent #RRGGBB] [--folder dir]
 #                                                  the desktop for `name`, with its browser
 #   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
@@ -24,6 +24,10 @@
 # takes it at once, apart from a browser already open, which takes it when it
 # next starts. Without one, a desktop keeps the colour it has, or starts in
 # Sugabots' own.
+#
+# `--folder` is the folder of the thread the desktop is for, where the dock's
+# Files opens, beside the agent's home and the workspace. `start` takes the
+# folder it runs in.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
 # people watching see what the agent does, in Chromium's own sandbox where the
@@ -123,6 +127,12 @@ draw_look() {
 	xfconf-query -c xfce4-desktop -p "$backdrop/image-style" -n -t int -s 5
 }
 
+# The folder of the thread display N's desktop is for, as `desktop`,
+# `session` or `start` recorded it; none for a desktop started without one.
+display_folder() {
+	cat "$state/$1.folder" 2>/dev/null || true
+}
+
 # Sugabots' own accent, for a desktop no agent's colour was given.
 DEFAULT_ACCENT="#405ec9"
 
@@ -131,12 +141,15 @@ display_accent() {
 	cat "$state/$1.accent" 2>/dev/null || echo "$DEFAULT_ACCENT"
 }
 
-# Reads `desktop` and `session`'s options into `accent`, empty without one.
-accent_option() {
+# Reads `desktop` and `session`'s options into `accent` and `folder`, each
+# empty without one.
+desktop_options() {
 	accent=""
+	folder=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--accent) accent="${2:?accent colour}" ;;
+		--folder) folder="${2:?thread folder}" ;;
 		*)
 			echo "unknown option: $1" >&2
 			exit 2
@@ -315,6 +328,7 @@ named_desktop() {
 	local file="$state/sessions/$name"
 	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
 	printf '%s\n%s\n' "$profile" "$output" >"$state/$n.browser-dirs"
+	[ -z "$folder" ] || echo "$folder" >"$state/$n.folder"
 	record_accent "$n"
 	desktop_started=no
 	if ! running "$n" desktop; then
@@ -328,13 +342,13 @@ named_desktop() {
 }
 
 desktop_only() {
-	accent_option "${@:4}"
+	desktop_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
-	accent_option "${@:4}"
+	desktop_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	local started=no
 	if ! running "$n" browser; then
@@ -354,6 +368,34 @@ viewer() {
 	echo $((5900 + n))
 }
 
+# Thunar on display N, at its thread's folder, with the places beside it:
+# This Thread, This Agent, Workspace, and its own File System. They are
+# bookmarks, which GTK reads from the home, and the agent's home is shared by
+# its desktops in every thread, so Thunar runs with a home of its own for the
+# display. Its Home entry, that home, is hidden; it can't hide its File
+# System instead of a bookmark to `/`, as it hides entries by their folder.
+# A shell Thunar opens goes back to the agent's home.
+open_files() {
+	local n="$1" agent_home="$HOME" thread
+	local files_home="$state/$n.files"
+	thread="$(display_folder "$n")"
+	mkdir -p "$files_home/.config/gtk-3.0"
+	# The agent's colours, and the image the dock's CSS names beside them.
+	ln -sf "$agent_home/.config/gtk-3.0/gtk.css" "$agent_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
+		"$files_home/.config/gtk-3.0/"
+	{
+		[ -z "$thread" ] || echo "file://$thread This Thread"
+		echo "file://$agent_home This Agent"
+		echo "file:///workspace Workspace"
+	} >"$files_home/.config/gtk-3.0/bookmarks"
+	cat >"$files_home/.bashrc" <<-EOF
+		export HOME=$(printf '%q' "$agent_home")
+		[ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
+	EOF
+	xfconf-query -c thunar -p /hidden-bookmarks -n -a -t string -s "file://$files_home"
+	HOME="$files_home" exec thunar "${thread:-/workspace}"
+}
+
 # What the dock opens on the desktop it runs on.
 open() {
 	local n="${DISPLAY#:}"
@@ -369,7 +411,7 @@ open() {
 		browser "$n" "$profile" "$output"
 		;;
 	terminal) exec xfce4-terminal --working-directory=/workspace ;;
-	files) exec thunar /workspace ;;
+	files) open_files "$n" ;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2
 		exit 2
@@ -380,6 +422,8 @@ open() {
 case "${1:-}" in
 start)
 	n="${2:-$(free_display)}"
+	# Agents start desktops from their thread's folder.
+	echo "$PWD" >"$state/$n.folder"
 	desktop "$n"
 	echo "DISPLAY=:$n"
 	;;
@@ -389,7 +433,7 @@ session) session "${@:2}" ;;
 viewer) viewer "${2:-}" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] | session name profile output [--accent #RRGGBB] | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] [--folder dir] | session name profile output [--accent #RRGGBB] [--folder dir] | viewer name | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac

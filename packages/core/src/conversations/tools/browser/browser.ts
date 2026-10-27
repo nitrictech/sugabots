@@ -125,9 +125,9 @@ const desktopCommand = (
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.agentId}`;
-		// Images from before desktops had colours ignore `--accent`.
+		// Images from before desktops had colours ignore `--accent` and `--folder`.
 		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)} --accent ${Sandboxes.shellQuoted(botColors[turn.color].face)}`,
+			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)} --accent ${Sandboxes.shellQuoted(botColors[turn.color].face)} --folder ${Sandboxes.shellQuoted(place.folder)}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
