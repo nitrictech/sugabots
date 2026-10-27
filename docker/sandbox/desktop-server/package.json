@@ -4,6 +4,7 @@
 	"type": "module",
 	"dependencies": {
 		"node-pty": "1.0.0",
-		"ws": "8.18.3"
+		"ws": "8.18.3",
+		"x11": "2.3.0"
 	}
 }

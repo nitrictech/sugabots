@@ -248,17 +248,16 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"shows a display the agent starts as a window of its desktop",
+		"shows a program the agent starts on its display as a window of its desktop",
 		async () => {
-			const started = await run("sugabots-desktop start");
-			const display = started.stdout.match(/DISPLAY=:(\d+)/)?.[1];
-			if (!display) throw new Error(started.stdout);
+			await run(
+				'export $(sugabots-desktop start) && xterm -T "Agent terminal" >/dev/null 2>&1 & sleep 2',
+			);
 			const server = succeeded(await openAs(ownerId));
 
 			expect(await windowsOf(server)).toContainEqual(
-				expect.objectContaining({ id: display, kind: "app" }),
+				expect.objectContaining({ kind: "app", title: "Agent terminal" }),
 			);
-			expect(await logsIn(succeeded(await openWindowAs(ownerId, display)))).toBe(true);
 		},
 		SLOW,
 	);

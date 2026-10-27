@@ -27,7 +27,9 @@ export interface WindowFrame {
 
 export const MIN_WINDOW_WIDTH = 320;
 export const MIN_WINDOW_HEIGHT = 200;
-const TITLE_STRIP_HEIGHT = 36;
+/** How tall a window's title strip is, and how wide the border around the window, in pixels. */
+export const TITLE_STRIP_HEIGHT = 36;
+export const WINDOW_BORDER = 1;
 const TOOLBAR_STRIP_HEIGHT = 46;
 /** How much of a window stays on the desktop when it's dragged off an edge, in pixels. */
 const KEPT_VISIBLE = 80;

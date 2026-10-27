@@ -5,32 +5,35 @@ import { useViewerIdle } from "@/lib/desktop.ts";
 import { useResolvedTheme } from "@/lib/theme.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { type ScreenBounds, ScreenRegion, SharedScreen } from "./DesktopScreen.tsx";
 import {
 	DesktopWindow,
 	MIN_WINDOW_HEIGHT,
 	MIN_WINDOW_WIDTH,
 	type Placement,
+	TITLE_STRIP_HEIGHT,
+	WINDOW_BORDER,
 	type WindowFrame,
 	WindowTitle,
 } from "./DesktopWindow.tsx";
 import { AppIcon, BrowserIcon, FilesIcon, TerminalIcon } from "./DockIcons.tsx";
 import { FilesWindow } from "./FilesWindow.tsx";
 import { TerminalView } from "./TerminalView.tsx";
-import {
-	desktopServerUrl,
-	type Standing,
-	StandingOverlay,
-	VncView,
-	windowUrl,
-} from "./VncView.tsx";
+import { desktopServerUrl, type Standing, StandingOverlay, windowUrl } from "./VncView.tsx";
 
-/** One of the desktop's windows that runs on a display in the sandbox, as its server lists them. */
-export interface DisplayWindow {
-	/** `browser`, or the number of a display the agent started. */
+/**
+ * One of the windows on the desktop's display in the sandbox, as its server
+ * lists them, where it is on the display: a browser's or another app's,
+ * framed here, or a popup, such as a menu, shown as it is.
+ */
+export interface DisplayWindow extends ScreenBounds {
+	/** The window's X id. */
 	id: string;
-	kind: "browser" | "app";
-	/** The title of the window in front on its display, if it has one. */
+	kind: "browser" | "app" | "popup";
 	title: string;
+	minimized: boolean;
+	/** The window a dialog belongs to. */
+	parent?: string;
 }
 
 /** The desktop's windows drawn here rather than shown from a display: its terminal and file browser. */
@@ -59,6 +62,8 @@ type DesktopAgent = Pick<Agent, "id" | "name" | "color" | "face" | "shape">;
 
 /** How far each window opens below and to the right of the one before, in pixels. */
 const CASCADE_STEP = 28;
+/** How long after a person last moved a window its frame keeps to where they put it, over where the display says it is. */
+const SETTLE_MS = 600;
 /** The agent's face in the wallpaper, in pixels, and how faintly it shows. */
 const WALLPAPER_FACE_SIZE = 620;
 const WALLPAPER_FACE_OPACITY = 0.16;
@@ -66,9 +71,11 @@ const WALLPAPER_FACE_OPACITY = 0.16;
 /**
  * The agent's desktop, drawn here rather than in the sandbox: a wallpaper
  * with the agent's face in it, so it's plain whose desktop it is, a dock,
- * and a window for each of its apps, each app on a display of its own and
- * shown over VNC, sized to its window; its terminal and file browser are
- * drawn here. The dock's dots take the colour of whoever is driving: the
+ * and a window for each of its apps' windows, each showing its part of the
+ * desktop's display, over VNC, where the window is on it; its terminal and
+ * file browser are drawn here. The display is the size of the desktop, and
+ * a window moved here moves there, so apps drag and drop between each other
+ * as on any desktop. The dock's dots take the colour of whoever is driving: the
  * agent's own, or neutral for a person. Unless
  * `viewOnly`, the person's mouse and keys go to the windows' apps, and they
  * can close the windows of apps the agent started. It lets go of every
@@ -134,7 +141,7 @@ export function AgentDesktop({
 	);
 }
 
-/** The desktop's windows and dock, connected to the desktop server while mounted. */
+/** The desktop's windows and dock, connected to the desktop server and its display while mounted. */
 function DesktopSurface({
 	threadId,
 	agentId,
@@ -150,15 +157,15 @@ function DesktopSurface({
 	const socket = useRef<WebSocket | undefined>(undefined);
 	const [displayWindows, setDisplayWindows] = useState<DisplayWindow[] | undefined>(undefined);
 	const [serverLost, setServerLost] = useState(false);
+	const [screen, setScreen] = useState<HTMLCanvasElement | undefined>(undefined);
+	const [screenStanding, setScreenStanding] = useState<Standing>("connecting");
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
-	// Each app is on a display of its own, with a clipboard of its own, so what
-	// one copies is put on the others, and on the person's own.
-	const [clipboard, setClipboard] = useState<string | undefined>(undefined);
-	const copied = (text: string) => {
-		setClipboard(text);
-		void navigator.clipboard.writeText(text).catch(() => {});
-	};
+	/**
+	 * When each window last moved here, as a person drags it. Where the display
+	 * says it is lags behind, so it's taken only once the window has settled.
+	 */
+	const movedAt = useRef(new Map<string, number>());
 
 	// The desktop's apps take on the person's light or dark look, as the app does.
 	const scheme = useResolvedTheme();
@@ -170,10 +177,25 @@ function DesktopSurface({
 		}
 	}, [scheme]);
 
+	const send = (message: object) => {
+		if (socket.current?.readyState !== WebSocket.OPEN) return;
+		socket.current.send(JSON.stringify(message));
+	};
+	/** Tells the display how big the desktop is, so a point on one is the same point on the other. */
+	const sendSize = () => {
+		const element = surface.current;
+		if (!element) return;
+		send({ type: "resize", width: element.clientWidth, height: element.clientHeight });
+	};
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: sendSize reads the surface when called.
 	useEffect(() => {
 		const opened = new WebSocket(desktopServerUrl(threadId, agentId, "windows"));
 		socket.current = opened;
-		opened.onopen = () => opened.send(themeMessage(schemeNow.current));
+		opened.onopen = () => {
+			opened.send(themeMessage(schemeNow.current));
+			sendSize();
+		};
 		opened.onmessage = (event) =>
 			setDisplayWindows((JSON.parse(String(event.data)) as WindowsMessage).windows);
 		opened.onclose = () => {
@@ -185,51 +207,92 @@ function DesktopSurface({
 		};
 	}, [threadId, agentId]);
 
-	/** Sizes a window's display to the window, whoever is viewing: the desktop server does it, not VNC. */
-	const resizeDisplay = (id: string) => (width: number, height: number) => {
-		if (socket.current?.readyState !== WebSocket.OPEN) return;
-		socket.current.send(JSON.stringify({ type: "resize", id, width, height }));
-	};
-	const closeDisplay = (id: string) => {
-		if (viewOnly || socket.current?.readyState !== WebSocket.OPEN) return;
-		socket.current.send(JSON.stringify({ type: "close", id }));
-	};
-
-	const windows: ShownWindow[] = [
-		...(displayWindows ?? []),
-		...[...localOpen].map((kind) => ({ id: kind, kind, title: "" })),
-	];
-
-	// A window opening for the first time is placed by kind, in front of the rest.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: sendSize reads the surface when called.
 	useEffect(() => {
 		const element = surface.current;
-		const unplaced = windows.filter((window) => !placements.has(window.id));
-		if (!element || unplaced.length === 0) return;
-		setPlacements((current) => {
-			const next = new Map(current);
-			for (const window of unplaced) {
-				next.set(
-					window.id,
-					initialPlacement(window.kind, next.size, frontOrder(next) + 1, element),
-				);
-			}
-			return next;
-		});
-	});
+		if (!element) return;
+		const sized = new ResizeObserver(sendSize);
+		sized.observe(element);
+		return () => sized.disconnect();
+	}, []);
 
-	const place = (id: string, change: Partial<Placement>) =>
+	const framed = (displayWindows ?? []).filter((window) => window.kind !== "popup");
+	const popups = (displayWindows ?? []).filter((window) => window.kind === "popup");
+	const windows: ShownWindow[] = [
+		...framed,
+		...[...localOpen].map((kind) => ({ id: kind, kind, title: "" })),
+	];
+	const onDisplay = (id: string) => framed.find((window) => window.id === id);
+
+	// A window's frame goes where the display has the window, unless a person
+	// is moving it; a local window opening for the first time is placed by kind.
+	// Either opens in front of the rest.
+	useEffect(() => {
+		const element = surface.current;
+		if (!element) return;
 		setPlacements((current) => {
-			const placement = current.get(id);
-			if (!placement) return current;
-			return new Map(current).set(id, { ...placement, ...change });
+			let next: Map<string, Placement> | undefined;
+			const change = (id: string, placement: Placement) => {
+				next ??= new Map(current);
+				next.set(id, placement);
+			};
+			for (const window of displayWindows ?? []) {
+				if (window.kind === "popup") continue;
+				const placed = current.get(window.id);
+				const settled = Date.now() - (movedAt.current.get(window.id) ?? 0) > SETTLE_MS;
+				const frame = frameAround(window);
+				if (!placed) {
+					change(window.id, {
+						...frame,
+						order: frontOrder(next ?? current) + 1,
+						minimized: window.minimized,
+						maximized: false,
+					});
+				} else if (
+					settled &&
+					!placed.maximized &&
+					(placed.x !== frame.x ||
+						placed.y !== frame.y ||
+						placed.width !== frame.width ||
+						placed.height !== frame.height ||
+						placed.minimized !== window.minimized)
+				) {
+					change(window.id, { ...placed, ...frame, minimized: window.minimized });
+				}
+			}
+			for (const kind of localOpen) {
+				if (current.has(kind)) continue;
+				const placements = next ?? current;
+				change(kind, initialPlacement(kind, placements.size, frontOrder(placements) + 1, element));
+			}
+			return next ?? current;
 		});
-	const focus = (id: string) =>
-		setPlacements((current) => {
-			const placement = current.get(id);
-			const front = frontOrder(current);
-			if (!placement || (placement.order === front && !placement.minimized)) return current;
-			return new Map(current).set(id, { ...placement, order: front + 1, minimized: false });
-		});
+	}, [displayWindows, localOpen]);
+
+	const place = (id: string, change: Partial<Placement>) => {
+		const placement = placements.get(id);
+		if (!placement) return;
+		const next = { ...placement, ...change };
+		setPlacements((current) => new Map(current).set(id, next));
+		if (viewOnly || !onDisplay(id) || change.minimized !== undefined) return;
+		movedAt.current.set(id, Date.now());
+		const element = surface.current;
+		if (element) send({ type: "place", id, ...contentOf(next, element) });
+	};
+	const focus = (id: string) => {
+		const placement = placements.get(id);
+		if (!placement) return;
+		if (!viewOnly && onDisplay(id)) send({ type: "focus", id });
+		const front = frontOrder(placements);
+		if (placement.order === front && !placement.minimized) return;
+		setPlacements((current) =>
+			new Map(current).set(id, { ...placement, order: front + 1, minimized: false }),
+		);
+	};
+	const minimize = (id: string) => {
+		place(id, { minimized: true });
+		if (!viewOnly && onDisplay(id)) send({ type: "minimize", id });
+	};
 
 	const shown = windows.filter((window) => {
 		const placement = placements.get(window.id);
@@ -241,10 +304,12 @@ function DesktopSurface({
 	}, undefined);
 
 	/** What a dock item does: opens its window, brings it forward, or tucks it away if it's already in front. */
-	const toggle = (id: string, open: () => void) => {
-		const placement = placements.get(id);
-		if (!windows.some((window) => window.id === id) || !placement) return open();
-		if (!placement.minimized && id === frontId) return place(id, { minimized: true });
+	const toggle = (id: string | undefined, open: () => void) => {
+		const placement = id === undefined ? undefined : placements.get(id);
+		if (id === undefined || !windows.some((window) => window.id === id) || !placement) {
+			return open();
+		}
+		if (!placement.minimized && id === frontId) return minimize(id);
 		focus(id);
 	};
 	const openLocal = (kind: LocalWindowKind) => () =>
@@ -253,10 +318,28 @@ function DesktopSurface({
 		setLocalOpen((current) => new Set([...current].filter((open) => open !== kind)));
 
 	const isOpen = (kind: DesktopWindowKind) => windows.some((window) => window.kind === kind);
-	const appWindows = windows.filter((window) => window.kind === "app");
+	const frontmost = (candidates: ShownWindow[]) =>
+		candidates.reduce<ShownWindow | undefined>(
+			(front, window) =>
+				!front || (placements.get(window.id)?.order ?? 0) > (placements.get(front.id)?.order ?? 0)
+					? window
+					: front,
+			undefined,
+		);
+	const browser = frontmost(framed.filter((window) => window.kind === "browser"));
+	// Dialogs are in the dock with the window they belong to.
+	const appWindows = framed.filter((window) => window.kind === "app" && !window.parent);
+	const popupOrder = frontOrder(placements) + 1;
 
 	return (
 		<div ref={surface} className="absolute inset-0">
+			<SharedScreen
+				url={windowUrl(threadId, agentId, "browser")}
+				viewOnly={viewOnly}
+				onStanding={setScreenStanding}
+				onScreen={setScreen}
+				onClipboard={(text) => void navigator.clipboard.writeText(text).catch(() => {})}
+			/>
 			{shown.map((window) => {
 				const placement = placements.get(window.id);
 				if (!placement) return null;
@@ -266,7 +349,7 @@ function DesktopSurface({
 					surface,
 					onFocus: () => focus(window.id),
 					onPlace: (change) => place(window.id, change),
-					onMinimize: () => place(window.id, { minimized: true }),
+					onMinimize: () => minimize(window.id),
 				};
 				if (window.kind === "files") {
 					return (
@@ -294,6 +377,7 @@ function DesktopSurface({
 					);
 				}
 				const isBrowser = window.kind === "browser";
+				const bounds = onDisplay(window.id);
 				return (
 					<DesktopWindow
 						key={window.id}
@@ -302,23 +386,35 @@ function DesktopSurface({
 						strip={{ title: <WindowTitle>{windowTitle(window)}</WindowTitle> }}
 						// The browser is the agent's, at work in it, so closing it only hides it.
 						onClose={
-							isBrowser ? frame.onMinimize : viewOnly ? undefined : () => closeDisplay(window.id)
+							isBrowser
+								? frame.onMinimize
+								: viewOnly
+									? undefined
+									: () => send({ type: "close", id: window.id })
 						}
 					>
-						<WindowDisplay
-							url={windowUrl(threadId, agentId, window.id)}
-							viewOnly={viewOnly}
-							what={isBrowser ? "browser" : "window"}
-							onResize={resizeDisplay(window.id)}
-							clipboard={clipboard}
-							onClipboard={copied}
-						/>
+						{bounds && <ScreenRegion screen={screen} bounds={bounds} viewOnly={viewOnly} />}
 					</DesktopWindow>
 				);
 			})}
-			{(serverLost || displayWindows === undefined) && (
+			{popups.map((popup) => (
+				<div
+					key={popup.id}
+					className="absolute"
+					style={{
+						left: popup.x,
+						top: popup.y,
+						width: popup.width,
+						height: popup.height,
+						zIndex: popupOrder,
+					}}
+				>
+					<ScreenRegion screen={screen} bounds={popup} viewOnly={viewOnly} />
+				</div>
+			))}
+			{(serverLost || displayWindows === undefined || screenStanding !== "connected") && (
 				<StandingOverlay
-					standing={serverLost ? "ended" : "connecting"}
+					standing={serverLost ? "ended" : screenStanding === "ended" ? "ended" : "connecting"}
 					what="desktop"
 					onReconnect={() => {}}
 				/>
@@ -332,7 +428,7 @@ function DesktopSurface({
 					kind="browser"
 					open={isOpen("browser")}
 					dotColor={driverColor}
-					onClick={() => toggle("browser", () => {})}
+					onClick={() => toggle(browser?.id, () => {})}
 				/>
 				<DockItem
 					label="Terminal"
@@ -368,57 +464,27 @@ function themeMessage(scheme: "light" | "dark") {
 	return JSON.stringify({ type: "theme", scheme });
 }
 
-/**
- * A window's display, saying so while it connects or if it can't be reached,
- * and saying how big it's shown, in pixels, as that changes, so the display
- * can be sized to match. It shares the desktop's clipboard, as `VncView` does.
- */
-function WindowDisplay({
-	url,
-	viewOnly,
-	what,
-	onResize,
-	clipboard,
-	onClipboard,
-}: {
-	url: string;
-	viewOnly: boolean;
-	what: "browser" | "window";
-	onResize: (width: number, height: number) => void;
-	clipboard: string | undefined;
-	onClipboard: (text: string) => void;
-}) {
-	const [standing, setStanding] = useState<Standing>("connecting");
-	const [attempt, setAttempt] = useState(0);
-	const room = useRef<HTMLDivElement>(null);
-	const onResizeNow = useRef(onResize);
-	onResizeNow.current = onResize;
-	useEffect(() => {
-		const element = room.current;
-		if (!element) return;
-		const sized = new ResizeObserver(() =>
-			onResizeNow.current(Math.round(element.clientWidth), Math.round(element.clientHeight)),
-		);
-		sized.observe(element);
-		return () => sized.disconnect();
-	}, []);
-	return (
-		<div ref={room} className="absolute inset-0">
-			<VncView
-				key={attempt}
-				url={url}
-				viewOnly={viewOnly}
-				onStanding={setStanding}
-				clipboard={clipboard}
-				onClipboard={onClipboard}
-			/>
-			<StandingOverlay
-				standing={standing}
-				what={what}
-				onReconnect={() => setAttempt((count) => count + 1)}
-			/>
-		</div>
-	);
+/** Where the frame around a window on the display goes, so the window shows through it where it is. */
+function frameAround(window: ScreenBounds) {
+	return {
+		x: window.x - WINDOW_BORDER,
+		y: window.y - TITLE_STRIP_HEIGHT - WINDOW_BORDER,
+		width: window.width + 2 * WINDOW_BORDER,
+		height: window.height + TITLE_STRIP_HEIGHT + 2 * WINDOW_BORDER,
+	};
+}
+
+/** Where the window inside a frame placed at `placement` goes on a display the size of `surface`. */
+function contentOf(placement: Placement, surface: HTMLElement): ScreenBounds {
+	const frame = placement.maximized
+		? { x: 0, y: 0, width: surface.clientWidth, height: surface.clientHeight }
+		: placement;
+	return {
+		x: frame.x + WINDOW_BORDER,
+		y: frame.y + TITLE_STRIP_HEIGHT + WINDOW_BORDER,
+		width: frame.width - 2 * WINDOW_BORDER,
+		height: frame.height - TITLE_STRIP_HEIGHT - 2 * WINDOW_BORDER,
+	};
 }
 
 /**
@@ -475,7 +541,7 @@ function windowTitle(window: ShownWindow) {
 	if (window.kind === "terminal") return "Terminal";
 	if (window.kind === "browser") return window.title || "Browser";
 	if (window.kind === "files") return "Files";
-	return window.title || `Display ${window.id}`;
+	return window.title || "Window";
 }
 
 function frontOrder(placements: ReadonlyMap<string, Placement>) {
@@ -484,18 +550,18 @@ function frontOrder(placements: ReadonlyMap<string, Placement>) {
 
 /** Where a window of `kind` first opens, the `index`th to open, on a desktop the size of `surface`. */
 function initialPlacement(
-	kind: DesktopWindowKind,
+	kind: LocalWindowKind,
 	index: number,
 	order: number,
 	surface: HTMLElement,
 ): Placement {
 	const { clientWidth: width, clientHeight: height } = surface;
 	const share = {
-		browser: { x: 0.04, y: 0.05, width: 0.66, height: 0.74 },
 		// Wide enough for its places beside the folder.
 		files: { x: 0.3, y: 0.18, width: 0.6, height: 0.64 },
-	}[kind as string] ?? { x: 0.36, y: 0.24, width: 0.5, height: 0.56 };
-	const offset = kind === "browser" ? 0 : index * CASCADE_STEP;
+		terminal: { x: 0.36, y: 0.24, width: 0.5, height: 0.56 },
+	}[kind];
+	const offset = index * CASCADE_STEP;
 	return {
 		x: Math.round(width * share.x) + offset,
 		y: Math.round(height * share.y) + offset,

@@ -33,7 +33,7 @@ if (!port || !devtoolsPort || !passwordsFile || !session || !folder || !xsetting
 }
 
 const terminal = makeTerminal(folder, session);
-const windows = makeWindows(session, await makeTheme(devtoolsPort, xsettingsFile));
+const windows = await makeWindows(session, await makeTheme(devtoolsPort, xsettingsFile));
 const channels = {
 	"/terminal": (viewer, mayUse) => terminal.serve(viewer, mayUse),
 	"/files": (viewer, mayUse) => serveFiles(viewer, mayUse, folder),

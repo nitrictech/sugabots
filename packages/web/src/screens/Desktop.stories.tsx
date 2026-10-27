@@ -16,8 +16,26 @@ const terminalChannel = desktopServer("terminal");
 const filesChannel = desktopServer("files");
 
 const windows: DisplayWindow[] = [
-	{ id: "browser", kind: "browser", title: "Pricing · Example - Chromium" },
-	{ id: "4", kind: "app", title: "Chart preview" },
+	{
+		id: "6291458",
+		kind: "browser",
+		title: "Pricing · Example - Chromium",
+		x: 24,
+		y: 60,
+		width: 620,
+		height: 380,
+		minimized: false,
+	},
+	{
+		id: "18874371",
+		kind: "app",
+		title: "Chart preview",
+		x: 360,
+		y: 150,
+		width: 420,
+		height: 300,
+		minimized: false,
+	},
 ];
 const sentToWindows = fn();
 
@@ -95,11 +113,9 @@ export const Watching = meta.story({
 		await waitFor(() =>
 			expect(sentToWindows).toHaveBeenCalledWith({ type: "theme", scheme: "dark" }),
 		);
-		// Each display is sized to its window even while only watching.
+		// The display is sized to the desktop even while only watching.
 		await waitFor(() =>
-			expect(sentToWindows).toHaveBeenCalledWith(
-				expect.objectContaining({ type: "resize", id: "browser" }),
-			),
+			expect(sentToWindows).toHaveBeenCalledWith(expect.objectContaining({ type: "resize" })),
 		);
 	},
 });
@@ -122,7 +138,9 @@ export const InControl = meta.story({
 
 		const app = canvas.getByRole("region", { name: "Chart preview" });
 		await userEvent.click(within(app).getByRole("button", { name: "Close" }));
-		await waitFor(() => expect(sentToWindows).toHaveBeenCalledWith({ type: "close", id: "4" }));
+		await waitFor(() =>
+			expect(sentToWindows).toHaveBeenCalledWith({ type: "close", id: "18874371" }),
+		);
 	},
 });
 

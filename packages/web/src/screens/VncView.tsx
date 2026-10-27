@@ -8,7 +8,8 @@ export type Standing = "connecting" | "connected" | "ended" | "idle";
 
 /**
  * A display over VNC from the API's WebSocket at `url`, filling its parent,
- * scaled to fit, connected for as long as it's mounted. Unless `viewOnly`, it
+ * scaled to fit unless not `scaled`, connected for as long as it's mounted,
+ * and giving `onScreen` the canvas it draws into once connected. Unless `viewOnly`, it
  * takes the person's mouse and keys, and shares a clipboard with them: what
  * the display's apps copy is passed to `onClipboard`, `clipboard` is put on
  * the display's, and the shortcut to paste reads the person's own clipboard
@@ -20,14 +21,18 @@ export type Standing = "connecting" | "connected" | "ended" | "idle";
 export function VncView({
 	url,
 	viewOnly,
+	scaled = true,
 	onStanding,
+	onScreen,
 	clipboard,
 	onClipboard,
 }: {
 	url: string;
 	/** Shows the display without sending input. The API enforces it either way. */
 	viewOnly: boolean;
+	scaled?: boolean;
 	onStanding?: (standing: Standing) => void;
+	onScreen?: (screen: HTMLCanvasElement | undefined) => void;
 	/** Text to put on the display's clipboard, as copied from elsewhere. */
 	clipboard?: string;
 	onClipboard?: (text: string) => void;
@@ -37,6 +42,9 @@ export function VncView({
 	const viewOnlyNow = useRef(viewOnly);
 	const onStandingNow = useRef(onStanding);
 	onStandingNow.current = onStanding;
+	const onScreenNow = useRef(onScreen);
+	onScreenNow.current = onScreen;
+	const scaledNow = useRef(scaled);
 	const onClipboardNow = useRef(onClipboard);
 	onClipboardNow.current = onClipboard;
 	/** What the display's clipboard holds, as far as this viewer knows. */
@@ -64,17 +72,22 @@ export function VncView({
 			if (unmounted) return;
 			const opened = new RFBClient(element, url);
 			connected.current = opened;
-			opened.scaleViewport = true;
+			opened.scaleViewport = scaledNow.current;
 			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
-			opened.addEventListener("connect", () => onStandingNow.current?.("connected"));
+			opened.addEventListener("connect", () => {
+				onStandingNow.current?.("connected");
+				onScreenNow.current?.(element.querySelector("canvas") ?? undefined);
+			});
 			opened.addEventListener("clipboard", (event) => {
 				const { text } = (event as CustomEvent<{ text: string }>).detail;
 				displayClipboard.current = text;
 				onClipboardNow.current?.(text);
 			});
 			opened.addEventListener("disconnect", () => {
-				if (connected.current === opened) onStandingNow.current?.("ended");
+				if (connected.current !== opened) return;
+				onStandingNow.current?.("ended");
+				onScreenNow.current?.(undefined);
 			});
 		});
 		// Caught before noVNC's own handler, which sends every key on as it is.

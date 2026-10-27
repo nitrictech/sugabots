@@ -1,15 +1,16 @@
 #!/bin/bash
-# The windows of agents' desktops in this sandbox, each app on a display of
-# its own: Sugabots' web app draws the desktop around them, and shows each
-# display in a window of its own, sized to it. Agents working at the same
-# time never click on each other's windows.
+# Agents' desktops in this sandbox, each on a display of its own, with every
+# app the agent runs on it: Sugabots' web app draws the desktop around them,
+# and a window for each of the display's windows, showing that part of the
+# display. Sharing a display, apps drag and drop between each other, as on
+# any desktop. Agents working at the same time never click on each other's
+# windows.
 #
-#   sugabots-desktop start [display]                      start a bare display, print its DISPLAY
-#   sugabots-desktop stop display                         stop it, and what runs on it
+#   sugabots-desktop start [display]                      the desktop's display, or a bare one, print its DISPLAY
+#   sugabots-desktop stop display                         stop a bare display, and what runs on it
 #   sugabots-desktop session name profile output folder   the browser and desktop server for `name`
-#   sugabots-desktop windows name                         the windows of `name`'s desktop, one a line
-#   sugabots-desktop display name id                      where viewers reach one of those windows
-#   sugabots-desktop resize name id width height          size that window's display, in pixels
+#   sugabots-desktop display name browser                 where viewers reach `name`'s display
+#   sugabots-desktop resize name browser width height     size `name`'s display, in pixels
 #
 # `session` is what Sugabots runs when the agent uses its browser or a person
 # opens its desktop. It starts the browser's display, the browser and the
@@ -17,19 +18,18 @@
 # watch=PORT browser=PORT server=PORT started=yes|no password=P
 # watch-password=P`, where `started` says whether the browser had to start.
 #
-# Each display holds one app, at the size of the window the web app shows it
-# in: viewers resize the display, and its window manager keeps the app
-# filling it, without a frame or window buttons of its own: the web app's
-# window has the title bar. The browser keeps its own tabs and address bar,
-# as any app keeps its own toolbars. Apps take on the web app's colours and
-# font, light or dark as the viewer has it, through the Sugabots GTK themes.
-# The desktop server runs the desktop's terminal, lists its files, says
-# which windows it has, and sets its look. A display an
-# agent starts, run with SUGABOTS_DESKTOP_SESSION set to its `name`, is one
-# of its windows too.
-# `windows` prints `id=ID kind=browser|app display=N title=T` a line,
-# the title last and to the end of its line; `display` prints `viewer=PORT
-# password=P watch-password=P` for the window with that id.
+# A desktop's display is the size of the desktop the web app draws, which
+# viewers resize it to, and its windows have no frame or window buttons of
+# their own: the web app's frame around each has the title bar. The browser
+# keeps its own tabs and address bar, as any app keeps its own toolbars. Apps
+# take on the web app's colours and font, light or dark as the viewer has
+# it, through the Sugabots GTK themes. The desktop server runs the desktop's
+# terminal, lists its files, says which windows the display has and where,
+# moves them as the web app's frames move, and sets the desktop's look.
+# `start`, run with SUGABOTS_DESKTOP_SESSION set to a desktop's `name`, as
+# the agent's commands are, gives the desktop's own display, starting it if
+# need be; `stop` leaves it running. `display` prints `viewer=PORT
+# password=P watch-password=P`.
 #
 # The browser is Chromium driven by Playwright MCP, in Chromium's own sandbox
 # where the sandbox it runs in allows user namespaces, with its profile under
@@ -118,28 +118,6 @@ display() {
 	SETTINGS
 	xsettingsd -c "$state/xsettings" >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	keep_maximized "$n" >>"$log" 2>&1 &
-	echo $! >>"$pids"
-}
-
-# Keeps every app window on display N maximized, which openbox then keeps
-# filling the display as viewers resize it. Openbox maximizes a window when it
-# appears, but apps such as GIMP restore a size of their own straight after.
-# Dialogs and other windows that belong to another are left as they are.
-keep_maximized() {
-	export DISPLAY=":$1"
-	local window properties
-	while sleep 1; do
-		for window in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -o '0x[0-9a-f]*'); do
-			properties="$(xprop -id "$window" _NET_WM_WINDOW_TYPE WM_TRANSIENT_FOR _NET_WM_STATE 2>/dev/null)" || continue
-			case "$properties" in
-			*_NET_WM_STATE_MAXIMIZED_HORZ* | *_NET_WM_STATE_FULLSCREEN* | *"WM_TRANSIENT_FOR(WINDOW)"*) continue ;;
-			*_NET_WM_WINDOW_TYPE_NORMAL* | *"_NET_WM_WINDOW_TYPE:  not found"*) ;;
-			*) continue ;;
-			esac
-			wmctrl -i -r "$window" -b add,maximized_vert,maximized_horz
-		done
-	done
 }
 
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
@@ -266,7 +244,7 @@ browser() {
 		curl -s -o /dev/null "http://localhost:$((8930 + n))/mcp" && break
 		sleep 0.1
 	done
-	node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" "$state/xsettings" >>"$log" 2>&1 &
+	DISPLAY=":$n" node /usr/local/lib/sugabots-desktop-server/server.mjs $((9530 + n)) "$devtools" "$state/$n.passwords" "$name" "$folder" "$state/xsettings" >>"$log" 2>&1 &
 	echo $! >>"$pids"
 	for _ in $(seq 100); do
 		curl -s -o /dev/null "http://localhost:$((9530 + n))/" && break
@@ -314,40 +292,10 @@ session() {
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) server=$((9530 + n)) started=$started $(passwords "$n")"
 }
 
-# The title of the window in front on display N, if it has one.
-title() {
-	local active
-	active="$(DISPLAY=":$1" xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | grep -o '0x[0-9a-f]*')" || return 0
-	# _NET_WM_NAME where the app sets it, as most do; WM_NAME from older ones, such as xterm.
-	DISPLAY=":$1" xprop -id "$active" _NET_WM_NAME WM_NAME 2>/dev/null | sed -n 's/^[A-Z_]*NAME([A-Z0-9_]*) = "\(.*\)"$/\1/p' | head -n 1
-}
-
-windows() {
-	local name="${1:?name}" file n
-	file="$state/sessions/$name"
-	if [ -f "$file" ] && n="$(cat "$file")" && running "$n" browser; then
-		echo "id=browser kind=browser display=$n title=$(title "$n")"
-	fi
-	for file in "$state"/started/*; do
-		[ -f "$file" ] && [ "$(cat "$file")" = "$name" ] || continue
-		n="${file##*/}"
-		running "$n" display && echo "id=$n kind=app display=$n title=$(title "$n")"
-	done
-}
-
-# The display of the window `id` of `name`'s desktop, if it's running.
+# The display of `name`'s desktop, which viewers reach as its `browser`, if it has one.
 display_of() {
-	local name="$1" id="$2" file
-	case "$id" in
-	browser) file="$state/sessions/$name" ;;
-	*[!0-9]* | "") return 1 ;;
-	*)
-		[ "$(cat "$state/started/$id" 2>/dev/null)" = "$name" ] || return 1
-		echo "$id"
-		return 0
-		;;
-	esac
-	[ -f "$file" ] && cat "$file"
+	local file="$state/sessions/$1"
+	[ "$2" = browser ] && [ -f "$file" ] && cat "$file"
 }
 
 display_viewer() {
@@ -357,9 +305,8 @@ display_viewer() {
 	echo "viewer=$((5900 + n)) $(passwords "$n")"
 }
 
-# Sizes the display of the window `id` of `name`'s desktop to the window
-# the web app shows it in, so the app lays out for that room whoever is
-# viewing, where VNC lets only a viewer in control resize it. Xvnc takes any
+# Sizes the display of `name`'s desktop to the desktop the web app draws,
+# whoever is viewing, where VNC lets only a viewer in control resize it. Xvnc takes any
 # size as a mode of its own; modes made for earlier sizes are removed.
 resize() {
 	local n width="${3:?width}" height="${4:?height}" mode old
@@ -398,19 +345,28 @@ esac
 
 case "${1:-}" in
 start)
+	if [ -n "${SUGABOTS_DESKTOP_SESSION:-}" ]; then
+		named_display "$SUGABOTS_DESKTOP_SESSION"
+		echo "DISPLAY=:$n"
+		exit 0
+	fi
 	n="${2:-$(free_display)}"
-	# Shown on the desktop of the session that started it.
-	echo "${SUGABOTS_DESKTOP_SESSION:-}" >"$state/started/$n"
+	touch "$state/started/$n"
 	display "$n"
 	echo "DISPLAY=:$n"
 	;;
-stop) stop "${2:-}" ;;
+stop)
+	if grep -qlx "${2:-}" "$state"/sessions/* 2>/dev/null; then
+		echo "Display :${2:-} is your desktop's, with your browser on it, so it stays. Close the programs you started on it instead." >&2
+		exit 0
+	fi
+	stop "${2:-}"
+	;;
 session) session "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
-windows) windows "${2:-}" ;;
 display) display_viewer "${2:-}" "${3:-}" ;;
 resize) resize "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | windows name | display name window | resize name window width height" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | session name profile output folder | display name browser | resize name browser width height" >&2
 	exit 2
 	;;
 esac
