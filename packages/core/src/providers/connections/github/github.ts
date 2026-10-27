@@ -43,7 +43,7 @@ export const WEB_URL = "https://github.com";
 const APP_PERMISSIONS = {
 	contents: "write",
 	pull_requests: "write",
-	issues: "read",
+	issues: "write",
 	checks: "read",
 	actions: "read",
 	metadata: "read",
@@ -357,7 +357,8 @@ export const setPullRequestDraft = (
 	);
 };
 
-const IssueComment = Schema.Struct({ html_url: Schema.String });
+const Comment = Schema.Struct({ id: Schema.Int, html_url: Schema.String });
+const madeComment = (made: typeof Comment.Type) => ({ commentId: made.id, url: made.html_url });
 
 /** Comments on issue or pull request `number`, which share their numbers and comments. */
 export const comment = (
@@ -368,10 +369,235 @@ export const comment = (
 	call(http, "POST", `/repos/${request.repository}/issues/${request.number}/comments`, {
 		bearer: token,
 		body: { body: request.body },
+	}).pipe(Effect.flatMap(decoded(Comment)), Effect.map(madeComment));
+
+/**
+ * A comment's kind, each with its own ids: one in an issue's or pull
+ * request's conversation, or one on a pull request's code.
+ */
+export type CommentKind = "comment" | "code_comment";
+
+const commentPath = (repository: string, kind: CommentKind, commentId: number) =>
+	`/repos/${repository}/${kind === "comment" ? "issues" : "pulls"}/comments/${commentId}`;
+
+const Authored = Schema.Struct({ user: Schema.NullOr(Schema.Struct({ login: Schema.String })) });
+
+/** Who wrote a comment, by login; undefined for a deleted account. */
+export const commentAuthor = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; kind: CommentKind; commentId: number },
+) =>
+	call(http, "GET", commentPath(request.repository, request.kind, request.commentId), {
+		bearer: token,
 	}).pipe(
-		Effect.flatMap(decoded(IssueComment)),
-		Effect.map((made) => ({ url: made.html_url })),
+		Effect.flatMap(decoded(Authored)),
+		Effect.map((found) => found.user?.login),
 	);
+
+export const editComment = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; kind: CommentKind; commentId: number; body: string },
+) =>
+	call(http, "PATCH", commentPath(request.repository, request.kind, request.commentId), {
+		bearer: token,
+		body: { body: request.body },
+	}).pipe(Effect.flatMap(decoded(Comment)), Effect.map(madeComment));
+
+export const deleteComment = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; kind: CommentKind; commentId: number },
+) =>
+	call(http, "DELETE", commentPath(request.repository, request.kind, request.commentId), {
+		bearer: token,
+	}).pipe(Effect.asVoid);
+
+/** The reactions GitHub has, by its names for them. */
+export const REACTIONS = [
+	"+1",
+	"-1",
+	"laugh",
+	"confused",
+	"heart",
+	"hooray",
+	"rocket",
+	"eyes",
+] as const;
+export type Reaction = (typeof REACTIONS)[number];
+
+/** What a reaction is on: an issue or pull request, which share their numbers, or a comment. */
+export type ReactionSubject =
+	| { readonly kind: "issue"; readonly number: number }
+	| { readonly kind: CommentKind; readonly commentId: number };
+
+export const react = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; subject: ReactionSubject; reaction: Reaction },
+) => {
+	const { repository, subject } = request;
+	const path =
+		subject.kind === "issue"
+			? `/repos/${repository}/issues/${subject.number}`
+			: commentPath(repository, subject.kind, subject.commentId);
+	return call(http, "POST", `${path}/reactions`, {
+		bearer: token,
+		body: { content: request.reaction },
+	}).pipe(Effect.asVoid);
+};
+
+const Issue = Schema.Struct({
+	number: Schema.Int,
+	html_url: Schema.String,
+	user: Schema.NullOr(Schema.Struct({ login: Schema.String })),
+	/** Present when the issue is a pull request. */
+	pull_request: Schema.optional(Schema.Unknown),
+});
+
+export const openIssue = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		title: string;
+		body: string;
+		labels: readonly string[] | undefined;
+		assignees: readonly string[] | undefined;
+	},
+) =>
+	call(http, "POST", `/repos/${request.repository}/issues`, {
+		bearer: token,
+		body: {
+			title: request.title,
+			body: request.body,
+			labels: request.labels,
+			assignees: request.assignees,
+		},
+	}).pipe(
+		Effect.flatMap(decoded(Issue)),
+		Effect.map((made) => ({ number: made.number, url: made.html_url })),
+	);
+
+/** Who opened issue or pull request `number`, by login, and whether it is a pull request. */
+export const issueAuthor = (
+	http: EgressHttpClient,
+	token: string,
+	{ repository, number }: { repository: string; number: number },
+) =>
+	call(http, "GET", `/repos/${repository}/issues/${number}`, { bearer: token }).pipe(
+		Effect.flatMap(decoded(Issue)),
+		Effect.map((found) => ({
+			author: found.user?.login,
+			isPullRequest: found.pull_request !== undefined,
+		})),
+	);
+
+/** Why an issue was closed, by GitHub's names. */
+export type ClosedReason = "completed" | "not_planned" | "duplicate";
+
+/**
+ * Changes what's given of issue or pull request `number`; the rest stays as
+ * it is. `labels` and `assignees` each replace the whole set.
+ */
+export const updateIssue = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		number: number;
+		title: string | undefined;
+		body: string | undefined;
+		state: "open" | "closed" | undefined;
+		closedReason: ClosedReason | undefined;
+		labels: readonly string[] | undefined;
+		assignees: readonly string[] | undefined;
+	},
+) =>
+	call(http, "PATCH", `/repos/${request.repository}/issues/${request.number}`, {
+		bearer: token,
+		body: {
+			title: request.title,
+			body: request.body,
+			state: request.state,
+			state_reason: request.closedReason,
+			labels: request.labels,
+			assignees: request.assignees,
+		},
+	}).pipe(
+		Effect.flatMap(decoded(Issue)),
+		Effect.map((updated) => ({ number: updated.number, url: updated.html_url })),
+	);
+
+/** What a review says of a pull request as a whole. */
+export type ReviewVerdict = "approve" | "request_changes" | "comment";
+
+const REVIEW_EVENTS: Readonly<Record<ReviewVerdict, string>> = {
+	approve: "APPROVE",
+	request_changes: "REQUEST_CHANGES",
+	comment: "COMMENT",
+};
+
+/** A review's comment on a line of a file in the diff, or on the lines from `startLine` to `line`. */
+export interface LineComment {
+	readonly path: string;
+	readonly line: number;
+	readonly startLine: number | undefined;
+	/** Which version of the file the lines are in: the base's for removed lines, the head's otherwise. */
+	readonly side: "base" | "head";
+	readonly body: string;
+}
+
+const Review = Schema.Struct({ id: Schema.Int, html_url: Schema.String });
+
+/** Reviews pull request `number` at `commit`, or at its newest commit when left out. */
+export const reviewPullRequest = (
+	http: EgressHttpClient,
+	token: string,
+	request: {
+		repository: string;
+		number: number;
+		verdict: ReviewVerdict;
+		body: string;
+		commit: string | undefined;
+		comments: readonly LineComment[];
+	},
+) => {
+	const sideOf = (side: LineComment["side"]) => (side === "base" ? "LEFT" : "RIGHT");
+	return call(http, "POST", `/repos/${request.repository}/pulls/${request.number}/reviews`, {
+		bearer: token,
+		body: {
+			event: REVIEW_EVENTS[request.verdict],
+			body: request.body,
+			commit_id: request.commit,
+			comments: request.comments.map((comment) => ({
+				path: comment.path,
+				line: comment.line,
+				side: sideOf(comment.side),
+				start_line: comment.startLine,
+				start_side: comment.startLine === undefined ? undefined : sideOf(comment.side),
+				body: comment.body,
+			})),
+		},
+	}).pipe(
+		Effect.flatMap(decoded(Review)),
+		Effect.map((made) => ({ reviewId: made.id, url: made.html_url })),
+	);
+};
+
+/** Replies in the thread of `commentId`, a comment on pull request `number`'s code. */
+export const replyToCodeComment = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; number: number; commentId: number; body: string },
+) =>
+	call(
+		http,
+		"POST",
+		`/repos/${request.repository}/pulls/${request.number}/comments/${request.commentId}/replies`,
+		{ bearer: token, body: { body: request.body } },
+	).pipe(Effect.flatMap(decoded(Comment)), Effect.map(madeComment));
 
 /** How long an app's own token lasts; GitHub takes at most ten minutes. */
 const APP_JWT_SECONDS = 9 * 60;

@@ -19,6 +19,9 @@ import {
 import { GitHubApps } from "./github-app.ts";
 import { GitHubConnections } from "./github-connections.ts";
 
+/** What GitHub shows the stand-in's app, `acme-sugabots`, as the author of. */
+const BOT_LOGIN = "acme-sugabots[bot]";
+
 /**
  * A pod's GitHub connection, its own app installed on `acme`, which reaches
  * `acme/web` and `acme/infra`, against Postgres.
@@ -56,7 +59,61 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 					head: { ref, repo: { full_name: fullName } },
 				});
 	};
-	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories, pullRequests);
+	// Issue #20 and comment 30 are the app's own; #21, pull request #22 and comment 31 are someone's.
+	const issuesAndComments: Route = ({ method, path }) => {
+		const issue = /^\/repos\/acme\/web\/issues\/(\d+)$/.exec(path);
+		if (issue) {
+			const number = Number(issue[1]);
+			const author = number === 20 ? BOT_LOGIN : "octocat";
+			return json({
+				number,
+				html_url: `https://github.com/acme/web/issues/${number}`,
+				user: { login: author },
+				...(number === 22 ? { pull_request: {} } : {}),
+			});
+		}
+		const comment = /^\/repos\/acme\/web\/issues\/comments\/(\d+)$/.exec(path);
+		if (!comment) return undefined;
+		const id = Number(comment[1]);
+		if (method === "DELETE") return new Response(null, { status: 204 });
+		return json({
+			id,
+			html_url: `https://github.com/acme/web/issues/20#issuecomment-${id}`,
+			user: { login: id === 30 ? BOT_LOGIN : "octocat" },
+		});
+	};
+	// Job 9's log is at GitHub's storage, where its address is signed for it.
+	const jobLogs: Route = ({ path }) => {
+		if (path === "/repos/acme/web/actions/jobs/9/logs") {
+			return new Response(null, {
+				status: 302,
+				headers: { location: "https://storage.example.com/logs/9?signature=signed" },
+			});
+		}
+		return path === "/logs/9"
+			? new Response(
+					"2026-10-27T01:00:00.0000000Z Run tests\n2026-10-27T01:00:01.0000000Z FAIL login.test.ts\n",
+				)
+			: undefined;
+	};
+	// Until set, the installation refuses tokens that write issues, as an app made before they were asked for.
+	let grantsIssues = true;
+	const refusesUngranted: Route = ({ method, path, body }) =>
+		!grantsIssues &&
+		method === "POST" &&
+		path.endsWith("/access_tokens") &&
+		JSON.stringify(body).includes('"issues":"write"')
+			? json({ message: "The permissions requested are not granted to this installation." }, 422)
+			: undefined;
+	const github = standInGitHub(
+		refusesUngranted,
+		mintsTokens,
+		listsRenamed,
+		listsRepositories,
+		pullRequests,
+		issuesAndComments,
+		jobLogs,
+	);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
 	let fixture: Awaited<ReturnType<typeof workspaceWithPod>>;
@@ -163,6 +220,94 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 				body: { title: "Fix the login" },
 			}),
 		]);
+	});
+
+	it("labels and closes anyone's issue, but changes the words only of the app's own, and never closes someone's pull request", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const change = {
+			repository: "acme/web",
+			title: undefined,
+			body: undefined,
+			state: undefined,
+			closedReason: undefined,
+			labels: undefined,
+			assignees: undefined,
+		};
+		const update = (number: number, changed: Partial<typeof change>) =>
+			runOnPostgres(connected.updateIssue({ ...change, ...changed, number }));
+
+		await update(21, { labels: ["bug"] });
+		await update(21, { state: "closed", closedReason: "duplicate" });
+		await update(20, { title: "Login loops" });
+		await expect(update(21, { title: "Login loops" })).rejects.toMatchObject({
+			_tag: "NotBotIssue",
+			change: "title or description",
+		});
+		await expect(update(22, { state: "closed" })).rejects.toMatchObject({
+			_tag: "NotBotIssue",
+			change: "state",
+		});
+
+		const patched = github.asked.filter((request) => request.method === "PATCH");
+		expect(patched.map(({ path, body }) => ({ path, body }))).toEqual([
+			{ path: "/repos/acme/web/issues/21", body: { labels: ["bug"] } },
+			{
+				path: "/repos/acme/web/issues/21",
+				body: { state: "closed", state_reason: "duplicate" },
+			},
+			{ path: "/repos/acme/web/issues/20", body: { title: "Login loops" } },
+		]);
+	});
+
+	it("edits and deletes the app's own comments, and no one else's", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const comment = { repository: "acme/web", kind: "comment" as const };
+
+		await runOnPostgres(connected.editComment({ ...comment, commentId: 30, body: "Fixed." }));
+		await runOnPostgres(connected.deleteComment({ ...comment, commentId: 30 }));
+		await expect(
+			runOnPostgres(connected.editComment({ ...comment, commentId: 31, body: "Fixed." })),
+		).rejects.toMatchObject({ _tag: "NotBotComment", author: "octocat" });
+		await expect(
+			runOnPostgres(connected.deleteComment({ ...comment, commentId: 31 })),
+		).rejects.toMatchObject({ _tag: "NotBotComment" });
+
+		const changed = github.asked.filter(({ method }) => method === "PATCH" || method === "DELETE");
+		expect(changed.map(({ method, path }) => `${method} ${path}`)).toEqual([
+			"PATCH /repos/acme/web/issues/comments/30",
+			"DELETE /repos/acme/web/issues/comments/30",
+		]);
+	});
+
+	it("says what the app must be granted when its installation hasn't been", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		grantsIssues = false;
+		try {
+			await expect(
+				runOnPostgres(
+					connected.commentOnIssue({ repository: "acme/web", number: 21, body: "On it." }),
+				),
+			).rejects.toMatchObject({ _tag: "GitHubPermissionNotGranted", permissions: "Issues: write" });
+		} finally {
+			grantsIssues = true;
+		}
+	});
+
+	it("reads the end of a job's log from where GitHub keeps it, without sending the token there", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+
+		const read = await runOnPostgres(connected.jobLog({ repository: "acme/web", jobId: 9 }));
+
+		expect(read).toEqual({ truncated: false, log: "Run tests\nFAIL login.test.ts\n" });
+		const fromStorage = github.asked.find(({ path }) => path === "/logs/9");
+		expect(fromStorage?.bearer).toBe("");
 	});
 
 	it("adds a repository and removes one, each a change of the connection's configuration", async () => {

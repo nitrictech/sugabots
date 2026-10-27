@@ -39,10 +39,11 @@ describe("GitHub's events", () => {
 			title: "Fix the login",
 			text: "Changes requested\n\nKeep the deep link.",
 			branch: "fix-login",
+			comment: null,
 		});
 	});
 
-	it("tells a comment on a pull request apart from one on an issue", () => {
+	it("tells a comment on a pull request apart from one on an issue, and which comment it is", () => {
 		const comment = (issue: object) =>
 			activityOf(
 				"issue_comment",
@@ -56,13 +57,44 @@ describe("GitHub's events", () => {
 						html_url: "https://github.com/acme/web/issues/4",
 						...issue,
 					},
-					comment: { body: "Any news?", html_url: "https://github.com/acme/web/issues/4#c1" },
+					comment: {
+						id: 11,
+						body: "Any news?",
+						html_url: "https://github.com/acme/web/issues/4#c1",
+					},
 				},
 				APP,
-			)?.event;
+			);
 
-		expect(comment({ pull_request: { url: "…" } })).toBe("pull_request_comment");
-		expect(comment({})).toBe("issue_comment");
+		expect(comment({ pull_request: { url: "…" } })?.event).toBe("pull_request_comment");
+		expect(comment({})).toMatchObject({
+			event: "issue_comment",
+			comment: { id: 11, kind: "comment" },
+		});
+	});
+
+	it("tells which comment on a pull request's code it is, apart from one in its conversation", () => {
+		const activity = activityOf(
+			"pull_request_review_comment",
+			{
+				action: "created",
+				repository,
+				sender: { login: "octocat" },
+				pull_request: pullRequest,
+				comment: {
+					id: 12,
+					body: "Keep the deep link.",
+					path: "src/login.ts",
+					html_url: "https://github.com/acme/web/pull/3#discussion_r12",
+				},
+			},
+			APP,
+		);
+
+		expect(activity).toMatchObject({
+			event: "pull_request_comment",
+			comment: { id: 12, kind: "code_comment" },
+		});
 	});
 
 	it("leaves out what the workspace's own app did, so a routine can't set itself off", () => {

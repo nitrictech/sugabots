@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { type Database, query, type RunEffect } from "../../../database/database.ts";
 import { agent, toolCall, user } from "../../../database/schema.ts";
+import * as GitHub from "../../../providers/connections/github/github.ts";
 import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
 import * as GitHubReads from "../../../providers/connections/github/github-reads.ts";
 import { GITHUB_CONNECTION_TOOLS } from "../../../providers/connections/github/github-tools.ts";
@@ -199,7 +200,7 @@ export function gitHubTools({
 		}),
 		comment_on_pull_request: tool({
 			description:
-				"Comment on a pull request, such as to answer its reviewers or say what you changed. For a comment on a line of its code, quote the file and line.",
+				"Comment in a pull request's conversation, such as to answer its reviewers or say what you changed. To comment on lines of its code, use review_pull_request; to answer a comment on its code, reply_to_code_comment.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,
@@ -223,13 +224,315 @@ export function gitHubTools({
 					}),
 				),
 		}),
+		review_pull_request: tool({
+			description:
+				"Review a pull request: approve it, request changes, or just comment, with comments on lines of its code. Read it with get_pull_request and its code in a checkout first. GitHub refuses a review of the app's own pull requests other than a comment.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: pullRequestNumberSchema,
+				verdict: Schema.Literals(["approve", "request_changes", "comment"]),
+				body: Schema.optional(Schema.String.check(Schema.isMaxLength(60_000))).annotate({
+					description: "The review's summary, in Markdown",
+				}),
+				commit: Schema.optional(commitSchema).annotate({
+					description:
+						"The full hash of the commit you reviewed, so line comments land where you read them; its newest if left out",
+				}),
+				comments: Schema.optional(
+					Schema.Array(
+						Schema.Struct({
+							path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
+								description: "The file, relative to the repository's root",
+							}),
+							line: lineSchema.annotate({
+								description: "The line commented on, or the last of the lines",
+							}),
+							startLine: Schema.optional(lineSchema).annotate({
+								description: "The first of the lines, for a comment on several",
+							}),
+							side: Schema.optional(Schema.Literals(["head", "base"])).annotate({
+								description:
+									"head for lines the pull request adds or keeps, numbered as in its branch; base for lines it removes, numbered as before. head if left out",
+							}),
+							body: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60_000)),
+						}),
+					).check(Schema.isMaxLength(MAX_REVIEW_COMMENTS)),
+				).annotate({
+					description: "Comments on lines the pull request's diff shows",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async (
+				{ repository, number, verdict, body = "", commit, comments = [] },
+				{ toolCallId },
+			) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this review",
+						);
+						const reviewed = yield* connected.reviewPullRequest({
+							repository: path,
+							number,
+							verdict,
+							body: body ? `${body}\n\n---\n${signature}` : signature,
+							commit,
+							comments: comments.map((comment) => ({
+								path: comment.path,
+								line: comment.line,
+								startLine: comment.startLine,
+								side: comment.side ?? "head",
+								body: comment.body,
+							})),
+						});
+						return { status: "reviewed", ...reviewed };
+					}),
+				),
+		}),
+		reply_to_code_comment: tool({
+			description:
+				"Reply in the thread of a comment on a pull request's code, such as to say how you addressed it. Its commentId is in get_pull_request's codeComments.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: pullRequestNumberSchema,
+				commentId: commentIdSchema,
+				body: commentBodySchema,
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, number, commentId, body }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this reply",
+						);
+						const replied = yield* connected.replyToCodeComment({
+							repository: path,
+							number,
+							commentId,
+							body: `${body}\n\n---\n${signature}`,
+						});
+						return { status: "replied", ...replied };
+					}),
+				),
+		}),
+		open_issue: tool({
+			description:
+				"Open an issue, such as for a bug you found or work to follow up. Search for one already open with search_issues first.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+				body: Schema.String.check(Schema.isMaxLength(60_000)).annotate({
+					description: "The issue's description, in Markdown",
+				}),
+				labels: Schema.optional(labelsSchema),
+				assignees: Schema.optional(assigneesSchema),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, title, body, labels, assignees }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"opened this issue",
+						);
+						const opened = yield* connected.openIssue({
+							repository: path,
+							title,
+							body: `${body}\n\n---\n${signature}`,
+							labels,
+							assignees,
+						});
+						return { status: "opened", ...opened };
+					}),
+				),
+		}),
+		update_issue: tool({
+			description:
+				"Change an issue or pull request: label or assign anyone's, close or reopen anyone's issue, and change the title or description only of one a bot opened. Pull requests open and close with update_pull_request. Leave out what stays the same.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+					description: "The issue's or pull request's number",
+				}),
+				title: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
+				body: Schema.optional(Schema.String.check(Schema.isMaxLength(60_000))).annotate({
+					description: "The whole new description, in Markdown, replacing the old one",
+				}),
+				state: Schema.optional(Schema.Literals(["open", "closed"])),
+				closedReason: Schema.optional(
+					Schema.Literals(["completed", "not_planned", "duplicate"]),
+				).annotate({ description: "Why it is closed, when closing it" }),
+				labels: Schema.optional(labelsSchema).annotate({
+					description:
+						"Every label it should have, replacing those it has; list_labels lists the repository's",
+				}),
+				assignees: Schema.optional(assigneesSchema).annotate({
+					description: "Everyone it should be assigned to, by login, replacing those it has",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async (
+				{ repository, number, title, body, state, closedReason, labels, assignees },
+				{ toolCallId },
+			) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signed =
+							body === undefined
+								? undefined
+								: `${body}\n\n---\n${yield* attribution(
+										{ agentId, turnId, sdkToolCallId: toolCallId },
+										"wrote this description",
+									)}`;
+						const updated = yield* connected.updateIssue({
+							repository: path,
+							number,
+							title,
+							body: signed,
+							state,
+							closedReason,
+							labels,
+							assignees,
+						});
+						return { status: "updated", ...updated };
+					}).pipe(
+						Effect.catchTag("NotBotIssue", (refused) =>
+							Effect.succeed(
+								failed(
+									`#${number} was opened by ${refused.author}, not a bot, so bots can't change its ${refused.change}. Comment on it instead.`,
+								),
+							),
+						),
+					),
+				),
+		}),
+		comment_on_issue: tool({
+			description: "Comment on an issue, such as to answer its author or say what you found.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+					description: "The issue's number",
+				}),
+				body: commentBodySchema,
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, number, body }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this comment",
+						);
+						const commented = yield* connected.commentOnIssue({
+							repository: path,
+							number,
+							body: `${body}\n\n---\n${signature}`,
+						});
+						return { status: "commented", ...commented };
+					}),
+				),
+		}),
+		react: tool({
+			description:
+				"React with an emoji to an issue, a pull request, or a comment, such as eyes to say you've seen it and are on it. Give number for an issue or pull request, commentId for a comment.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				on: Schema.Literals(["issue", "pull_request", "comment", "code_comment"]).annotate({
+					description:
+						"What to react to: comment is one in an issue's or pull request's conversation, code_comment one on a pull request's code",
+				}),
+				number: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+					description: "The issue's or pull request's number",
+				}),
+				commentId: Schema.optional(commentIdSchema),
+				reaction: Schema.Literals(GitHub.REACTIONS),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, on, number, commentId, reaction }) => {
+				const subject = reactionSubject(on, number, commentId);
+				if ("status" in subject) return subject;
+				return onRepository(repository, (path) =>
+					Effect.as(connected.react({ repository: path, subject, reaction }), {
+						status: "reacted",
+					}),
+				);
+			},
+		}),
+		edit_comment: tool({
+			description:
+				"Replace the words of a comment a bot wrote, such as to correct it. Comments on code are code_comment; others are comment.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				kind: commentKindSchema,
+				commentId: commentIdSchema,
+				body: commentBodySchema,
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, kind, commentId, body }, { toolCallId }) =>
+				onRepository(repository, (path) =>
+					Effect.gen(function* () {
+						const signature = yield* attribution(
+							{ agentId, turnId, sdkToolCallId: toolCallId },
+							"wrote this comment",
+						);
+						const edited = yield* connected.editComment({
+							repository: path,
+							kind,
+							commentId,
+							body: `${body}\n\n---\n${signature}`,
+						});
+						return { status: "edited", ...edited };
+					}).pipe(Effect.catchTag("NotBotComment", notBotComment)),
+				),
+		}),
+		delete_comment: tool({
+			description: "Delete a comment a bot wrote.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				kind: commentKindSchema,
+				commentId: commentIdSchema,
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, kind, commentId }) =>
+				onRepository(repository, (path) =>
+					connected
+						.deleteComment({ repository: path, kind, commentId })
+						.pipe(
+							Effect.as({ status: "deleted" }),
+							Effect.catchTag("NotBotComment", notBotComment),
+						),
+				),
+		}),
 		list_issues: tool({
-			description: "List a repository's issues, newest first, without their comments.",
+			description:
+				"List a repository's issues, newest first, without their comments. To find some, use search_issues.",
 			inputSchema: listSchema(repositorySchema),
-			execute: async ({ repository, state = "open" }) =>
+			execute: async ({ repository, state = "open", page = 1 }) =>
 				onRepository(repository, (path) =>
 					connected.read((http, token) =>
-						GitHubReads.listIssues(http, token, { repository: path, state }),
+						GitHubReads.listIssues(http, token, { repository: path, state, page }),
+					),
+				),
+		}),
+		search_issues: tool({
+			description:
+				"Search a repository's issues and pull requests, with GitHub's search syntax, such as: is:issue is:open label:bug login error",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+				page: pageSchema,
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, query, page = 1 }) =>
+				onRepository(repository, (path) =>
+					connected.read((http, token) =>
+						GitHubReads.searchIssues(http, token, { repository: path, query, page }),
+					),
+				),
+		}),
+		list_labels: tool({
+			description: "List the labels a repository's issues and pull requests can have.",
+			inputSchema: Schema.Struct({ repository: repositorySchema }).pipe(
+				Schema.toStandardSchemaV1,
+				Schema.toStandardJSONSchemaV1,
+			),
+			execute: async ({ repository }) =>
+				onRepository(repository, (path) =>
+					connected.read((http, token) =>
+						GitHubReads.listLabels(http, token, { repository: path }),
 					),
 				),
 		}),
@@ -246,10 +549,10 @@ export function gitHubTools({
 		list_pull_requests: tool({
 			description: "List a repository's pull requests, newest first.",
 			inputSchema: listSchema(repositorySchema),
-			execute: async ({ repository, state = "open" }) =>
+			execute: async ({ repository, state = "open", page = 1 }) =>
 				onRepository(repository, (path) =>
 					connected.read((http, token) =>
-						GitHubReads.listPullRequests(http, token, { repository: path, state }),
+						GitHubReads.listPullRequests(http, token, { repository: path, state, page }),
 					),
 				),
 		}),
@@ -278,6 +581,18 @@ export function gitHubTools({
 					connected.read((http, token) =>
 						GitHubReads.listCheckRuns(http, token, { repository: path, ref }),
 					),
+				),
+		}),
+		get_job_log: tool({
+			description:
+				"Read the end of a GitHub Actions job's log, where a failure is, such as to see why a check failed. Give a checkRunId from list_check_runs whose hasLog is true.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				checkRunId: Schema.Int.check(Schema.isGreaterThan(0)),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, checkRunId }) =>
+				onRepository(repository, (path) =>
+					connected.jobLog({ repository: path, jobId: checkRunId }),
 				),
 		}),
 	};
@@ -311,7 +626,7 @@ export function gitHubNote(connected: GitHubConnections.Connected, signedIn: boo
 	const reading = signedIn
 		? "In the sandbox, git clone and fetch of them are signed in to read, outside the sandbox, without a token. There is no gh; read issues, pull requests and checks with the connection's tools."
 		: "The sandbox's provider can't sign its requests in, so only public ones can be cloned.";
-	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request.`;
+	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request and reply_to_code_comment. Review others' with review_pull_request. Work on issues with comment_on_issue, open_issue and update_issue, and acknowledge what you were asked with react. When a check fails, read why with list_check_runs and get_job_log.`;
 }
 
 interface Failed {
@@ -335,7 +650,7 @@ function describeFailure(failure: unknown): string {
 		const tag = "_tag" in failure ? String(failure._tag) : "Failed";
 		return `${tag === "PushFailed" ? "git push" : "GitHub"}: ${String(failure.reason)}`;
 	}
-	return String(failure);
+	return failure instanceof Error ? failure.message : String(failure);
 }
 
 const commitSchema = Schema.String.check(
@@ -357,13 +672,66 @@ const pullRequestNumberSchema = Schema.Int.check(Schema.isGreaterThan(0)).annota
 	description: "The pull request's number",
 });
 
+const pageSchema = Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+	description: "Which page to read, from 1; the last answer's nextPage",
+});
+
 const listSchema = (repository: Schema.Codec<string>) =>
 	Schema.Struct({
 		repository,
 		state: Schema.optional(Schema.Literals(["open", "closed", "all"])).annotate({
 			description: "Which to list; open if left out",
 		}),
+		page: pageSchema,
 	}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1);
+
+/** GitHub's most comments in one review. */
+const MAX_REVIEW_COMMENTS = 100;
+
+const lineSchema = Schema.Int.check(Schema.isGreaterThan(0));
+
+const commentIdSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+	description: "The comment's commentId, from get_issue, get_pull_request or the run's trigger",
+});
+
+const commentKindSchema = Schema.Literals(["comment", "code_comment"]).annotate({
+	description:
+		"code_comment for a comment on a pull request's code; comment for one in an issue's or pull request's conversation",
+});
+
+const commentBodySchema = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(60_000),
+).annotate({ description: "The comment, in Markdown" });
+
+const labelsSchema = Schema.Array(
+	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+).check(Schema.isMaxLength(100));
+
+const assigneesSchema = Schema.Array(
+	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+).check(Schema.isMaxLength(10));
+
+/** What `on` names, by `number` or `commentId`, or why it can't be reacted to. */
+function reactionSubject(
+	on: "issue" | "pull_request" | "comment" | "code_comment",
+	number: number | undefined,
+	commentId: number | undefined,
+) {
+	if (on === "issue" || on === "pull_request") {
+		return number === undefined
+			? failed(`Give the ${on === "issue" ? "issue's" : "pull request's"} number.`)
+			: { kind: on, number };
+	}
+	return commentId === undefined
+		? failed("Give the comment's commentId.")
+		: { kind: on, commentId };
+}
+
+const notBotComment = (refused: GitHubConnections.NotBotComment) =>
+	Effect.succeed(
+		failed(`That comment is ${refused.author}'s, not a bot's, so bots can't change it.`),
+	);
 
 const numberedSchema = (repository: Schema.Codec<string>, description: string) =>
 	Schema.Struct({
