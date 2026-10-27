@@ -14,15 +14,6 @@
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 
-# The desktop's wallpaper, rendered at the display's size, so the renderer
-# doesn't ship in the image.
-FROM debian:trixie-slim AS wallpaper
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends librsvg2-bin \
-	&& rm -rf /var/lib/apt/lists/*
-COPY wallpaper.svg /wallpaper.svg
-RUN rsvg-convert --width 1280 --height 800 /wallpaper.svg --output /wallpaper.png
-
 # The dock's icons, from Papirus, without the rest of its 380 MB.
 FROM debian:trixie-slim AS dock-icons
 RUN apt-get update \
@@ -39,8 +30,8 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
 # The tools agents use on a repository, then the desktop: a virtual display,
-# a window manager and dock, a browser, a file manager, and what computer-use
-# tools drive them with.
+# an Xfce session, a browser, a terminal and file manager, and what
+# computer-use tools drive them with.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		bash ca-certificates curl wget git openssh-client less file procps \
@@ -48,9 +39,10 @@ RUN apt-get update \
 		build-essential pkg-config \
 		python3 python3-pip python3-venv \
 		nodejs npm \
-		tigervnc-standalone-server tigervnc-tools websockify x11-utils openbox plank dconf-gsettings-backend dconf-cli xcompmgr xterm \
-		xfonts-base dbus-x11 hsetroot \
-		lxterminal pcmanfm adwaita-icon-theme librsvg2-common \
+		tigervnc-standalone-server tigervnc-tools websockify x11-utils x11-xserver-utils xterm \
+		xfce4-session xfwm4 xfce4-panel xfce4-docklike-plugin xfdesktop4 xfce4-settings \
+		xfce4-terminal thunar adwaita-icon-theme librsvg2-common librsvg2-bin \
+		xfonts-base dbus-x11 fonts-inter fonts-jetbrains-mono \
 		nix-bin \
 		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -62,17 +54,23 @@ ARG PLAYWRIGHT_MCP_VERSION
 RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
 	&& npm cache clean --force
 
-COPY --from=wallpaper /wallpaper.png /usr/share/sugabots-desktop/wallpaper.png
+# The desktop: an Xfce session, set up for every user by these defaults.
+# The dock is a panel holding the docklike plugin, which reads its settings
+# only from the user's home, where sugabots-desktop puts them. Its launchers
+# stand in for the apps' own, so the dock matches their windows to them.
+COPY xfce/*.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/
+COPY xfce/docklike.rc /usr/share/sugabots-desktop/docklike.rc
+# The dock's plugin runs inside the panel rather than in a process of its
+# own, whose window, embedded a pixel inside the bar, draws the bar again
+# over it and dents its rounded corners.
+RUN sed -i 's/^X-XFCE-Internal=false$/X-XFCE-Internal=true/' /usr/share/xfce4/panel/plugins/docklike.desktop \
+	&& grep -qx 'X-XFCE-Internal=true' /usr/share/xfce4/panel/plugins/docklike.desktop
 COPY --from=dock-icons /icons /usr/share/sugabots-desktop/icons
-# The dock's launchers stand in for the apps' own, so the dock matches their
-# windows to them, and its settings are the system's dconf defaults.
 COPY dock/*.desktop /usr/share/applications/
-COPY dock/plank/ /usr/share/sugabots-desktop/plank/
-COPY dock/plank-theme/dock.theme /usr/share/plank/themes/Sugabots/dock.theme
-COPY dock/plank.dconf /etc/dconf/db/local.d/00-plank
-RUN mkdir -p /etc/dconf/profile \
-	&& printf 'user-db:user\nsystem-db:local\n' >/etc/dconf/profile/user \
-	&& dconf update
+# The look: Adwaita with the agent's colour for GTK apps and the dock, and
+# the wallpaper and window frames sugabots-desktop-look draws in it.
+COPY theme/ /usr/share/themes/Sugabots/
+COPY sugabots-desktop-look /usr/local/bin/sugabots-desktop-look
 # Nix, for software beyond this image: `nix profile install nixpkgs#ffmpeg`,
 # or `nix shell nixpkgs#ffmpeg` for one command. The agents' user owns the
 # store, so it installs without root. `nixpkgs` follows a NixOS release and
@@ -94,6 +92,6 @@ COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
 
-RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop
+RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop /usr/local/bin/sugabots-desktop-look
 
 WORKDIR /workspace

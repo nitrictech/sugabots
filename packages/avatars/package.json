@@ -6,6 +6,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./bot-colors": "./src/bot-colors.ts",
 		"./bot-crowd.svg": "./assets/bot-crowd.svg",
 		"./sugabots-logo.svg": "./assets/sugabots-logo.svg",
 		"./app-icons/*": "./assets/app-icons/*"

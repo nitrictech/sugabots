@@ -2,7 +2,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { DesktopScreen, LiveDesktopCard } from "./DesktopViewer.tsx";
+import { growthDesk } from "@/shell/story-fixtures.ts";
+import { DesktopScreen, DesktopStage, LiveDesktopCard } from "./DesktopViewer.tsx";
 
 const meta = preview.meta({
 	title: "Product/DesktopScreen",
@@ -54,5 +55,21 @@ export const LiveCard = meta.story({
 		await expect(canvas.getByText("Growth Desk is using its browser")).toBeVisible();
 		await userEvent.click(canvas.getByRole("button", { name: "Open Growth Desk's desktop" }));
 		await expect(openDesktop).toHaveBeenCalled();
+	},
+});
+
+/**
+ * The desktop opened beside a chat, filling the window: the screen takes the
+ * largest 4:3 shape the room above the controls allows.
+ */
+export const Opened = meta.story({
+	parameters: { layout: "fullscreen" },
+	render: ({ threadId }) => (
+		<div className="fixed inset-0 flex">
+			<DesktopStage threadId={threadId} agent={growthDesk} mayUse onClose={fn()} />
+		</div>
+	),
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Growth Desk's desktop")).toBeVisible();
 	},
 });

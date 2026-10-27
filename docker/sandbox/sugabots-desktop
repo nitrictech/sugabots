@@ -4,18 +4,30 @@
 #
 #   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
 #   sugabots-desktop stop display                  stop it, and its browser
-#   sugabots-desktop desktop name profile output   the desktop for `name`, without a browser
-#   sugabots-desktop session name profile output   the desktop for `name`, with its browser
+#   sugabots-desktop desktop name profile output [--accent #RRGGBB] [--folder dir]
+#                                                  the desktop for `name`, without a browser
+#   sugabots-desktop session name profile output [--accent #RRGGBB] [--folder dir]
+#                                                  the desktop for `name`, with its browser
 #   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
 # `desktop` is what Sugabots runs when a person opens an agent's desktop, and
 # `session` when the agent uses its browser. Both start the named desktop, or
-# find it running: a display with a window manager and a dock, served to VNC
-# viewers. `session` also starts the browser on it, or finds it running, and
-# prints `display=N viewer=PORT watch=PORT browser=PORT started=yes|no
-# password=P watch-password=P`, where `started` says whether the browser had
-# to start; `desktop` prints the same without `browser`.
+# find it running: an Xfce session with a dock, served to VNC viewers.
+# `session` also starts the browser on it, or finds it running, and prints
+# `display=N viewer=PORT watch=PORT browser=PORT started=yes|no password=P
+# watch-password=P`, where `started` says whether the browser had to start;
+# `desktop` prints the same without `browser`.
+#
+# `--accent` is the agent's colour, which the desktop is drawn in: its
+# wallpaper, window frames, dock and browser. A running desktop given another
+# takes it at once, apart from a browser already open, which takes it when it
+# next starts. Without one, a desktop keeps the colour it has, or starts in
+# Sugabots' own.
+#
+# `--folder` is the folder of the thread the desktop is for, where the dock's
+# Files opens, beside the agent's home and the workspace. `start` takes the
+# folder it runs in.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
 # people watching see what the agent does, in Chromium's own sandbox where the
@@ -78,27 +90,113 @@ desktop() {
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and agents drive the browser through
 	# Playwright, not the X server.
-	Xvnc "$DISPLAY" -geometry 1280x800 -depth 24 -ac -s 0 -nolisten tcp \
+	Xvnc "$DISPLAY" -geometry 1280x960 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
 		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
 	echo $! >"$pids"
 	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
 	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# The dock matches windows to its apps through a service on the session bus.
+	# Xfce keeps its settings on the session bus, which `open` and `restyle`
+	# reach it by.
 	eval "$(dbus-launch --sh-syntax)"
 	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
-	hsetroot -fill /usr/share/sugabots-desktop/wallpaper.png >>"$log" 2>&1
-	openbox >>"$log" 2>&1 &
+	echo "$DBUS_SESSION_BUS_ADDRESS" >"$state/$n.bus"
+	draw_look "$n" >>"$log" 2>&1
+	# The dock's plugin reads its settings only from the home.
+	mkdir -p "$HOME/.config/xfce4/panel"
+	cp /usr/share/sugabots-desktop/docklike.rc "$HOME/.config/xfce4/panel/docklike-1.rc"
+	# The session starts the window manager, settings daemon, dock and
+	# wallpaper, and starts any of them again that stops.
+	xfce4-session >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# For the dock's shadows and see-through background.
-	xcompmgr -n >>"$log" 2>&1 &
-	echo $! >>"$pids"
-	# The dock's items are read from the home it runs with.
-	mkdir -p "$HOME/.config/plank/dock1/launchers"
-	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
-	plank >>"$log" 2>&1 &
-	echo $! >>"$pids"
+}
+
+# Draws display N's look in its colour, and points its desktop, on whichever
+# monitor Xvnc names, at the wallpaper. With DISPLAY and the display's
+# session bus set.
+draw_look() {
+	local accent monitor backdrop
+	accent="$(display_accent "$1")"
+	sugabots-desktop-look "$accent"
+	monitor="$(xrandr --listactivemonitors | awk 'NR == 2 { print $4 }')"
+	backdrop="/backdrop/screen0/monitor$monitor/workspace0"
+	xfconf-query -c xfce4-desktop -p "$backdrop/last-image" -n -t string \
+		-s "$HOME/.local/share/sugabots-desktop/wallpaper-${accent#\#}.png"
+	# Zoomed: filling the screen without stretching.
+	xfconf-query -c xfce4-desktop -p "$backdrop/image-style" -n -t int -s 5
+}
+
+# The folder of the thread display N's desktop is for, as `desktop`,
+# `session` or `start` recorded it; none for a desktop started without one.
+display_folder() {
+	cat "$state/$1.folder" 2>/dev/null || true
+}
+
+# Where display N's browser saves what people download: in the thread's
+# folder, beside the agents' work, or the agent's home without one.
+display_downloads() {
+	local thread
+	thread="$(display_folder "$1")"
+	echo "${thread:-$HOME}/Downloads"
+}
+
+# Sugabots' own accent, for a desktop no agent's colour was given.
+DEFAULT_ACCENT="#405ec9"
+
+# Display N's colour, as `record_accent` last recorded it.
+display_accent() {
+	cat "$state/$1.accent" 2>/dev/null || echo "$DEFAULT_ACCENT"
+}
+
+# Reads `desktop` and `session`'s options into `accent` and `folder`, each
+# empty without one.
+desktop_options() {
+	accent=""
+	folder=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--accent) accent="${2:?accent colour}" ;;
+		--folder) folder="${2:?thread folder}" ;;
+		*)
+			echo "unknown option: $1" >&2
+			exit 2
+			;;
+		esac
+		shift 2
+	done
+	# It goes into the look's SVG, CSS and the browser's settings, so nothing
+	# but a colour may.
+	if [ -n "$accent" ] && ! [[ "$accent" =~ ^#[0-9a-fA-F]{6}$ ]]; then
+		echo "accent must be #RRGGBB: $accent" >&2
+		exit 2
+	fi
+}
+
+# Records `accent` for display N. Sets `accent_changed`.
+record_accent() {
+	local n="$1"
+	accent_changed=no
+	[ -n "$accent" ] || return 0
+	[ "$accent" = "$(display_accent "$n")" ] && return 0
+	echo "$accent" >"$state/$n.accent"
+	accent_changed=yes
+}
+
+# Draws display N, running from before, in its recorded colour. Apps already
+# open keep the colour they started with.
+restyle() {
+	local n="$1" log="$state/$1.log"
+	(
+		export DISPLAY=":$n" DBUS_SESSION_BUS_ADDRESS
+		DBUS_SESSION_BUS_ADDRESS="$(cat "$state/$n.bus")"
+		draw_look "$n"
+		# xfwm4 reads its theme again only when its name changes, so it moves
+		# to another and back. The dock reads its colours when it starts.
+		xfconf-query -c xfwm4 -p /general/theme -s Default
+		xfconf-query -c xfwm4 -p /general/theme -s Sugabots
+		xfce4-panel --restart
+	) >>"$log" 2>&1
 }
 
 # Eight characters, all VNC authentication reads of a password: 48 random bits.
@@ -162,11 +260,30 @@ unlock_profile() {
 	rm -f "$dir/SingletonLock" "$dir/SingletonSocket" "$dir/SingletonCookie"
 }
 
+# Chromium draws its own frame around its tabs, in the colours of the theme
+# sugabots-desktop-look writes, which it loads when it starts, and saves
+# downloads to `downloads` without asking. Set before it starts: it writes
+# its preferences back over any change while running.
+set_browser_preferences() {
+	local preferences="$1/chromium/Default/Preferences" downloads="$2"
+	mkdir -p "$(dirname "$preferences")" "$downloads"
+	[ -s "$preferences" ] || echo '{}' >"$preferences"
+	jq --arg downloads "$downloads" '
+		.browser.custom_chrome_frame = true
+		| .download.default_directory = $downloads
+		| .download.prompt_for_download = false
+		| .savefile.default_directory = $downloads
+	' "$preferences" >"$preferences.new"
+	mv "$preferences.new" "$preferences"
+}
+
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
 	unlock_profile "$profile"
+	set_browser_preferences "$profile" "$(display_downloads "$n")" >>"$log" 2>&1 ||
+		echo "The browser's frame and downloads folder couldn't be set." >>"$log"
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
 		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
@@ -177,7 +294,7 @@ browser() {
 	# put its path in the windows' names, and the dock would no longer know
 	# them as the Browser's.
 	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
-		--class=sugabots-browser \
+		--class=sugabots-browser --load-extension="$HOME/.local/share/sugabots-desktop/chromium-theme" \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
 		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
 	echo $! >"$pids"
@@ -208,28 +325,35 @@ stop() {
 	stop_part "$n" desktop
 }
 
-# The display of the desktop named `name`, running, with where its browser
-# keeps its profile and output recorded for the dock. Sets `desktop_started`.
+# The display of the desktop named `name`, running in the colour `accent`
+# gives, with where its browser keeps its profile and output recorded for the
+# dock. Sets `n` and `desktop_started`.
 named_desktop() {
 	local name="$1" profile="$2" output="$3"
 	local file="$state/sessions/$name"
 	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
 	printf '%s\n%s\n' "$profile" "$output" >"$state/$n.browser-dirs"
+	[ -z "$folder" ] || echo "$folder" >"$state/$n.folder"
+	record_accent "$n"
 	desktop_started=no
 	if ! running "$n" desktop; then
 		# The browser can't outlive the display it was on.
 		stop "$n"
 		desktop "$n"
 		desktop_started=yes
+	elif [ "$accent_changed" = yes ]; then
+		restyle "$n"
 	fi
 }
 
 desktop_only() {
+	desktop_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
+	desktop_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	local started=no
 	if ! running "$n" browser; then
@@ -249,6 +373,38 @@ viewer() {
 	echo $((5900 + n))
 }
 
+# Thunar on display N, at its thread's folder, with the places beside it: This
+# Thread, Downloads, This Agent, Workspace, and its own File System. They are
+# bookmarks, which GTK reads from the home, and the agent's home is shared by
+# its desktops in every thread, so Thunar runs with a home of its own for the
+# display. Its Home entry, that home, is hidden; it can't hide its File
+# System instead of a bookmark to `/`, as it hides entries by their folder.
+# A shell Thunar opens goes back to the agent's home.
+open_files() {
+	local n="$1" agent_home="$HOME" thread downloads
+	local files_home="$state/$n.files"
+	thread="$(display_folder "$n")"
+	downloads="$(display_downloads "$n")"
+	# A thread's folder is made by the first thing to use it, which may not
+	# have happened yet.
+	mkdir -p "$files_home/.config/gtk-3.0" ${thread:+"$thread"} "$downloads"
+	# The agent's colours, and the image the dock's CSS names beside them.
+	ln -sf "$agent_home/.config/gtk-3.0/gtk.css" "$agent_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
+		"$files_home/.config/gtk-3.0/"
+	{
+		[ -z "$thread" ] || echo "file://$thread This Thread"
+		echo "file://$downloads Downloads"
+		echo "file://$agent_home This Agent"
+		echo "file:///workspace Workspace"
+	} >"$files_home/.config/gtk-3.0/bookmarks"
+	cat >"$files_home/.bashrc" <<-EOF
+		export HOME=$(printf '%q' "$agent_home")
+		[ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
+	EOF
+	xfconf-query -c thunar -p /hidden-bookmarks -n -a -t string -s "file://$files_home"
+	HOME="$files_home" exec thunar "${thread:-/workspace}"
+}
+
 # What the dock opens on the desktop it runs on.
 open() {
 	local n="${DISPLAY#:}"
@@ -263,10 +419,8 @@ open() {
 		stop_part "$n" browser
 		browser "$n" "$profile" "$output"
 		;;
-	terminal)
-		exec lxterminal --working-directory=/workspace
-		;;
-	files) exec pcmanfm /workspace ;;
+	terminal) exec xfce4-terminal --working-directory=/workspace ;;
+	files) open_files "$n" ;;
 	*)
 		echo "usage: sugabots-desktop open browser|terminal|files" >&2
 		exit 2
@@ -277,16 +431,18 @@ open() {
 case "${1:-}" in
 start)
 	n="${2:-$(free_display)}"
+	# Agents start desktops from their thread's folder.
+	echo "$PWD" >"$state/$n.folder"
 	desktop "$n"
 	echo "DISPLAY=:$n"
 	;;
 stop) stop "${2:-}" ;;
-desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" ;;
-session) session "${2:-}" "${3:-}" "${4:-}" ;;
+desktop) desktop_only "${@:2}" ;;
+session) session "${@:2}" ;;
 viewer) viewer "${2:-}" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] [--folder dir] | session name profile output [--accent #RRGGBB] [--folder dir] | viewer name | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac
