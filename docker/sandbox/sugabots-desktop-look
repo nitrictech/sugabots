@@ -12,6 +12,7 @@
 #     so the desktop sees a new one as a new file
 #   .local/share/themes/Sugabots/xfwm4/
 #   .config/gtk-3.0/gtk.css
+#   .local/share/sugabots-desktop/chromium-theme/
 set -euo pipefail
 
 accent="${1:?accent colour, #RRGGBB}"
@@ -22,8 +23,8 @@ fi
 accent="${accent,,}"
 
 # The display's size, as sugabots-desktop starts Xvnc.
-width_px=1920
-height_px=1200
+width_px=1600
+height_px=900
 
 # The colour `percent` of the way from `from` to `to`, both #rrggbb.
 mix() {
@@ -193,6 +194,44 @@ gtk_colours() {
 	mv "$out/gtk.css.$$" "$out/gtk.css"
 }
 
+# Chromium's colours, as a theme sugabots-desktop loads into the browser: the
+# tab strip in the colour, like the window frames, over a toolbar of its
+# lightest tint. A theme sets each colour exactly, where Chromium's own
+# setting for a colour makes a far paler palette of it.
+rgb() {
+	local colour="$1"
+	echo "[$((16#${colour:1:2})), $((16#${colour:3:2})), $((16#${colour:5:2}))]"
+}
+
+chromium_theme() {
+	local out="$HOME/.local/share/sugabots-desktop/chromium-theme"
+	mkdir -p "$out"
+	cat >"$out/manifest.json.$$" <<-EOF
+		{
+			"manifest_version": 3,
+			"name": "Sugabots",
+			"version": "1",
+			"theme": {
+				"colors": {
+					"frame": $(rgb "$accent"),
+					"frame_inactive": $(rgb "$quiet_title"),
+					"tab_background_text": $(rgb "$ink"),
+					"tab_background_text_inactive": $(rgb "$quiet_ink"),
+					"toolbar": $(rgb "$(mix "$accent" "#ffffff" 88)"),
+					"tab_text": $(rgb "#1d1b16"),
+					"bookmark_text": $(rgb "#1d1b16"),
+					"toolbar_button_icon": $(rgb "$(mix "$accent" "#000000" 40)"),
+					"omnibox_background": $(rgb "#ffffff"),
+					"omnibox_text": $(rgb "#1d1b16"),
+					"ntp_background": $(rgb "#ffffff")
+				}
+			}
+		}
+	EOF
+	mv "$out/manifest.json.$$" "$out/manifest.json"
+}
+
 wallpaper
 window_frames
 gtk_colours
+chromium_theme

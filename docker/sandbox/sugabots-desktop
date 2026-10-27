@@ -90,7 +90,7 @@ desktop() {
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and agents drive the browser through
 	# Playwright, not the X server.
-	Xvnc "$DISPLAY" -geometry 1920x1200 -depth 24 -ac -s 0 -nolisten tcp \
+	Xvnc "$DISPLAY" -geometry 1600x900 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
 		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
 	echo $! >"$pids"
@@ -252,23 +252,14 @@ unlock_profile() {
 	rm -f "$dir/SingletonLock" "$dir/SingletonSocket" "$dir/SingletonCookie"
 }
 
-# Chromium draws its tabs and toolbar from a colour in its profile's
-# preferences, rather than from the desktop's GTK theme, and its own frame
-# around them. Set before it starts: it writes its preferences back over
-# any change while running.
-colour_browser() {
-	local profile="$1" accent="$2"
-	local preferences="$profile/chromium/Default/Preferences"
+# Chromium draws its own frame around its tabs, in the colours of the theme
+# sugabots-desktop-look writes, which it loads when it starts. Set before it
+# starts: it writes its preferences back over any change while running.
+frame_browser() {
+	local preferences="$1/chromium/Default/Preferences"
 	mkdir -p "$(dirname "$preferences")"
 	[ -s "$preferences" ] || echo '{}' >"$preferences"
-	# Chromium keeps the colour as a signed 32-bit ARGB integer, opaque.
-	local colour=$((16#${accent:1} - 16#1000000))
-	jq --argjson colour "$colour" '
-		.browser.theme.user_color = $colour
-		| .browser.theme.color_variant = 1
-		| .browser.custom_chrome_frame = true
-		| .extensions.theme.system_theme = 0
-	' "$preferences" >"$preferences.new"
+	jq '.browser.custom_chrome_frame = true' "$preferences" >"$preferences.new"
 	mv "$preferences.new" "$preferences"
 }
 
@@ -277,8 +268,8 @@ browser() {
 	local devtools=$((9230 + n))
 	mkdir -p "$profile" "$output"
 	unlock_profile "$profile"
-	colour_browser "$profile" "$(display_accent "$n")" >>"$log" 2>&1 ||
-		echo "The browser couldn't be given the desktop's colour." >>"$log"
+	frame_browser "$profile" >>"$log" 2>&1 ||
+		echo "The browser couldn't be set to draw its own frame." >>"$log"
 	# A browser that warns about every site is better than none.
 	trust_provider_authority >>"$log" 2>&1 ||
 		echo "The browser couldn't be made to trust the sandbox provider's certificate authority." >>"$log"
@@ -289,7 +280,7 @@ browser() {
 	# put its path in the windows' names, and the dock would no longer know
 	# them as the Browser's.
 	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
-		--class=sugabots-browser \
+		--class=sugabots-browser --load-extension="$HOME/.local/share/sugabots-desktop/chromium-theme" \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
 		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
 	echo $! >"$pids"
