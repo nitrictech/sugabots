@@ -14,5 +14,9 @@ declare module "@novnc/novnc" {
 		scaleViewport: boolean;
 		background: string;
 		disconnect(): void;
+		/** Puts text on the remote desktop's clipboard. */
+		clipboardPasteFrom(text: string): void;
+		/** Presses (`down`) or releases an X11 keysym on the remote desktop. */
+		sendKey(keysym: number, code: string, down?: boolean): void;
 	}
 }
