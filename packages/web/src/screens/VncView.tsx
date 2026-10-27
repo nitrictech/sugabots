@@ -137,11 +137,16 @@ export function VncView({
 	return <div ref={screen} className="absolute inset-0" />;
 }
 
-/** A display as noVNC draws it: its canvas, and the areas of it each update draws. */
+/** A display as noVNC draws it: its canvas, the areas of it each update draws, and its pointer. */
 export interface VncScreen {
 	canvas: HTMLCanvasElement;
 	/** Calls `listener` with each area of the canvas drawn, in pixels, until the returned function is called. */
 	onDraw: (listener: (area: DrawnArea) => void) => () => void;
+	/**
+	 * Calls `listener` with the display's pointer, as a CSS `cursor`, now and
+	 * as it changes, until the returned function is called.
+	 */
+	onCursor: (listener: (cursor: string) => void) => () => void;
 }
 
 export interface DrawnArea {
@@ -154,11 +159,16 @@ export interface DrawnArea {
 /**
  * What `viewer` draws into `canvas`. noVNC says nothing when it draws, so
  * this wraps its display's `flip`, which copies each update's damaged area
- * to the canvas. That is noVNC's private API, as of 1.7: check it when
- * upgrading noVNC.
+ * to the canvas; and it draws the display's pointer itself, at the point it
+ * sends, so this takes over its cursor's `change` and `clear`, and hides
+ * the pointer it draws on devices with touch. That is noVNC's private API,
+ * as of 1.7: check it when upgrading noVNC.
  */
 function screenOf(viewer: RFB, canvas: HTMLCanvasElement): VncScreen {
-	const display = (viewer as unknown as { _display: NoVncDisplay })._display;
+	const { _display: display, _cursor: pointer } = viewer as unknown as {
+		_display: NoVncDisplay;
+		_cursor: NoVncCursor;
+	};
 	const listeners = new Set<(area: DrawnArea) => void>();
 	const flip = display.flip.bind(display);
 	display.flip = (fromQueue) => {
@@ -170,13 +180,52 @@ function screenOf(viewer: RFB, canvas: HTMLCanvasElement): VncScreen {
 		const area = { x: left, y: top, width: right - left, height: bottom - top };
 		for (const listener of listeners) listener(area);
 	};
+
+	let cursor = "default";
+	const cursorListeners = new Set<(cursor: string) => void>();
+	const setCursor = (next: string) => {
+		cursor = next;
+		// noVNC's page-wide layer for catching a drag takes its pointer from here.
+		canvas.style.cursor = next;
+		for (const listener of cursorListeners) listener(cursor);
+	};
+	pointer._canvas.style.display = "none";
+	pointer.change = (rgba, hotX, hotY, width, height) => {
+		if (width === 0 || height === 0) return setCursor("none");
+		const image = document.createElement("canvas");
+		image.width = width;
+		image.height = height;
+		image
+			.getContext("2d")
+			?.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+		setCursor(`url(${image.toDataURL()}) ${hotX} ${hotY}, default`);
+	};
+	pointer.clear = () => setCursor("none");
+
 	return {
 		canvas,
 		onDraw: (listener) => {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		onCursor: (listener) => {
+			cursorListeners.add(listener);
+			listener(cursor);
+			return () => cursorListeners.delete(listener);
+		},
 	};
+}
+
+interface NoVncCursor {
+	_canvas: HTMLCanvasElement;
+	change: (
+		rgba: ArrayLike<number>,
+		hotX: number,
+		hotY: number,
+		width: number,
+		height: number,
+	) => void;
+	clear: () => void;
 }
 
 interface NoVncDisplay {

@@ -141,7 +141,8 @@ function eventAt(event: MouseEvent, clientX: number, clientY: number) {
  * Moved or resized, a window shows where it was until the display has drawn
  * it where it is, so it never shows what was behind it. Unless `viewOnly`,
  * the person's mouse goes to the same point in the window on the display,
- * and their keys with it.
+ * and their keys with it. The person's pointer takes the shape the
+ * display's has, such as a text cursor over text.
  */
 export function ScreenRegion({
 	screen,
@@ -227,6 +228,14 @@ export function ScreenRegion({
 		}, PIXELS_WAIT_MS);
 		return () => clearTimeout(giveUp);
 	}, [x, y, width, height]);
+
+	useEffect(() => {
+		const element = room.current;
+		if (!element || !screen) return;
+		return screen.onCursor((cursor) => {
+			element.style.cursor = cursor;
+		});
+	}, [screen]);
 
 	useEffect(() => {
 		const element = room.current;
