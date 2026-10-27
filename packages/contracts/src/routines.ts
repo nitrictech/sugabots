@@ -393,11 +393,7 @@ export const routineExecutionTriggerSchema = Schema.Union([
 		text: Schema.NullOr(Schema.String),
 		/** The branch it is on, if any. */
 		branch: Schema.NullOr(Schema.String),
-		/**
-		 * The comment it is, if any, for replying or reacting to it: one in the
-		 * conversation, or one on a pull request's code. Runs recorded before it
-		 * was kept lack it.
-		 */
+		/** The comment associated with this execution, if any. */
 		comment: Schema.optional(
 			Schema.NullOr(
 				Schema.Struct({
