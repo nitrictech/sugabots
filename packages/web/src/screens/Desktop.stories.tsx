@@ -113,10 +113,6 @@ export const Watching = meta.story({
 		await waitFor(() =>
 			expect(sentToWindows).toHaveBeenCalledWith({ type: "theme", scheme: "dark" }),
 		);
-		// The display is sized to the desktop even while only watching.
-		await waitFor(() =>
-			expect(sentToWindows).toHaveBeenCalledWith(expect.objectContaining({ type: "resize" })),
-		);
 	},
 });
 

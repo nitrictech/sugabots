@@ -38,7 +38,7 @@ export interface DisplayWindow extends ScreenBounds {
 	kind: "browser" | "app" | "popup";
 	title: string;
 	minimized: boolean;
-	/** The window a dialog belongs to. */
+	/** The window a dialog or popup belongs to. */
 	parent?: string;
 }
 
@@ -66,9 +66,10 @@ export type Driver = "agent" | "person";
 /** The agent whose desktop it is, as much of it as the desktop shows. */
 type DesktopAgent = Pick<Agent, "id" | "name" | "color" | "face" | "shape">;
 
-/** How far each window opens below and to the right of the one before, in pixels. */
+/** How far each window opens below and to the right of the one before, in pixels, from how far into the desktop the first opens. */
 const CASCADE_STEP = 28;
-/** How long after a person last moved a window its frame keeps to where they put it, over where the display says it is. */
+const CASCADE_START = 0.04;
+/** How long after a person last resized a window its frame keeps to the size they gave it, over the size the display says it is. */
 const SETTLE_MS = 600;
 /** The agent's face in the wallpaper, in pixels, and how faintly it shows. */
 const WALLPAPER_FACE_SIZE = 620;
@@ -77,11 +78,10 @@ const WALLPAPER_FACE_OPACITY = 0.16;
 /**
  * The agent's desktop, drawn here rather than in the sandbox: a wallpaper
  * with the agent's face in it, so it's plain whose desktop it is, a dock,
- * and a window for each of its apps' windows, each showing its part of the
- * desktop's display, over VNC, where the window is on it; its terminal and
- * file browser are drawn here. The display is the size of the desktop, and
- * a window moved here moves there, so apps drag and drop between each other
- * as on any desktop. The dock's dots take the colour of whoever is driving: the
+ * and a window for each of its apps' windows, each showing that window
+ * from the desktop's display, over VNC; its terminal and file browser are
+ * drawn here. Every app is on the one display, so apps drag and drop
+ * between each other as on any desktop. The dock's dots take the colour of whoever is driving: the
  * agent's own, or neutral for a person. Unless
  * `viewOnly`, the person's mouse and keys go to the windows' apps, and they
  * can close the windows of apps the agent started. It lets go of every
@@ -168,11 +168,11 @@ function DesktopSurface({
 	const [localOpen, setLocalOpen] = useState<ReadonlySet<LocalWindowKind>>(new Set());
 	const [placements, setPlacements] = useState<ReadonlyMap<string, Placement>>(new Map());
 	/**
-	 * When a person last put each window somewhere, or forever while they're
-	 * still moving it. Where the display says it is lags behind, so it's taken
+	 * When a person last resized each window, or forever while they're still
+	 * resizing it. The size the display says it is lags behind, so it's taken
 	 * only once the window has settled.
 	 */
-	const movedAt = useRef(new Map<string, number>());
+	const resizedAt = useRef(new Map<string, number>());
 	/** The placements, with what a person has done since they were last drawn. */
 	const latestPlacements = useRef(placements);
 	latestPlacements.current = placements;
@@ -191,21 +191,10 @@ function DesktopSurface({
 		if (socket.current?.readyState !== WebSocket.OPEN) return;
 		socket.current.send(JSON.stringify(message));
 	};
-	/** Tells the display how big the desktop is, so a point on one is the same point on the other. */
-	const sendSize = () => {
-		const element = surface.current;
-		if (!element) return;
-		send({ type: "resize", width: element.clientWidth, height: element.clientHeight });
-	};
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: sendSize reads the surface when called.
 	useEffect(() => {
 		const opened = new WebSocket(desktopServerUrl(threadId, agentId, "windows"));
 		socket.current = opened;
-		opened.onopen = () => {
-			opened.send(themeMessage(schemeNow.current));
-			sendSize();
-		};
+		opened.onopen = () => opened.send(themeMessage(schemeNow.current));
 		opened.onmessage = (event) =>
 			setDisplayWindows((JSON.parse(String(event.data)) as WindowsMessage).windows);
 		opened.onclose = () => {
@@ -217,15 +206,6 @@ function DesktopSurface({
 		};
 	}, [threadId, agentId]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: sendSize reads the surface when called.
-	useEffect(() => {
-		const element = surface.current;
-		if (!element) return;
-		const sized = new ResizeObserver(sendSize);
-		sized.observe(element);
-		return () => sized.disconnect();
-	}, []);
-
 	const framed = (displayWindows ?? []).filter((window) => window.kind !== "popup");
 	const popups = (displayWindows ?? []).filter((window) => window.kind === "popup");
 	const windows: ShownWindow[] = [
@@ -234,9 +214,9 @@ function DesktopSurface({
 	];
 	const onDisplay = (id: string) => framed.find((window) => window.id === id);
 
-	// A window's frame goes where the display has the window, unless a person
-	// is moving it; a local window opening for the first time is placed by kind.
-	// Either opens in front of the rest.
+	// A window opening for the first time is placed by kind, a dialog over the
+	// window it belongs to, in front of the rest. A window's frame is the size
+	// the display has it, unless a person is resizing it.
 	useEffect(() => {
 		const element = surface.current;
 		if (!element) return;
@@ -249,25 +229,26 @@ function DesktopSurface({
 			for (const window of displayWindows ?? []) {
 				if (window.kind === "popup") continue;
 				const placed = current.get(window.id);
-				const settled = Date.now() - (movedAt.current.get(window.id) ?? 0) > SETTLE_MS;
-				const frame = frameAround(window);
+				const settled = Date.now() - (resizedAt.current.get(window.id) ?? 0) > SETTLE_MS;
+				const size = frameSize(window);
 				if (!placed) {
+					const placements = next ?? current;
+					const parent = window.parent ? placements.get(window.parent) : undefined;
 					change(window.id, {
-						...frame,
-						order: frontOrder(next ?? current) + 1,
+						...size,
+						...(parent ? centredOver(parent, size) : cascaded(placements.size, element)),
+						order: frontOrder(placements) + 1,
 						minimized: window.minimized,
 						maximized: false,
 					});
 				} else if (
 					settled &&
 					!placed.maximized &&
-					(placed.x !== frame.x ||
-						placed.y !== frame.y ||
-						placed.width !== frame.width ||
-						placed.height !== frame.height ||
+					(placed.width !== size.width ||
+						placed.height !== size.height ||
 						placed.minimized !== window.minimized)
 				) {
-					change(window.id, { ...placed, ...frame, minimized: window.minimized });
+					change(window.id, { ...placed, ...size, minimized: window.minimized });
 				}
 			}
 			for (const kind of localOpen) {
@@ -279,18 +260,23 @@ function DesktopSurface({
 		});
 	}, [displayWindows, localOpen]);
 
-	/** Moves a window on the display to where its frame is. */
-	const sendPlacement = (id: string) => {
+	/** Sizes a window on the display to fit its frame, if it doesn't. */
+	const sendSize = (id: string) => {
 		const placement = latestPlacements.current.get(id);
+		const window = onDisplay(id);
 		const element = surface.current;
-		if (!placement || !element || viewOnly || !onDisplay(id)) return;
-		movedAt.current.set(id, Date.now());
-		send({ type: "place", id, ...contentOf(placement, element) });
+		if (!placement || !window || !element || viewOnly) return;
+		resizedAt.current.set(id, Date.now());
+		const { width, height } = contentSize(placement, element);
+		if (width === window.width && height === window.height) return;
+		send({ type: "size", id, width, height });
 	};
 	/**
-	 * Moves a window's frame. A window on the display follows once the person
-	 * lets go, or straight away when it fills the desktop or stops filling it:
-	 * moving it there at every step makes the app draw it again at every step.
+	 * Moves or resizes a window's frame. Its window on the display is shown
+	 * wherever its frame is, so moving it is the frame's alone. Resized, the
+	 * window takes the frame's size once the person lets go, or straight away
+	 * when it fills the desktop or stops filling it: resizing it at every step
+	 * makes the app draw it again at every step.
 	 */
 	const place = (id: string, change: Partial<Placement>) => {
 		const placement = latestPlacements.current.get(id);
@@ -298,15 +284,19 @@ function DesktopSurface({
 		const next = { ...placement, ...change };
 		latestPlacements.current = new Map(latestPlacements.current).set(id, next);
 		setPlacements((current) => new Map(current).set(id, { ...current.get(id), ...next }));
-		if (change.maximized !== undefined) return sendPlacement(id);
-		if (change.minimized === undefined) movedAt.current.set(id, Number.POSITIVE_INFINITY);
+		if (change.maximized !== undefined) return sendSize(id);
+		if (change.width !== undefined || change.height !== undefined) {
+			resizedAt.current.set(id, Number.POSITIVE_INFINITY);
+		}
 	};
 	const focus = (id: string) => {
 		const placement = placements.get(id);
 		if (!placement) return;
-		if (!viewOnly && onDisplay(id)) send({ type: "focus", id });
 		const front = frontOrder(placements);
 		if (placement.order === front && !placement.minimized) return;
+		// Clicking a window on the display focuses it there too; this is for the
+		// dock, and for the keys. Sent with each click, it costs apps their double-clicks.
+		if (!viewOnly && onDisplay(id)) send({ type: "focus", id });
 		setPlacements((current) =>
 			new Map(current).set(id, { ...placement, order: front + 1, minimized: false }),
 		);
@@ -371,7 +361,7 @@ function DesktopSurface({
 					surface,
 					onFocus: () => focus(window.id),
 					onPlace: (change) => place(window.id, change),
-					onSettle: () => sendPlacement(window.id),
+					onSettle: () => sendSize(window.id),
 					onMinimize: () => minimize(window.id),
 				};
 				if (window.kind === "files") {
@@ -420,21 +410,28 @@ function DesktopSurface({
 					</DesktopWindow>
 				);
 			})}
-			{popups.map((popup) => (
-				<div
-					key={popup.id}
-					className="absolute"
-					style={{
-						left: popup.x,
-						top: popup.y,
-						width: popup.width,
-						height: popup.height,
-						zIndex: popupOrder,
-					}}
-				>
-					<ScreenRegion screen={screen} bounds={popup} viewOnly={viewOnly} />
-				</div>
-			))}
+			{popups.map((popup) => {
+				// A popup opens where it does beside its window on the display, so it's shown there beside its frame.
+				const parent = popup.parent ? onDisplay(popup.parent) : undefined;
+				const placement = parent ? placements.get(parent.id) : undefined;
+				if (!parent || !placement || placement.minimized) return null;
+				const origin = contentOrigin(placement);
+				return (
+					<div
+						key={popup.id}
+						className="absolute"
+						style={{
+							left: origin.x + popup.x - parent.x,
+							top: origin.y + popup.y - parent.y,
+							width: popup.width,
+							height: popup.height,
+							zIndex: popupOrder,
+						}}
+					>
+						<ScreenRegion screen={screen} bounds={popup} viewOnly={viewOnly} />
+					</div>
+				);
+			})}
 			{(serverLost || displayWindows === undefined || screenStanding !== "connected") && (
 				<StandingOverlay
 					standing={serverLost ? "ended" : screenStanding === "ended" ? "ended" : "connecting"}
@@ -488,25 +485,47 @@ function themeMessage(scheme: "light" | "dark") {
 }
 
 /** Where the frame around a window on the display goes, so the window shows through it where it is. */
-function frameAround(window: ScreenBounds) {
+/** How big the frame around a window on the display is, to show the window whole. */
+function frameSize(window: ScreenBounds) {
 	return {
-		x: window.x - WINDOW_BORDER,
-		y: window.y - TITLE_STRIP_HEIGHT - WINDOW_BORDER,
 		width: window.width + 2 * WINDOW_BORDER,
 		height: window.height + TITLE_STRIP_HEIGHT + 2 * WINDOW_BORDER,
 	};
 }
 
-/** Where the window inside a frame placed at `placement` goes on a display the size of `surface`. */
-function contentOf(placement: Placement, surface: HTMLElement): ScreenBounds {
+/** How big the window inside a frame placed at `placement` is, on a desktop the size of `surface`. */
+function contentSize(placement: Placement, surface: HTMLElement) {
 	const frame = placement.maximized
-		? { x: 0, y: 0, width: surface.clientWidth, height: surface.clientHeight }
+		? { width: surface.clientWidth, height: surface.clientHeight }
 		: placement;
+	return {
+		width: frame.width - 2 * WINDOW_BORDER,
+		height: frame.height - TITLE_STRIP_HEIGHT - 2 * WINDOW_BORDER,
+	};
+}
+
+/** Where the window inside a frame placed at `placement` starts on the desktop. */
+function contentOrigin(placement: Placement) {
+	const frame = placement.maximized ? { x: 0, y: 0 } : placement;
 	return {
 		x: frame.x + WINDOW_BORDER,
 		y: frame.y + TITLE_STRIP_HEIGHT + WINDOW_BORDER,
-		width: frame.width - 2 * WINDOW_BORDER,
-		height: frame.height - TITLE_STRIP_HEIGHT - 2 * WINDOW_BORDER,
+	};
+}
+
+/** Where a frame of `size` goes to sit in the middle of `parent`'s. */
+function centredOver(parent: Placement, size: { width: number; height: number }) {
+	return {
+		x: Math.round(parent.x + (parent.width - size.width) / 2),
+		y: Math.round(parent.y + (parent.height - size.height) / 2),
+	};
+}
+
+/** Where the `index`th window to open goes on a desktop the size of `surface`, each below and right of the one before. */
+function cascaded(index: number, surface: HTMLElement) {
+	return {
+		x: Math.round(surface.clientWidth * CASCADE_START) + index * CASCADE_STEP,
+		y: Math.round(surface.clientHeight * CASCADE_START) + index * CASCADE_STEP,
 	};
 }
 

@@ -18,14 +18,15 @@
 # watch=PORT browser=PORT server=PORT started=yes|no password=P
 # watch-password=P`, where `started` says whether the browser had to start.
 #
-# A desktop's display is the size of the desktop the web app draws, which
-# viewers resize it to, and its windows have no frame or window buttons of
-# their own: the web app's frame around each has the title bar. The browser
+# A desktop's display holds its windows laid out apart, never overlapping,
+# and is as big as that takes: the web app shows each where a person puts
+# its frame, and its windows have no frame or window buttons of their own:
+# the web app's frame around each has the title bar. The browser
 # keeps its own tabs and address bar, as any app keeps its own toolbars. Apps
 # take on the web app's colours and font, light or dark as the viewer has
 # it, through the Sugabots GTK themes. The desktop server runs the desktop's
-# terminal, lists its files, says which windows the display has and where,
-# moves them as the web app's frames move, and sets the desktop's look.
+# terminal, lists its files, lays the display's windows out and says where
+# they are, and sets the desktop's look.
 # `start`, run with SUGABOTS_DESKTOP_SESSION set to a desktop's `name`, as
 # the agent's commands are, gives the desktop's own display, starting it if
 # need be; `stop` leaves it running. `display` prints `viewer=PORT
@@ -70,8 +71,7 @@ running() {
 	while read -r pid; do kill -0 "$pid" 2>/dev/null || return 1; done <"$pids"
 }
 
-# Display N, served to VNC viewers, with a window manager that keeps
-# windows on the screen as viewers resize it.
+# Display N, served to VNC viewers, with a window manager.
 display() {
 	local n="$1" log="$state/$1.log" pids="$state/$1.display.pids"
 	export DISPLAY=":$n"
@@ -305,8 +305,8 @@ display_viewer() {
 	echo "viewer=$((5900 + n)) $(passwords "$n")"
 }
 
-# Sizes the display of `name`'s desktop to the desktop the web app draws,
-# whoever is viewing, where VNC lets only a viewer in control resize it. Xvnc takes any
+# Sizes the display of `name`'s desktop to hold its windows, whoever is
+# viewing, where VNC lets only a viewer in control resize it. Xvnc takes any
 # size as a mode of its own; modes made for earlier sizes are removed.
 resize() {
 	local n width="${3:?width}" height="${4:?height}" mode old
@@ -326,7 +326,7 @@ resize() {
 		xrandr --rmmode "$old" 2>/dev/null || true
 	done
 }
-MIN_WIDTH=320 MIN_HEIGHT=200 MAX_WIDTH=3840 MAX_HEIGHT=2160
+MIN_WIDTH=320 MIN_HEIGHT=200 MAX_WIDTH=8192 MAX_HEIGHT=8192
 
 # One command at a time starts or stops what runs: a desktop opened by
 # several viewers at once, as the web app opens it, would otherwise be

@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type DrawnArea, type Standing, type VncScreen, VncView } from "./VncView.tsx";
 
-/** Where a window is on the desktop's display, and how big, in pixels: the same as on the desktop drawn here. */
+/** Where a window is on the desktop's display, and how big, in pixels. */
 export interface ScreenBounds {
 	x: number;
 	y: number;
@@ -10,11 +10,14 @@ export interface ScreenBounds {
 }
 
 /**
- * The desktop's display over VNC, drawn nowhere itself: laid over the
- * desktop at its own size, unscaled and unseen, so a point on the desktop is
- * the same point on the display. `ScreenRegion`s show its windows, each
- * where its frame is, and send it what the person does in them. Gives
- * `onScreen` what it draws once connected.
+ * The desktop's display over VNC, drawn nowhere itself: unscaled and unseen
+ * under the desktop. `ScreenRegion`s show its windows, each wherever its
+ * frame is, and send it what the person does in them. Whatever reaches the
+ * display goes to the point under the pointer of the window shown there, or
+ * to an empty corner of the display over anything else, such as a title
+ * strip, so a drag goes from window to window as the person sees them,
+ * wherever they are on the display. Gives `onScreen` what it draws once
+ * connected.
  */
 export function SharedScreen({
 	url,
@@ -29,6 +32,12 @@ export function SharedScreen({
 	onScreen: (screen: VncScreen | undefined) => void;
 	onClipboard: (text: string) => void;
 }) {
+	const [screen, setScreen] = useState<VncScreen | undefined>(undefined);
+	useEffect(() => {
+		onScreen(screen);
+		if (!screen) return;
+		return sendToWindowsUnderPointer(screen.canvas);
+	}, [screen, onScreen]);
 	return (
 		// noVNC centres a canvas smaller than its room; this keeps it at the desktop's corner.
 		<div
@@ -40,11 +49,90 @@ export function SharedScreen({
 				viewOnly={viewOnly}
 				scaled={false}
 				onStanding={onStanding}
-				onScreen={onScreen}
+				onScreen={setScreen}
 				onClipboard={onClipboard}
 			/>
 		</div>
 	);
+}
+
+const POINTER_EVENTS = ["mousedown", "mouseup", "mousemove", "wheel", "contextmenu"] as const;
+/** Marks a window's region with where its window is on the display. */
+const SCREEN_X = "data-screen-x";
+const SCREEN_Y = "data-screen-y";
+
+/**
+ * Makes noVNC, drawing into `canvas`, send the display each pointer event
+ * at the point it lands on in the window under the pointer. noVNC reads the
+ * point from the event, against its canvas, including from the page-wide
+ * layer it catches a drag on, so each event is stopped before it does and
+ * sent again with the point on the display. Returns how to stop.
+ */
+function sendToWindowsUnderPointer(canvas: HTMLCanvasElement) {
+	const translated = new WeakSet<Event>();
+	const translate = (event: MouseEvent) => {
+		if (translated.has(event)) return;
+		event.stopImmediatePropagation();
+		event.preventDefault();
+		// An empty corner, past every window and its room on the display.
+		const point = displayPointAt(event.clientX, event.clientY) ?? {
+			x: canvas.width - 1,
+			y: canvas.height - 1,
+		};
+		const origin = canvas.getBoundingClientRect();
+		const copy = eventAt(event, origin.left + point.x, origin.top + point.y);
+		translated.add(copy);
+		canvas.dispatchEvent(copy);
+	};
+	for (const type of POINTER_EVENTS) canvas.addEventListener(type, translate, { capture: true });
+	return () => {
+		for (const type of POINTER_EVENTS) {
+			canvas.removeEventListener(type, translate, { capture: true });
+		}
+	};
+}
+
+/** Where on the display the point on the page at `clientX`, `clientY` is, if a window's region is on top there. */
+function displayPointAt(clientX: number, clientY: number) {
+	for (const element of document.elementsFromPoint(clientX, clientY)) {
+		// noVNC's page-wide layer for catching a drag.
+		if (element.id === "noVNC_mouse_capture_elem") continue;
+		const region = element.closest<HTMLElement>(`[${SCREEN_X}]`);
+		if (!region) return undefined;
+		const shown = region.getBoundingClientRect();
+		return {
+			x: Number(region.getAttribute(SCREEN_X)) + Math.round(clientX - shown.left),
+			y: Number(region.getAttribute(SCREEN_Y)) + Math.round(clientY - shown.top),
+		};
+	}
+	return undefined;
+}
+
+/** `event` again, at `clientX`, `clientY` on the page. */
+function eventAt(event: MouseEvent, clientX: number, clientY: number) {
+	const init: MouseEventInit = {
+		bubbles: event.bubbles,
+		cancelable: true,
+		clientX,
+		clientY,
+		screenX: event.screenX,
+		screenY: event.screenY,
+		button: event.button,
+		buttons: event.buttons,
+		detail: event.detail,
+		altKey: event.altKey,
+		ctrlKey: event.ctrlKey,
+		metaKey: event.metaKey,
+		shiftKey: event.shiftKey,
+	};
+	if (!(event instanceof WheelEvent)) return new MouseEvent(event.type, init);
+	return new WheelEvent(event.type, {
+		...init,
+		deltaX: event.deltaX,
+		deltaY: event.deltaY,
+		deltaZ: event.deltaZ,
+		deltaMode: event.deltaMode,
+	});
 }
 
 /**
@@ -52,9 +140,8 @@ export function SharedScreen({
  * the size it is there, unstretched, and drawn again as that part changes.
  * Moved or resized, a window shows where it was until the display has drawn
  * it where it is, so it never shows what was behind it. Unless `viewOnly`,
- * the person's mouse goes to the display at the same point on the desktop,
- * and their keys with it, so a drag that starts here and ends over another
- * window ends there on the display too.
+ * the person's mouse goes to the same point in the window on the display,
+ * and their keys with it.
  */
 export function ScreenRegion({
 	screen,
@@ -144,25 +231,25 @@ export function ScreenRegion({
 	useEffect(() => {
 		const element = room.current;
 		if (!element || !screen || viewOnly) return;
-		// noVNC reads where the pointer is from the event, against its own canvas,
-		// which lies over the desktop at the display's size.
+		// To noVNC, which sends it on to the window under the pointer.
 		const forward = (event: MouseEvent) => {
 			event.preventDefault();
-			const copy =
-				event instanceof WheelEvent
-					? new WheelEvent(event.type, event)
-					: new MouseEvent(event.type, event);
-			screen.canvas.dispatchEvent(copy);
+			screen.canvas.dispatchEvent(eventAt(event, event.clientX, event.clientY));
 		};
-		const types = ["mousedown", "mouseup", "mousemove", "wheel", "contextmenu"] as const;
-		for (const type of types) element.addEventListener(type, forward, { passive: false });
+		for (const type of POINTER_EVENTS) {
+			element.addEventListener(type, forward, { passive: false });
+		}
 		return () => {
-			for (const type of types) element.removeEventListener(type, forward);
+			for (const type of POINTER_EVENTS) element.removeEventListener(type, forward);
 		};
 	}, [screen, viewOnly]);
 
 	return (
-		<div ref={room} className="absolute inset-0 overflow-hidden">
+		<div
+			ref={room}
+			className="absolute inset-0 overflow-hidden"
+			{...{ [SCREEN_X]: bounds.x, [SCREEN_Y]: bounds.y }}
+		>
 			<canvas ref={region} className="absolute top-0 left-0" />
 		</div>
 	);

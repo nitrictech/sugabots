@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Openbox for a desktop's display, whose windows the web app draws a frame
-     around, one each, where they are on the display: no window has a frame
-     of its own. Windows open below the top 37 pixels, the height of the web
-     app's title strip and its border, so their frames stay on the desktop. -->
+     around, one each: no window has a frame or border of its own. The
+     desktop server places them. -->
 <openbox_config xmlns="http://openbox.org/3.4/rc">
-  <margins><top>37</top><bottom>0</bottom><left>0</left><right>0</right></margins>
   <theme><keepBorder>no</keepBorder></theme>
   <desktops><number>1</number></desktops>
-  <placement><policy>Smart</policy></placement>
   <applications>
     <application class="*">
       <decor>no</decor>
