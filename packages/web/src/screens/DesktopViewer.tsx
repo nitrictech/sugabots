@@ -42,8 +42,8 @@ export function DesktopStage({
 			onClose={onClose}
 		>
 			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
-				{/* As large as the room allows, keeping the desktop's 16:10 shape, up to its own 1280 pixels across. */}
-				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*1.6))]">
+				{/* As large as the room allows, keeping the desktop's 16:10 shape, up to its own 1920 pixels across. */}
+				<div className="w-[min(1920px,100%,calc((100dvh-13rem)*1.6))]">
 					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
 				</div>
 				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">

@@ -22,8 +22,8 @@ fi
 accent="${accent,,}"
 
 # The display's size, as sugabots-desktop starts Xvnc.
-width_px=1280
-height_px=800
+width_px=1920
+height_px=1200
 
 # The colour `percent` of the way from `from` to `to`, both #rrggbb.
 mix() {

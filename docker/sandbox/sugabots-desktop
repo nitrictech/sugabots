@@ -90,7 +90,7 @@ desktop() {
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and agents drive the browser through
 	# Playwright, not the X server.
-	Xvnc "$DISPLAY" -geometry 1280x800 -depth 24 -ac -s 0 -nolisten tcp \
+	Xvnc "$DISPLAY" -geometry 1920x1200 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
 		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
 	echo $! >"$pids"
