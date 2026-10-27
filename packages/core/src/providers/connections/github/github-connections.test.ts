@@ -3,6 +3,7 @@ import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
+import type { Connected } from "./connected.ts";
 import {
 	INSTALLATION_ID,
 	installedConnection,
@@ -278,7 +279,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 		const connected = await runOnPostgres(connections.forPod(pod()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
-		type Change = Parameters<GitHubConnections.Connected["updateIssue"]>[0];
+		type Change = Parameters<Connected["updateIssue"]>[0];
 		const unchanged = {
 			repository: "acme/web",
 			title: undefined,

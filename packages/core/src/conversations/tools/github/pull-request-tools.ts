@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
-import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
+import { BOT_BRANCH_PREFIX } from "../../../providers/connections/github/connected.ts";
 import {
 	botBranchSchema,
 	commentBodySchema,
@@ -53,7 +53,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 				),
 		}),
 		update_pull_request: tool({
-			description: `Change a pull request a bot opened, from a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}: its title, description, base branch, whether it's a draft, or whether it's open. Leave out what stays the same. To change its code, push to its branch with push_branch.`,
+			description: `Change a pull request a bot opened, from a branch under ${BOT_BRANCH_PREFIX}: its title, description, base branch, whether it's a draft, or whether it's open. Leave out what stays the same. To change its code, push to its branch with push_branch.`,
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,
@@ -91,7 +91,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 						Effect.catchTag("NotBotPullRequest", (refused) =>
 							Effect.succeed(
 								failed(
-									`#${number} is from ${refused.branch}, not a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, so bots can't change it. Comment on it with comment_on_pull_request instead.`,
+									`#${number} is from ${refused.branch}, not a branch under ${BOT_BRANCH_PREFIX}, so bots can't change it. Comment on it with comment_on_pull_request instead.`,
 								),
 							),
 						),

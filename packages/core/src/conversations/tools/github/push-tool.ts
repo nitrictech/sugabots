@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
-import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
+import { BOT_BRANCH_PREFIX } from "../../../providers/connections/github/connected.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connections/github/push.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import { inSandbox, type OpenSandbox, type Place } from "../sandbox/tools.ts";
@@ -28,7 +28,7 @@ export function pushTool(
 ) {
 	return {
 		push_branch: tool({
-			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${GitHubConnections.BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
+			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				branch: botBranchSchema,

@@ -2,7 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { type Database, query, type RunEffect } from "../../../database/database.ts";
 import { agent, toolCall, user } from "../../../database/schema.ts";
-import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
+import {
+	BOT_BRANCH_PREFIX,
+	type Connected,
+} from "../../../providers/connections/github/connected.ts";
 
 /** What every tool of a pod's GitHub connection works with in a turn. */
 export type ToolContext = ReturnType<typeof toolContext>;
@@ -13,7 +16,7 @@ export function toolContext({
 	agentId,
 	run,
 }: {
-	connected: GitHubConnections.Connected;
+	connected: Connected;
 	turnId: string;
 	agentId: string;
 	run: RunEffect<Database>;
@@ -87,10 +90,10 @@ export const commitSchema = Schema.String.check(
 export const botBranchSchema = Schema.String.check(
 	Schema.isMaxLength(200),
 	Schema.isPattern(/^sugabots\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/, {
-		message: `Name a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
+		message: `Name a branch under ${BOT_BRANCH_PREFIX}, such as ${BOT_BRANCH_PREFIX}fix-login`,
 	}),
 ).annotate({
-	description: `The branch, which must start with ${GitHubConnections.BOT_BRANCH_PREFIX}, such as ${GitHubConnections.BOT_BRANCH_PREFIX}fix-login`,
+	description: `The branch, which must start with ${BOT_BRANCH_PREFIX}, such as ${BOT_BRANCH_PREFIX}fix-login`,
 });
 
 export const positiveIntegerSchema = Schema.Int.check(Schema.isGreaterThan(0));

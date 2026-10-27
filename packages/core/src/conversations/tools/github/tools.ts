@@ -1,7 +1,10 @@
 import { connectionToolKey } from "@sugabots/contracts";
 import { asSchema, type Tool } from "ai";
 import type { Database, RunEffect } from "../../../database/database.ts";
-import { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
+import {
+	BOT_BRANCH_PREFIX,
+	type Connected,
+} from "../../../providers/connections/github/connected.ts";
 import { GITHUB_CONNECTION_TOOLS } from "../../../providers/connections/github/github-tools.ts";
 import { toolAccessOf } from "../../../providers/connections/tool-access.ts";
 import type { OfferedTool } from "../connections.ts";
@@ -24,7 +27,7 @@ export function gitHubTools({
 	workspace,
 	run,
 }: {
-	connected: GitHubConnections.Connected;
+	connected: Connected;
 	turnId: string;
 	agentId: string;
 	/** Undefined when the turn has no sandbox, so pushes are refused. */
@@ -62,12 +65,12 @@ export function gitHubTools({
 }
 
 /** What the model is told of the pod's GitHub connection with the turn. */
-export function gitHubNote(connected: GitHubConnections.Connected, signedIn: boolean): string {
+export function gitHubNote(connected: Connected, signedIn: boolean): string {
 	const listed = connected.repositories
 		.map((repository) => `${repository} (https://github.com/${repository}.git)`)
 		.join(", ");
 	const reading = signedIn
 		? "In the sandbox, git clone and fetch of them are signed in to read, outside the sandbox, without a token. There is no gh; read issues, pull requests and checks with the connection's tools."
 		: "The sandbox's provider can't sign its requests in, so only public ones can be cloned.";
-	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${GitHubConnections.BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request and reply_to_code_comment. Review others' with review_pull_request. Work on issues with comment_on_issue, open_issue and update_issue, and acknowledge what you were asked with react. When a check fails, read why with list_check_runs and get_job_log.`;
+	return `The pod's GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing in the sandbox can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${BOT_BRANCH_PREFIX}, then open_pull_request. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request and reply_to_code_comment. Review others' with review_pull_request. Work on issues with comment_on_issue, open_issue and update_issue, and acknowledge what you were asked with react. When a check fails, read why with list_check_runs and get_job_log.`;
 }

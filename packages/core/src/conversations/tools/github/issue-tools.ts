@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
+import type { NotBotComment } from "../../../providers/connections/github/connected.ts";
 import * as GitHub from "../../../providers/connections/github/github.ts";
-import type { GitHubConnections } from "../../../providers/connections/github/github-connections.ts";
 import {
 	commentBodySchema,
 	commentIdSchema,
@@ -216,7 +216,7 @@ function reactionSubject(
 		: { kind: on, commentId };
 }
 
-const notBotComment = (refused: GitHubConnections.NotBotComment) =>
+const notBotComment = (refused: NotBotComment) =>
 	Effect.succeed(
 		failed(`That comment is ${refused.author}'s, not a bot's, so bots can't change it.`),
 	);
