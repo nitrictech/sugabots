@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
-import { API_URL, call, decoded, GitHubRequestFailed } from "./github.ts";
+import { call, decoded, GitHubRequestFailed, getPage, redirectOf } from "./github.ts";
 
 /**
  * What bots read of a repository's issues, pull requests and checks, as
@@ -12,7 +12,7 @@ import { API_URL, call, decoded, GitHubRequestFailed } from "./github.ts";
 const LIST_SIZE = 30;
 /** GitHub's largest page. */
 const PAGE_SIZE = 100;
-/** At most this many pages of a list read whole, such as an issue's comments, are read. */
+/** At most this many pages of an issue's or pull request's comments, or of a repository's labels, are read. */
 const MAX_PAGES = 5;
 /** The most of a job's log a bot is given: its end, where a failure is. */
 const MAX_LOG_CHARACTERS = 30_000;
@@ -88,23 +88,36 @@ export const listIssues = (
 		),
 	);
 
-/** Every page of a list, up to {@link MAX_PAGES}. */
-const allPages = <S extends Schema.Decoder<unknown>>(
+/**
+ * A list GitHub gives oldest first, such as an issue's comments: its first
+ * page and its newest pages, up to {@link MAX_PAGES} in all, and whether
+ * pages between them were left out.
+ */
+const firstAndNewestPages = <S extends Schema.Decoder<unknown>>(
 	http: EgressHttpClient,
 	token: string,
 	path: string,
 	schema: S,
 ) =>
 	Effect.gen(function* () {
-		const read: S["Type"][] = [];
-		for (let page = 1; page <= MAX_PAGES; page++) {
-			const found = yield* call(http, "GET", `${path}?per_page=${PAGE_SIZE}&page=${page}`, {
-				bearer: token,
-			}).pipe(Effect.flatMap(decoded(Schema.Array(schema))));
-			read.push(...found);
-			if (found.length < PAGE_SIZE) break;
-		}
-		return read;
+		const list = `${path}?per_page=${PAGE_SIZE}`;
+		const page = (number: number) =>
+			getPage(http, token, list, number).pipe(
+				Effect.flatMap(({ body, lastPage }) =>
+					Effect.map(decoded(Schema.Array(schema))(body), (items) => ({ items, lastPage })),
+				),
+			);
+		const first = yield* page(1);
+		const fromPage = Math.max(2, first.lastPage - MAX_PAGES + 2);
+		const newest = yield* Effect.forEach(
+			Array.from({ length: Math.max(0, first.lastPage - fromPage + 1) }, (_, at) => fromPage + at),
+			page,
+			{ concurrency: "unbounded" },
+		);
+		return {
+			items: [...first.items, ...newest.flatMap((read) => read.items)],
+			olderLeftOut: fromPage > 2,
+		};
 	});
 
 export const getIssue = (
@@ -113,35 +126,52 @@ export const getIssue = (
 	{ repository, number }: { repository: string; number: number },
 ) =>
 	Effect.gen(function* () {
-		const [issue, comments] = yield* Effect.all([
-			call(http, "GET", `/repos/${repository}/issues/${number}`, { bearer: token }).pipe(
-				Effect.flatMap(decoded(Issue)),
-			),
-			allPages(http, token, `/repos/${repository}/issues/${number}/comments`, Comment),
-		]);
+		const [issue, comments] = yield* Effect.all(
+			[
+				call(http, "GET", `/repos/${repository}/issues/${number}`, { bearer: token }).pipe(
+					Effect.flatMap(decoded(Issue)),
+				),
+				firstAndNewestPages(http, token, `/repos/${repository}/issues/${number}/comments`, Comment),
+			],
+			{ concurrency: "unbounded" },
+		);
 		return {
 			...aboutIssue(issue),
 			body: issue.body ?? "",
 			isPullRequest: issue.pull_request !== undefined,
-			comments: comments.map(commentOf),
+			comments: comments.items.map(commentOf),
+			...leftOut(comments, "comments"),
 		};
 	});
+
+/** Says which of a read's lists had pages between their first and newest left out. */
+const leftOut = (read: { olderLeftOut: boolean }, list: string) =>
+	read.olderLeftOut
+		? { note: `Some of the ${list} between the first and the newest were left out.` }
+		: {};
 
 const SearchResults = Schema.Struct({
 	total_count: Schema.Int,
 	items: Schema.Array(Issue),
 });
 
+/** The most results GitHub's search gives for a query, however many match. */
+const MAX_SEARCH_RESULTS = 1_000;
+
+/** A qualifier saying whether a search is for issues or pull requests, which GitHub requires one of. */
+const SEARCH_KIND = /(?:^|\s)-?(?:is|type):(?:issue|pr|pull-request)\b/i;
+
 /**
- * Issues and pull requests of `repository` that match `query`, in GitHub's
- * search syntax, which is kept to the repository.
+ * Issues or pull requests of `repository` that match `query`, in GitHub's
+ * search syntax, kept to the repository; issues unless the query says.
  */
 export const searchIssues = (
 	http: EgressHttpClient,
 	token: string,
 	{ repository, query, page }: { repository: string; query: string; page: number },
 ) => {
-	const scoped = encodeURIComponent(`${query} repo:${repository}`);
+	const kind = SEARCH_KIND.test(query) ? "" : " is:issue";
+	const scoped = encodeURIComponent(`${query}${kind} repo:${repository}`);
 	return call(http, "GET", `/search/issues?q=${scoped}&per_page=${LIST_SIZE}&page=${page}`, {
 		bearer: token,
 	}).pipe(
@@ -152,7 +182,8 @@ export const searchIssues = (
 			const found = items
 				.filter((item) => item.html_url.toLowerCase().startsWith(prefix))
 				.map((item) => ({ ...aboutIssue(item), isPullRequest: item.pull_request !== undefined }));
-			return paged(found, page, page * LIST_SIZE < total_count && items.length === LIST_SIZE);
+			const reachable = Math.min(total_count, MAX_SEARCH_RESULTS);
+			return paged(found, page, page * LIST_SIZE < reachable && items.length === LIST_SIZE);
 		}),
 	);
 };
@@ -165,10 +196,14 @@ export const listLabels = (
 	token: string,
 	{ repository }: { repository: string },
 ) =>
-	allPages(http, token, `/repos/${repository}/labels`, Label).pipe(
-		Effect.map((labels) =>
-			labels.map((label) => ({ name: label.name, description: label.description ?? "" })),
-		),
+	firstAndNewestPages(http, token, `/repos/${repository}/labels`, Label).pipe(
+		Effect.map((labels) => ({
+			labels: labels.items.map((label) => ({
+				name: label.name,
+				description: label.description ?? "",
+			})),
+			...leftOut(labels, "labels"),
+		})),
 	);
 
 const PullRequest = Schema.Struct({
@@ -245,14 +280,22 @@ export const getPullRequest = (
 	{ repository, number }: { repository: string; number: number },
 ) =>
 	Effect.gen(function* () {
-		const [pull, reviews, comments, codeComments] = yield* Effect.all([
-			call(http, "GET", `/repos/${repository}/pulls/${number}`, { bearer: token }).pipe(
-				Effect.flatMap(decoded(PullRequest)),
-			),
-			allPages(http, token, `/repos/${repository}/pulls/${number}/reviews`, Review),
-			allPages(http, token, `/repos/${repository}/issues/${number}/comments`, Comment),
-			allPages(http, token, `/repos/${repository}/pulls/${number}/comments`, ReviewComment),
-		]);
+		const [pull, reviews, comments, codeComments] = yield* Effect.all(
+			[
+				call(http, "GET", `/repos/${repository}/pulls/${number}`, { bearer: token }).pipe(
+					Effect.flatMap(decoded(PullRequest)),
+				),
+				firstAndNewestPages(http, token, `/repos/${repository}/pulls/${number}/reviews`, Review),
+				firstAndNewestPages(http, token, `/repos/${repository}/issues/${number}/comments`, Comment),
+				firstAndNewestPages(
+					http,
+					token,
+					`/repos/${repository}/pulls/${number}/comments`,
+					ReviewComment,
+				),
+			],
+			{ concurrency: "unbounded" },
+		);
 		return {
 			number: pull.number,
 			title: pull.title,
@@ -265,15 +308,15 @@ export const getPullRequest = (
 			headCommit: pull.head.sha,
 			base: pull.base.ref,
 			url: pull.html_url,
-			reviews: reviews.map((review) => ({
+			reviews: reviews.items.map((review) => ({
 				reviewId: review.id,
 				author: loginOf(review.user),
 				verdict: review.state,
 				body: review.body ?? "",
 				at: review.submitted_at ?? null,
 			})),
-			comments: comments.map(commentOf),
-			codeComments: codeComments.map((comment) => ({
+			comments: comments.items.map(commentOf),
+			codeComments: codeComments.items.map((comment) => ({
 				commentId: comment.id,
 				reviewId: comment.pull_request_review_id,
 				inReplyTo: comment.in_reply_to_id ?? null,
@@ -283,6 +326,12 @@ export const getPullRequest = (
 				body: comment.body,
 				at: comment.created_at,
 			})),
+			...leftOut(
+				{
+					olderLeftOut: reviews.olderLeftOut || comments.olderLeftOut || codeComments.olderLeftOut,
+				},
+				"reviews and comments",
+			),
 		};
 	});
 
@@ -348,28 +397,17 @@ export const jobLog = (
 	{ repository, jobId }: { repository: string; jobId: number },
 ) =>
 	Effect.gen(function* () {
-		const redirect = yield* Effect.tryPromise({
-			try: (signal) =>
-				http(`${API_URL}/repos/${repository}/actions/jobs/${jobId}/logs`, {
-					signal,
-					headers: {
-						accept: "application/vnd.github+json",
-						"x-github-api-version": "2022-11-28",
-						authorization: `Bearer ${token}`,
-					},
-				}),
-			catch: (cause) => new GitHubRequestFailed({ status: undefined, reason: String(cause) }),
-		});
-		const location = redirect.headers.get("location");
-		if (!location) {
-			const reason = redirect.status === 404 ? "No such GitHub Actions job" : redirect.statusText;
-			return yield* new GitHubRequestFailed({ status: redirect.status, reason });
-		}
-		const text = yield* Effect.tryPromise({
+		const location = yield* redirectOf(
+			http,
+			token,
+			`/repos/${repository}/actions/jobs/${jobId}/logs`,
+		);
+		// Kept with room for the timestamps taken off each line after.
+		const tail = yield* Effect.tryPromise({
 			try: async (signal) => {
 				const response = await storage(location, { signal });
 				if (!response.ok) throw new Error(`The log's storage answered ${response.status}`);
-				return response.text();
+				return tailOf(response, 2 * MAX_LOG_CHARACTERS);
 			},
 			catch: (cause) =>
 				new GitHubRequestFailed({
@@ -377,9 +415,30 @@ export const jobLog = (
 					reason: cause instanceof Error ? cause.message : String(cause),
 				}),
 		});
-		const log = text.replace(LOG_LINE_TIMESTAMP, "");
-		return {
-			truncated: log.length > MAX_LOG_CHARACTERS,
-			log: log.slice(-MAX_LOG_CHARACTERS),
-		};
+		const log = tail.text.replace(LOG_LINE_TIMESTAMP, "");
+		const truncated = tail.truncated || log.length > MAX_LOG_CHARACTERS;
+		return { truncated, log: truncated ? wholeLines(log.slice(-MAX_LOG_CHARACTERS)) : log };
 	});
+
+/**
+ * The last `characters` of `response`'s body, read as it streams in so a
+ * long log is never held whole, and whether there was more before them.
+ */
+async function tailOf(response: Response, characters: number) {
+	const decoder = new TextDecoder();
+	let text = "";
+	let truncated = false;
+	const reader = response.body?.getReader();
+	for (let read = await reader?.read(); read && !read.done; read = await reader?.read()) {
+		text += decoder.decode(read.value, { stream: true });
+		if (text.length > characters) {
+			text = text.slice(-characters);
+			truncated = true;
+		}
+	}
+	text += decoder.decode();
+	return truncated ? { text: wholeLines(text), truncated } : { text, truncated };
+}
+
+/** `text` without the partial line a cut left at its start. */
+const wholeLines = (text: string) => text.slice(text.indexOf("\n") + 1);

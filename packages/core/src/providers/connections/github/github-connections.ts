@@ -429,13 +429,8 @@ export class Connected {
 	/** A token that can push to `repository` alone. */
 	writeCredential(repository: string) {
 		return Effect.map(
-			Effect.suspend(() =>
-				GitHub.accessToken(this.http, this.app, {
-					repositoryIds: [this.idOf(repository)],
-					permissions: { contents: "write" },
-				}),
-			),
-			(token): GitHub.GitCredential => ({ username: TOKEN_USERNAME, token: token.token }),
+			this.tokenFor(repository, { contents: "write" }),
+			(token): GitHub.GitCredential => ({ username: TOKEN_USERNAME, token }),
 		);
 	}
 
@@ -448,13 +443,13 @@ export class Connected {
 		body: string;
 		draft: boolean;
 	}) {
-		const { http, app } = this;
-		const idOf = (repository: string) => this.idOf(repository);
+		const { http } = this;
+		const granted = this.tokenFor(request.repository, {
+			pull_requests: "write",
+			contents: "read",
+		});
 		return Effect.gen(function* () {
-			const { token } = yield* GitHub.accessToken(http, app, {
-				repositoryIds: [idOf(request.repository)],
-				permissions: { pull_requests: "write", contents: "read" },
-			});
+			const token = yield* granted;
 			return yield* GitHub.openPullRequest(http, token, {
 				...request,
 				base: request.base ?? (yield* GitHub.defaultBranch(http, token, request.repository)),
@@ -476,13 +471,13 @@ export class Connected {
 		state: "open" | "closed" | undefined;
 		draft: boolean | undefined;
 	}) {
-		const { http, app } = this;
-		const idOf = (repository: string) => this.idOf(repository);
+		const { http } = this;
+		const granted = this.tokenFor(request.repository, {
+			pull_requests: "write",
+			contents: "read",
+		});
 		return Effect.gen(function* () {
-			const { token } = yield* GitHub.accessToken(http, app, {
-				repositoryIds: [idOf(request.repository)],
-				permissions: { pull_requests: "write", contents: "read" },
-			});
+			const token = yield* granted;
 			const head = yield* GitHub.pullRequestHead(http, token, request);
 			const fromBotBranch =
 				head.branch.startsWith(BOT_BRANCH_PREFIX) &&
@@ -502,14 +497,8 @@ export class Connected {
 
 	/** Comments on pull request `number`, anyone's. */
 	commentOnPullRequest(request: { repository: string; number: number; body: string }) {
-		return Effect.flatMap(
-			Effect.suspend(() =>
-				GitHub.accessToken(this.http, this.app, {
-					repositoryIds: [this.idOf(request.repository)],
-					permissions: { pull_requests: "write" },
-				}),
-			),
-			({ token }) => GitHub.comment(this.http, token, request),
+		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
+			GitHub.comment(this.http, token, request),
 		);
 	}
 
@@ -527,7 +516,9 @@ export class Connected {
 		).pipe(
 			Effect.map(({ token }) => token),
 			Effect.catchIf(
-				(failure) => failure.status === UNGRANTED_PERMISSIONS_STATUS,
+				(failure) =>
+					failure.status === UNGRANTED_PERMISSIONS_STATUS &&
+					UNGRANTED_PERMISSIONS_REASON.test(failure.reason),
 				() =>
 					Effect.fail(new PermissionNotGranted({ permissions: describedPermissions(permissions) })),
 			),
@@ -593,7 +584,7 @@ export class Connected {
 			request.kind === "code_comment" ? { pull_requests: "write" } : { issues: "write" };
 		return Effect.flatMap(this.tokenFor(request.repository, permissions), (token) =>
 			Effect.gen(function* () {
-				const author = yield* GitHub.commentAuthor(http, token, request);
+				const { author } = yield* GitHub.findComment(http, token, request);
 				if (author !== botLogin) {
 					return yield* new NotBotComment({
 						commentId: request.commentId,
@@ -618,10 +609,10 @@ export class Connected {
 	}
 
 	/**
-	 * Changes an issue or pull request. Bots label and assign anyone's, and
-	 * close or reopen anyone's issue, but change the title or description only
-	 * of what the connection's app opened, and open or close only its own pull
-	 * requests, as {@link updatePullRequest} does. What isn't given stays as it is.
+	 * Changes an issue, or labels and assigns a pull request, whose other
+	 * changes are {@link updatePullRequest}'s alone. Bots label, assign, close
+	 * and reopen anyone's issue, but change the title or description only of
+	 * one the connection's app opened. What isn't given stays as it is.
 	 */
 	updateIssue(request: {
 		repository: string;
@@ -643,16 +634,12 @@ export class Connected {
 					const changesState = request.state !== undefined || request.closedReason !== undefined;
 					if (changesWords || changesState) {
 						const found = yield* GitHub.issueAuthor(http, token, request);
-						const author = found.author ?? "ghost";
-						if (author !== botLogin && changesWords) {
-							return yield* new NotBotIssue({
-								number: request.number,
-								author,
-								change: "title or description",
-							});
+						if (found.isPullRequest) {
+							return yield* new IssueIsPullRequest({ number: request.number });
 						}
-						if (author !== botLogin && changesState && found.isPullRequest) {
-							return yield* new NotBotIssue({ number: request.number, author, change: "state" });
+						const author = found.author ?? "ghost";
+						if (changesWords && author !== botLogin) {
+							return yield* new NotBotIssue({ number: request.number, author });
 						}
 					}
 					return yield* GitHub.updateIssue(http, token, request);
@@ -674,15 +661,26 @@ export class Connected {
 		);
 	}
 
-	/** Replies in the thread of a comment on pull request `number`'s code. */
+	/**
+	 * Replies in the thread of a comment on pull request `number`'s code,
+	 * which may itself be a reply: GitHub takes replies only to a thread's first.
+	 */
 	replyToCodeComment(request: {
 		repository: string;
 		number: number;
 		commentId: number;
 		body: string;
 	}) {
+		const { http } = this;
 		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
-			GitHub.replyToCodeComment(this.http, token, request),
+			Effect.gen(function* () {
+				const { threadId } = yield* GitHub.findComment(http, token, {
+					repository: request.repository,
+					kind: "code_comment",
+					commentId: request.commentId,
+				});
+				return yield* GitHub.replyToCodeComment(http, token, { ...request, commentId: threadId });
+			}),
 		);
 	}
 
@@ -743,27 +741,48 @@ export class NotBotComment
 	}
 }
 
-/** A change to an issue or pull request that only what the connection's app opened may have. */
+/** An issue someone else opened, whose title and description bots may not change. */
 export class NotBotIssue
 	extends Schema.TaggedError<NotBotIssue>()("NotBotIssue", {
 		number: Schema.Int,
 		author: Schema.String,
-		change: Schema.Literals(["title or description", "state"]),
 	})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return `#${this.number} is ${this.author}'s, so bots can't change its ${this.change}`;
+		return `#${this.number} is ${this.author}'s, so bots can't change its title or description`;
 	}
 	get userMessage() {
-		return userText`Bots can only change the title, description or state of what they opened.`;
+		return userText`Bots can only change the title or description of issues they opened.`;
 	}
 }
 
-/** The status GitHub refuses a token with when the installation hasn't been granted what it asks for. */
+/** A pull request given where an issue is changed, though only its labels and assignees may be there. */
+export class IssueIsPullRequest
+	extends Schema.TaggedError<IssueIsPullRequest>()("IssueIsPullRequest", {
+		number: Schema.Int,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `#${this.number} is a pull request, whose title, description and state are changed as a pull request`;
+	}
+	get userMessage() {
+		return userText`Change a pull request's title, description or state as a pull request.`;
+	}
+}
+
+/**
+ * The status and words GitHub refuses a token with when the installation
+ * hasn't been granted what it asks for; it refuses others, such as for a
+ * repository it no longer reaches, with the same status.
+ */
 const UNGRANTED_PERMISSIONS_STATUS = 422;
+const UNGRANTED_PERMISSIONS_REASON = /permissions requested are not granted/i;
 
 /** `permissions` as GitHub's settings name them, such as "Issues: write". */
 function describedPermissions(permissions: GitHub.Permissions): string {

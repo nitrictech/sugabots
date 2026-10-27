@@ -141,7 +141,7 @@ export function gitHubTools({
 							head: branch,
 							base,
 							title,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 							draft,
 						});
 						return { status: "opened", ...opened };
@@ -170,18 +170,21 @@ export function gitHubTools({
 			execute: async ({ repository, number, title, body, base, draft, state }, { toolCallId }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signed =
+						const description =
 							body === undefined
 								? undefined
-								: `${body}\n\n---\n${yield* attribution(
-										{ agentId, turnId, sdkToolCallId: toolCallId },
-										"wrote this description",
-									)}`;
+								: signed(
+										body,
+										yield* attribution(
+											{ agentId, turnId, sdkToolCallId: toolCallId },
+											"wrote this description",
+										),
+									);
 						const updated = yield* connected.updatePullRequest({
 							repository: path,
 							number,
 							title,
-							body: signed,
+							body: description,
 							base,
 							state,
 							draft,
@@ -218,7 +221,7 @@ export function gitHubTools({
 						const commented = yield* connected.commentOnPullRequest({
 							repository: path,
 							number,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 						});
 						return { status: "commented", ...commented };
 					}),
@@ -275,7 +278,7 @@ export function gitHubTools({
 							repository: path,
 							number,
 							verdict,
-							body: body ? `${body}\n\n---\n${signature}` : signature,
+							body: body ? signed(body, signature) : signature,
 							commit,
 							comments: comments.map((comment) => ({
 								path: comment.path,
@@ -309,7 +312,7 @@ export function gitHubTools({
 							repository: path,
 							number,
 							commentId,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 						});
 						return { status: "replied", ...replied };
 					}),
@@ -337,7 +340,7 @@ export function gitHubTools({
 						const opened = yield* connected.openIssue({
 							repository: path,
 							title,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 							labels,
 							assignees,
 						});
@@ -347,7 +350,7 @@ export function gitHubTools({
 		}),
 		update_issue: tool({
 			description:
-				"Change an issue or pull request: label or assign anyone's, close or reopen anyone's issue, and change the title or description only of one a bot opened. Pull requests open and close with update_pull_request. Leave out what stays the same.",
+				"Change an issue: label, assign, close or reopen anyone's, and change the title or description only of one a bot opened. Label and assign a pull request too; change anything else of one with update_pull_request. Leave out what stays the same.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
@@ -375,18 +378,21 @@ export function gitHubTools({
 			) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
-						const signed =
+						const description =
 							body === undefined
 								? undefined
-								: `${body}\n\n---\n${yield* attribution(
-										{ agentId, turnId, sdkToolCallId: toolCallId },
-										"wrote this description",
-									)}`;
+								: signed(
+										body,
+										yield* attribution(
+											{ agentId, turnId, sdkToolCallId: toolCallId },
+											"wrote this description",
+										),
+									);
 						const updated = yield* connected.updateIssue({
 							repository: path,
 							number,
 							title,
-							body: signed,
+							body: description,
 							state,
 							closedReason,
 							labels,
@@ -394,13 +400,20 @@ export function gitHubTools({
 						});
 						return { status: "updated", ...updated };
 					}).pipe(
-						Effect.catchTag("NotBotIssue", (refused) =>
-							Effect.succeed(
-								failed(
-									`#${number} was opened by ${refused.author}, not a bot, so bots can't change its ${refused.change}. Comment on it instead.`,
+						Effect.catchTags({
+							NotBotIssue: (refused) =>
+								Effect.succeed(
+									failed(
+										`#${number} was opened by ${refused.author}, not a bot, so bots can't change its title or description. Comment on it instead.`,
+									),
 								),
-							),
-						),
+							IssueIsPullRequest: () =>
+								Effect.succeed(
+									failed(
+										`#${number} is a pull request: change its title, description or state with update_pull_request. update_issue only labels and assigns it.`,
+									),
+								),
+						}),
 					),
 				),
 		}),
@@ -423,7 +436,7 @@ export function gitHubTools({
 						const commented = yield* connected.commentOnIssue({
 							repository: path,
 							number,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 						});
 						return { status: "commented", ...commented };
 					}),
@@ -474,7 +487,7 @@ export function gitHubTools({
 							repository: path,
 							kind,
 							commentId,
-							body: `${body}\n\n---\n${signature}`,
+							body: signed(body, signature),
 						});
 						return { status: "edited", ...edited };
 					}).pipe(Effect.catchTag("NotBotComment", notBotComment)),
@@ -510,7 +523,7 @@ export function gitHubTools({
 		}),
 		search_issues: tool({
 			description:
-				"Search a repository's issues and pull requests, with GitHub's search syntax, such as: is:issue is:open label:bug login error",
+				"Search a repository's issues, or its pull requests with is:pr, in GitHub's search syntax, such as: is:open label:bug login error. Only the first 1,000 matches can be read.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
@@ -764,6 +777,20 @@ const attribution = (
 		const bot = opener ? `**${opener.name}**, a bot in Sugabots,` : "A bot in Sugabots";
 		return decider ? `${bot} ${did}, which ${decider.name} allowed.` : `${bot} ${did}.`;
 	});
+
+/** What divides what a bot wrote from its {@link attribution}. */
+const SIGNATURE_DIVIDER = "\n\n---\n";
+
+/** An {@link attribution} at the end of what a bot wrote, as bots read it back from GitHub. */
+const TRAILING_SIGNATURE =
+	/\n\n---\n(?:\*\*[^\n]*\*\*, a bot in Sugabots,|A bot in Sugabots) [^\n]*\s*$/;
+
+/**
+ * `body` with `signature` under it, in place of any signature it ends with,
+ * since a bot changing what it wrote passes back what it read, signed.
+ */
+const signed = (body: string, signature: string) =>
+	`${body.replace(TRAILING_SIGNATURE, "")}${SIGNATURE_DIVIDER}${signature}`;
 
 /** What the bundling script exits with when the checkout is shallow, so the bundle would lack history. */
 const SHALLOW_EXIT_CODE = 3;

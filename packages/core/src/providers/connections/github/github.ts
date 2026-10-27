@@ -380,10 +380,17 @@ export type CommentKind = "comment" | "code_comment";
 const commentPath = (repository: string, kind: CommentKind, commentId: number) =>
 	`/repos/${repository}/${kind === "comment" ? "issues" : "pulls"}/comments/${commentId}`;
 
-const Authored = Schema.Struct({ user: Schema.NullOr(Schema.Struct({ login: Schema.String })) });
+const FoundComment = Schema.Struct({
+	user: Schema.NullOr(Schema.Struct({ login: Schema.String })),
+	in_reply_to_id: Schema.optional(Schema.Int),
+});
 
-/** Who wrote a comment, by login; undefined for a deleted account. */
-export const commentAuthor = (
+/**
+ * Who wrote a comment, by login, undefined for a deleted account; and the
+ * thread it is in, by its first comment's id, which for a comment on code
+ * that answers another is that other's.
+ */
+export const findComment = (
 	http: EgressHttpClient,
 	token: string,
 	request: { repository: string; kind: CommentKind; commentId: number },
@@ -391,8 +398,11 @@ export const commentAuthor = (
 	call(http, "GET", commentPath(request.repository, request.kind, request.commentId), {
 		bearer: token,
 	}).pipe(
-		Effect.flatMap(decoded(Authored)),
-		Effect.map((found) => found.user?.login),
+		Effect.flatMap(decoded(FoundComment)),
+		Effect.map((found) => ({
+			author: found.user?.login,
+			threadId: found.in_reply_to_id ?? request.commentId,
+		})),
 	);
 
 export const editComment = (
@@ -623,29 +633,35 @@ const ErrorBody = Schema.Struct({
 	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.optional(Schema.String) }))),
 });
 
-/** A request to GitHub's API, signed in with `bearer`, answering with the decoded JSON body. */
-export function call(
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
+
+/** A request to GitHub's API, signed in with `bearer`, answering with its response unread. */
+function send(
 	http: EgressHttpClient,
-	method: "GET" | "POST" | "PATCH" | "DELETE",
+	method: Method,
 	path: string,
 	options: { bearer?: string; body?: unknown },
 ) {
+	return Effect.tryPromise({
+		try: (signal) =>
+			http(`${API_URL}${path}`, {
+				method,
+				signal,
+				headers: {
+					accept: "application/vnd.github+json",
+					"x-github-api-version": "2022-11-28",
+					...(options.bearer ? { authorization: `Bearer ${options.bearer}` } : {}),
+					...(options.body === undefined ? {} : { "content-type": "application/json" }),
+				},
+				body: options.body === undefined ? undefined : JSON.stringify(options.body),
+			}),
+		catch: (cause) => requestFailed({ status: undefined, reason: String(cause) }),
+	});
+}
+
+/** `response`'s body, decoded from JSON when it is ok, or its refusal in GitHub's own words. */
+function answerOf(response: Response) {
 	return Effect.gen(function* () {
-		const response = yield* Effect.tryPromise({
-			try: (signal) =>
-				http(`${API_URL}${path}`, {
-					method,
-					signal,
-					headers: {
-						accept: "application/vnd.github+json",
-						"x-github-api-version": "2022-11-28",
-						...(options.bearer ? { authorization: `Bearer ${options.bearer}` } : {}),
-						...(options.body === undefined ? {} : { "content-type": "application/json" }),
-					},
-					body: options.body === undefined ? undefined : JSON.stringify(options.body),
-				}),
-			catch: (cause) => requestFailed({ status: undefined, reason: String(cause) }),
-		});
 		const text = yield* Effect.tryPromise({
 			try: () => response.text(),
 			catch: (cause) => requestFailed({ status: response.status, reason: String(cause) }),
@@ -658,8 +674,48 @@ export function call(
 				? [failure.value.message, ...(failure.value.errors ?? []).flatMap((e) => e.message ?? [])]
 						.filter(Boolean)
 						.join(": ")
-				: response.statusText;
+				: response.statusText || `HTTP ${response.status}`;
 		return yield* requestFailed({ status: response.status, reason });
+	});
+}
+
+/** A request to GitHub's API, signed in with `bearer`, answering with the decoded JSON body. */
+export function call(
+	http: EgressHttpClient,
+	method: Method,
+	path: string,
+	options: { bearer?: string; body?: unknown },
+) {
+	return Effect.flatMap(send(http, method, path, options), answerOf);
+}
+
+/** GitHub's link to the last page of a list, in its `Link` header. */
+const LAST_PAGE_LINK = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/;
+
+/**
+ * A page of a list GitHub's API gives, with the number of its last page,
+ * which is this one's when GitHub links no further.
+ */
+export function getPage(http: EgressHttpClient, token: string, path: string, page: number) {
+	const separator = path.includes("?") ? "&" : "?";
+	return Effect.gen(function* () {
+		const response = yield* send(http, "GET", `${path}${separator}page=${page}`, {
+			bearer: token,
+		});
+		const lastPage = LAST_PAGE_LINK.exec(response.headers.get("link") ?? "")?.[1];
+		const body = yield* answerOf(response);
+		return { body, lastPage: lastPage ? Number(lastPage) : page };
+	});
+}
+
+/** Where GitHub's API redirects a request to, such as a job's log at its storage. */
+export function redirectOf(http: EgressHttpClient, token: string, path: string) {
+	return Effect.gen(function* () {
+		const response = yield* send(http, "GET", path, { bearer: token });
+		const location = response.headers.get("location");
+		if (location && response.status >= 300 && response.status < 400) return location;
+		yield* answerOf(response);
+		return yield* requestFailed({ status: response.status, reason: "GitHub didn't redirect" });
 	});
 }
 
