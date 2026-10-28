@@ -1,4 +1,3 @@
-import { botColorVariables } from "@sugabots/avatars";
 import {
 	type AgentParticipant,
 	mentionedHandles,
@@ -8,13 +7,14 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
-import { createContext, type ReactNode, useContext } from "react";
+import { type ComponentProps, createContext, type ReactNode, useContext } from "react";
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 
 /*
- * `@handle` in a message, drawn in the colours of whoever it names. Plain text
+ * `@handle` in a message, drawn as a chip for whoever it names. Plain text
  * and markdown text nodes are both split with the parser the API routes by, so
  * a mention inside a list item or a bold run is still a mention while one
  * inside a code span, its own node type, is left alone.
@@ -59,22 +59,38 @@ export function participantWithHandle(
 }
 
 /**
- * An agent is named on its own tint in its brighter mono colour, the way a bot
- * draws an inline ID; a person on a neutral chip. Both are edged, so a chip
- * still stands out on a bubble of the same tint, as a bot naming itself does.
+ * A mention as a chip that stands off the words around it: a bot by its face
+ * and name, a person by their handle. Sent messages and the composer both
+ * draw it, so a mention looks the same before and after it is sent.
  */
-function Mention({ participant }: { participant: ThreadParticipant }) {
+export function MentionChip({
+	participant,
+	className,
+	...rest
+}: { participant: ThreadParticipant } & ComponentProps<"span">) {
 	return (
 		<span
+			{...rest}
 			className={cn(
-				"box-decoration-clone rounded-xs px-[0.3em] font-semibold",
-				participant.kind === "agent"
-					? "bg-bot-tint text-bot-mono shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--bot-mono)_25%,transparent)]"
-					: "bg-chip text-foreground shadow-[inset_0_0_0_1px_var(--border-strong)]",
+				"mx-px inline-flex items-center gap-1 rounded-[5px] bg-chip px-1 align-[-0.15em] font-semibold text-foreground leading-[1.5]",
+				className,
 			)}
-			style={participant.kind === "agent" ? botColorVariables(participant.color) : undefined}
 		>
-			@{participant.handle}
+			{participant.kind === "agent" ? (
+				<>
+					<AgentAvatar
+						color={participant.color}
+						face={participant.face}
+						shape={participant.shape}
+						size={14}
+						className="shrink-0"
+					/>
+					<span className="sr-only">@</span>
+					{participant.name}
+				</>
+			) : (
+				`@${participant.handle}`
+			)}
 		</span>
 	);
 }
@@ -86,7 +102,7 @@ export function textWithMentions(content: string, mentionable: ThreadParticipant
 		const participant = participantWithHandle(mentionable, part);
 		return participant ? (
 			// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
-			<Mention key={index} participant={participant} />
+			<MentionChip key={index} participant={participant} />
 		) : (
 			`@${part}`
 		);
@@ -136,5 +152,5 @@ export function MarkdownMention({
 	const mentionable = useContext(MentionableContext);
 	const participant =
 		typeof handle === "string" ? participantWithHandle(mentionable, handle) : undefined;
-	return participant ? <Mention participant={participant} /> : (children as ReactNode);
+	return participant ? <MentionChip participant={participant} /> : (children as ReactNode);
 }

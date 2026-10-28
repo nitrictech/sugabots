@@ -24,7 +24,7 @@ import {
 } from "../story-app.tsx";
 
 /*
- * A bot's chat as the app shows it: the rail and the pod's list beside it, the
+ * A bot's chat as the app shows it: the sidebar with the pod's chats and bots beside it, the
  * header across the top, and the thread with its composer. On a phone the chat
  * takes the screen, its header centred, with Back to the list.
  */
@@ -86,7 +86,7 @@ const meta = preview.meta({
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
 });
 
-/** The chat beside its pod's list, with Details a tap on the header away. */
+/** The chat beside the sidebar, with Details a tap on the header away. */
 export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
@@ -98,15 +98,13 @@ export const Conversation = meta.story({
 	},
 });
 
-/** A shared pod opened from the rail opens its chat. */
+/** A shared pod opened from the sidebar opens its chat. */
 export const PodOpensTopChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
-		await expect(
-			canvas.getByText("Everyone in the pod. Mention a bot to start a thread with it."),
-		).toBeInTheDocument();
-		const list = canvas.getByRole("region", { name: revenue.name });
+		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
+		const list = canvas.getByRole("group", { name: "Revenue" });
 		await expect(within(list).getByRole("link", { name: /^General/ })).toHaveAttribute(
 			"aria-current",
 			"page",
@@ -141,9 +139,7 @@ export const PodChat = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
-		await expect(
-			canvas.getByText("Everyone in the pod. Mention a bot to start a thread with it."),
-		).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
 		await expect(canvas.getByRole("textbox", { name: "Message General" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 	},
@@ -204,7 +200,7 @@ export const PodChatStartsAThread = meta.story({
 			name: /^Open thread: Pricing for the Northwind renewal/,
 		});
 		await expect(thread).toHaveTextContent("Pricing for the Northwind renewal");
-		await expect(thread).toHaveTextContent("Last reply");
+		await expect(thread).toHaveAccessibleName(/Last reply \d/);
 		await expect(thread).toHaveTextContent("3 replies");
 		// Under the message it was started from, before the next one.
 		const started = within(log).getByText("Northwind signed. Thanks for the push, everyone.");
@@ -244,6 +240,33 @@ export const NewThread = meta.story({
 	},
 });
 
+/**
+ * Starting a thread from a bot's +: it is with that bot, so the page asks what
+ * it should work on, under no header of its own, and the message needs no chip
+ * and no word on who it goes to.
+ */
+export const NewThreadWithABot = meta.story({
+	render: () => (
+		<StoryApp
+			path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/new?agent=${growthDesk.handle}`}
+		/>
+	),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole(
+				"heading",
+				{ name: `What should ${growthDesk.name} work on?` },
+				{ timeout: 10_000 },
+			),
+		).toBeVisible();
+		await expect(canvas.queryByRole("heading", { name: "New thread", level: 1 })).toBeNull();
+		const message = canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` });
+		await expect(message).toHaveTextContent("");
+		await expect(canvas.queryByRole("list", { name: "Bots" })).toBeNull();
+		await expect(canvas.queryByText(/^Sending starts a thread/)).toBeNull();
+	},
+});
+
 const failingRoutine = {
 	id: "0199a3a0-0000-7000-8000-0000000003b1",
 	feed: "0199a3a0-0000-7000-8000-0000000003b2",
@@ -277,6 +300,7 @@ function failingRoutineHandlers() {
 		triggerKind: "cron",
 		state: "failed",
 		error: "Gmail refused the connection: the token has expired.",
+		report: null,
 		createdAt: at,
 	});
 	return [
@@ -300,17 +324,18 @@ const failingRoutineThread = () => (
 );
 
 /**
- * A routine whose last two runs failed: each says why, the latest offers
- * Retry and the way to fix its connection, and a line says it paused itself.
+ * A routine whose last two runs failed, each its own run with why it failed;
+ * the latest offers Retry and the way to fix its connection, and a line says
+ * the routine paused itself, which its switch shows.
  */
 export const FailingRoutine = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...failingRoutineHandlers());
 	},
 	render: failingRoutineThread,
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
-		const failures = await within(log).findAllByRole("article", { name: /Run failed/ });
+		const failures = await within(log).findAllByRole("article", { name: /: Failed$/ });
 		await expect(failures).toHaveLength(2);
 		await expect(
 			within(failures[0] as HTMLElement).queryByRole("button", { name: "Retry" }),
@@ -318,58 +343,12 @@ export const FailingRoutine = meta.story({
 		await expect(
 			within(failures[1] as HTMLElement).getByRole("button", { name: "Retry" }),
 		).toBeVisible();
+		await expect(within(log).getAllByText(/^Run (today|yesterday|on )/)).toHaveLength(2);
 		await expect(
 			within(log).getByText("Paused after two failed runs in a row."),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Resume" })).toBeVisible();
-	},
-});
-
-/**
- * A routine's Details: who runs it, that it paused itself, the way to run it
- * now or change it, when it runs, what it is told and where its result goes.
- */
-export const FailingRoutineDetails = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			http.get(`${API}/agents/:agentId/routines`, () =>
-				HttpResponse.json([
-					{
-						id: failingRoutine.id,
-						workspaceId: storyWorkspace.id,
-						agentId: growthDesk.id,
-						name: "Overnight outbound",
-						instructions: "Queue the overnight leads and draft replies to anyone who answered.",
-						triggers: [
-							{
-								id: "0199a3a0-0000-7000-8000-0000000003c1",
-								kind: "cron",
-								schedule: { repeat: "cron", expression: "0 6 * * *" },
-								timezone: "Australia/Sydney",
-								nextScheduledAt: null,
-							},
-						],
-						state: "paused",
-						results: "post_to_chat",
-						chatId: null,
-						createdById: null,
-						createdByAgentId: null,
-						createdAt: "2026-09-01T00:00:00.000Z",
-						updatedAt: "2026-09-18T06:01:00.000Z",
-					},
-				]),
-			),
-			...failingRoutineHandlers(),
-		);
-	},
-	render: failingRoutineThread,
-	play: async ({ canvas, userEvent }) => {
-		await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await userEvent.click(canvas.getByRole("button", { name: "Details" }));
-		const details = await canvas.findByRole("complementary", { name: "Details" });
-		await expect(within(details).getByText("Paused after two failed runs")).toBeVisible();
-		await expect(within(details).getByRole("button", { name: "Run now" })).toBeVisible();
-		await expect(await within(details).findByText("This thread and General")).toBeVisible();
+		await expect(canvas.getByRole("switch", { name: "Routine on" })).not.toBeChecked();
 	},
 });
 
@@ -422,7 +401,7 @@ export const NamedChat = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Pricing", level: 1 }, { timeout: 10_000 }),
 		).toBeVisible();
-		const list = canvas.getByRole("region", { name: revenue.name });
+		const list = canvas.getByRole("group", { name: "Revenue" });
 		await expect(within(list).getByRole("link", { name: /^Pricing/ })).toHaveAttribute(
 			"aria-current",
 			"page",
@@ -448,15 +427,15 @@ export const PodChatOnAPhone = meta.story({
 	},
 });
 
-/** On a phone the pod's list is the page, so it stays open on the list. */
+/** On a phone the sidebar is the page, so a pod stays open on it rather than on a chat. */
 export const PodOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole(
-				"link",
-				{ name: new RegExp(`^Conversation with ${growthDesk.name}`) },
+				"button",
+				{ name: new RegExp(`^${growthDesk.name}`) },
 				{ timeout: 10_000 },
 			),
 		).toBeVisible();
@@ -475,7 +454,7 @@ export const FirstMessage = meta.story({
 				{ timeout: 10_000 },
 			),
 		).toBeInTheDocument();
-		await expect(canvas.getByText(/Only you can see this$/)).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: chief.name, level: 1 })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 	},
 });
@@ -834,13 +813,14 @@ export const CollaborationOnAPhone = meta.story({
 
 /** Growth Desk with the sandbox on, in a workspace that has sandboxes. */
 const sandboxHandlers = (messages: Message[]) => [
+	// Before the app's own handlers, whose default has no computers.
+	http.get(`${import.meta.env.VITE_API_URL}/workspaces/:workspace/sandbox-providers/access`, () =>
+		HttpResponse.json({ enabled: true }),
+	),
 	...appHandlers({
 		bots: storyBots.map((bot) => (bot.id === growthDesk.id ? { ...bot, usesSandbox: true } : bot)),
 		messages: { [growthDesk.id]: messages },
 	}),
-	http.get(`${import.meta.env.VITE_API_URL}/workspaces/:workspace/sandbox-providers/access`, () =>
-		HttpResponse.json({ enabled: true }),
-	),
 ];
 
 /** Growth Desk's reply in progress, having opened a page in its browser. */
@@ -864,15 +844,34 @@ const browsing: Message = {
 	],
 };
 
-/** The bot's sandbox, a button at the top right of its chat that opens the desktop. */
+/** The bot's computer, a button at the top right of its chat that opens its desktop. */
 export const Sandbox = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...sandboxHandlers(conversation));
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("button", { name: "Sandbox desktop" }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: "Computer" }, { timeout: 10_000 }),
 		).toBeVisible();
+	},
+});
+
+/**
+ * Without computers set up in the workspace, the button is still there, and
+ * opens to say what computers are for and how to get them.
+ */
+export const NoComputer = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Computer" }, { timeout: 10_000 }),
+		);
+		const computer = await canvas.findByRole("region", { name: `${growthDesk.name}'s computer` });
+		await expect(await within(computer).findByText("Computers aren't set up yet")).toBeVisible();
+		await expect(within(computer).getByText("No computer")).toBeVisible();
+		await expect(within(computer).getByRole("link", { name: "Set up computers" })).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/sandboxes$/),
+		);
 	},
 });
 
@@ -896,7 +895,7 @@ export const SandboxInUse = meta.story({
 		await userEvent.click(
 			within(screen).getByRole("button", { name: `Open ${growthDesk.name}'s desktop` }),
 		);
-		const desktop = await canvas.findByRole("region", { name: `${growthDesk.name}'s desktop` });
+		const desktop = await canvas.findByRole("region", { name: `${growthDesk.name}'s computer` });
 		await expect(within(desktop).getByText("has control")).toBeVisible();
 		await userEvent.click(within(desktop).getByRole("button", { name: "Take over" }));
 		await expect(within(desktop).getByRole("button", { name: "Hand back" })).toBeVisible();
@@ -986,9 +985,8 @@ const artifactHandlers = () => {
 
 /**
  * An artifact the bot made, as a card in its reply. Opening it shows it large
- * beside the chat, in the room the pod's list had, and Close brings the list back.
- * While it is open, the chat shows no artifact cards and there is no Details,
- * whose place it has taken.
+ * beside the chat, and Close puts it away. While it is open, the chat shows no
+ * artifact cards and there is no Details, whose place it has taken.
  */
 export const Artifact = meta.story({
 	beforeEach({ msw }) {
@@ -1001,12 +999,11 @@ export const Artifact = meta.story({
 		);
 		const stage = await canvas.findByRole("region", { name: pricing.title });
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
-		await expect(canvas.queryByRole("link", { name: /^General/ })).toBeNull();
 		await expect(canvas.queryByRole("article", { name: pricing.title })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
-		await expect(await canvas.findByRole("link", { name: /^General/ })).toBeVisible();
-		await expect(canvas.getByRole("button", { name: "Details" })).toBeVisible();
+		await expect(await canvas.findByRole("button", { name: "Details" })).toBeVisible();
+		await expect(canvas.queryByRole("region", { name: pricing.title })).toBeNull();
 	},
 });
 

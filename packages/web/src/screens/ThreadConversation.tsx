@@ -31,7 +31,7 @@ import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
 import { textWithMentions } from "./mentions.tsx";
-import { SideThreadLine } from "./SideThreadLine.tsx";
+import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
@@ -85,6 +85,7 @@ export function ThreadConversation({
 	onReply,
 	onStartThread,
 	threadLinesOf,
+	inRoutineThread = false,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -155,6 +156,11 @@ export function ThreadConversation({
 	onStartThread?: (message: Message) => void;
 	/** In a pod's chat: the lines of the threads started from the message, drawn under it. */
 	threadLinesOf?: (message: Message) => ReactNode;
+	/**
+	 * In a routine's own thread, where each result already sits under its run,
+	 * so a result does not also say which routine it came from.
+	 */
+	inRoutineThread?: boolean;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
@@ -214,6 +220,7 @@ export function ThreadConversation({
 								onReply={onReply}
 								onStartThread={onStartThread}
 								threadLines={threadLinesOf?.(message)}
+								inRoutineThread={inRoutineThread}
 								onJumpToMessage={onJumpToMessage}
 								reacting={reacting}
 								fileUrlOf={fileUrlOf}
@@ -425,6 +432,7 @@ function MessageRow({
 	onReply,
 	onStartThread,
 	threadLines,
+	inRoutineThread,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -459,6 +467,7 @@ function MessageRow({
 	onReply?: (message: Message) => void;
 	onStartThread?: (message: Message) => void;
 	threadLines?: ReactNode;
+	inRoutineThread: boolean;
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
@@ -507,7 +516,7 @@ function MessageRow({
 			onClick={toggleTimeOnTouch}
 			className={cn(
 				"group/message relative flex pb-0.5 transition-colors duration-700 motion-reduce:animate-none",
-				highlighted ? "bg-primary/15" : "hover:bg-message-hover",
+				highlighted ? "bg-chip" : "hover:bg-message-hover",
 				size.row,
 				startsGroup ? "pt-3.5" : "pt-0.5",
 				!arrivedLive && "animate-rise",
@@ -646,7 +655,7 @@ function MessageRow({
 				)}
 				{threadLines}
 				<MessageReactions message={message} reacting={reacting} addable={finished} />
-				{message.routineResultOf && (
+				{message.routineResultOf && !inRoutineThread && (
 					<RowNote className="text-subtle-foreground">
 						<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />
 					</RowNote>
@@ -796,16 +805,16 @@ function RoutineResultLink({
 	);
 }
 
-/** How a collaboration's thread line labels where it stands, when it has settled or needs somebody. */
-const COLLABORATION_TAG: Partial<Record<CollaborationPart["status"], string>> = {
-	pending: "Needs approval",
-	answered: "Done",
-	failed: "Stopped",
+/** How a collaboration's line says where it stands, once it has settled or needs somebody. */
+const COLLABORATION_STATUS: Partial<Record<CollaborationPart["status"], SideThreadStatus>> = {
+	pending: { text: "Needs approval", urgent: true },
+	answered: { text: "Done", done: true },
+	failed: { text: "Stopped" },
 };
 
 /**
- * The collaboration a bot's message opened, as a thread under it: both bots'
- * faces, who it was with, when it last moved, and where it stands.
+ * The collaboration a bot's message opened, hanging off it: both bots' faces,
+ * who it asked, where it stands, and when it last moved.
  */
 function CollaborationLine({
 	initiator,
@@ -820,14 +829,13 @@ function CollaborationLine({
 	lastActivityAt?: string;
 	onOpen: () => void;
 }) {
-	const tag = COLLABORATION_TAG[status];
 	return (
 		<SideThreadLine
 			faces={[initiator, recipient]}
-			label={`Collaboration with ${recipient.name}`}
+			label={`Asked ${recipient.name}`}
 			description={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
 			lastActivityAt={lastActivityAt}
-			tag={tag ? { text: tag, urgent: status === "pending" } : "working"}
+			status={COLLABORATION_STATUS[status] ?? "working"}
 			onOpen={onOpen}
 		/>
 	);
@@ -897,7 +905,7 @@ const dateWithYear: Intl.DateTimeFormatOptions = {
 };
 
 /** "Today", "Yesterday", or the date in `dateFormat`: by default the month and day, and the year only for another year. */
-function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
+export function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
 	const today = new Date();
 	if (sameDate(date, today)) {
 		return "Today";

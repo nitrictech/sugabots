@@ -62,7 +62,7 @@ export function useChatList(podSlug: string | undefined) {
 	return useQuery(chatListQuery(useWorkspace().workspace?.id, podSlug));
 }
 
-/** How each pod stands for the rail: its unread messages, and whether any chat waits on the person. */
+/** How each pod stands for the pod menu: its unread messages, and whether any chat waits on the person. */
 export function usePodChatMarkers() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
@@ -118,13 +118,15 @@ export function useApprovalInbox() {
 export type AttentionCounts = {
 	/** Messages that mention the person and that they have not read. */
 	unreadMentions: number;
+	/** Everything in Inbox the person has not read: mentions, messages, runs and collaborations. */
+	unreadInInbox: number;
 	/** Approvals waiting on the person. */
 	waitingApprovals: number;
 };
 
 /**
- * How much in the workspace is waiting for the person, which the rail and the
- * app's badge count. Unread mentions come from the activity feed, so they are
+ * How much in the workspace is waiting for the person, which the sidebar and the
+ * app's badge count. What is unread comes from the activity feed, so it is
  * counted among its latest items only.
  */
 export function useAttentionCounts(): AttentionCounts {
@@ -133,13 +135,14 @@ export function useAttentionCounts(): AttentionCounts {
 	return {
 		unreadMentions:
 			activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0,
+		unreadInInbox: activity?.items.filter((item) => item.unread).length ?? 0,
 		waitingApprovals: approvals?.waiting.length ?? 0,
 	};
 }
 
 /**
  * Records that the person has read the conversation up to its newest message, and
- * clears its dot and its count on the rail.
+ * clears its dot and its count in the sidebar.
  */
 export function useMarkChatRead(conversationId: string | undefined) {
 	const queries = useQueryClient();
@@ -152,6 +155,29 @@ export function useMarkChatRead(conversationId: string | undefined) {
 		onSuccess: () => refreshChatMarkers(queries, workspaceId),
 	});
 }
+
+/**
+ * Records that the person has read each of `conversationIds` up to its newest
+ * message, as Inbox's Mark all as read does, and clears what marks them.
+ */
+export function useMarkChatsRead() {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: (conversationIds: readonly string[]) =>
+			Effect.runPromise(
+				Effect.forEach(
+					conversationIds,
+					(conversationId) => client.api.chats.markRead({ params: { conversationId } }),
+					{ concurrency: MARK_READ_CONCURRENCY, discard: true },
+				),
+			),
+		onSettled: () => refreshChatMarkers(queries, workspaceId),
+	});
+}
+
+/** How many conversations Mark all as read marks at once. */
+const MARK_READ_CONCURRENCY = 4;
 
 /**
  * Marks the chat read while the person can see `newest`, its latest item: the
@@ -189,7 +215,7 @@ function readRevision(item: ChatMessageItem): string {
 	return item.kind === "message" ? `${item.message.id}:${item.message.status}` : item.id;
 }
 
-/** Fetches again what shows which chats are unread: the lists, the rail and activity. */
+/** Fetches again what shows which chats are unread: the lists, the sidebar and activity. */
 export function refreshChatMarkers(queries: QueryClient, workspaceId: string | undefined) {
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),

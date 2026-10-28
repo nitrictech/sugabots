@@ -344,7 +344,7 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 	return (
 		<span
 			className={cn(
-				"absolute bottom-[5px] left-[5px] flex h-4 max-w-[calc(100%-10px)] items-center truncate rounded-[4px] px-[5px] font-semibold text-[10px] text-primary-foreground tracking-[0.03em] transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
+				"absolute bottom-[5px] left-[5px] flex h-4 max-w-[calc(100%-10px)] items-center truncate rounded-[4px] px-[5px] font-semibold text-[10px] text-white tracking-[0.03em] transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
 				look === "sheet" ? "bg-file-badge-sheet" : "bg-file-badge-other",
 			)}
 		>

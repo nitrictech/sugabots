@@ -1,6 +1,6 @@
 import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, ExternalLink } from "lucide-react";
+import { Braces, ChevronLeft, CircleAlert, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -11,6 +11,7 @@ import { useThread } from "@/lib/threads.ts";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
@@ -101,12 +102,7 @@ export function ChatThreadPanel({
 				: type === "routine"
 					? (routineExecution?.routineName ?? title)
 					: title,
-		subheading:
-			type === "collaboration"
-				? other && `${mine?.name} and ${other.name}`
-				: type === "routine"
-					? "Routine run"
-					: undefined,
+		subheading: type === "collaboration" ? other && `${mine?.name} and ${other.name}` : undefined,
 		headingRef: heading,
 		actions: type === "routine" && routineExecution && (
 			<RoutineHeaderActions execution={routineExecution} />
@@ -239,18 +235,18 @@ function ThreadPage({
 }) {
 	return (
 		<section aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
-			<header className="relative flex h-14 shrink-0 items-center gap-2 border-border border-b pr-4 pl-5 max-md:pl-12">
+			<header className="relative flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-4 pl-6 max-md:pl-12">
 				<HeaderBack back={back} />
 				<div className="flex min-w-0 flex-1 items-baseline gap-2">
 					<h1
 						ref={headingRef}
 						tabIndex={-1}
-						className="m-0 min-w-0 shrink-0 truncate font-semibold text-[16px] text-foreground outline-none max-md:shrink"
+						className="m-0 min-w-0 shrink-0 truncate font-medium text-[14px] text-foreground outline-none max-md:shrink"
 					>
 						{heading}
 					</h1>
 					{subheading && (
-						<span className="min-w-0 truncate text-[13.5px] text-muted-foreground">
+						<span className="min-w-0 truncate text-[13px] text-subtle-foreground">
 							{subheading}
 						</span>
 					)}
@@ -303,11 +299,11 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 				</IconButton>
 			)}
 			<IconButton
-				label="View routine definition"
+				label="Routine settings"
 				variant="bar"
 				render={<Link {...routineSettingsLink({ id: execution.routineId })} state={backToChat} />}
 			>
-				<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
+				<SettingsIcon />
 			</IconButton>
 		</>
 	);

@@ -39,6 +39,8 @@ const toolButtonClassName =
  */
 export function ChatComposer({
 	label,
+	placeholder,
+	model,
 	value,
 	onValueChange,
 	onSubmit,
@@ -51,8 +53,12 @@ export function ChatComposer({
 	attachments,
 	needsText = false,
 }: {
-	/** Names the box for assistive technology, and is its placeholder. */
+	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
 	label: string;
+	/** What the empty box says, when that is not its name. */
+	placeholder?: string;
+	/** The model of the bot the message goes to, named beside Send while nothing holds the message back. */
+	model?: string;
 	value: string;
 	onValueChange: (value: string) => void;
 	onSubmit: () => void | Promise<void>;
@@ -174,6 +180,7 @@ export function ChatComposer({
 						ref={editor}
 						id={id}
 						label={label}
+						placeholder={placeholder}
 						value={value}
 						mentionable={mentionable}
 						maxLength={20_000}
@@ -216,9 +223,14 @@ export function ChatComposer({
 						</button>
 					</Tooltip>
 					<span className="flex-1" />
-					<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
-						{sendHint(attachments.items)}
-					</span>
+					{/* Beside Send: what holds the message back, else the model that answers, else how to send it. */}
+					{filesNote(attachments.items) === undefined && model ? (
+						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs">{model}</span>
+					) : (
+						<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
+							{filesNote(attachments.items) ?? "Enter to send"}
+						</span>
+					)}
 					<button
 						type="submit"
 						aria-label={submitLabel}
@@ -307,8 +319,8 @@ function AttachButton({
 	);
 }
 
-/** Beside Send: what holds the message back, else how full it is of files, else how to send it. */
-function sendHint(items: readonly ComposerAttachment[]): string {
+/** What holds the message back, or how full it is of files, for beside Send; nothing when neither. */
+function filesNote(items: readonly ComposerAttachment[]): string | undefined {
 	const readiness = sendReadiness(items);
 	if (!readiness.ready && readiness.failed > 0) {
 		const action = items.some(({ upload }) => upload.state === "failed" && upload.retryable)
@@ -326,7 +338,7 @@ function sendHint(items: readonly ComposerAttachment[]): string {
 	if (items.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
 		return `${MAX_ATTACHMENTS_PER_MESSAGE} of ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
-	return "Enter to send";
+	return undefined;
 }
 
 /**

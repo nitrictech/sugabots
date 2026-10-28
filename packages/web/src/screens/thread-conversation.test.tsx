@@ -184,11 +184,11 @@ describe("what people and bots write", () => {
 		const answer = reply([{ type: "text", text: "I asked @issue-triager about it." }]);
 		const { update } = show([answer]);
 		await screen.findByText(/I asked/);
-		expect(screen.queryByText("@issue-triager")).toBeNull();
+		expect(screen.queryByText("Issue Triager", { selector: "span" })).toBeNull();
 
 		update([answer], [host, triager]);
 
-		expect(await screen.findByText("@issue-triager")).toBeDefined();
+		expect(await screen.findByText("Issue Triager", { selector: "span" })).toBeDefined();
 	});
 });
 

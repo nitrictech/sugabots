@@ -16,8 +16,9 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CircleAlert, Pause } from "lucide-react";
+import { Pause } from "lucide-react";
 import {
+	type CSSProperties,
 	Fragment,
 	type RefObject,
 	useCallback,
@@ -29,6 +30,7 @@ import {
 	useState,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { useAgents, useModelName } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -41,7 +43,6 @@ import {
 	useChatMessages,
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
-	useRoutineControls,
 	useSendChatMessage,
 	useSetDone,
 	useThreadFrom,
@@ -49,9 +50,10 @@ import {
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
-import { agentSettingsLink, conversationLink, podSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
+import { usePaneWidth } from "@/lib/pane-width.ts";
 import { useReactions } from "@/lib/reactions.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -66,6 +68,7 @@ import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
@@ -77,7 +80,8 @@ import { DetailsSidebar, PeopleDetails, type ThreadContents } from "./DetailsSid
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { RoutineDetails } from "./RoutineDetails.tsx";
+import { RoutinePanel } from "./RoutinePanel.tsx";
+import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
 import {
 	DaySeparator,
@@ -173,7 +177,8 @@ export function ConversationChat({
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const sending = sendingIds(optimistic, messages.items, details?.messages ?? []);
-	const groups = chatGroupsOf(items);
+	const routineFeed = details?.thread.type === "routine_feed";
+	const groups = chatGroupsOf(items, routineFeed);
 	const startedThreads = threadsByMessage(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
@@ -184,6 +189,14 @@ export function ConversationChat({
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
 	const threadWith = isPodChat && details ? firstBotNamed(draft, details.crew) : undefined;
+	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
+	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
+	const chatColumn = useRef<HTMLDivElement>(null);
+	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
+	const { agents } = useAgents();
+	const answeringModel = useModelName(
+		(isPodChat ? agents?.find((one) => one.id === threadWith?.id)?.model : agent?.model) ?? null,
+	);
 	// The people here and this chat's own bot, not yourself; the pod's other bots are not
 	// offered, except in the pod's chat, where naming one starts a thread with it.
 	const composerMentionable = useMemo(
@@ -363,14 +376,14 @@ export function ConversationChat({
 						: { open: place.detailsOpen, onChange: place.onDetailsChange },
 				};
 	const header =
-		conversation.kind === "botThread" ? (
+		conversation.kind === "botThread" && details?.routine ? (
+			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} />
+		) : conversation.kind === "botThread" ? (
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
 				title={direct ? undefined : title}
-				onlyYou={direct}
 				done={done}
-				routine={details?.routine}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
 			/>
@@ -379,8 +392,6 @@ export function ConversationChat({
 				back={headerPlace.back}
 				trailing={headerPlace.trailing}
 				title={podChatName}
-				tile={<PodChatTile color={pod.color} size={28} />}
-				description="Everyone in the pod. Mention a bot to start a thread with it."
 				menu={
 					listedChat &&
 					pod.permissions.rename && (
@@ -419,7 +430,9 @@ export function ConversationChat({
 	const composerLabel =
 		botStaysOut && draftMentions.length > 0
 			? `Message ${listNames(draftMentions.map((person) => person.name))}`
-			: `Message ${agent?.name ?? (isPodChat ? podChatName : pod.name)}`;
+			: details.routine && agent
+				? `Message ${agent.name} about this routine`
+				: `Message ${agent?.name ?? (isPodChat ? podChatName : pod.name)}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
 	const contents: ThreadContents = {
 		participants: details.participants,
@@ -440,11 +453,27 @@ export function ConversationChat({
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
 		<div className="flex min-h-0 min-w-0 flex-1 md:relative">
 			<div
+				ref={chatColumn}
+				style={
+					staged && chatWidth !== undefined
+						? ({ "--pane-width": `${chatWidth}px` } as CSSProperties)
+						: undefined
+				}
 				className={cn(
 					"relative flex min-w-0 flex-1 flex-col",
-					staged && "md:w-[440px] md:flex-none md:border-border md:border-r",
+					staged &&
+						"md:w-[clamp(320px,var(--pane-width,440px),calc(100%_-_360px))] md:flex-none md:border-border md:border-r",
 				)}
 			>
+				{staged && (
+					<ResizeHandle
+						label="Resize the chat"
+						pane={chatColumn}
+						edge="end"
+						min={320}
+						onResize={setChatWidth}
+					/>
+				)}
 				{header}
 				<FileDropTarget
 					onDropFiles={agent?.model === null ? undefined : attachments.attach}
@@ -495,7 +524,8 @@ export function ConversationChat({
 								))}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
-									{group.separated && <DaySeparator at={group.at} />}
+									{group.separated &&
+										(routineFeed ? <RunDivider at={group.at} /> : <DaySeparator at={group.at} />)}
 									{group.kind === "messages" ? (
 										<ThreadConversation
 											messages={group.messages}
@@ -518,6 +548,7 @@ export function ConversationChat({
 											authorLinkOf={authorLinkOf}
 											onReply={replyTo}
 											onStartThread={isPodChat ? threadFromMessage : undefined}
+											inRoutineThread={routineFeed}
 											threadLinesOf={(message) =>
 												startedThreads
 													.get(message.id)
@@ -543,15 +574,15 @@ export function ConversationChat({
 										</div>
 									) : group.item.kind === "routine_paused" ? (
 										<PausedLine at={group.item.createdAt} />
-									) : group.item.kind === "routine" &&
-										group.item.state === "failed" &&
-										details.routine ? (
-										<FailedRunCard
+									) : group.item.kind === "routine" && details.routine && host ? (
+										<RunMessage
 											item={group.item}
+											agent={host}
 											pod={pod}
 											routine={details.routine}
 											conversationId={conversationId}
 											latest={details.routine.failed && group.item.id === latestRunId(items)}
+											mentionable={mentionable}
 											onOpenThread={openThread}
 										/>
 									) : (
@@ -559,6 +590,7 @@ export function ConversationChat({
 									)}
 								</Fragment>
 							))}
+							{details.routine && <NextRunDivider routine={details.routine} />}
 							{jump.notFound && (
 								<p
 									role="status"
@@ -576,6 +608,7 @@ export function ConversationChat({
 						) : (
 							<ChatComposer
 								label={composerLabel}
+								model={botStaysOut ? undefined : (answeringModel ?? undefined)}
 								value={draft}
 								onValueChange={setDraft}
 								onSubmit={submit}
@@ -614,6 +647,7 @@ export function ConversationChat({
 				<DesktopStage
 					threadId={details.thread.id}
 					agent={agent}
+					pod={pod}
 					mayUse={pod.permissions.useDesktops}
 					onClose={() => onStagedChange(undefined)}
 				/>
@@ -633,12 +667,11 @@ export function ConversationChat({
 				place.detailsOpen &&
 				!isPodChat &&
 				(details.routine && agent ? (
-					<RoutineDetails
+					<RoutinePanel
 						agent={agent}
 						pod={pod}
 						conversationId={conversationId}
 						standing={details.routine}
-						onOpenThread={openThread}
 						onClose={() => place.onDetailsChange(false)}
 					/>
 				) : agent ? (
@@ -714,7 +747,7 @@ type ChatGroup = { key: string; at: string; separated: boolean } & (
  * author's messages in a row read as a run, and each collaboration or routine
  * row on its own. A new day starts a new group behind a separator.
  */
-function chatGroupsOf(items: readonly ChatMessageItem[]): ChatGroup[] {
+function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGroup[] {
 	const groups: ChatGroup[] = [];
 	let previousAt: string | undefined;
 	// A thread is drawn under the message it was started from, when that message is here.
@@ -725,7 +758,8 @@ function chatGroupsOf(items: readonly ChatMessageItem[]): ChatGroup[] {
 		(one) => one.kind !== "thread" || !underTheirMessages.has(one.id),
 	)) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
-		const separated = startsNewDay(previousAt, at);
+		// A routine's thread is marked where each run starts; any other, where each day does.
+		const separated = byRun ? startsRun(item) : startsNewDay(previousAt, at);
 		previousAt = at;
 		const last = groups.at(-1);
 		if (item.kind === "message") {
@@ -864,7 +898,7 @@ function useJumpToMessage({
 		// In the next frame, after the scroll event from the chat's first move to its
 		// foot, which would otherwise say the chat is following its latest again.
 		requestAnimationFrame(() => {
-			row.scrollIntoView({ block: "center" });
+			if (viewport.current) centreIn(viewport.current, row);
 			row.tabIndex = -1;
 			row.focus({ preventScroll: true });
 			jumpedTo();
@@ -879,6 +913,17 @@ function useJumpToMessage({
 	const notFound =
 		target !== undefined && !shown && older !== "loading" && (older === "none" || searchedEnough);
 	return { pointedOut, notFound };
+}
+
+/**
+ * Scrolls `scroller` alone so `row` sits in its middle. `scrollIntoView` would
+ * also scroll every box around it, such as the app's frame, which is clipped
+ * rather than meant to scroll, and leave the whole page shifted up.
+ */
+function centreIn(scroller: HTMLElement, row: HTMLElement) {
+	const frame = scroller.getBoundingClientRect();
+	const box = row.getBoundingClientRect();
+	scroller.scrollTop += box.top - frame.top - (frame.height - box.height) / 2;
 }
 
 /** The newest routine run in `items`, which is the one that can be tried again. */
@@ -900,71 +945,10 @@ function PausedLine({ at }: { at: string }) {
 }
 
 /**
- * A routine run that failed: when, and why. The latest, while the routine is
- * still failing, offers to try again or to see to the connection it needs.
- */
-function FailedRunCard({
-	item,
-	pod,
-	routine,
-	conversationId,
-	latest,
-	onOpenThread,
-}: {
-	item: Extract<ChatMessageItem, { kind: "routine" }>;
-	pod: Pod;
-	routine: NonNullable<ThreadDetails["routine"]>;
-	conversationId: string;
-	latest: boolean;
-	onOpenThread: (threadId: string) => void;
-}) {
-	const controls = useRoutineControls(conversationId, routine);
-	return (
-		<div className="px-5 py-1.5 pl-[70px]">
-			<article
-				aria-label={`Run failed: ${item.routineName}`}
-				className="flex max-w-[520px] gap-3 rounded-[10px] border border-failed-card-border bg-failed-card px-3.5 py-3"
-			>
-				<CircleAlert
-					aria-hidden
-					size={17}
-					strokeWidth={2}
-					className="mt-px shrink-0 text-destructive-text"
-				/>
-				<div className="flex min-w-0 flex-1 flex-col gap-1">
-					<button
-						type="button"
-						onClick={() => onOpenThread(item.threadId)}
-						className="focus-ring self-start rounded-sm text-left font-semibold text-[14px] text-failed-card-heading"
-					>
-						Run failed {formatListTime(new Date(item.createdAt), new Date())}
-					</button>
-					{item.error && <p className="m-0 text-[13.5px] text-failed-card-text">{item.error}</p>}
-					{latest && (
-						<div className="mt-1.5 flex gap-2">
-							<Button
-								size="sm"
-								disabled={controls.pending}
-								onClick={() => void controls.runAgain()}
-							>
-								Retry
-							</Button>
-							<Button size="sm" variant="secondary" render={<Link {...podSettingsLink(pod)} />}>
-								Fix connection
-							</Button>
-						</div>
-					)}
-				</div>
-			</article>
-		</div>
-	);
-}
-
-/**
- * A thread started from a message in the pod's chat, as a line under that
+ * A thread started from a message in the pod's chat, hanging off that
  * message, drawn as a collaboration is: the faces of who started it and its
- * bot, its name, when it last moved, and how many replies it has, or dots
- * while its bot has yet to answer.
+ * bot, how many replies it has, its name, and when it last moved; or, before
+ * any reply, its name with dots while its bot has yet to answer.
  */
 function ThreadLine({
 	item,
@@ -979,19 +963,15 @@ function ThreadLine({
 		...(startedBy && startedBy.kind !== "routine_trigger" ? [startedBy] : []),
 		...(item.agent ? [item.agent] : []),
 	];
+	const replied = item.replies > 0;
 	return (
 		<SideThreadLine
 			faces={faces}
-			label={item.title}
+			label={replied ? countOf(item.replies, "reply", "replies") : item.title}
+			detail={replied ? item.title : undefined}
 			description={`Open thread: ${item.title}`}
 			lastActivityAt={item.lastReplyAt ?? undefined}
-			tag={
-				item.replies > 0
-					? { text: countOf(item.replies, "reply", "replies") }
-					: item.agent
-						? "working"
-						: undefined
-			}
+			status={!replied && item.agent ? "working" : undefined}
 			onOpen={onOpen}
 		/>
 	);
@@ -1141,4 +1121,9 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 			)}
 		</p>
 	);
+}
+
+/** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
+function startsRun(item: ChatMessageItem): boolean {
+	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
 }

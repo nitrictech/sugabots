@@ -32,7 +32,6 @@ export const Filling = meta.story({
 			"value",
 			"19",
 		);
-		await expect(canvas.getByText("19% full")).toBeVisible();
 		await expect(canvas.queryByText(/tokens/)).toBeNull();
 	},
 });
@@ -41,7 +40,10 @@ export const Filling = meta.story({
 export const PastTheLine = meta.story({
 	args: { context: context(186_400) },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("73% full")).toBeVisible();
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
+			"value",
+			"73",
+		);
 	},
 });
 
@@ -52,6 +54,9 @@ export const PastTheLine = meta.story({
 export const CompactedSinceMeasured = meta.story({
 	args: { context: context(186_400, "2026-09-28T09:06:00.000Z") },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("73% full")).toBeVisible();
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
+			"value",
+			"73",
+		);
 	},
 });

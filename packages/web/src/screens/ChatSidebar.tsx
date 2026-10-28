@@ -15,6 +15,7 @@ export function ChatSidebar({
 	headingRef,
 	onClose,
 	sheet = false,
+	headerless = false,
 	actions,
 	className,
 	children,
@@ -29,6 +30,12 @@ export function ChatSidebar({
 	headingRef?: Ref<HTMLHeadingElement>;
 	onClose: () => void;
 	sheet?: boolean;
+	/**
+	 * Without its header where it sits beside the chat, as Details does: what it
+	 * shows heads it, and the chat's own button closes it. Where it covers the
+	 * chat, the header stays for its Close.
+	 */
+	headerless?: boolean;
 	/** Buttons for what the sidebar shows, beside its Close; each an `IconButton` with `variant="bar"`. */
 	actions?: ReactNode;
 	className?: string;
@@ -67,7 +74,12 @@ export function ChatSidebar({
 						className="mx-auto mt-2 mb-3.5 h-1 w-9 shrink-0 rounded-full bg-border-strong md:hidden"
 					/>
 				)}
-				<header className="flex h-14 shrink-0 items-center gap-2 border-border border-b pr-3 pl-[18px]">
+				<header
+					className={cn(
+						"flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-[18px]",
+						headerless && "xl:hidden",
+					)}
+				>
 					<div className="flex min-w-0 flex-1 items-baseline gap-2">
 						<h2
 							ref={headingRef}
@@ -96,38 +108,32 @@ export function ChatSidebar({
 }
 
 /**
- * A labelled group in a sidebar: its name, with a note at the right such as
- * when it was updated, then its rows on a card, or loose with `card={false}`.
+ * A labelled group in a sidebar, ruled off from the one above: its name, with
+ * `end` at the right, such as a figure, then what it holds.
  */
 export function SidebarSection({
 	title,
-	note,
-	card = true,
+	end,
 	children,
 	className,
 }: {
 	title: string;
-	note?: ReactNode;
-	card?: boolean;
-	children: ReactNode;
+	end?: ReactNode;
+	children?: ReactNode;
 	className?: string;
 }) {
 	return (
-		<section>
-			<div className="flex items-baseline gap-2 px-0.5 pb-2">
-				<h3 className="m-0 flex-1 font-medium text-muted-foreground text-sm">{title}</h3>
-				{note && <span className="text-subtle-foreground text-xs">{note}</span>}
+		<section className={cn("flex flex-col gap-2.5 border-border border-t px-5 py-4", className)}>
+			<div className="flex items-center gap-2">
+				<h3 className="m-0 flex-1 font-medium text-subtle-foreground text-xs">{title}</h3>
+				{end}
 			</div>
-			<div
-				className={cn(card && "overflow-hidden rounded-xl border border-border bg-list", className)}
-			>
-				{children}
-			</div>
+			{children}
 		</section>
 	);
 }
 
-/** The first `shown` of a list, as list items, and a Show more row for the rest. */
+/** The first `shown` of a list, as list items, and a Show more for the rest. */
 export function Expandable<Item>({
 	items,
 	shown,
@@ -141,19 +147,20 @@ export function Expandable<Item>({
 	const visible = open ? items : items.slice(0, shown);
 	return (
 		<>
-			<ul className="m-0 list-none p-0">{visible.map(children)}</ul>
+			<ul className="m-0 flex list-none flex-col p-0">{visible.map(children)}</ul>
 			{items.length > shown && <ShowMore open={open} onToggle={() => setOpen(!open)} />}
 		</>
 	);
 }
 
+/** A small text button under something folded, opening the rest of it or folding it again. */
 export function ShowMore({ open, onToggle }: { open: boolean; onToggle: () => void }) {
 	return (
 		<button
 			type="button"
 			aria-expanded={open}
 			onClick={onToggle}
-			className="focus-ring block w-full border-border border-t px-3.5 py-[9px] text-left font-medium text-[13px] text-link"
+			className="focus-ring self-start rounded-sm text-muted-foreground text-xs hover:text-foreground"
 		>
 			{open ? "Show less" : "Show more"}
 		</button>

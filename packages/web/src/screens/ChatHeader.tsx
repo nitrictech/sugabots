@@ -1,16 +1,11 @@
-import type { Agent, Pod, ThreadDetails } from "@sugabots/contracts";
+import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ChevronLeft, CircleCheck, Info, Pause, Play, RotateCcw } from "lucide-react";
+import { cn } from "cn";
+import { ChevronLeft, CircleCheck, PanelRight, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
-import { useRoutineControls } from "@/lib/chats.ts";
 import { activityLink, podLink } from "@/lib/links.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
-
-/** A routine, as its own thread knows it. */
-type RoutineStanding = NonNullable<ThreadDetails["routine"]>;
 
 /** The list a page covers on a phone, which its Back returns to. */
 export type BackTo = { to: "pod"; pod: Pod } | { to: "activity" };
@@ -41,18 +36,16 @@ export interface DetailsToggle {
 }
 
 /**
- * The bar across the top of a bot's chat: its face and name, what it is for,
- * the way into its sandbox's desktop when it has one, and, with `details`, the
- * way into its Details: the ⓘ, or the name, which is how a phone reaches them.
+ * The bar across the top of a bot's chat: its name, the way into its
+ * sandbox's desktop when it has one, and, with `details`, the way into its
+ * Details: the ⓘ, or the name, which is how a phone reaches them.
  */
 export function ChatHeader({
 	agent,
 	title,
 	done,
-	routine,
 	conversationId,
 	onOpenDesktop,
-	onlyYou = false,
 	back,
 	trailing,
 	details,
@@ -62,87 +55,43 @@ export function ChatHeader({
 	title?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it. */
 	done?: DoneToggle;
-	/** On a routine's own thread: the routine, which the header pauses and resumes. */
-	routine?: RoutineStanding;
 	conversationId: string;
 	onOpenDesktop: () => void;
-	/** The conversation is the viewer's alone, as in their Personal pod, which the header says. */
-	onlyYou?: boolean;
 }) {
-	const description = [agent.description?.replace(/\.$/, ""), onlyYou && "Only you can see this"]
-		.filter(Boolean)
-		.join(". ");
-	const name = (
-		<>
-			<AgentAvatar
-				color={agent.color}
-				face={agent.face}
-				shape={agent.shape}
-				size={24}
-				className="shrink-0"
-			/>
-			<span className="truncate">{title ?? agent.name}</span>
-		</>
-	);
+	const name = title ?? agent.name;
 	return (
-		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
-			<HeaderBack back={back} />
-			<h1 className="m-0 flex min-w-0 font-semibold text-[16px] text-foreground">
+		<HeaderBar back={back}>
+			<h1 className={TITLE_CLASS_NAME}>
 				{details ? (
 					<button
 						type="button"
 						onClick={() => details.onChange(!details.open)}
-						className="focus-ring flex min-w-0 items-center gap-3 rounded-md text-left"
+						className="focus-ring block max-w-full truncate rounded-md text-left"
 					>
 						{name}
 					</button>
 				) : (
-					<span className="flex min-w-0 items-center gap-3">{name}</span>
+					name
 				)}
 			</h1>
-			{description ? (
-				<>
-					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
-					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
-						{description}
-					</p>
-				</>
-			) : (
-				<span className="flex-1" />
-			)}
 			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
 			{done && <DoneButton {...done} />}
-			{routine && <RoutinePauseButton conversationId={conversationId} routine={routine} />}
 			{details && <DetailsButton {...details} />}
 			{trailing}
-		</header>
+		</HeaderBar>
 	);
 }
 
-/** Pauses the routine whose own thread `conversationId` is, or resumes it. */
-function RoutinePauseButton({
-	conversationId,
-	routine,
-}: {
-	conversationId: string;
-	routine: RoutineStanding;
-}) {
-	const controls = useRoutineControls(conversationId, routine);
-	const paused = routine.state === "paused";
+/** The title across the top of a chat, as a page's is: its name, in the same type and place. */
+const TITLE_CLASS_NAME = "m-0 min-w-0 flex-1 truncate font-medium text-[14px] text-foreground";
+
+/** The bar across the top of a chat: Back on a phone, then what goes in it, the same height and inset as a page's. */
+function HeaderBar({ back, children }: { back: BackTo; children: ReactNode }) {
 	return (
-		<Button
-			size="sm"
-			variant="outline"
-			disabled={controls.pending}
-			onClick={() => void controls.setPaused(!paused)}
-		>
-			{paused ? (
-				<Play aria-hidden size={14} strokeWidth={2} />
-			) : (
-				<Pause aria-hidden size={14} strokeWidth={2} />
-			)}
-			{paused ? "Resume" : "Pause"}
-		</Button>
+		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:pl-12">
+			<HeaderBack back={back} />
+			{children}
+		</header>
 	);
 }
 
@@ -154,56 +103,40 @@ function DetailsButton({ open, onChange }: DetailsToggle) {
 			variant="bar"
 			aria-pressed={open}
 			onClick={() => onChange(!open)}
-			className="size-8 aria-pressed:bg-chip max-md:hidden"
+			className={cn(HEADER_ICON_CLASS_NAME, "max-md:hidden")}
 		>
-			<Info size={18} strokeWidth={2} />
+			<PanelRight size={16} strokeWidth={1.75} />
 		</IconButton>
 	);
 }
 
 /**
- * The bar across the top of a chat between people, the pod's chat or a thread
- * started from it: what it is called, and what it is for.
+ * The bar across the top of a chat with no bot's controls in it: between
+ * people, the pod's chat, a thread started from it, or a routine's thread.
+ * What it is called, and its Details where it has them.
  */
 export function PeopleChatHeader({
 	title,
-	tile,
 	menu,
-	description,
 	done,
 	back,
 	trailing,
 	details,
 }: HeaderPlace & {
 	title: string;
-	/** Drawn before the title, such as the pod's tile on its chat. */
-	tile?: ReactNode;
 	/** What else can be done with it, at the end of the header. */
 	menu?: ReactNode;
-	description?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
 	done?: DoneToggle;
 }) {
 	return (
-		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
-			<HeaderBack back={back} />
-			{tile}
-			<h1 className="m-0 min-w-0 truncate font-semibold text-[16px] text-foreground">{title}</h1>
-			{description ? (
-				<>
-					<span aria-hidden className="h-5 w-px shrink-0 bg-border-strong max-md:hidden" />
-					<p className="m-0 min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground max-md:hidden">
-						{description}
-					</p>
-				</>
-			) : (
-				<span className="flex-1" />
-			)}
+		<HeaderBar back={back}>
+			<h1 className={TITLE_CLASS_NAME}>{title}</h1>
 			{done && <DoneButton {...done} />}
 			{details && <DetailsButton {...details} />}
 			{menu}
 			{trailing}
-		</header>
+		</HeaderBar>
 	);
 }
 
@@ -214,21 +147,29 @@ export interface DoneToggle {
 }
 
 /**
- * Marks the thread done, which moves it to the list's Done, or reopens it,
- * saying in words which it will do.
+ * Marks the thread done, which takes it off the sidebar once it is left, or
+ * reopens it; its name, and tooltip, say which it will do.
  */
 function DoneButton({ isDone, onChange }: DoneToggle) {
 	return (
-		<Button size="sm" variant="outline" onClick={() => onChange(!isDone)}>
+		<IconButton
+			label={isDone ? "Reopen" : "Mark done"}
+			variant="bar"
+			onClick={() => onChange(!isDone)}
+			className={HEADER_ICON_CLASS_NAME}
+		>
 			{isDone ? (
-				<RotateCcw aria-hidden size={14} strokeWidth={2} />
+				<RotateCcw size={16} strokeWidth={1.75} />
 			) : (
-				<CircleCheck aria-hidden size={14} strokeWidth={2} />
+				<CircleCheck size={16} strokeWidth={1.75} />
 			)}
-			{isDone ? "Reopen" : "Mark done"}
-		</Button>
+		</IconButton>
 	);
 }
+
+/** An icon button in a chat's header, quieter until pointed at, and shaded while what it opens is open. */
+export const HEADER_ICON_CLASS_NAME =
+	"text-muted-foreground hover:text-foreground aria-pressed:bg-row-selected aria-pressed:text-foreground";
 
 /** The round Back a phone shows at the left of a page's header, to the list the page covers. */
 export function HeaderBack({ back }: { back: BackTo }) {
@@ -240,7 +181,7 @@ export function HeaderBack({ back }: { back: BackTo }) {
 			{chevron}
 		</Link>
 	) : (
-		<Link {...activityLink()} aria-label="Back to Activity" className={className}>
+		<Link {...activityLink()} aria-label="Back to Inbox" className={className}>
 			{chevron}
 		</Link>
 	);

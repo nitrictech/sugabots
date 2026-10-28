@@ -122,13 +122,16 @@ describe("what everybody sees", () => {
 	it("lists every bot beside the open one, each under its pod", async () => {
 		mount(page);
 
-		const list = await screen.findByRole("link", { name: new RegExp(triager.name) });
+		const main = await screen.findByRole("main");
+		const list = await within(main).findByRole("link", { name: new RegExp(triager.name) });
 		expect(list.textContent).toContain(suga.name);
 		expect(
-			screen.getByRole("link", { name: new RegExp(linear.name) }).getAttribute("aria-current"),
+			within(main)
+				.getByRole("link", { name: new RegExp(linear.name) })
+				.getAttribute("aria-current"),
 		).toBe("page");
 		// A system bot is in no pod, so it is not on the list of bots.
-		expect(screen.queryByRole("link", { name: new RegExp(compaction.name) })).toBeNull();
+		expect(within(main).queryByRole("link", { name: new RegExp(compaction.name) })).toBeNull();
 	});
 
 	it("shows the bot as a contact card: its face, name and pod first", async () => {
@@ -166,7 +169,7 @@ describe("a member", () => {
 
 		await openSlide("Model");
 		expect(await screen.findByRole("button", { name: MODELS[1] })).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: linear.name }));
+		fireEvent.click(within(screen.getByRole("main")).getByRole("button", { name: linear.name }));
 		await openSlide("Instructions");
 		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(false);
 	});

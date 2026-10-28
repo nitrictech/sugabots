@@ -1,20 +1,24 @@
 import type { ThreadContext } from "@sugabots/contracts";
 import { cn } from "cn";
 
+/** How much of the bot's short-term memory the chat fills, as a whole percentage. */
+export function usedPercentOf(context: ThreadContext): number {
+	return Math.round(Math.min(context.usedTokens / context.windowTokens, 1) * 100);
+}
+
 /**
  * How much of the bot's short-term memory (its context window) the chat
- * fills, as a percentage measured on the latest reply, with a tick where older
+ * fills, as a thin bar measured on the latest reply, with a tick where older
  * messages are folded into the summary. A compaction since that reply leaves
  * the figure out of date until the next one, so the bar fades.
  */
 export function ContextMeter({ context }: { context: ThreadContext }) {
-	const { usedTokens, measuredAt, windowTokens, compactionLineTokens, compactedAt } = context;
+	const { measuredAt, windowTokens, compactionLineTokens, compactedAt } = context;
 	const compactedSinceMeasured = compactedAt !== null && compactedAt > measuredAt;
-	const usedPercent = Math.round(Math.min(usedTokens / windowTokens, 1) * 100);
+	const usedPercent = usedPercentOf(context);
 	const linePercent = Math.round((compactionLineTokens / windowTokens) * 100);
 	return (
-		<div className="flex flex-col gap-2.5 px-3.5 py-3">
-			<span className="font-medium text-[14px] text-foreground">{usedPercent}% full</span>
+		<>
 			{/* The native meter can't be styled across browsers, so it is read out and the bar drawn. */}
 			<meter
 				className="sr-only"
@@ -26,7 +30,7 @@ export function ContextMeter({ context }: { context: ThreadContext }) {
 			<div
 				aria-hidden
 				className={cn(
-					"relative h-1.5 rounded-full bg-chip",
+					"relative h-[3px] rounded-full bg-chip-strong",
 					compactedSinceMeasured && "opacity-40",
 				)}
 			>
@@ -35,10 +39,10 @@ export function ContextMeter({ context }: { context: ThreadContext }) {
 					style={{ width: `${usedPercent}%` }}
 				/>
 				<div
-					className="absolute -top-[3px] h-3 w-0.5 rounded-[1px] bg-muted-foreground"
+					className="absolute -top-[3px] h-[9px] w-px bg-muted-foreground"
 					style={{ left: `${linePercent}%` }}
 				/>
 			</div>
-		</div>
+		</>
 	);
 }
