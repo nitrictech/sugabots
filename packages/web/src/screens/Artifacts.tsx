@@ -115,7 +115,7 @@ export function ArtifactListView({
 						</EmptyState>
 					</div>
 				) : (
-					<div className="flex flex-col gap-5 px-4 pt-4 pb-12">
+					<div className="flex flex-col gap-5 px-4 pt-4 pb-12 max-md:grid max-md:grid-cols-2 max-md:gap-3 max-md:pt-2">
 						{artifacts === "failed" ? (
 							<EmptyState title="Could not load the artifacts">
 								The API did not answer. Reload, or check that it is running.
@@ -125,12 +125,12 @@ export function ArtifactListView({
 								<section
 									key={group.label}
 									aria-label={group.label}
-									className="flex flex-col gap-0.5"
+									className="flex flex-col gap-0.5 max-md:contents"
 								>
-									<h2 className="m-0 px-2 pb-1.5 font-medium text-subtle-foreground text-xs">
+									<h2 className="m-0 px-2 pb-1.5 font-medium text-subtle-foreground text-xs max-md:hidden">
 										{group.label}
 									</h2>
-									<ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+									<ul className="m-0 flex list-none flex-col gap-0.5 p-0 max-md:contents">
 										{group.artifacts.map((artifact) => (
 											<li key={artifact.id}>
 												<ArtifactRow
@@ -170,7 +170,11 @@ export function ArtifactListView({
 	);
 }
 
-/** An artifact in the list: what kind it is, its title, which version, who made it, and when it last changed. */
+/**
+ * An artifact in the list: what kind it is, its title, which version, who
+ * made it, and when it last changed. A phone draws it as a card, under the
+ * shape of a page.
+ */
 function ArtifactRow({
 	pod,
 	artifact,
@@ -189,22 +193,47 @@ function ArtifactRow({
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex items-center gap-3 rounded-[10px] p-2 transition-colors",
+				"max-md:h-full max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:overflow-hidden max-md:rounded-[12px] max-md:border max-md:border-border max-md:bg-list max-md:p-0",
 				selected ? "bg-row-selected" : "hover:bg-message-hover",
 			)}
 		>
-			<KindMark kind={artifact.kind} />
-			<span className="flex min-w-0 flex-1 flex-col leading-snug">
-				<span className="truncate font-medium text-[13px] text-foreground">{artifact.title}</span>
+			<PageShape />
+			<span className="contents max-md:hidden">
+				<KindMark kind={artifact.kind} />
+			</span>
+			<span className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-1 max-md:px-3 max-md:pt-2.5 max-md:pb-3">
+				<span className="truncate font-medium text-[13px] text-foreground max-md:line-clamp-2 max-md:whitespace-normal max-md:text-[14px]">
+					{artifact.title}
+				</span>
 				<span className="truncate text-subtle-foreground text-xs">
 					{[kind.label, `v${artifact.version}`, artifact.createdBy?.name ?? "A removed bot"].join(
 						", ",
 					)}
 				</span>
 			</span>
-			<time dateTime={artifact.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
+			<time
+				dateTime={artifact.updatedAt}
+				className="shrink-0 text-subtle-foreground text-xs max-md:-mt-2 max-md:px-3 max-md:pb-3"
+			>
 				{formatListTime(new Date(artifact.updatedAt), now)}
 			</time>
 		</Link>
+	);
+}
+
+/** The shape of a page, heading, lines and a table, at the top of an artifact's card on a phone. */
+function PageShape() {
+	return (
+		<span
+			aria-hidden
+			className="flex h-[112px] w-full shrink-0 flex-col gap-[7px] overflow-hidden border-border border-b bg-row-hover px-3.5 pt-3.5 md:hidden"
+		>
+			<span className="h-[7px] w-[62%] rounded-[2px] bg-border-strong" />
+			<span className="h-1 w-[92%] rounded-[2px] bg-tile" />
+			<span className="h-1 w-[84%] rounded-[2px] bg-tile" />
+			<span className="h-1 w-[70%] rounded-[2px] bg-tile" />
+			<span className="mt-1 h-[26px] w-full rounded-[4px] bg-border" />
+		</span>
 	);
 }
 

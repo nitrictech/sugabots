@@ -88,7 +88,7 @@ export function RoutinesPage({
 				)}
 			>
 				<PageHeader title={title} actions={newRoutine} back={back} />
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
+				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 max-md:gap-0 max-md:px-0 max-md:pt-0">
 					{list.isError && (
 						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">
 							Routines could not be loaded.
@@ -138,7 +138,7 @@ function RoutineRow({
 			{...routineThreadLink(pod, row.routine.id)}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				"focus-ring flex gap-2.5 rounded-lg p-2.5 transition-colors",
+				"focus-ring flex gap-2.5 rounded-lg p-2.5 transition-colors max-md:min-h-16 max-md:items-center max-md:gap-3 max-md:rounded-none max-md:px-4",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
@@ -147,13 +147,20 @@ function RoutineRow({
 				face={row.agent.face}
 				shape={row.agent.shape}
 				size={20}
-				className={cn("shrink-0", paused && "opacity-50")}
+				className={cn("shrink-0 max-md:hidden", paused && "opacity-50")}
 			/>
-			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+			<AgentAvatar
+				color={row.agent.color}
+				face={row.agent.face}
+				shape={row.agent.shape}
+				size={36}
+				className={cn("shrink-0 md:hidden", paused && "opacity-50")}
+			/>
+			<span className="flex min-w-0 flex-1 flex-col gap-0.5 max-md:gap-[3px] max-md:text-[13px] max-md:*:*:text-[13px]">
 				<span className="flex min-w-0 items-baseline gap-2">
 					<span
 						className={cn(
-							"min-w-0 flex-1 truncate-fade text-[13px]",
+							"min-w-0 flex-1 truncate-fade text-[13px] max-md:text-[15px]!",
 							selected || row.mentionsYou
 								? "text-foreground"
 								: paused

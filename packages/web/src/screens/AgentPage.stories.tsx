@@ -925,6 +925,33 @@ export const SandboxInUseOnAPhone = meta.story({
 	},
 });
 
+/**
+ * On a phone the computer opens in a sheet first, watch-only, and in full,
+ * to take over, from there.
+ */
+export const ComputerOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...sandboxHandlers([...conversation, browsing]));
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole(
+				"button",
+				{ name: `${growthDesk.name} is using the sandbox. Open its desktop` },
+				{ timeout: 10_000 },
+			),
+		);
+		const sheet = await screen.findByRole("dialog", { name: `${growthDesk.name}'s computer` });
+		await userEvent.click(
+			within(sheet).getByRole("button", { name: `Open ${growthDesk.name}'s desktop` }),
+		);
+		await expect(
+			await canvas.findByRole("region", { name: `${growthDesk.name}'s computer` }),
+		).toBeVisible();
+	},
+});
+
 const pricing = {
 	id: "0199a3a0-0000-7000-8000-0000000005f1",
 	podId: revenue.id,

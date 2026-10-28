@@ -52,6 +52,7 @@ import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attach
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink, conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { useReactions } from "@/lib/reactions.ts";
@@ -81,7 +82,7 @@ import {
 } from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
-import { DesktopStage } from "./DesktopViewer.tsx";
+import { ComputerSheet, DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar, PeopleDetails, type ThreadContents } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
@@ -142,6 +143,10 @@ export function ConversationChat({
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
+	// A phone looks at the computer in a sheet first, and opens it in full from there.
+	const wide = useMediaQuery(SIDE_BY_SIDE);
+	const [computerSheetOpen, setComputerSheetOpen] = useState(false);
+	const openComputer = () => (wide ? openDesktop() : setComputerSheetOpen(true));
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
 	const mainThread = useThread(conversationId);
@@ -402,7 +407,7 @@ export function ConversationChat({
 				title={direct ? undefined : title}
 				done={done}
 				conversationId={conversationId}
-				onOpenDesktop={openDesktop}
+				onOpenDesktop={openComputer}
 			/>
 		) : conversation.kind === "podChat" ? (
 			<PeopleChatHeader
@@ -653,6 +658,19 @@ export function ConversationChat({
 					</div>
 				</FileDropTarget>
 			</div>
+			{agent && (
+				<ComputerSheet
+					threadId={details.thread.id}
+					agent={agent}
+					pod={pod}
+					open={computerSheetOpen}
+					onOpenChange={setComputerSheetOpen}
+					onOpenFull={() => {
+						setComputerSheetOpen(false);
+						openDesktop();
+					}}
+				/>
+			)}
 			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
 			{staged?.kind === "artifact" ? (
 				<ArtifactStage
@@ -690,6 +708,7 @@ export function ConversationChat({
 						agent={agent}
 						pod={pod}
 						conversationId={conversationId}
+						name={details.thread.title}
 						standing={details.routine}
 						onClose={() => place.onDetailsChange(false)}
 					/>
@@ -700,7 +719,7 @@ export function ConversationChat({
 						threadId={details.thread.id}
 						user={user}
 						contents={contents}
-						onOpenDesktop={openDesktop}
+						onOpenDesktop={openComputer}
 						onClose={() => place.onDetailsChange(false)}
 					/>
 				) : (

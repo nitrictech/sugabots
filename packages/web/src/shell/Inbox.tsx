@@ -1,10 +1,11 @@
 import type { ActivityItem, Pod } from "@sugabots/contracts";
 import { Link, linkOptions, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CheckCheck, Inbox as InboxIcon, ListFilter } from "lucide-react";
+import { Check, CheckCheck, Inbox as InboxIcon, ListFilter } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import { useActivityFeed, useAttentionCounts, useMarkChatsRead } from "@/lib/chats.ts";
 import { activityThreadLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { usePods } from "@/lib/pods.ts";
@@ -27,6 +28,7 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
+import { SHEET_ROW_CLASS_NAME, Sheet } from "@/ui/sheet.tsx";
 
 /** How narrow the list can be dragged, in pixels. */
 const LIST_MIN_WIDTH_PX = 280;
@@ -156,6 +158,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 /**
  * The ⧩ that narrows Inbox to the kinds of item ticked in its menu, each with
  * how many there are in the view. Several can be ticked; none lists them all.
+ * A phone ticks them in a sheet.
  */
 function KindFilter({
 	kinds,
@@ -166,14 +169,67 @@ function KindFilter({
 	chosen: ReadonlySet<Kind>;
 	onToggle: (kind: Kind) => void;
 }) {
+	const wide = useMediaQuery(SIDE_BY_SIDE);
+	const [sheetOpen, setSheetOpen] = useState(false);
+	const shaded = cn(chosen.size > 0 && "bg-chip text-foreground");
+	if (!wide) {
+		return (
+			<>
+				<IconButton
+					label="Filter"
+					variant="bar"
+					onClick={() => setSheetOpen(true)}
+					className={shaded}
+				>
+					<ListFilter size={16} strokeWidth={1.75} />
+				</IconButton>
+				<Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="Show in inbox">
+					<ul className="m-0 flex list-none flex-col p-0">
+						{kinds.map((option) => {
+							const ticked = chosen.has(option.value);
+							return (
+								<li key={option.value}>
+									<label
+										className={cn(
+											SHEET_ROW_CLASS_NAME,
+											"gap-3.5 has-focus-visible:shadow-(--ring-shadow)",
+										)}
+									>
+										<input
+											type="checkbox"
+											checked={ticked}
+											onChange={() => onToggle(option.value)}
+											className="sr-only"
+										/>
+										<span
+											aria-hidden
+											className={cn(
+												"grid size-[22px] shrink-0 place-items-center rounded-[6px]",
+												ticked
+													? "bg-foreground text-background"
+													: "shadow-[inset_0_0_0_1.5px_var(--color-border-strong)]",
+											)}
+										>
+											{ticked && <Check size={15} strokeWidth={2.5} />}
+										</span>
+										<span className="flex-1">{option.label}</span>
+										{option.count > 0 && (
+											<span className="text-[14px] text-subtle-foreground tabular-nums">
+												{option.count}
+											</span>
+										)}
+									</label>
+								</li>
+							);
+						})}
+					</ul>
+				</Sheet>
+			</>
+		);
+	}
 	return (
 		<DropdownMenu>
-			<IconButton
-				label="Filter"
-				variant="bar"
-				render={<DropdownMenuTrigger />}
-				className={cn(chosen.size > 0 && "bg-chip text-foreground")}
-			>
+			<IconButton label="Filter" variant="bar" render={<DropdownMenuTrigger />} className={shaded}>
 				<ListFilter size={16} strokeWidth={1.75} />
 			</IconButton>
 			<DropdownMenuContent align="start" className="min-w-48">

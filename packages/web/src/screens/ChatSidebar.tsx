@@ -81,7 +81,8 @@ export function ChatSidebar({
 				<header
 					className={cn(
 						"flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-[18px]",
-						headerless && "max-md:hidden xl:hidden",
+						headerless && "xl:hidden",
+						headerless && !sheet && "max-md:hidden",
 					)}
 				>
 					<div className="flex min-w-0 flex-1 items-baseline gap-2">

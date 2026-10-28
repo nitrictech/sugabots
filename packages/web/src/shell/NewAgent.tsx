@@ -24,6 +24,7 @@ import {
 	SmilePlus,
 	Star,
 	Wrench,
+	X,
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
@@ -42,6 +43,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
 interface Look {
@@ -74,7 +76,8 @@ type Part = "shape" | "eyes";
  * for its colour, head and eyes, which open at the right in place of the
  * models. At the right the models it can think with, the suggested first,
  * then each provider's. It starts by asking its creator what it's for in its
- * first chat.
+ * first chat. A phone gives it the whole screen, the bot over its models,
+ * with a frosted Close and Create across the top.
  */
 export function NewAgentDialog({
 	podId: fixedPodId,
@@ -126,15 +129,23 @@ export function NewAgentDialog({
 	return (
 		<DialogContent
 			showCloseButton={false}
-			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[780px]"
+			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[780px] max-md:inset-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:bg-background"
 		>
 			<DialogTitle className="sr-only">New bot</DialogTitle>
+			<IconButton
+				label="Close"
+				variant="glass"
+				render={<DialogClose />}
+				className="absolute top-[calc(env(safe-area-inset-top)+12px)] left-4 z-10 md:hidden"
+			>
+				<X aria-hidden size={18} strokeWidth={2} />
+			</IconButton>
 			<form
 				onSubmit={submit}
 				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-[580px] md:flex-row"
 			>
 				<div
-					className="flex shrink-0 flex-col items-center gap-5 p-6 transition-colors md:w-[300px]"
+					className="flex shrink-0 flex-col items-center gap-5 p-6 transition-colors max-md:pt-[calc(env(safe-area-inset-top)+56px)] md:w-[300px]"
 					// A tint of the bot's colour, so the bot is shown in its own light.
 					style={{
 						background: `color-mix(in oklab, ${botColors[look.color].face} 9%, var(--list))`,
@@ -176,9 +187,10 @@ export function NewAgentDialog({
 						</Alert>
 					)}
 					{models.error && <Alert>Models could not be loaded. Close this and try again.</Alert>}
+					{/* On a phone it sits at the top right, opposite Close. */}
 					<Button
 						type="submit"
-						className="w-full"
+						className="w-full max-md:absolute max-md:top-[calc(env(safe-area-inset-top)+12px)] max-md:right-4 max-md:z-10 max-md:h-9 max-md:w-auto max-md:rounded-full max-md:px-4 max-md:text-[15px]"
 						disabled={!trimmedName || !model || !podId || create.isPending}
 					>
 						Create
@@ -210,8 +222,8 @@ export function NewAgentDialog({
 }
 
 /**
- * The looks to start from, two rows of four with Customise last, which opens
- * the chosen one's colour, head and eyes beside them. The chosen one is
+ * The looks to start from, two rows of four with Customise last, or one row
+ * across a phone, which opens the chosen one's colour, head and eyes beside them. The chosen one is
  * ringed. Each is a native radio, so arrow keys move the choice.
  */
 function LookGrid({
@@ -229,7 +241,7 @@ function LookGrid({
 }) {
 	const group = useId();
 	return (
-		<fieldset className="m-0 grid grid-cols-4 gap-2 border-0 p-0">
+		<fieldset className="no-scrollbar m-0 grid grid-cols-4 gap-2 border-0 p-0 max-md:-mx-6 max-md:flex max-md:gap-2.5 max-md:self-stretch max-md:overflow-x-auto max-md:px-6">
 			<legend className="sr-only">Looks</legend>
 			{looks.map((look, index) => (
 				<Tile
@@ -609,7 +621,7 @@ function StepHeader({ onBack, children }: { onBack: () => void; children: ReactN
 
 /** The dialog's ×, in a page's title row, so it is level with the title. */
 function Close() {
-	return <CloseButton render={<DialogClose />} className="-mr-1.5" />;
+	return <CloseButton render={<DialogClose />} className="-mr-1.5 max-md:hidden" />;
 }
 
 /**

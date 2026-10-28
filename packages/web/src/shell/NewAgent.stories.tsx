@@ -119,6 +119,21 @@ export const InAPod = meta.story({
 	},
 });
 
+/**
+ * On a phone it fills the screen: Close and Create across the top, the bot
+ * and a row of looks to swipe through, then the models.
+ */
+export const OnAPhone = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	play: async ({ userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await expect(within(dialog).getByRole("button", { name: "Close" })).toBeVisible();
+		await userEvent.type(within(dialog).getByRole("textbox", { name: "Name" }), "Support Desk");
+		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeEnabled();
+	},
+});
+
 /** Opened from Bots: the pod is chosen at the foot, from those the viewer may add to. */
 export const ChoosingAPod = meta.story({
 	args: { pods: [revenue, engineering, personal] },

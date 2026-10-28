@@ -1,4 +1,4 @@
-import { expect, within } from "storybook/test";
+import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.tsx";
@@ -37,6 +37,20 @@ export const Default = meta.story({
 		await expect(within(tabs).getByRole("link", { name: /^Home/ })).toHaveAttribute(
 			"aria-current",
 			"page",
+		);
+	},
+});
+
+/** New thread asks, in a sheet, which of the pod's bots it is with. */
+export const NewThread = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "New thread" }, { timeout: 10_000 }),
+		);
+		const sheet = await screen.findByRole("dialog", { name: "New thread with" });
+		await expect(await within(sheet).findByRole("link", { name: growthDesk.name })).toHaveAttribute(
+			"href",
+			expect.stringContaining(`agent=${growthDesk.handle}`),
 		);
 	},
 });

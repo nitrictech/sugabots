@@ -179,6 +179,22 @@ export const Filtered = meta.story({
 	},
 });
 
+/** On a phone the filter is a sheet, ticking the kinds to show. */
+export const FilteredOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Filter" }, { timeout: 10_000 }),
+		);
+		const sheet = await screen.findByRole("dialog", { name: "Show in inbox" });
+		await userEvent.click(within(sheet).getByRole("checkbox", { name: /^Mentions/ }));
+		await expect(within(sheet).getByRole("checkbox", { name: /^Mentions/ })).toBeChecked();
+		await userEvent.keyboard("{Escape}");
+		const inbox = canvas.getByRole("region", { name: "Inbox" });
+		await expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
+	},
+});
+
 /** Mark all as read reads every conversation with something unread, and Inbox is caught up. */
 export const MarkAllAsRead = meta.story({
 	beforeEach({ msw }) {

@@ -23,6 +23,8 @@ import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import type { PodStanding } from "@/shell/SidebarPod.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
+import { SHEET_ROW_CLASS_NAME, Sheet } from "@/ui/sheet.tsx";
 
 /**
  * Home on a phone: the pods as tiles down the left, the one shown marked
@@ -128,12 +130,16 @@ function PodRailTile({ standing, current }: { standing: PodStanding; current: bo
 	);
 }
 
-/** The pod shown: its name and a new thread, then its artifacts, channels and bots. */
+/**
+ * The pod shown: its name and a new thread, which asks in a sheet which bot
+ * it is with, then its artifacts, channels and bots.
+ */
 function PodPanel({ pod }: { pod: Pod }) {
 	const list = useChatList(pod.slug);
 	const { agents } = useAgents();
 	const [folded, toggleFolded] = useFolded();
 	const [addingBot, setAddingBot] = useState(false);
+	const [pickingBot, setPickingBot] = useState(false);
 	const navigate = useNavigate();
 	const bots = crewIn(agents, pod);
 	const threads = list.data?.threads ?? [];
@@ -160,13 +166,35 @@ function PodPanel({ pod }: { pod: Pod }) {
 						className="shrink-0 text-subtle-foreground"
 					/>
 				</Link>
-				<Link
-					{...newThreadLink(pod)}
-					aria-label="New thread"
-					className="focus-ring grid size-9 shrink-0 place-items-center rounded-full bg-chip text-foreground"
+				<IconButton
+					label="New thread"
+					variant="round"
+					onClick={() => setPickingBot(true)}
+					className="size-9"
 				>
 					<SquarePen aria-hidden size={17} strokeWidth={1.75} />
-				</Link>
+				</IconButton>
+				<Sheet open={pickingBot} onOpenChange={setPickingBot} title="New thread with">
+					<ul className="m-0 flex list-none flex-col p-0">
+						{bots.map((bot) => (
+							<li key={bot.id}>
+								<Link
+									{...newThreadLink(pod, bot)}
+									onClick={() => setPickingBot(false)}
+									className={SHEET_ROW_CLASS_NAME}
+								>
+									<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={32} />
+									<span className="min-w-0 flex-1 truncate">{bot.name}</span>
+								</Link>
+							</li>
+						))}
+						{bots.length === 0 && (
+							<li className="px-1 py-3 text-[15px] text-muted-foreground">
+								{pod.name} has no bots yet.
+							</li>
+						)}
+					</ul>
+				</Sheet>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-2 pb-4 pl-1.5">
 				<Row render={<Link {...artifactsLink(pod)} />} icon={<FileText />} label="Artifacts" />

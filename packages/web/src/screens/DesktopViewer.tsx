@@ -3,7 +3,7 @@ import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
@@ -14,6 +14,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { Sheet } from "@/ui/sheet.tsx";
 
 /**
  * An agent's computer opened beside its chat, live: where the browser it
@@ -38,22 +39,13 @@ export function DesktopStage({
 	mayUse: boolean;
 	onClose: () => void;
 }) {
-	const access = useSandboxAccess();
-	const sandboxes = access.data;
+	const { missing, failed } = useMissingComputer(agent);
 	const may = useWorkspacePermissions();
 	const backToChat = useBackToHere("Chat");
-	// What stands between the bot and a computer, if anything: the workspace has none, or the bot doesn't use one.
-	const missing =
-		sandboxes === undefined
-			? undefined
-			: !sandboxes.enabled
-				? "workspace"
-				: !agent.usesSandbox
-					? "bot"
-					: null;
 	return (
 		<Stage
 			label={`${agent.name}'s computer`}
+			immersive
 			icon={
 				<StageMark>
 					<Monitor strokeWidth={2} />
@@ -113,12 +105,131 @@ export function DesktopStage({
 				</EmptyState>
 			) : missing === null ? (
 				<ComputerScreen threadId={threadId} agent={agent} mayUse={mayUse} />
-			) : access.isError ? (
+			) : failed ? (
 				<EmptyState title="Could not check for a computer">
 					The API did not answer. Reload this page to try again.
 				</EmptyState>
 			) : null}
 		</Stage>
+	);
+}
+
+/**
+ * What stands between the bot and a computer: the workspace has none, or the
+ * bot doesn't use one; `null` when nothing does, and `undefined` while that is
+ * being checked or, when `failed`, could not be.
+ */
+function useMissingComputer(agent: Agent): {
+	missing: "workspace" | "bot" | null | undefined;
+	failed: boolean;
+} {
+	const access = useSandboxAccess();
+	const sandboxes = access.data;
+	const missing =
+		sandboxes === undefined
+			? undefined
+			: !sandboxes.enabled
+				? "workspace"
+				: !agent.usesSandbox
+					? "bot"
+					: null;
+	return { missing, failed: access.isError };
+}
+
+/**
+ * A phone's first look at the bot's computer, in a sheet: its screen, watch
+ * only, which opens it in full to take over; or, without a computer, why not
+ * and where to give it one.
+ */
+export function ComputerSheet({
+	threadId,
+	agent,
+	pod,
+	open,
+	onOpenChange,
+	onOpenFull,
+}: {
+	threadId: string;
+	agent: Agent;
+	pod: Pod;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	onOpenFull: () => void;
+}) {
+	const { missing, failed } = useMissingComputer(agent);
+	const may = useWorkspacePermissions();
+	const backToChat = useBackToHere("Chat");
+	return (
+		<Sheet open={open} onOpenChange={onOpenChange} title={`${agent.name}'s computer`}>
+			{missing === null ? (
+				<div className="relative overflow-hidden rounded-[12px] border border-border-strong bg-panel">
+					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly />
+					<button
+						type="button"
+						onClick={onOpenFull}
+						aria-label={`Open ${agent.name}'s desktop`}
+						className="focus-ring absolute inset-0"
+					/>
+				</div>
+			) : missing === "workspace" ? (
+				<NoComputer title="Computers aren't set up yet">
+					{may.manageProviders ? (
+						<>
+							Computers let bots run commands, open websites and edit files. They're set up once for
+							the whole workspace.
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "sandboxes" }}
+								state={backToChat}
+								className={cn(buttonStyles(), SHEET_BUTTON_CLASS_NAME)}
+							>
+								Set up computers
+							</Link>
+						</>
+					) : (
+						"Ask a workspace admin to set up computers."
+					)}
+				</NoComputer>
+			) : missing === "bot" ? (
+				<NoComputer title={`${agent.name} doesn't have a computer`}>
+					{pod.permissions.updateAgents ? (
+						<>
+							Give it a computer to run commands, browse and make files.
+							<Link
+								{...agentSettingsLink({ pod, agent })}
+								state={backToChat}
+								className={cn(buttonStyles(), SHEET_BUTTON_CLASS_NAME)}
+							>
+								Open {agent.name}'s settings
+							</Link>
+						</>
+					) : (
+						"Ask a workspace admin to give it a computer."
+					)}
+				</NoComputer>
+			) : failed ? (
+				<NoComputer title="Could not check for a computer">
+					The API did not answer. Reload this page to try again.
+				</NoComputer>
+			) : null}
+		</Sheet>
+	);
+}
+
+/** A sheet's one way forward: across its width, a thumb high. */
+const SHEET_BUTTON_CLASS_NAME = "mt-4 h-[46px] w-full rounded-[12px] text-[15px]";
+
+/** Why the sheet has no computer to show, under a screen, with what can be done about it. */
+function NoComputer({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<div className="flex flex-col items-center gap-2.5 px-3 pt-5 pb-1.5 text-center">
+			<Monitor aria-hidden size={28} strokeWidth={1.75} className="text-muted-foreground" />
+			<span className="font-medium text-[15px] text-foreground">{title}</span>
+			<p className="m-0 flex w-full flex-col items-center text-[13px] text-muted-foreground leading-[1.5]">
+				{children}
+			</p>
+		</div>
 	);
 }
 
@@ -135,14 +246,14 @@ function ComputerScreen({
 	const [inControl, setInControl] = useState(false);
 	const agentUsing = useDesktopInUse(threadId, agent.id);
 	return (
-		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
+		<div className="flex min-h-0 flex-1 flex-col items-center gap-4 max-md:relative max-md:justify-center">
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
 			<div className="@container-[size] flex min-h-0 w-full flex-1 items-center justify-center">
 				<div className="w-[min(100cqw,calc(100cqh*4/3))]">
 					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
 				</div>
 			</div>
-			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
+			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm max-md:glass max-md:absolute max-md:bottom-6 max-md:max-w-[calc(100%-32px)] max-md:border-0 max-md:py-1.5 max-md:pl-4 max-md:text-[15px]">
 				<AgentAvatar
 					color={agent.color}
 					face={agent.face}
