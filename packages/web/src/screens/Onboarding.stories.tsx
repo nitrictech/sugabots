@@ -53,6 +53,7 @@ const enabledModel = {
 	providerActive: true,
 	modelId: "claude-sonnet",
 	displayName: "Claude Sonnet",
+	capabilities: ["tools", "vision"],
 };
 
 const API = import.meta.env.VITE_API_URL;

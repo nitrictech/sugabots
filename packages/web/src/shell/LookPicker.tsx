@@ -278,9 +278,10 @@ function ShapePicker({
 }
 
 /** A head's outline without its eyes, in the text colour. */
-function ShapeGlyph({ shape }: { shape: AgentShape }) {
+/** A head shape alone, without eyes, in the current colour, `size` pixels square. */
+export function ShapeGlyph({ shape, size = 20 }: { shape: AgentShape; size?: number }) {
 	return (
-		<svg aria-hidden viewBox="0 0 40 40" width={20} height={20} fill="currentColor">
+		<svg aria-hidden viewBox="0 0 40 40" width={size} height={size} fill="currentColor">
 			{headShape(shape).parts.map((part) =>
 				part.kind === "circle" ? (
 					<circle key={`${part.cx}-${part.cy}`} cx={part.cx} cy={part.cy} r={part.r} />
@@ -325,9 +326,16 @@ function EyesPicker({
 }
 
 /** A face's eyes without the face, in the text colour, cropped to the band they sit in. */
-function EyesGlyph({ face }: { face: AgentFace }) {
+/** A pair of eyes alone, without a head, in the current colour, `width` pixels across. */
+export function EyesGlyph({ face, width = 34 }: { face: AgentFace; width?: number }) {
 	return (
-		<svg aria-hidden viewBox="6 12 28 16" width={34} height={19} className="text-current">
+		<svg
+			aria-hidden
+			viewBox="6 12 28 16"
+			width={width}
+			height={(width * 16) / 28}
+			className="text-current"
+		>
 			{faceMarks(face).map((mark, index) =>
 				mark.shape === "circle" ? (
 					// biome-ignore lint/suspicious/noArrayIndexKey: a face's marks are fixed and never reorder.
