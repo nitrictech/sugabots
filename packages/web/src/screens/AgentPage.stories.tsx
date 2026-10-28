@@ -434,7 +434,7 @@ export const PodOnAPhone = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole(
-				"button",
+				"link",
 				{ name: new RegExp(`^${growthDesk.name}`) },
 				{ timeout: 10_000 },
 			),

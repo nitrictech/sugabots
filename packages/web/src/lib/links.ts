@@ -28,6 +28,15 @@ export function podLink(pod: Pod) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod", params: { pod: pod.slug } });
 }
 
+/** A bot's page on a phone: its threads, and its routines. */
+export function botPageLink(pod: Pick<Pod, "slug">, agent: Pick<Agent, "handle">) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/bots/$agent",
+		params: { pod: pod.slug, agent: agent.handle },
+	});
+}
+
 /** A pod's artifacts. */
 export function artifactsLink(pod: Pod) {
 	return linkOptions({

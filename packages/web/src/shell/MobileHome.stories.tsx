@@ -1,0 +1,55 @@
+import { expect, within } from "storybook/test";
+import preview from "#storybook/preview";
+import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.tsx";
+
+/*
+ * Home on a phone: the pods as tiles down the left, beside the pod shown,
+ * with its artifacts, channels and bots, and the tabs along the foot.
+ */
+
+const meta = preview.meta({
+	title: "Views/Mobile home",
+	tags: ["ai-generated"],
+	parameters: { layout: "fullscreen" },
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...appHandlers());
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
+});
+
+/** A pod open: its tile marked, its name, Artifacts, its channels and its bots, and the tabs. */
+export const Default = meta.story({
+	play: async ({ canvas }) => {
+		const pods = await canvas.findByRole("navigation", { name: "Pods" }, { timeout: 10_000 });
+		await expect(within(pods).getByRole("link", { name: revenue.name })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		const pod = canvas.getByRole("region", { name: revenue.name });
+		await expect(within(pod).getByRole("link", { name: "Artifacts" })).toBeVisible();
+		await expect(
+			await within(pod).findByRole("link", { name: new RegExp(`^${growthDesk.name}`) }),
+		).toHaveAttribute("href", expect.stringMatching(/\/pods\/revenue\/bots\//));
+		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
+		await expect(within(tabs).getByRole("link", { name: /^Home/ })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+	},
+});
+
+/** A bot's page: Back, a new thread, its name, its routines and its threads. */
+export const BotPage = meta.story({
+	render: () => (
+		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/bots/${growthDesk.handle}`} />
+	),
+	play: async ({ canvas }) => {
+		const page = await canvas.findByRole("region", { name: growthDesk.name }, { timeout: 10_000 });
+		await expect(within(page).getByRole("link", { name: /^Routines/ })).toBeVisible();
+		await expect(
+			within(page).getByRole("link", { name: `New thread with ${growthDesk.name}` }),
+		).toBeVisible();
+	},
+});

@@ -22,7 +22,7 @@ import {
 } from "@tanstack/react-router";
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
-import { usePodAgent } from "@/lib/agents.ts";
+import { useAgents, usePodAgent } from "@/lib/agents.ts";
 import {
 	type ConversationPlace,
 	prefetchConversation,
@@ -49,6 +49,7 @@ import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { ArtifactsPage } from "@/screens/Artifacts.tsx";
 import type { Staged } from "@/screens/ConversationChat.tsx";
+import { MobileBotPage } from "@/screens/MobileBotPage.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
@@ -1293,6 +1294,19 @@ function OpenPodChat({ pod }: { pod: Pod }) {
 }
 
 /** A bot's newest conversation, opened first if it has none, then shown at its own address. */
+/** A bot's page on a phone: its threads and its routines. */
+const botPageRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/bots/$agent",
+	component: () => {
+		const { pod: podSlug, agent: handle } = botPageRoute.useParams();
+		const pod = findPod(usePods().data, podSlug);
+		const { agents } = useAgents();
+		const agent = agents?.find((one) => one.podId === pod?.id && one.handle === handle);
+		return pod && agent ? <MobileBotPage pod={pod} agent={agent} /> : null;
+	},
+});
+
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
@@ -1532,6 +1546,7 @@ const routeTree = rootRoute.addChildren([
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
 		podRoute.addChildren([
 			podIndexRoute,
+			botPageRoute,
 			agentRoute,
 			podChatRoute,
 			routinesRoute.addChildren([routinesIndexRoute, routineThreadRoute]),

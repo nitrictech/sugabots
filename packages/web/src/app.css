@@ -345,6 +345,16 @@
 	mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 
+/*
+ * A control floating over a phone's page, such as its tab bar or a Back
+ * button: a frosted, see-through fill with a hairline edge.
+ */
+@utility glass {
+	background: color-mix(in oklab, var(--color-chip) 72%, transparent);
+	backdrop-filter: blur(20px);
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-foreground) 8%, transparent);
+}
+
 /* A row that scrolls sideways under a swipe or its own arrows, without a bar. */
 @utility no-scrollbar {
 	scrollbar-width: none;

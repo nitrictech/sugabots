@@ -1,22 +1,25 @@
 import { useRender } from "@base-ui/react/use-render";
 import type { Pod, Workspace } from "@sugabots/contracts";
-import { Link, useMatchRoute, useParams, useSearch } from "@tanstack/react-router";
+import { Link, useMatchRoute, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Inbox, Library, ShieldCheck } from "lucide-react";
-import { type CSSProperties, type ReactNode, useRef } from "react";
+import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
-import { artifactsLink } from "@/lib/links.ts";
+import { artifactsLink, podLink } from "@/lib/links.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
-import { usePods } from "@/lib/pods.ts";
+import { defaultPod, findPod, usePods } from "@/lib/pods.ts";
 import { useSession, useSignOut } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
+import { useWorkspace, useWorkspacePermissions, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
 import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
+import { MobileHome } from "@/shell/MobileHome.tsx";
+import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { type PodStanding, SidebarPod } from "@/shell/SidebarPod.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
@@ -45,37 +48,71 @@ export function Sidebar() {
 	const place = useSidebarPlace();
 	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
 	const backToChat = useBackToHere("Chat");
+	const may = useWorkspacePermissions();
+	const navigate = useNavigate();
+	const [makingPod, setMakingPod] = useState(false);
 	const current =
 		place.podSlug === undefined ? undefined : pods?.find((pod) => pod.slug === place.podSlug);
+	// A phone's Home shows one pod: the one the address is in, or the one last shown.
+	const shown = useShownPod(pods, place.podSlug);
+	const standings = [...(pods ?? [])]
+		.sort((a, b) => Number(a.kind === "personal") - Number(b.kind === "personal"))
+		.map((pod) => ({
+			pod,
+			unreadMessages: markers?.pods[pod.id]?.unreadMessages ?? 0,
+			needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
+			failedRoutines: markers?.pods[pod.id]?.failedRoutines ?? 0,
+		}));
 
 	return (
-		<SidebarView
-			pods={[...(pods ?? [])]
-				.sort((a, b) => Number(a.kind === "personal") - Number(b.kind === "personal"))
-				.map((pod) => ({
-					pod,
-					unreadMessages: markers?.pods[pod.id]?.unreadMessages ?? 0,
-					needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
-					failedRoutines: markers?.pods[pod.id]?.failedRoutines ?? 0,
-				}))}
-			currentPodId={current?.id}
-			view={place.view}
-			unreadInInbox={unreadInInbox}
-			waitingApprovals={waitingApprovals}
-			workspace={workspace}
-			workspaces={workspaces ?? []}
-			user={session.user ?? undefined}
-			settingsBack={place.inSettings ? undefined : backToChat}
-			onSignOut={() => void signOut()}
-			className={place.coversPhone ? "max-md:hidden" : undefined}
-			conversationsOf={(pod) => (
-				<ConversationList
-					pod={pod}
-					selected={pod.id === current?.id ? place.selected : undefined}
+		<>
+			<SidebarView
+				pods={standings}
+				currentPodId={current?.id}
+				view={place.view}
+				unreadInInbox={unreadInInbox}
+				waitingApprovals={waitingApprovals}
+				workspace={workspace}
+				workspaces={workspaces ?? []}
+				user={session.user ?? undefined}
+				settingsBack={place.inSettings ? undefined : backToChat}
+				onSignOut={() => void signOut()}
+				className="max-md:hidden"
+				conversationsOf={(pod) => (
+					<ConversationList
+						pod={pod}
+						selected={pod.id === current?.id ? place.selected : undefined}
+					/>
+				)}
+			/>
+			{!place.coversPhone && shown && (
+				<MobileHome
+					pods={standings}
+					pod={shown}
+					onNewPod={may.createPods ? () => setMakingPod(true) : undefined}
 				/>
 			)}
-		/>
+			<Dialog open={makingPod} onOpenChange={setMakingPod}>
+				<NewPodDialog
+					onCreated={async (pod) => {
+						setMakingPod(false);
+						await navigate(podLink(pod));
+					}}
+				/>
+			</Dialog>
+		</>
 	);
+}
+
+/**
+ * The pod a phone's Home shows: the one the address is in, or, away from
+ * every pod, the one last shown, or the one the workspace opens on.
+ */
+function useShownPod(pods: readonly Pod[] | undefined, podSlug: string | undefined) {
+	const [lastSlug, setLastSlug] = useState(podSlug);
+	if (podSlug !== undefined && podSlug !== lastSlug) setLastSlug(podSlug);
+	const slug = podSlug ?? lastSlug;
+	return (slug === undefined ? undefined : findPod(pods, slug)) ?? defaultPod(pods);
 }
 
 /** Where the address is, as the sidebar marks it. */

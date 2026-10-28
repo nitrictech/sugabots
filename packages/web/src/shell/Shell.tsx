@@ -5,9 +5,10 @@ import { useAppBadge } from "@/lib/app-badge.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
+import { MobileTabBar } from "@/shell/MobileTabBar.tsx";
 import { Sidebar } from "@/shell/Sidebar.tsx";
 
-/** The frame: the sidebar, then whatever the address shows beside it. */
+/** The frame: the sidebar, then whatever the address shows beside it, and on a phone its tabs along the foot. */
 export function Shell() {
 	useWorkspaceEvents();
 	useVisibleHeight();
@@ -16,9 +17,12 @@ export function Shell() {
 
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (
-		<div className="relative flex h-[var(--visible-height,100dvh)] min-w-0 overflow-hidden bg-background">
-			<Sidebar />
-			<Outlet />
+		<div className="relative flex h-[var(--visible-height,100dvh)] min-w-0 flex-col overflow-hidden bg-background">
+			<div className="flex min-h-0 min-w-0 flex-1">
+				<Sidebar />
+				<Outlet />
+			</div>
+			<MobileTabBar />
 		</div>
 	);
 }

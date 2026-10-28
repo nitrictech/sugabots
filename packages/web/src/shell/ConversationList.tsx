@@ -98,7 +98,7 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 }
 
 /** The pod's own bots, leaving out the system bots every pod has. */
-function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
+export function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
 	return agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
 }
 
