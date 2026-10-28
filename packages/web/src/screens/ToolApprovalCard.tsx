@@ -241,7 +241,7 @@ const FOLDED_HEIGHT_PX = 66;
  * rather than handing the scroll to the chat. On a phone a long one is only
  * ever its folded start, since the whole of it opens full screen.
  */
-function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
+export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 	const bodyId = useId();
 	const content = useRef<HTMLDivElement>(null);
 	const [foldable, setFoldable] = useState(false);

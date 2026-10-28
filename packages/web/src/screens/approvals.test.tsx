@@ -76,7 +76,7 @@ afterEach(() => {
 });
 
 describe("Approvals", () => {
-	it("opens on Answered when the request in the address was answered, and says how", async () => {
+	it("says how a request in the address was answered, with the way back to Approvals", async () => {
 		mount(`/suga/approvals/${answered.call.id}`);
 
 		const article = await screen.findByRole("article", {
@@ -84,28 +84,25 @@ describe("Approvals", () => {
 		});
 		expect(within(article).getByText(/Allowed by Mia Chen/)).toBeDefined();
 		expect(within(article).queryByRole("button", { name: /^Allow/ })).toBeNull();
-		expect(screen.getByRole("tab", { name: "Answered" }).getAttribute("aria-selected")).toBe(
-			"true",
+		expect(within(article).getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe(
+			"/suga/approvals",
 		);
 	});
 
-	it("keeps the list on Waiting on you while a request chosen there is answered", async () => {
+	it("answers a request where it waits, and lists it under Resolved", async () => {
 		mount("/suga/approvals");
 
-		const list = await screen.findByRole("region", { name: "Approvals" });
-		fireEvent.click(await within(list).findByRole("link", { name: /Update issue/ }));
-		const allow = await screen.findByRole("button", { name: /^Allow/ });
+		const card = await screen.findByRole("article", { name: /Update issue/ });
 		inbox({
 			waiting: [],
 			answered: [{ ...waiting, answer: { ...decided, decidedByName: "Sam" } }, answered],
 		});
-		fireEvent.click(allow);
+		fireEvent.click(within(card).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(client.api.toolApprovals.decide).toHaveBeenCalled());
-		expect(await screen.findByText(/Allowed by Sam/)).toBeDefined();
-		expect(screen.getByRole("tab", { name: /Waiting on you/ }).getAttribute("aria-selected")).toBe(
-			"true",
-		);
+		await waitFor(() => expect(screen.queryByRole("article", { name: /Update issue/ })).toBeNull());
+		expect(screen.getAllByRole("link", { name: /Update issue/ })).toHaveLength(2);
+		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
 	});
 
 	it("says a request is gone when the inbox no longer holds it", async () => {

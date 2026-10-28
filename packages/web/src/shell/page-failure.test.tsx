@@ -19,10 +19,10 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-it("keeps the rail and offers a reload when a page's code fails to download", async () => {
+it("keeps the sidebar and offers a reload when a page's code fails to download", async () => {
 	mount("/suga/settings");
 
 	expect(await screen.findByText("This page could not load")).toBeDefined();
 	expect(screen.getByRole("button", { name: "Reload" })).toBeDefined();
-	expect(screen.getByRole("navigation", { name: "Pods" })).toBeDefined();
+	expect(screen.getByRole("navigation", { name: "Sidebar" })).toBeDefined();
 });

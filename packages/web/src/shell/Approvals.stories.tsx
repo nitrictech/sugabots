@@ -5,13 +5,13 @@ import type {
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
-import { expect } from "storybook/test";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
- * Every approval across the workspace, opened from the rail: what waits on
+ * Every approval across the workspace, opened from the sidebar: what waits on
  * you, each answerable here, and the latest answered.
  */
 
@@ -96,16 +96,20 @@ const meta = preview.meta({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/approvals`} />,
 });
 
-/** A request waiting on you, beside an empty pane until one is chosen; the answered ones are under their own tab. */
+/**
+ * A request waiting on you, as a card with the request and Allow and Deny;
+ * under it, the ones resolved, each with which way it went.
+ */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: /Send quote/ }, { timeout: 10_000 }),
-		).toHaveTextContent("Growth Desk");
-		await expect(canvas.getByRole("link", { name: "Approvals, 1 waiting on you" })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
+		const card = await canvas.findByRole("article", { name: /Send quote/ }, { timeout: 10_000 });
+		await expect(card).toHaveTextContent("Acme Retail");
+		await expect(within(card).getByRole("button", { name: /^Allow/ })).toBeVisible();
+		await expect(within(card).getByRole("button", { name: /^Deny/ })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: /Delete deal/ })).toHaveTextContent("Denied");
+		const approvals = canvas.getByRole("link", { name: /^Approvals/ });
+		await expect(approvals).toHaveAttribute("aria-current", "page");
+		await expect(approvals).toHaveTextContent("1 waiting on you");
 	},
 });
 
@@ -128,14 +132,14 @@ export const Opened = meta.story({
 	},
 });
 
-/** One already answered, opened from the Answered tab, which says who answered it and when. */
+/** One already answered, opened from Resolved, which says who answered it and when. */
 export const Answered = meta.story({
 	render: () => (
 		<StoryApp path={`/${storyWorkspace.slug}/approvals/0199a3a0-0000-7000-8000-000000000702`} />
 	),
 });
 
-/** Nothing waiting: it says you're clear, and still lists what was answered. */
+/** Nothing waiting: it says so, and still lists what was resolved. */
 export const Clear = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -143,5 +147,11 @@ export const Clear = meta.story({
 				HttpResponse.json({ ...inbox, waiting: [] }),
 			),
 		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(/^Nothing waiting/, {}, { timeout: 10_000 }),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: /Send email/ })).toHaveTextContent("Allowed");
 	},
 });

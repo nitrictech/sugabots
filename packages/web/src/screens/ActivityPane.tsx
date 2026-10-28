@@ -1,8 +1,11 @@
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import type { ReactNode } from "react";
 import { type ConversationKind, useChatHistory } from "@/lib/chats.ts";
-import { conversationLink } from "@/lib/links.ts";
+import { conversationLink, routineThreadLink } from "@/lib/links.ts";
+import { useThread } from "@/lib/threads.ts";
+import { buttonStyles } from "@/ui/button.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import type { Staged } from "./ConversationChat.tsx";
@@ -11,10 +14,11 @@ import { ConversationPage } from "./ConversationPage.tsx";
 const BACK_TO_ACTIVITY: BackTo = { to: "activity" };
 
 /**
- * What Activity shows beside its list for the item chosen: a routine run or a
+ * What Inbox opens for the item chosen: a routine run or a
  * collaboration as a page of its own, or a message in its chat, jumped to.
- * Either way it is not the chat's own page, so there is no Details, and a link
- * at the right goes to the chat itself.
+ * Either way it is not the thread's own page, so there is no Details, and Open
+ * thread at the right goes to the thread itself, or, for a routine's thread,
+ * to the routine on the Routines page.
  */
 export function ActivityPane({
 	pod,
@@ -46,12 +50,16 @@ export function ActivityPane({
 	staged?: Staged;
 	onStagedChange: (staged: Staged | undefined) => void;
 }) {
+	// A routine's own thread opens on the Routines page, beside the pod's other routines.
+	const routineId = useThread(conversationId).data?.routine?.id;
 	const openChat = (
 		<Link
-			{...conversationLink({ pod, conversationId })}
-			className="focus-ring shrink-0 rounded-sm font-medium text-[13px] text-link"
+			{...(routineId
+				? routineThreadLink(pod, routineId)
+				: conversationLink({ pod, conversationId }))}
+			className={cn(buttonStyles({ variant: "outline", size: "sm" }), "shrink-0")}
 		>
-			Open chat
+			Open thread
 		</Link>
 	);
 	// Runs and collaborations are a bot's, so only a thread with a bot has them.

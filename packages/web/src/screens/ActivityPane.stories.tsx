@@ -15,7 +15,7 @@ import {
 /*
  * What Activity opens beside its list: a message in its chat, jumped to and
  * pointed out, or a routine run as a page of its own. Neither is the chat's
- * own page, so there are no Details, and Open chat goes there.
+ * own page, so there are no Details, and Open thread goes there.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -134,23 +134,23 @@ const opened = (search: string) =>
 
 /** A mention opened in its chat: the chat jumps to it, points it out, and puts the focus on it. */
 export const MessageJumpedTo = meta.story({
-	render: () => <StoryApp path={opened(`item=${mention.id}&message=${mention.id}`)} />,
+	render: () => <StoryApp path={opened(`message=${mention.id}`)} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: "Open chat" }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Open thread" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 	},
 });
 
-/** A routine run opened as a page of its own, with Back to Activity on a phone and Open chat. */
+/** A routine run opened as a page of its own, with Back to Activity on a phone and Open thread. */
 export const RunPage = meta.story({
-	render: () => <StoryApp path={opened(`item=${RUN}&threadPage=${RUN}`)} />,
+	render: () => <StoryApp path={opened(`threadPage=${RUN}`)} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		await expect(canvas.getByRole("link", { name: "Open chat" })).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "Open thread" })).toBeInTheDocument();
 	},
 });

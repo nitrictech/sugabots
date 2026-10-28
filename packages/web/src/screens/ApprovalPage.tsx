@@ -20,7 +20,7 @@ type InboxRequest =
 	| { kind: "answered"; request: AnsweredApproval };
 
 /**
- * One approval in full, beside the list of them: who wants to do what, every
+ * One approval in full, on its own page: who wants to do what, every
  * field of the request in a table, and Allow and Deny, or how it was
  * answered, with a way to the chat it was asked in.
  */
@@ -69,7 +69,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 				<Link
 					from="/$workspace"
 					to="./approvals"
-					className="focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm md:hidden"
+					className="focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm"
 				>
 					<ChevronLeft aria-hidden size={16} />
 					Approvals
