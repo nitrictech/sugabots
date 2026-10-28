@@ -54,6 +54,7 @@ describe("chat contracts", () => {
 						triggerKind: "webhook",
 						state: "completed",
 						error: null,
+						report: null,
 						createdAt: "2026-09-18T00:00:00.000Z",
 					},
 				],

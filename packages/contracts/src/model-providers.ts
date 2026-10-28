@@ -335,6 +335,8 @@ export const workspaceModelSchema = Schema.Struct({
 	providerActive: Schema.Boolean,
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
+	/** What agents may use it for: what it can do, less what an admin switched off. */
+	capabilities: Schema.mutable(Schema.Array(providerModelCapabilitySchema)),
 });
 
 export const workspaceModelsResponseSchema = Schema.Struct({

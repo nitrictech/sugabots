@@ -19,6 +19,7 @@ export function toConversationThread(row: schema.ThreadRow): ConversationThread 
 		kind: "thread",
 		...commonFields(row),
 		hostAgentId: row.hostAgentId,
+		startedInChatId: row.parentThreadId,
 		doneAt: row.doneAt?.toISOString() ?? null,
 	};
 }

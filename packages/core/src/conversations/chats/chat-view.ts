@@ -1180,6 +1180,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 			state: true,
 			error: true,
 		},
+		extras: { report: (row) => lastReplyIn(db, row.threadId) },
 	});
 	const [paused] = yield* db
 		.select({ routineId: routine.id, at: routine.pausedAfterFailuresAt })
@@ -1251,6 +1252,7 @@ function toMainPage(row: MainPage, limit: number) {
 					triggerKind: execution.triggerKind,
 					state: execution.state,
 					error: execution.error,
+					report: execution.report && spokenText(execution.report),
 					createdAt: execution.acceptedAt.toISOString(),
 				}),
 			})),
