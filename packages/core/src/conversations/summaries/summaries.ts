@@ -140,8 +140,7 @@ export const make = Effect.gen(function* () {
 				"complete",
 				transaction(
 					Effect.gen(function* () {
-						if (result.title) {
-							yield* threads.retitle(prepared.threadId, result.title);
+						if (result.title && (yield* threads.retitle(prepared.threadId, result.title))) {
 							// The thread holding the summaries is named after this one, which
 							// had no real title until the first summary gave it one.
 							yield* threads.retitleSystemAgentThread({

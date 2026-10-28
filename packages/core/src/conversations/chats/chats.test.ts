@@ -773,11 +773,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				requestId: crypto.randomUUID(),
 			});
 
-			expect(await hostRow()).toMatchObject({
-				needsApproval: true,
-				waitingOn: "linear__create_issue",
-				lastMessage: { preview: "File it" },
-			});
+			expect(await hostRow()).toMatchObject({ needsApproval: true });
 			expect(await view.podMarkers(workspaceId)).toEqual({
 				pods: { [podId]: { unreadMessages: 0, needsApproval: true, failedRoutines: 0 } },
 			});

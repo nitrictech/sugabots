@@ -194,8 +194,11 @@ export interface Interface {
 		systemAgentKey: SystemAgentKey;
 		title: string;
 	}) => Effect.Effect<string>;
-	/** Calls the thread `title`, unless it is a bot's channel, which goes by its bot's name. */
-	readonly retitle: (threadId: string, title: string) => Effect.Effect<void>;
+	/**
+	 * Calls the thread `title`, unless it is a bot's channel, which goes by its
+	 * bot's name. True when the thread took the title.
+	 */
+	readonly retitle: (threadId: string, title: string) => Effect.Effect<boolean>;
 	/** Retitles the thread the system agent `systemAgentKey` works in under `servedThreadId`. */
 	readonly retitleSystemAgentThread: (input: {
 		servedThreadId: string;
@@ -908,9 +911,10 @@ export const make = Effect.gen(function* () {
 						db
 							.update(thread)
 							.set({ title, updatedAt: now })
-							.where(and(eq(thread.id, threadId), ne(thread.type, "bot_channel"))),
+							.where(and(eq(thread.id, threadId), ne(thread.type, "bot_channel")))
+							.returning({ id: thread.id }),
 					),
-				).pipe(Effect.asVoid),
+				).pipe(Effect.map((retitled) => retitled.length > 0)),
 			),
 
 		retitleSystemAgentThread: (input) =>
