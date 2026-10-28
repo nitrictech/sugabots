@@ -76,6 +76,9 @@ export const fromE2b = (
 								...options(),
 								cpuCount: connection.size.cpuCount,
 								memoryMB: connection.size.memoryGiB * MIB_PER_GIB,
+								...(connection.size.freeDiskGiB === undefined
+									? {}
+									: { minFreeDiskMb: connection.size.freeDiskGiB * MIB_PER_GIB }),
 							},
 						);
 						return { templateId, buildId };

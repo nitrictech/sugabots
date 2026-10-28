@@ -41,6 +41,9 @@ export const sandboxE2bCpuCountSchema = Schema.Int.check(
 export const sandboxE2bMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
+export const sandboxE2bFreeDiskGiBSchema = Schema.Int.check(
+	Schema.isBetween({ minimum: 1, maximum: 1024 }),
+);
 
 export const sandboxProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
 export type SandboxProviderPresetId = typeof sandboxProviderPresetIdSchema.Type;
@@ -122,6 +125,11 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		/** What the template is built with, so every sandbox made from it has. */
 		cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
 		memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+		/**
+		 * Free disk the template's filesystem is grown to have after its build,
+		 * at least. Left out, the E2B account's default. E2B never shrinks it.
+		 */
+		freeDiskGiB: Schema.optional(sandboxE2bFreeDiskGiBSchema),
 		/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
 		networkMode: Schema.optional(sandboxNetworkModeSchema),
 	}),

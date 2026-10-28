@@ -115,6 +115,7 @@ export const make = Effect.gen(function* () {
 					size: {
 						cpuCount: settings.cpuCount ?? SANDBOX_E2B_DEFAULT_SIZE.cpuCount,
 						memoryGiB: settings.memoryGiB ?? SANDBOX_E2B_DEFAULT_SIZE.memoryGiB,
+						...(settings.freeDiskGiB === undefined ? {} : { freeDiskGiB: settings.freeDiskGiB }),
 					},
 					...(settings.apiUrl && settings.sandboxUrl
 						? { endpoints: { apiUrl: settings.apiUrl, sandboxUrl: settings.sandboxUrl } }

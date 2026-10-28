@@ -271,7 +271,7 @@ export const E2bCustomSize = meta.story({
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
 					preset: "e2b",
 					name: "E2B",
-					settings: { preset: "e2b", cpuCount: 4, memoryGiB: 8 },
+					settings: { preset: "e2b", cpuCount: 4, memoryGiB: 8, freeDiskGiB: 20 },
 					hasApiKey: true,
 					status: "connected",
 				},
@@ -282,6 +282,7 @@ export const E2bCustomSize = meta.story({
 		const vcpus = await canvas.findByLabelText("vCPUs");
 		await expect(vcpus).toHaveValue("4");
 		await expect(canvas.getByLabelText("Memory")).toHaveValue("8 GiB");
+		await expect(canvas.getByLabelText("Free disk")).toHaveValue("20 GiB");
 
 		await userEvent.clear(vcpus);
 		await userEvent.type(vcpus, "2.5{Enter}");

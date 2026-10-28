@@ -8,6 +8,7 @@ import {
 	type SandboxProviderTestResult,
 	type SandboxProviderUpdate,
 	sandboxE2bCpuCountSchema,
+	sandboxE2bFreeDiskGiBSchema,
 	sandboxE2bMemoryGiBSchema,
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
@@ -332,6 +333,21 @@ function ProviderSettings({
 								return Promise.resolve();
 							}
 							return onConfigure({ settings: { ...settings, memoryGiB } });
+						}}
+					/>
+					<TextEntryRow
+						label="Free disk"
+						saved={settings.freeDiskGiB === undefined ? undefined : `${settings.freeDiskGiB} GiB`}
+						placeholder="Account default"
+						disabled={pending}
+						clearable
+						onSave={(typed) => {
+							const freeDiskGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
+							if (typed && !Schema.is(sandboxE2bFreeDiskGiBSchema)(freeDiskGiB)) {
+								onInvalid("Enter a whole number of GiB, from 1 to 1024.");
+								return Promise.resolve();
+							}
+							return onConfigure({ settings: { ...settings, freeDiskGiB } });
 						}}
 					/>
 				</>

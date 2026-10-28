@@ -133,7 +133,12 @@ export interface E2bConnection {
 	/** The template sandboxes are made from. */
 	readonly template: string;
 	/** What the template is built with, so every sandbox made from it has. */
-	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
+	readonly size: {
+		readonly cpuCount: number;
+		readonly memoryGiB: number;
+		/** Unset, the E2B account's default. */
+		readonly freeDiskGiB?: number;
+	};
 	readonly networkMode: SandboxNetworkMode;
 }
 
