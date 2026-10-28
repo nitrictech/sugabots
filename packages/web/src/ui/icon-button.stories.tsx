@@ -9,7 +9,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { label: "Workspace settings", children: <SettingsIcon />, onClick: fn() },
 	argTypes: {
-		variant: { control: "select", options: ["quiet", "outline", "pane", "bar", "round"] },
+		variant: { control: "select", options: ["quiet", "outline", "pane", "bar", "round", "glass"] },
 		size: { control: "select", options: ["sm", "default", "lg"] },
 	},
 });
@@ -30,5 +30,10 @@ export const Bar = meta.story({
 
 /** Round is a filled circle, for a Close or a ⋯ beside other controls. */
 export const Round = meta.story({ args: { variant: "round" } });
+
+/** Glass floats at the top of a phone's page, frosted over what scrolls under it, such as its Back. */
+export const Glass = meta.story({
+	args: { variant: "glass", children: <SettingsIcon size={17} /> },
+});
 
 export const Disabled = meta.story({ args: { disabled: true } });

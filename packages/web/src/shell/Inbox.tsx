@@ -90,7 +90,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 					width === undefined ? undefined : ({ "--list-width": `${width}px` } as CSSProperties)
 				}
 				className={cn(
-					"relative flex min-h-0 flex-col border-border border-r max-md:flex-1 md:w-[clamp(280px,var(--list-width,380px),60%)] md:shrink-0",
+					"relative flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-[clamp(280px,var(--list-width,380px),60%)] md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
@@ -128,7 +128,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 						</>
 					}
 				/>
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
+				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 max-md:gap-0 max-md:px-0 max-md:pt-0">
 					{feed.isError && (
 						<li className="px-3 py-3 text-[13px] text-muted-foreground">
 							Inbox could not be loaded.
@@ -315,18 +315,18 @@ function wordsOf(item: ActivityItem): { title: string; detail: string } {
 	}
 }
 
-/** Who or what a row is about, in its face's place. */
-function FaceOf({ item }: { item: ActivityItem }) {
+/** Who or what a row is about, in its face's place, `size` pixels high. */
+function FaceOf({ item, size }: { item: ActivityItem; size: number }) {
 	switch (item.kind) {
 		case "routine":
 			// The bot that ran it, with what started the run on its corner.
 			return (
-				<span className="relative size-6">
+				<span className="relative" style={{ width: size, height: size }}>
 					<AgentAvatar
 						color={item.agent.color}
 						face={item.agent.face}
 						shape={item.agent.shape}
-						size={24}
+						size={size}
 					/>
 					<span className="absolute -right-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full bg-chip-strong text-foreground shadow-[0_0_0_2px_var(--background)]">
 						<RoutineTriggerIcon kind={item.triggerKind} size={11} strokeWidth={2.4} />
@@ -335,22 +335,23 @@ function FaceOf({ item }: { item: ActivityItem }) {
 			);
 		case "collaboration":
 			return (
-				<span className="relative h-6 w-9">
+				<span className="relative" style={{ width: size * 1.5, height: size }}>
 					<AgentAvatar
 						color={item.initiator.color}
 						face={item.initiator.face}
 						shape={item.initiator.shape}
-						size={24}
+						size={size}
 						className="absolute top-0 left-0"
 					/>
-					<AgentAvatar
-						color={item.recipient.color}
-						face={item.recipient.face}
-						shape={item.recipient.shape}
-						size={24}
-						ringed={{ color: "var(--background)", width: 2 }}
-						className="absolute top-0 left-3"
-					/>
+					<span className="absolute top-0 flex" style={{ left: size / 2 }}>
+						<AgentAvatar
+							color={item.recipient.color}
+							face={item.recipient.face}
+							shape={item.recipient.shape}
+							size={size}
+							ringed={{ color: "var(--background)", width: 2 }}
+						/>
+					</span>
 				</span>
 			);
 		default:
@@ -359,10 +360,10 @@ function FaceOf({ item }: { item: ActivityItem }) {
 					color={item.author.color}
 					face={item.author.face}
 					shape={item.author.shape}
-					size={24}
+					size={size}
 				/>
 			) : (
-				<PersonAvatar person={item.author} size={24} />
+				<PersonAvatar person={item.author} size={size} />
 			);
 	}
 }
@@ -392,7 +393,7 @@ function activityItemLink(item: ActivityItem, pod: Pod) {
 /**
  * One thing that happened: a dot while it is unread, who or what it is about,
  * what happened and its pod's mark, and under them a line about it and when,
- * shaded while it is open.
+ * shaded while it is open. A phone draws it larger, across the screen.
  */
 function InboxRow({
 	item,
@@ -408,21 +409,24 @@ function InboxRow({
 	const { title, detail } = wordsOf(item);
 	const content = (
 		<>
-			<span className="w-1.5 shrink-0 pt-[7px]">
+			<span className="w-1.5 shrink-0 pt-[7px] max-md:w-2 max-md:pt-0">
 				{item.unread && (
-					<span className="block size-1.5 rounded-full bg-foreground">
+					<span className="block size-1.5 rounded-full bg-foreground max-md:size-2">
 						<span className="sr-only">Unread</span>
 					</span>
 				)}
 			</span>
-			<span aria-hidden className="flex shrink-0">
-				<FaceOf item={item} />
+			<span aria-hidden className="flex shrink-0 max-md:hidden">
+				<FaceOf item={item} size={24} />
+			</span>
+			<span aria-hidden className="flex shrink-0 md:hidden">
+				<FaceOf item={item} size={36} />
 			</span>
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex min-w-0 items-center gap-2">
 					<span
 						className={cn(
-							"min-w-0 flex-1 truncate text-[13px]",
+							"min-w-0 flex-1 truncate text-[13px] max-md:text-[15px]",
 							item.unread ? "font-semibold text-foreground" : "text-muted-foreground",
 						)}
 					>
@@ -436,7 +440,7 @@ function InboxRow({
 					)}
 				</span>
 				<span className="flex min-w-0 items-baseline gap-2">
-					<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+					<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground max-md:text-[14px]">
 						{detail}
 					</span>
 					<ListTime at={item.at} />
@@ -444,7 +448,8 @@ function InboxRow({
 			</span>
 		</>
 	);
-	const layout = "flex gap-3 rounded-lg p-2.5";
+	const layout =
+		"flex gap-3 rounded-lg p-2.5 max-md:items-center max-md:rounded-none max-md:py-3 max-md:pr-4 max-md:pl-2.5";
 	if (!pod) return <div className={layout}>{content}</div>;
 	return (
 		<Link

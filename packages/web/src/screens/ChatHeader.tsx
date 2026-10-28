@@ -215,17 +215,14 @@ function PhoneHeader({
 
 /** A round, frosted Back at the top left of a phone's chat, to the list the chat covers. */
 function PhoneBack({ back }: { back: BackTo }) {
-	const className =
-		"focus-ring glass grid size-9 shrink-0 place-items-center rounded-full text-foreground";
-	const chevron = <ChevronLeft aria-hidden size={18} strokeWidth={2.25} />;
-	return back.to === "pod" ? (
-		<Link {...podLink(back.pod)} aria-label={`Back to ${back.pod.name}`} className={className}>
-			{chevron}
-		</Link>
-	) : (
-		<Link {...activityLink()} aria-label="Back to Inbox" className={className}>
-			{chevron}
-		</Link>
+	return (
+		<IconButton
+			label={back.to === "pod" ? `Back to ${back.pod.name}` : "Back to Inbox"}
+			variant="glass"
+			render={back.to === "pod" ? <Link {...podLink(back.pod)} /> : <Link {...activityLink()} />}
+		>
+			<ChevronLeft aria-hidden size={18} strokeWidth={2.25} />
+		</IconButton>
 	);
 }
 

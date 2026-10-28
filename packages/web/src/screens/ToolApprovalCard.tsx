@@ -392,8 +392,9 @@ function ReviewHeading({
 
 /**
  * Allow and Deny, and what went wrong if answering failed. Deny is neutral:
- * refusing is not a danger. Pinned along a phone's foot they are two halves,
- * Deny first, so Allow is under the thumb.
+ * refusing is not a danger. Pinned along a phone's foot, or across a card on
+ * a phone with `halvesOnPhone`, they are two halves, Deny first, so Allow is
+ * under the thumb.
  */
 export function Answer({
 	pending,
@@ -401,6 +402,7 @@ export function Answer({
 	onDecide,
 	actionLabel,
 	pinned = false,
+	halvesOnPhone = false,
 }: {
 	pending: boolean;
 	error: Error | null;
@@ -408,13 +410,20 @@ export function Answer({
 	/** What would be allowed, for Allow's accessible name. */
 	actionLabel: string;
 	pinned?: boolean;
+	halvesOnPhone?: boolean;
 }) {
+	const size = pinned
+		? HALF_BUTTON_CLASS_NAME
+		: cn(
+				"h-[31px] px-4 text-[13px]",
+				halvesOnPhone && "max-md:h-11 max-md:flex-1 max-md:px-0 max-md:text-[15px]",
+			);
 	const allow = (
 		<Button
 			disabled={pending}
 			onClick={() => onDecide("allow_once")}
 			aria-label={`Allow: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+			className={size}
 		>
 			Allow
 		</Button>
@@ -425,13 +434,13 @@ export function Answer({
 			disabled={pending}
 			onClick={() => onDecide("deny")}
 			aria-label={`Deny: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+			className={cn(size, halvesOnPhone && "max-md:order-first")}
 		>
 			Deny
 		</Button>
 	);
 	return (
-		<div className="flex flex-col gap-1.5">
+		<div className={cn("flex flex-col gap-1.5", halvesOnPhone && "max-md:w-full")}>
 			<fieldset className="m-0 flex flex-wrap gap-2 border-0 p-0">
 				<legend className="sr-only">Answer this request</legend>
 				{pinned ? (
@@ -454,6 +463,9 @@ export function Answer({
 		</div>
 	);
 }
+
+/** Allow or Deny as half of the width they share, large enough for a thumb. */
+const HALF_BUTTON_CLASS_NAME = "h-11 flex-1 text-[15px]";
 
 type Fields = [string, unknown][];
 

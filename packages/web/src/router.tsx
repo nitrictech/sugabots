@@ -56,6 +56,7 @@ import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
+import { You } from "@/shell/You.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -147,6 +148,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/activity/$pod/$conversation   the conversation, run or collaboration of the one chosen, beside them
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
+ *   /$workspace/you          a phone's You: the workspace, its pods, your account and Sign out
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
  *   /$workspace/pods/$pod/routines/$routine  a routine's own thread, opened first if it has none
@@ -986,6 +988,13 @@ const approvalsRoute = createRoute({
 	),
 });
 
+/** A phone's You tab. */
+const youRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/you",
+	component: You,
+});
+
 const approvalsIndexRoute = createRoute({
 	getParentRoute: () => approvalsRoute,
 	path: "/",
@@ -1544,6 +1553,7 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
+		youRoute,
 		podRoute.addChildren([
 			podIndexRoute,
 			botPageRoute,

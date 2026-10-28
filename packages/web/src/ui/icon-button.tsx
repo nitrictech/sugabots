@@ -32,6 +32,8 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	 * one in the header bar across the top of a list, chat or sidebar: a 30px
 	 * rounded square, whatever `size`, whose icon keeps the size it is given.
 	 * `round` for a close or a ⋯: a 29px filled circle, whatever `size`.
+	 * `glass` for one floating at the top of a phone's page, such as its Back:
+	 * a 36px frosted circle, whose icon keeps the size it is given.
 	 */
 	variant?: IconButtonVariant;
 	side?: "top" | "bottom";
@@ -42,7 +44,7 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	render?: useRender.RenderProp;
 }
 
-type IconButtonVariant = "quiet" | "outline" | "pane" | "bar" | "round";
+type IconButtonVariant = "quiet" | "outline" | "pane" | "bar" | "round" | "glass";
 
 /**
  * An `IconButton`'s look, for a control that has to be another element, such
@@ -58,14 +60,18 @@ export function iconButtonClassName(
 			? "bg-chip text-foreground hover:bg-hover"
 			: variant === "bar"
 				? "rounded-[8px] text-soft-foreground hover:bg-chip"
-				: "text-muted-foreground hover:bg-hover hover:text-foreground",
+				: variant === "glass"
+					? "glass text-foreground"
+					: "text-muted-foreground hover:bg-hover hover:text-foreground",
 		variant === "bar"
 			? "size-[30px]"
-			: variant === "round"
-				? "size-[29px] [&_svg]:size-4"
-				: size === "lg" && variant === "pane"
-					? "size-[34px]"
-					: sizes[size],
+			: variant === "glass"
+				? "size-9"
+				: variant === "round"
+					? "size-[29px] [&_svg]:size-4"
+					: size === "lg" && variant === "pane"
+						? "size-[34px]"
+						: sizes[size],
 	);
 }
 

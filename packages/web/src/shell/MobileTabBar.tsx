@@ -70,9 +70,7 @@ export function MobileTabBar() {
 			<TabLink
 				label="You"
 				open={open === "you"}
-				render={
-					<Link to="/$workspace/settings/$section" params={{ ...params, section: "profile" }} />
-				}
+				render={<Link to="/$workspace/you" params={params} />}
 				icon={
 					<span
 						aria-hidden
@@ -127,6 +125,7 @@ function useOpenTab(): Tab {
 	const matchRoute = useMatchRoute();
 	if (matchRoute({ to: "/$workspace/activity", fuzzy: true })) return "inbox";
 	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
+	if (matchRoute({ to: "/$workspace/you" })) return "you";
 	if (matchRoute({ to: "/$workspace/settings", fuzzy: true })) return "you";
 	return "home";
 }

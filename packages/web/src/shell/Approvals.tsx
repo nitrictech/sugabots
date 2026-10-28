@@ -110,27 +110,30 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 	return (
 		<article
 			aria-label={`${agent.name}: ${action}`}
-			className="flex flex-col gap-3 rounded-xl border border-border p-4"
+			className="flex flex-col gap-3 rounded-xl border border-border p-4 max-md:rounded-[14px] max-md:bg-list max-md:p-3.5"
 		>
 			<div className="flex items-start gap-3">
 				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<h3 className="m-0 font-semibold text-[14px] text-foreground">{action}</h3>
+					<h3 className="m-0 font-semibold text-[14px] text-foreground max-md:font-medium max-md:text-[17px]">
+						{action}
+					</h3>
 					<span className="text-subtle-foreground text-xs">
 						{agent.name} asked {asked}
 					</span>
 				</div>
 			</div>
-			<div className="ml-9 min-w-0">
+			<div className="ml-9 min-w-0 max-md:ml-0">
 				<FoldedRequest input={call.input} />
 			</div>
-			<div className="ml-9 flex flex-wrap items-center gap-3">
+			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0">
 				{awaitsApproval(call) ? (
 					<Answer
 						pending={review.isPending || review.isSuccess}
 						error={review.error}
 						onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
 						actionLabel={action}
+						halvesOnPhone
 					/>
 				) : (
 					<p className="m-0 text-[13px] text-muted-foreground">

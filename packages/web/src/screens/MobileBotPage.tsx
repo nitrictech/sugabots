@@ -6,6 +6,7 @@ import { useChatList } from "@/lib/chats.ts";
 import { conversationLink, newThreadLink, podLink, routinesLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime } from "@/shell/Page.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * A bot's page on a phone: Back to its pod and a new thread with it, then its
@@ -21,20 +22,20 @@ export function MobileBotPage({ pod, agent }: { pod: Pod; agent: Agent }) {
 	return (
 		<section aria-label={agent.name} className="flex min-h-0 min-w-0 flex-1 flex-col">
 			<div className="flex shrink-0 items-center justify-between px-4 pt-[calc(env(safe-area-inset-top)+16px)]">
-				<Link
-					{...podLink(pod)}
-					aria-label={`Back to ${pod.name}`}
-					className="focus-ring glass grid size-9 place-items-center rounded-full text-foreground"
+				<IconButton
+					label={`Back to ${pod.name}`}
+					variant="glass"
+					render={<Link {...podLink(pod)} />}
 				>
 					<ChevronLeft aria-hidden size={18} strokeWidth={2.25} />
-				</Link>
-				<Link
-					{...newThreadLink(pod, agent)}
-					aria-label={`New thread with ${agent.name}`}
-					className="focus-ring glass grid size-9 place-items-center rounded-full text-foreground"
+				</IconButton>
+				<IconButton
+					label={`New thread with ${agent.name}`}
+					variant="glass"
+					render={<Link {...newThreadLink(pod, agent)} />}
 				>
 					<SquarePen aria-hidden size={17} strokeWidth={1.75} />
-				</Link>
+				</IconButton>
 			</div>
 			<div className="flex shrink-0 items-center gap-3 px-5 pt-[18px] pb-2.5">
 				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={36} />

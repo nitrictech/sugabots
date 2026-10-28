@@ -2,6 +2,7 @@ import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
 import { type ReactNode, type Ref, useState } from "react";
 import { CloseButton } from "@/ui/close-button.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * The column beside a chat: Details, or a collaboration or routine run opened
@@ -105,14 +106,14 @@ export function ChatSidebar({
 					/>
 				</header>
 				{headerless && !sheet && (
-					<button
-						type="button"
+					<IconButton
+						label="Back"
+						variant="glass"
 						onClick={onClose}
-						aria-label="Back"
-						className="focus-ring glass absolute top-[calc(env(safe-area-inset-top)+12px)] left-4 z-10 grid size-9 place-items-center rounded-full text-foreground md:hidden"
+						className="absolute top-[calc(env(safe-area-inset-top)+12px)] left-4 z-10 md:hidden"
 					>
 						<ChevronLeft aria-hidden size={18} strokeWidth={2.25} />
-					</button>
+					</IconButton>
 				)}
 				{children}
 			</aside>

@@ -1,11 +1,11 @@
 import type { ListedRoutine, Pod, Routine } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, RefreshCcw } from "lucide-react";
+import { ChevronLeft, Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
-import { newRoutineLink, routineThreadLink } from "@/lib/links.ts";
+import { botPageLink, newRoutineLink, podLink, routineThreadLink } from "@/lib/links.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -53,9 +53,19 @@ export function RoutinesPage({
 			<Plus size={15} strokeWidth={2} />
 		</IconButton>
 	);
+	// A phone reaches a bot's routines from its page, and a pod's from the pod.
+	const back = (
+		<IconButton
+			label={`Back to ${bot ? bot.name : pod.name}`}
+			variant="glass"
+			render={bot ? <Link {...botPageLink(pod, bot)} /> : <Link {...podLink(pod)} />}
+		>
+			<ChevronLeft aria-hidden size={18} strokeWidth={2.25} />
+		</IconButton>
+	);
 	if (list.isSuccess && routines.length === 0) {
 		return (
-			<Page title={title} actions={newRoutine}>
+			<Page title={title} actions={newRoutine} back={back}>
 				<div className="flex h-full pb-[10%]">
 					<EmptyState
 						title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
@@ -77,7 +87,7 @@ export function RoutinesPage({
 					chosen && "max-md:hidden",
 				)}
 			>
-				<PageHeader title={title} actions={newRoutine} />
+				<PageHeader title={title} actions={newRoutine} back={back} />
 				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
 					{list.isError && (
 						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">

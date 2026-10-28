@@ -43,13 +43,13 @@ export function PhoneChatSandbox({
 }) {
 	const inUse = useSandboxInUse(agent, threadId);
 	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			aria-label={
+		<IconButton
+			label={
 				inUse ? `${agent.name} is using the sandbox. Open its desktop` : `${agent.name}'s computer`
 			}
-			className="focus-ring glass relative grid size-9 shrink-0 place-items-center rounded-full text-foreground"
+			variant="glass"
+			onClick={onOpen}
+			className="relative"
 		>
 			<Monitor aria-hidden size={17} strokeWidth={1.75} />
 			{inUse && (
@@ -58,7 +58,7 @@ export function PhoneChatSandbox({
 					<span className="relative inline-flex size-2.5 rounded-full bg-bot-mono" />
 				</span>
 			)}
-		</button>
+		</IconButton>
 	);
 }
 

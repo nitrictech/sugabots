@@ -7,7 +7,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronDown, Download, FileText, Link2, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Download, FileText, Link2, Trash2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import {
 	useArtifact,
@@ -16,7 +16,7 @@ import {
 	useDeleteArtifact,
 } from "@/lib/artifacts.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { artifactLink, artifactsLink } from "@/lib/links.ts";
+import { artifactLink, artifactsLink, podLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { Page } from "@/shell/Page.tsx";
@@ -29,6 +29,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
@@ -91,7 +92,18 @@ export function ArtifactListView({
 	const pane = useRef<HTMLDivElement>(null);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
-			<Page title="Artifacts">
+			<Page
+				title="Artifacts"
+				back={
+					<IconButton
+						label={`Back to ${pod.name}`}
+						variant="glass"
+						render={<Link {...podLink(pod)} />}
+					>
+						<ChevronLeft aria-hidden size={18} strokeWidth={2.25} />
+					</IconButton>
+				}
+			>
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
 					<div className="flex h-full pb-[10%]">
 						<EmptyState
