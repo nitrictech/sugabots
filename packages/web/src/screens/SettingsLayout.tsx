@@ -19,7 +19,7 @@ import {
 } from "@/ui/settings-page.tsx";
 
 /**
- * Settings, as a page of the app beside the rail: its sections down the left,
+ * Settings, as a page of the app beside the sidebar: its sections down the left,
  * grouped the way a phone's settings are, and the open one beside them. Below
  * a laptop's width there is no room for both beside a section's own list, so
  * settings drill down as a phone's do: the sections as one list, and each

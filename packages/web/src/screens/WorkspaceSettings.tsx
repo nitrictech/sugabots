@@ -2,10 +2,9 @@ import { USER_NAME_MAX_LENGTH, type WorkspaceRole, workspaceRoleLabel } from "@s
 import { useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
-import { useSession, useUpdateName } from "@/lib/session.ts";
+import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -239,16 +238,10 @@ function ThemeChoice() {
 
 function ProfileSettings() {
 	const session = useSession();
-	const navigate = useNavigate();
+	const signOut = useSignOut();
 	const updateName = useUpdateName();
 	const user = session.user;
 	if (!user) return null;
-
-	async function signOut() {
-		await client.auth.signOut();
-		await session.refresh();
-		await navigate({ to: "/login", replace: true });
-	}
 
 	return (
 		<SettingsPage

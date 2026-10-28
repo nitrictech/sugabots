@@ -48,8 +48,13 @@ export function findPod(pods: readonly Pod[] | undefined, slug: string): Pod | u
 	return pods?.find((pod) => pod.slug === slug);
 }
 
+/** The pod a workspace opens on: the first shared pod, or Personal for somebody in none. */
+export function defaultPod(pods: readonly Pod[] | undefined): Pod | undefined {
+	return pods?.find((pod) => pod.kind === "shared") ?? pods?.find((pod) => pod.kind === "personal");
+}
+
 /**
- * Makes a pod, and puts it in the rail.
+ * Makes a pod, and puts it in the pod menu.
  *
  * The API adds the creator as a member in the same transaction, so the new
  * pod is visible to whoever made it — which is why invalidating the list is
@@ -137,7 +142,7 @@ export function usePlacePodMember(podId: string) {
 	});
 }
 
-/** Takes you out of a pod, and so off the rail. */
+/** Takes you out of a pod, and so out of the pod menu. */
 export function useLeavePod(podId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;

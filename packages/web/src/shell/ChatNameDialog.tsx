@@ -11,7 +11,7 @@ import {
 import { SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
- * Naming a chat in a pod: a new one, under `title` "New chat", or one being
+ * Naming a chat in a pod: a new one, under `title` "New channel", or one being
  * renamed, starting from its `name`. `onSave` is given the name as written.
  */
 export function ChatNameDialog({

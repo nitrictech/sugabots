@@ -36,7 +36,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
 
 /**
- * The ? at the bottom of the rail. Its menu leads out to the docs, Discord, a
+ * The ? at the foot of the sidebar. Its menu leads out to the docs, Discord, a
  * new bug report and the release notes, and opens About, which shows the
  * running version and copies it with the browser and system for a bug report.
  *
@@ -52,15 +52,15 @@ export function HelpMenu() {
 	return (
 		<>
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-				<Tooltip label="Help" side="right">
+				<Tooltip label="Help" side="top">
 					<DropdownMenuTrigger
 						aria-label="Help"
-						className="focus-ring grid size-9 shrink-0 place-items-center rounded-full bg-panel text-muted-foreground transition-colors hover:text-foreground data-popup-open:bg-chip-strong data-popup-open:text-foreground"
+						className="focus-ring grid size-7 shrink-0 place-items-center rounded-[6px] text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
 					>
-						<CircleHelp aria-hidden size={18} strokeWidth={2} />
+						<CircleHelp aria-hidden size={16} strokeWidth={1.75} />
 					</DropdownMenuTrigger>
 				</Tooltip>
-				<DropdownMenuContent side="right" align="end" className="min-w-60">
+				<DropdownMenuContent side="top" align="end" className="min-w-60">
 					<ExternalItem href={projectLinks.documentation} icon={BookOpen}>
 						Documentation
 					</ExternalItem>

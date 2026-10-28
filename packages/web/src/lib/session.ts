@@ -1,6 +1,7 @@
 import type { Me, SessionUser } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { createContext, use, useCallback, useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
@@ -107,6 +108,17 @@ export function useSession(): Session {
 	const session = use(SessionContext);
 	if (!session) throw new Error("useSession needs a SessionContext above it");
 	return session;
+}
+
+/** Signs you out, then opens the login page in place of the page you were on. */
+export function useSignOut(): () => Promise<void> {
+	const session = useSession();
+	const navigate = useNavigate();
+	return async () => {
+		await client.auth.signOut();
+		await session.refresh();
+		await navigate({ to: "/login", replace: true });
+	};
 }
 
 /**

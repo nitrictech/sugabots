@@ -8,84 +8,54 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import {
-	ChevronDown,
-	ChevronRight,
-	CircleCheck,
-	Library,
-	ListFilter,
-	Plus,
-	RefreshCw,
-	Settings2,
-	Users,
-} from "lucide-react";
+import { Check, ChevronRight, Hash, Plus, RefreshCcw, Users } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList, useStartChat } from "@/lib/chats.ts";
+import { useFolded } from "@/lib/folded.ts";
 import {
 	agentChatLink,
-	artifactsLink,
 	conversationLink,
 	newThreadLink,
 	podChatLink,
-	podSettingsLink,
-	routineThreadLink,
+	routinesLink,
 } from "@/lib/links.ts";
-import { type ListGrouping, useFoldedBots, useListGrouping } from "@/lib/list-grouping.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
+import { useOpenBots } from "@/lib/open-bots.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
-import { ListColumn } from "@/shell/ListColumn.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
-import { PodChatTile } from "@/shell/PodChatTile.tsx";
-import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * Which row of the list is open: the pod's first chat while it is being
- * opened, or a conversation, which is a chat, a thread or a routine's thread.
+ * opened, a bot's conversation while it is being found by the bot's handle,
+ * or a conversation, which is a chat, a thread or a routine's thread.
  */
-export type ListSelection = { kind: "podChat" } | { kind: "conversation"; conversationId: string };
+export type ListSelection =
+	| { kind: "podChat" }
+	| { kind: "bot"; handle: string }
+	| { kind: "conversation"; conversationId: string }
+	| { kind: "routine"; routineId: string }
+	/** A bot's Routines page, while none of its routines is open. */
+	| { kind: "routines"; handle: string };
 
 /** One of a shared pod's chats in its list. */
 export type ListedChat = ChatList["chats"][number];
 
 /**
- * The column of conversations for the pod chosen on the rail: a shared pod's
- * chat first, then its threads, newest message first or under their bots.
+ * The pod's conversations in the sidebar: a shared pod's chats, then each of
+ * its bots, which opens to show its threads.
  */
-export function ConversationList({
-	pod,
-	selected,
-	className,
-}: {
-	pod: Pod;
-	selected?: ListSelection;
-	className?: string;
-}) {
+export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListSelection }) {
 	const list = useChatList(pod.slug);
 	const [creating, setCreating] = useState(false);
 	const [namingChat, setNamingChat] = useState(false);
 	const startChat = useStartChat(pod);
-	const [grouping, setGrouping] = useListGrouping(pod.id);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
 	const { agents } = useAgents();
-	const hasBots = agents?.some((agent) => agent.podId === pod.id) ?? true;
-	const emptyState: EmptyList = {
-		title: `No bots in ${pod.name} yet`,
-		hint: newBot ? undefined : "Someone who runs this pod can add one.",
-		action: newBot ? { label: "New bot", onClick: newBot } : undefined,
-	};
 	return (
 		<>
 			<ConversationListView
@@ -95,20 +65,16 @@ export function ConversationList({
 						? { list: list.data?.chats ?? [], onNew: () => setNamingChat(true) }
 						: undefined
 				}
+				bots={crewIn(agents, pod)}
 				rows={list.data?.threads ?? []}
 				routines={list.data?.routines ?? []}
-				hasBots={hasBots}
-				grouping={grouping}
-				onGroupingChange={setGrouping}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selected={selected}
 				onNewBot={newBot}
-				emptyState={emptyState}
-				className={className}
 			/>
 			<Dialog open={namingChat} onOpenChange={setNamingChat}>
 				<ChatNameDialog
-					title="New chat"
+					title="New channel"
 					action="Create"
 					onSave={async (name) => {
 						const started = await startChat.mutateAsync(name);
@@ -131,27 +97,20 @@ export function ConversationList({
 	);
 }
 
-/** What an empty list says, and the one thing that would fill it. */
-export interface EmptyList {
-	title: string;
-	/** For when there is nothing the viewer can do themselves, or it needs a word of why. */
-	hint?: string;
-	action?: { label: string; onClick: () => void };
+/** The pod's own bots, leaving out the system bots every pod has. */
+function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
+	return agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
 }
 
 export function ConversationListView({
 	pod,
 	chats,
+	bots,
 	rows,
-	routines,
-	hasBots,
-	grouping,
-	onGroupingChange,
+	routines = [],
 	status,
 	selected,
 	onNewBot,
-	emptyState,
-	className,
 }: {
 	pod: Pod;
 	/**
@@ -159,43 +118,40 @@ export function ConversationListView({
 	 * what starts another. Absent from a Personal pod, which has none.
 	 */
 	chats?: { list: readonly ListedChat[]; onNew: () => void };
+	/** The pod's bots, each listed whether or not it has a thread yet. */
+	bots: readonly Agent[];
 	/** The pod's threads, newest message first. */
 	rows: readonly ChatListItem[];
-	/** The pod's routines, under their own heading, folded until opened. */
-	routines: readonly ListedRoutine[];
-	/** Whether the pod has bots; one without says so, with the way to make the first. */
-	hasBots: boolean;
-	/**
-	 * Newest first, or a section for each bot holding its open threads and
-	 * routines. A Personal pod's list is already one row for each bot, so has no choice.
-	 */
-	grouping: ListGrouping;
-	onGroupingChange: (grouping: ListGrouping) => void;
+	/** The pod's routines, each listed under the bot that runs it. */
+	routines?: readonly ListedRoutine[];
 	status: "loading" | "ready" | "failed";
 	selected?: ListSelection;
 	/** Absent when the viewer may not make a bot here. */
 	onNewBot?: () => void;
-	emptyState: EmptyList;
-	className?: string;
 }) {
-	const backToChat = useBackToHere("Chat");
-	// A Personal pod's conversations are its person's own with their bots, never done.
-	const direct = pod.kind === "personal";
-	const open = direct ? rows : rows.filter((row) => row.conversation.doneAt === null);
-	const done = direct ? [] : rows.filter((row) => row.conversation.doneAt !== null);
-	const [doneShown, setDoneShown] = useState(false);
-	const byBot = !direct && grouping === "bot";
-	const [foldedBots, toggleBot] = useFoldedBots(pod.id);
-	// The open thread when the viewer folded the section holding it, which stays folded until another opens.
-	const [foldedOver, setFoldedOver] = useState<string>();
+	const [openBots, toggleBot] = useOpenBots(pod.id);
+	const [folded, toggleFolded] = useFolded();
+	const chatsKey = `chats:${pod.id}`;
+	const botsKey = `bots:${pod.id}`;
+	// The open thread when the viewer closed the bot holding it, which stays closed until another opens.
+	const [closedOver, setClosedOver] = useState<string>();
 	const selectedId = selected?.kind === "conversation" ? selected.conversationId : undefined;
-	// Bot sections showing all their rows, after Show more, until the page is left.
-	const [unclippedBots, setUnclippedBots] = useState<ReadonlySet<string>>(new Set());
-	// Folded until opened, unless a routine has failed, which opens it.
-	const [routinesChosen, setRoutinesShown] = useState<boolean>();
-	const routinesShown = routinesChosen ?? routines.some((row) => row.routine.failed);
+	// What is open, as `closedOver` remembers it: a conversation, or a bot whose thread is being found or started.
+	const selectedKey =
+		selected?.kind === "conversation"
+			? selected.conversationId
+			: selected?.kind === "bot"
+				? `bot:${selected.handle}`
+				: selected?.kind === "routine"
+					? `routine:${selected.routineId}`
+					: selected?.kind === "routines"
+						? `routines:${selected.handle}`
+						: undefined;
+	const selectedRoutineId = selected?.kind === "routine" ? selected.routineId : undefined;
+	const routinesOf = (agentId: string | undefined) =>
+		routines.filter((row) => row.agent.id === agentId);
 	const isSelected = (conversationId: string | undefined) =>
-		selected?.kind === "conversation" && conversationId === selected.conversationId;
+		conversationId !== undefined && conversationId === selectedId;
 	// The first chat is listed before anyone opens it, which opens it.
 	const shownChats: (ListedChat | "unopened")[] | undefined =
 		chats &&
@@ -207,220 +163,252 @@ export function ConversationListView({
 			? selected?.kind === "podChat"
 			: isSelected(chat.conversation.id) ||
 				(selected?.kind === "podChat" && chat.conversation.main);
-	const empty = status === "ready" && rows.length === 0 && !hasBots;
-	const noBots = (
-		// A little above the middle, as the design sets it, with the one next step under it.
-		<div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-6 pb-[18%] text-center">
-			<div className="flex flex-col gap-1.5">
-				<p className="m-0 font-medium text-[14.5px] text-muted-foreground">{emptyState.title}</p>
-				{emptyState.hint && (
-					<p className="m-0 max-w-[240px] text-[13px] text-subtle-foreground leading-normal">
-						{emptyState.hint}
-					</p>
-				)}
-			</div>
-			{emptyState.action && (
-				<button
-					type="button"
-					onClick={emptyState.action.onClick}
-					className="focus-ring flex h-10 items-center gap-[7px] rounded-[20px] bg-switch-on px-[18px] font-semibold text-[14px] text-white transition-colors hover:bg-primary"
-				>
-					<Plus size={15} strokeWidth={2.6} />
-					{emptyState.action.label}
-				</button>
-			)}
-		</div>
+	// Done threads leave the sidebar, but for the one open, so marking it done doesn't pull it from under you.
+	const listed = rows.filter(
+		(row) => row.conversation.doneAt === null || isSelected(row.conversation.id),
+	);
+	// A thread between people hangs under the chat it was started from; any other goes under its bot.
+	const byChat = threadsByChat(chats?.list ?? [], listed);
+	const groups = groupByBot(
+		bots,
+		listed.filter((row) => !startedInChatOf(row, byChat)),
 	);
 
 	return (
-		<ListColumn
-			title={pod.name}
-			className={className}
-			actions={
-				<>
-					{!direct && !empty && (
-						<GroupingMenu grouping={grouping} onGroupingChange={onGroupingChange} />
-					)}
-					{onNewBot && !empty && (
-						<IconButton label={`New bot in ${pod.name}`} variant="bar" onClick={onNewBot}>
-							<Plus size={17} strokeWidth={2.2} />
-						</IconButton>
-					)}
-					<IconButton label="Artifacts" variant="bar" render={<Link {...artifactsLink(pod)} />}>
-						<Library size={16} strokeWidth={2} />
-					</IconButton>
-					<IconButton
-						label="Pod settings"
-						variant="bar"
-						render={<Link {...podSettingsLink(pod)} state={backToChat} />}
-					>
-						<Settings2 size={16} strokeWidth={2} />
-					</IconButton>
-				</>
-			}
-		>
-			{(shownChats || !empty) && (
-				<ul
-					className={cn(
-						"m-0 flex min-h-0 list-none flex-col gap-px overflow-y-auto px-2 pt-2.5 pb-3",
-						!empty && "flex-1",
-					)}
-				>
-					{status === "failed" && (
-						<li className="px-2.5 py-3 text-muted-foreground">Could not load these chats.</li>
-					)}
-					{shownChats && (
-						<>
-							<li className="flex items-center pr-1.5 pb-1 pl-2.5 font-medium text-[12px] text-subtle-foreground">
-								<span className="flex-1">Chats</span>
-								{chats && (
-									<IconButton label={`New chat in ${pod.name}`} size="sm" onClick={chats.onNew}>
-										<Plus strokeWidth={2.4} />
-									</IconButton>
-								)}
-							</li>
-							{shownChats.map((chat) => (
-								<li key={chat === "unopened" ? "unopened" : chat.conversation.id}>
-									<PodChatRow pod={pod} chat={chat} selected={isChatSelected(chat)} />
-								</li>
-							))}
-							{!byBot && open.length > 0 && (
-								<li className="px-2.5 pt-3.5 pb-1 font-medium text-[12px] text-subtle-foreground">
-									Active threads
-								</li>
-							)}
-						</>
-					)}
-					{byBot &&
-						groupByBot(open, routines).map((group) => {
-							// A thread opened in a folded section unfolds it, so the viewer can see where they are.
-							const holdsSelected =
-								group.threads.some((row) => isSelected(row.conversation.id)) ||
-								group.routines.some((row) => isSelected(row.conversation?.id));
-							const folded =
-								foldedBots.has(group.key) && (!holdsSelected || foldedOver === selectedId);
-							const toggle = () => {
-								// Still folded in storage, and only showing for the open thread.
-								if (!folded && foldedBots.has(group.key)) return setFoldedOver(selectedId);
-								toggleBot(group.key);
-								if (holdsSelected) setFoldedOver(folded ? undefined : selectedId);
-							};
-							// The first few rows, and the open one wherever it is.
-							const shownRows = unclippedBots.has(group.key) ? Infinity : ROWS_BEFORE_SHOW_MORE;
-							const threads = group.threads.filter(
-								(row, index) => index < shownRows || isSelected(row.conversation.id),
-							);
-							const routines = group.routines.filter(
-								(row, index) =>
-									group.threads.length + index < shownRows || isSelected(row.conversation?.id),
-							);
-							const hidden =
-								group.threads.length + group.routines.length - threads.length - routines.length;
-							return (
-								<BotSection
-									key={group.key}
-									pod={pod}
-									group={group}
-									folded={folded}
-									onToggle={toggle}
-								>
-									{threads.map((row) => (
-										<li key={row.conversation.id}>
-											<ConversationRow
-												row={row}
-												pod={pod}
-												selected={isSelected(row.conversation.id)}
-												grouped
-											/>
-										</li>
-									))}
-									{routines.map((row) => (
-										<li key={row.routine.id}>
-											<RoutineRow
-												row={row}
-												pod={pod}
-												selected={isSelected(row.conversation?.id)}
-												grouped
-											/>
-										</li>
-									))}
-									{hidden > 0 && (
-										<li>
-											<button
-												type="button"
-												onClick={() => setUnclippedBots(new Set(unclippedBots).add(group.key))}
-												className="focus-ring flex min-h-8 w-full items-center rounded-tail pl-12 text-left font-medium text-[13px] text-subtle-foreground hover:text-muted-foreground"
-											>
-												Show {hidden} more
-											</button>
-										</li>
-									)}
-								</BotSection>
-							);
-						})}
-					{!byBot &&
-						open.map((row) => (
-							<li key={row.conversation.id}>
-								<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
-							</li>
-						))}
-					{!byBot && routines.length > 0 && (
-						<li className="pt-3.5">
-							<SectionToggle
-								label="Routines"
-								count={routines.length}
-								open={routinesShown}
-								onOpenChange={setRoutinesShown}
-							/>
-						</li>
-					)}
-					{!byBot &&
-						routinesShown &&
-						routines.map((row) => (
-							<li key={row.routine.id}>
-								<RoutineRow row={row} pod={pod} selected={isSelected(row.conversation?.id)} />
-							</li>
-						))}
-					{done.length > 0 &&
-						(byBot ? (
-							<GroupHeading
-								icon={<CircleCheck aria-hidden size={17} strokeWidth={2} />}
-								label="Done"
-								folded={!doneShown}
-								onToggle={() => setDoneShown(!doneShown)}
-								end={
-									<span className="w-5 text-center font-medium text-[13px] text-subtle-foreground">
-										{done.length}
-									</span>
-								}
-							/>
-						) : (
-							<li className="pt-3.5">
-								<SectionToggle
-									label="Done"
-									count={done.length}
-									open={doneShown}
-									onOpenChange={setDoneShown}
-								/>
-							</li>
-						))}
-					{doneShown &&
-						done.map((row) => (
-							<li key={row.conversation.id}>
-								<ConversationRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
-							</li>
-						))}
-				</ul>
+		<div className="flex flex-col gap-px">
+			{status === "failed" && (
+				<p className="m-0 px-2 pb-4 text-[13px] text-muted-foreground">
+					Could not load these chats.
+				</p>
 			)}
-			{empty && noBots}
-		</ListColumn>
+			{chats && shownChats && (
+				<div className="flex flex-col gap-px">
+					<SectionHeading
+						label="Channels"
+						open={!folded.has(chatsKey)}
+						onToggle={() => toggleFolded(chatsKey)}
+						news={newsIn([...chats.list, ...[...byChat.values()].flat()])}
+						action={
+							<IconButton label={`New channel in ${pod.name}`} size="sm" onClick={chats.onNew}>
+								<Plus strokeWidth={2.2} />
+							</IconButton>
+						}
+					/>
+					{!folded.has(chatsKey) && (
+						<ul className={cn("m-0 flex list-none flex-col gap-px p-0", NESTED_INDENT)}>
+							{shownChats.map((chat) => {
+								const under = chat === "unopened" ? undefined : byChat.get(chat.conversation.id);
+								return (
+									<li key={chat === "unopened" ? "unopened" : chat.conversation.id}>
+										<PodChatRow pod={pod} chat={chat} selected={isChatSelected(chat)} />
+										{under && <ThreadTree pod={pod} threads={under} isSelected={isSelected} />}
+									</li>
+								);
+							})}
+						</ul>
+					)}
+				</div>
+			)}
+			<div className="flex flex-col gap-px">
+				<SectionHeading
+					label="Bots"
+					open={!folded.has(botsKey)}
+					onToggle={() => toggleFolded(botsKey)}
+					news={newsIn(groups.flatMap((group) => group.threads))}
+					action={
+						onNewBot && (
+							<IconButton label={`New bot in ${pod.name}`} size="sm" onClick={onNewBot}>
+								<Plus strokeWidth={2.2} />
+							</IconButton>
+						)
+					}
+				/>
+				{folded.has(botsKey) ? null : (
+					<div className={cn("flex flex-col gap-px", NESTED_INDENT)}>
+						{status === "ready" && groups.length === 0 && <NoBots onNewBot={onNewBot} />}
+						<ul className="m-0 flex list-none flex-col gap-px p-0">
+							{groups.map((group) => {
+								// A thread opened under a closed bot opens it, so the viewer can see where they are.
+								const botRoutines = routinesOf(group.agent?.id);
+								const holdsRoutine =
+									botRoutines.some((row) => row.routine.id === selectedRoutineId) ||
+									(selected?.kind === "routines" && group.agent?.handle === selected.handle);
+								const holdsSelected =
+									(selected?.kind === "bot" && group.agent?.handle === selected.handle) ||
+									group.threads.some((row) => isSelected(row.conversation.id)) ||
+									holdsRoutine;
+								// In a Personal pod a bot keeps one conversation, which its row opens, unless it has routines to show.
+								if (pod.kind === "personal" && group.agent && botRoutines.length === 0) {
+									return (
+										<DirectBotItem
+											key={group.key}
+											pod={pod}
+											agent={group.agent}
+											threads={group.threads}
+											selected={holdsSelected}
+										/>
+									);
+								}
+								const open =
+									openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey);
+								const toggle = () => {
+									if (openBots.has(group.key) === open) toggleBot(group.key);
+									setClosedOver(open && holdsSelected ? selectedKey : undefined);
+								};
+								return (
+									<BotItem
+										key={group.key}
+										starting={selected?.kind === "bot" && group.agent?.handle === selected.handle}
+										pod={pod}
+										group={group}
+										open={open}
+										onToggle={toggle}
+										isSelected={isSelected}
+										routines={
+											group.agent && (
+												<BotRoutines
+													pod={pod}
+													agent={group.agent}
+													routines={botRoutines}
+													selected={holdsRoutine}
+												/>
+											)
+										}
+										routinesNeedYou={botRoutines.some((row) => row.mentionsYou)}
+									/>
+								);
+							})}
+						</ul>
+					</div>
+				)}
+			</div>
+		</div>
 	);
 }
 
 /**
- * One of the pod's chats on one line, bright while something there is new,
- * with how much.
+ * A section's name in small grey type, which folds the section away or opens
+ * it, with its one action at the end. Folded, it says what is new in it.
  */
+function SectionHeading({
+	label,
+	open,
+	onToggle,
+	news,
+	action,
+}: {
+	label: string;
+	open: boolean;
+	onToggle: () => void;
+	news: { unreadMessages: number; needsYou: boolean };
+	action?: ReactNode;
+}) {
+	return (
+		<h2 className="group/section m-0 flex h-8 items-center rounded-[6px] pr-1.5 font-normal text-[14px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground">
+			<button
+				type="button"
+				aria-expanded={open}
+				onClick={onToggle}
+				className={cn(
+					"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left",
+					// Folded over something new, it is bright, as a bot is.
+					!open && hasNews(news) && "font-semibold text-foreground",
+				)}
+			>
+				<span className="grid size-[18px] shrink-0 place-items-center">
+					<ChevronRight
+						aria-hidden
+						size={14}
+						strokeWidth={2.25}
+						className={cn("transition-transform", open && "rotate-90")}
+					/>
+				</span>
+				{label}
+			</button>
+			{!open && (
+				<span className={END_SLOT}>
+					<UnreadMarker {...news} />
+				</span>
+			)}
+			{/* The action comes in under the pointer or on focus, beside what is new. */}
+			<span
+				className={cn(
+					END_SLOT,
+					!open && hasNews(news)
+						? "hidden group-hover/section:grid group-has-focus-visible/section:grid"
+						: "opacity-0 group-hover/section:opacity-100 group-has-focus-visible/section:opacity-100",
+				)}
+			>
+				{action}
+			</span>
+		</h2>
+	);
+}
+
+function hasNews(news: { unreadMessages: number; needsYou: boolean }): boolean {
+	return news.unreadMessages > 0 || news.needsYou;
+}
+
+/** What is new across `rows`, as a folded section says it. */
+function newsIn(
+	rows: readonly { unreadMessages: number; needsApproval?: boolean; mentionsYou?: boolean }[],
+) {
+	return {
+		unreadMessages: rows.reduce((sum, row) => sum + row.unreadMessages, 0),
+		needsYou: rows.some((row) => row.needsApproval || row.mentionsYou),
+	};
+}
+
+/**
+ * The Bots section while the pod has none: a row that adds the first, its
+ * face a dashed circle, or, for somebody who may not add one, a line saying
+ * there are none.
+ */
+function NoBots({ onNewBot }: { onNewBot?: () => void }) {
+	const mark = (
+		<span
+			aria-hidden
+			className="grid size-[18px] shrink-0 place-items-center rounded-full border border-border-strong border-dashed"
+		>
+			{onNewBot && <Plus size={10} strokeWidth={2.4} className="block" />}
+		</span>
+	);
+	if (!onNewBot) {
+		return (
+			<p
+				className={cn(
+					sidebarRowClassName(false),
+					"m-0 hover:bg-transparent hover:text-muted-foreground",
+				)}
+			>
+				{mark}
+				No bots yet
+			</p>
+		);
+	}
+	return (
+		<button
+			type="button"
+			onClick={onNewBot}
+			className={cn(sidebarRowClassName(false), "text-left")}
+		>
+			{mark}
+			Add a bot
+		</button>
+	);
+}
+
+/** A row of the sidebar: a link or button 36px tall, shaded while it is the one open. */
+function sidebarRowClassName(selected: boolean): string {
+	return cn(
+		"focus-ring flex h-8 min-w-0 items-center gap-2.5 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors",
+		selected
+			? "bg-row-selected text-foreground"
+			: "text-muted-foreground hover:bg-row-hover hover:text-foreground",
+	);
+}
+
+/** One of the pod's chats, bright and dotted while something there is new. */
 function PodChatRow({
 	pod,
 	chat,
@@ -431,250 +419,56 @@ function PodChatRow({
 	selected: boolean;
 }) {
 	const unreadMessages = chat === "unopened" ? 0 : chat.unreadMessages;
-	const lit = selected || unreadMessages > 0;
 	return (
 		<Link
 			{...(chat === "unopened"
 				? podChatLink(pod)
 				: conversationLink({ pod, conversationId: chat.conversation.id }))}
 			aria-current={selected ? "page" : undefined}
-			className={rowClassName(selected)}
+			className={sidebarRowClassName(selected)}
 		>
-			<PodChatTile color={pod.color} size={26} />
+			<Hash aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
 			<span
 				className={cn(
-					"min-w-0 flex-1 truncate text-[14.5px]",
-					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+					"min-w-0 flex-1 truncate-fade",
+					unreadMessages > 0 && "font-semibold text-foreground",
 				)}
 			>
 				{chat === "unopened" ? FIRST_CHAT_NAME : chat.conversation.title}
 			</span>
-			<ChatMarker needsYou={false} unreadMessages={unreadMessages} />
-		</Link>
-	);
-}
-
-/**
- * A thread on one line: its bot's face, or the people's tile for one between
- * people, and its title, bright while something there is new or waits on the
- * viewer, and at the end what does.
- */
-function ConversationRow({
-	row,
-	pod,
-	selected,
-	grouped = false,
-}: {
-	row: ChatListItem;
-	pod: Pod;
-	selected: boolean;
-	/** Under its bot's heading, so marked as a thread rather than by whose it is. */
-	grouped?: boolean;
-}) {
-	const { agent } = row;
-	const needsYou = row.needsApproval || row.mentionsYou;
-	const lit = selected || needsYou || row.unreadMessages > 0;
-	// In a Personal pod a conversation is with the bot, so goes by its name and is never done.
-	const direct = pod.kind === "personal";
-	const done = !direct && row.conversation.doneAt !== null;
-	return (
-		<Link
-			{...conversationLink({ pod, conversationId: row.conversation.id })}
-			aria-current={selected ? "page" : undefined}
-			className={cn(rowClassName(selected), grouped && GROUPED_ROW_INDENT)}
-		>
-			{grouped ? null : agent ? (
-				<AgentAvatar
-					color={agent.color}
-					face={agent.face}
-					shape={agent.shape}
-					size={26}
-					className={cn("shrink-0", done && "opacity-50")}
-				/>
-			) : (
-				<PeopleTile />
-			)}
-			<span
-				className={cn(
-					"min-w-0 flex-1 truncate text-[14.5px]",
-					lit ? "font-semibold" : "font-medium",
-					lit && !done ? "text-foreground" : "text-muted-foreground",
-				)}
-			>
-				{direct && agent ? agent.name : row.conversation.title}
+			<span className={END_SLOT}>
+				<UnreadMarker unreadMessages={unreadMessages} needsYou={false} />
 			</span>
-			<ChatMarker needsYou={needsYou} unreadMessages={row.unreadMessages} />
 		</Link>
 	);
 }
 
-/** Lines a row under its bot's heading up with the bot's name, past the column of faces. */
-const GROUPED_ROW_INDENT = "pl-12";
-
-/** How many of a bot's rows show before Show more. */
-const ROWS_BEFORE_SHOW_MORE = 4;
-
-/** A list row, shaded while it is the one open. */
-function rowClassName(selected: boolean): string {
-	return cn(
-		"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
-		selected ? "bg-row-selected" : "hover:bg-row-hover",
-	);
-}
-
-/** A heading that folds the rows under it away, with how many there are. */
-function SectionToggle({
-	label,
-	count,
-	open,
-	onOpenChange,
-}: {
-	label: string;
-	count: number;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-}) {
-	return (
-		<button
-			type="button"
-			aria-expanded={open}
-			onClick={() => onOpenChange(!open)}
-			className="focus-ring flex w-full items-center gap-1.5 rounded-tail px-2.5 py-1 text-left font-medium text-[12px] text-subtle-foreground hover:text-muted-foreground"
-		>
-			<ChevronRight
-				aria-hidden
-				size={10}
-				strokeWidth={2.6}
-				className={cn("transition-transform duration-150", open && "rotate-90")}
-			/>
-			{label}
-			<span>{count}</span>
-		</button>
-	);
-}
-
-/**
- * A routine on one line: the bot that runs it, its name, and at the end a red
- * dot when its latest run failed, or a dot when a message in its thread
- * mentions the viewer. Only a screen reader says it is paused.
- */
-function RoutineRow({
-	row,
-	pod,
-	selected,
-	grouped = false,
-}: {
-	row: ListedRoutine;
-	pod: Pod;
-	selected: boolean;
-	/** Under its bot's heading, so marked as a routine at its end rather than by whose it is. */
-	grouped?: boolean;
-}) {
-	const { agent, routine } = row;
-	const paused = routine.state === "paused";
-	return (
-		<Link
-			{...(row.conversation
-				? conversationLink({ pod, conversationId: row.conversation.id })
-				: routineThreadLink(pod, routine.id))}
-			aria-current={selected ? "page" : undefined}
-			className={cn(rowClassName(selected), grouped && GROUPED_ROW_INDENT)}
-		>
-			{!grouped && (
-				<AgentAvatar
-					color={agent.color}
-					face={agent.face}
-					shape={agent.shape}
-					size={26}
-					className="shrink-0"
-				/>
-			)}
-			<span
-				className={cn(
-					"min-w-0 flex-1 truncate text-[14.5px]",
-					selected || row.mentionsYou
-						? "font-semibold text-foreground"
-						: "font-medium text-muted-foreground",
-				)}
-			>
-				{routine.name}
-				{paused && <span className="sr-only"> Paused</span>}
-			</span>
-			{grouped && (
-				<RefreshCw
-					aria-hidden
-					size={14}
-					strokeWidth={2}
-					className="shrink-0 text-subtle-foreground"
-				/>
-			)}
-			{routine.failed ? (
-				<span className="mr-1.5 size-2 shrink-0 rounded-full bg-destructive-text">
-					<span className="sr-only">Failed</span>
-				</span>
-			) : paused ? null : (
-				<ChatMarker needsYou={row.mentionsYou} unreadMessages={0} />
-			)}
-		</Link>
-	);
-}
-
-/** The header button that chooses between newest first and a section for each bot. */
-function GroupingMenu({
-	grouping,
-	onGroupingChange,
-}: {
-	grouping: ListGrouping;
-	onGroupingChange: (grouping: ListGrouping) => void;
-}) {
-	return (
-		<DropdownMenu>
-			<IconButton label="Group threads" variant="bar" render={<DropdownMenuTrigger />}>
-				<ListFilter size={16} strokeWidth={2} />
-			</IconButton>
-			<DropdownMenuContent align="end" className="min-w-44">
-				<DropdownMenuRadioGroup
-					value={grouping}
-					onValueChange={(value: ListGrouping) => onGroupingChange(value)}
-				>
-					<DropdownMenuRadioItem value="recent">Most recent</DropdownMenuRadioItem>
-					<DropdownMenuRadioItem value="bot">By bot</DropdownMenuRadioItem>
-				</DropdownMenuRadioGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
-	);
-}
-
-/** A bot's open threads, newest first, then its routines; or threads between people, when `agent` is null. */
+/** A bot's open threads, newest first; or the threads between people, when `agent` is null. */
 interface BotGroup {
 	key: string;
 	agent: Agent | null;
 	threads: ChatListItem[];
-	routines: ListedRoutine[];
 }
 
 const PEOPLE_GROUP_KEY = "people";
 
 /**
- * Sections for each bot with an open thread or a routine, in order of the
- * bots' names so each stays where it was as threads move, then the threads
- * between people.
+ * A group for each of the pod's bots, and for any other bot with a thread
+ * here, in order of the bots' names so each stays where it was as
+ * threads move, then the threads between people.
  */
-function groupByBot(
-	threads: readonly ChatListItem[],
-	routines: readonly ListedRoutine[],
-): BotGroup[] {
+function groupByBot(bots: readonly Agent[], threads: readonly ChatListItem[]): BotGroup[] {
 	const groups = new Map<string, BotGroup>();
 	const groupFor = (agent: Agent | null) => {
 		const key = agent?.id ?? PEOPLE_GROUP_KEY;
 		const existing = groups.get(key);
 		if (existing) return existing;
-		const group: BotGroup = { key, agent, threads: [], routines: [] };
+		const group: BotGroup = { key, agent, threads: [] };
 		groups.set(key, group);
 		return group;
 	};
+	for (const bot of bots) groupFor(bot);
 	for (const row of threads) groupFor(row.agent).threads.push(row);
-	for (const row of routines) groupFor(row.agent).routines.push(row);
 	return [...groups.values()].sort((a, b) => {
 		if (!a.agent) return 1;
 		if (!b.agent) return -1;
@@ -682,136 +476,389 @@ function groupByBot(
 	});
 }
 
+/** The threads between people started from each of `chats`, newest first, by the chat's id; only chats with one. */
+function threadsByChat(
+	chats: readonly ListedChat[],
+	rows: readonly ChatListItem[],
+): Map<string, ChatListItem[]> {
+	const chatIds = new Set(chats.map((chat) => chat.conversation.id));
+	const byChat = new Map<string, ChatListItem[]>();
+	for (const row of rows) {
+		const chat = row.agent === null ? row.conversation.startedInChatId : null;
+		if (chat === null || !chatIds.has(chat)) continue;
+		byChat.set(chat, [...(byChat.get(chat) ?? []), row]);
+	}
+	return byChat;
+}
+
+/** Whether `row` hangs under a chat in `byChat`, rather than under its bot. */
+function startedInChatOf(
+	row: ChatListItem,
+	byChat: ReadonlyMap<string, readonly ChatListItem[]>,
+): boolean {
+	return (
+		row.agent === null &&
+		row.conversation.startedInChatId !== null &&
+		byChat.has(row.conversation.startedInChatId)
+	);
+}
+
+/** Whether something under a bot is new to the viewer or waits on them. */
+function needsAttention(group: BotGroup): boolean {
+	return group.threads.some(
+		(row) => row.needsApproval || row.mentionsYou || row.unreadMessages > 0,
+	);
+}
+
+/** A bot's own part of its row: its face and name, filling the row up to its end. */
+const botClassName =
+	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left text-[14px]";
+
+/** How many of a bot's open threads show before Show more. */
+const THREADS_BEFORE_SHOW_MORE = 4;
+
 /**
- * A bot's heading, with its face and name, that folds its rows away, and a +
- * that starts a new thread with the bot.
+ * A bot on one line, which opens to show its threads, or, with none, opens a
+ * new thread with it. At its end, folded,
+ * how many of their messages are unread, or how many threads it has when none
+ * are; under the pointer or while it is open, a + that starts a new thread
+ * with it.
  */
-function BotSection({
+function BotItem({
 	pod,
 	group,
-	folded,
+	open,
+	starting,
 	onToggle,
-	children,
+	isSelected,
+	routines,
+	routinesNeedYou = false,
 }: {
 	pod: Pod;
 	group: BotGroup;
-	folded: boolean;
+	open: boolean;
+	/** Whether a new thread with the bot is being started, which marks it when it has no other. */
+	starting: boolean;
 	onToggle: () => void;
-	children: ReactNode;
+	isSelected: (conversationId: string | undefined) => boolean;
+	/** The bot's Routines row, under its threads, when it runs any. */
+	routines?: ReactNode;
+	/** Whether one of its routines' threads mentions the viewer. */
+	routinesNeedYou?: boolean;
 }) {
 	const { agent } = group;
+	const attention = !open && (needsAttention(group) || routinesNeedYou);
+	const count = group.threads.length;
+	// Folded, a bot is bold over unread threads, and tells a screen reader how many messages.
+	const unread = group.threads.reduce((sum, row) => sum + row.unreadMessages, 0);
+	const waiting =
+		routinesNeedYou || group.threads.some((row) => row.needsApproval || row.mentionsYou);
+	const name = agent ? agent.name : "People";
+	const empty = count === 0 && !routines;
+	// The bot is the open row while a new thread with it is started.
+	const current = starting;
+	const mark = agent ? (
+		<AgentAvatar
+			color={agent.color}
+			face={agent.face}
+			shape={agent.shape}
+			size={18}
+			className="shrink-0"
+		/>
+	) : (
+		<Users aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
+	);
+	const label = <span className="min-w-0 flex-1 truncate-fade">{name}</span>;
 	return (
-		<>
-			<GroupHeading
-				icon={
-					agent ? (
-						<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
-					) : (
-						<span className="grid size-5 place-items-center rounded-[6px] bg-chip-strong">
-							<Users aria-hidden size={12} strokeWidth={2} />
+		<li className="flex flex-col">
+			<div
+				className={cn(
+					"group/bot flex h-8 items-center rounded-[6px] pr-1.5",
+					current ? "bg-row-selected" : "hover:bg-row-hover",
+				)}
+			>
+				{empty ? (
+					// With no thread to show, the bot opens a new one with it.
+					<Link
+						{...newThreadLink(pod, agent ?? undefined)}
+						aria-current={current ? "page" : undefined}
+						className={cn(
+							botClassName,
+							current ? "text-foreground" : "text-muted-foreground group-hover/bot:text-foreground",
+						)}
+					>
+						{mark}
+						{label}
+					</Link>
+				) : (
+					<button
+						type="button"
+						aria-expanded={open}
+						aria-current={current ? "page" : undefined}
+						onClick={onToggle}
+						className={cn(
+							botClassName,
+							attention || current
+								? "text-foreground"
+								: "text-muted-foreground group-hover/bot:text-foreground",
+							attention && "font-semibold",
+						)}
+					>
+						{/* Under the pointer or on focus, a caret takes the mark's place, as on a pod. */}
+						<span className="grid size-[18px] shrink-0 place-items-center *:col-start-1 *:row-start-1">
+							<span className="grid group-hover/bot:invisible group-has-focus-visible/bot:invisible">
+								{mark}
+							</span>
+							<ChevronRight
+								aria-hidden
+								size={14}
+								strokeWidth={2.25}
+								className={cn(
+									"invisible text-muted-foreground transition-transform group-hover/bot:visible group-has-focus-visible/bot:visible",
+									open && "rotate-90",
+								)}
+							/>
 						</span>
-					)
-				}
-				label={agent ? agent.name : "People"}
-				folded={folded}
-				onToggle={onToggle}
-				end={
+						{label}
+					</button>
+				)}
+				{/* What is unread stays in view; the + comes in beside it under the pointer or on focus. */}
+				{attention && (
+					<span className={END_SLOT}>
+						<UnreadMarker unreadMessages={unread} needsYou={waiting} />
+					</span>
+				)}
+				{/* Otherwise the count and the + share the end: the count while folded, the + under the pointer or on focus. */}
+				<span
+					className={cn(
+						"size-[22px] shrink-0 place-items-center *:col-start-1 *:row-start-1",
+						attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
+					)}
+				>
+					{!attention && count > 0 && (
+						<span
+							aria-hidden
+							className={cn(
+								"text-[12px] text-subtle-foreground tabular-nums group-has-focus-visible/bot:invisible group-hover/bot:invisible",
+								open && "invisible",
+							)}
+						>
+							{count}
+						</span>
+					)}
 					<IconButton
 						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
 						size="sm"
 						render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+						className={cn(
+							"size-[22px]",
+							!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
+						)}
 					>
-						<Plus strokeWidth={2.4} />
+						<Plus strokeWidth={2.2} />
 					</IconButton>
-				}
-			/>
-			{!folded && children}
-		</>
-	);
-}
-
-/**
- * A section's heading in the list by bot: its icon in the column of faces, a
- * muted name that folds the section, with a chevron beside it, and `end` at
- * the far side.
- */
-function GroupHeading({
-	icon,
-	label,
-	folded,
-	onToggle,
-	end,
-}: {
-	icon: ReactNode;
-	label: string;
-	folded: boolean;
-	onToggle: () => void;
-	end: ReactNode;
-}) {
-	return (
-		<li className="flex items-center gap-1 pt-3.5 pr-1.5 pb-0.5">
-			<button
-				type="button"
-				aria-expanded={!folded}
-				onClick={onToggle}
-				className="focus-ring group/heading flex min-h-8 min-w-0 flex-1 items-center gap-3 rounded-tail pl-2.5 text-left font-medium text-[13.5px] text-muted-foreground"
-			>
-				<span className="grid size-[26px] shrink-0 place-items-center text-subtle-foreground">
-					{icon}
 				</span>
-				<span className="min-w-0 truncate group-hover/heading:text-foreground">{label}</span>
-				<ChevronDown
-					aria-hidden
-					size={13}
-					strokeWidth={2.4}
-					className={cn(
-						"-ml-1 shrink-0 text-subtle-foreground transition-transform duration-150",
-						folded && "-rotate-90",
-					)}
-				/>
-			</button>
-			{end}
+			</div>
+			{open && !empty && (
+				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
+			)}
 		</li>
 	);
 }
 
-/** Where a thread's row has no bot's face, as a thread between people does. */
-function PeopleTile() {
+/**
+ * A bot in a Personal pod, whose one conversation with the viewer its row
+ * opens: bold while something there is new, with a dot while it waits on the
+ * viewer, and shaded while it is open.
+ */
+function DirectBotItem({
+	pod,
+	agent,
+	threads,
+	selected,
+}: {
+	pod: Pod;
+	agent: Agent;
+	threads: readonly ChatListItem[];
+	selected: boolean;
+}) {
+	const news = newsIn(threads);
+	const lit = hasNews(news);
+	const conversation = threads[0]?.conversation;
 	return (
-		<span
-			aria-hidden
-			className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip-strong text-muted-foreground"
-		>
-			<Users size={14} strokeWidth={2} />
-		</span>
+		<li className="flex flex-col">
+			<Link
+				{...(conversation
+					? conversationLink({ pod, conversationId: conversation.id })
+					: agentChatLink({ pod, agent }))}
+				aria-current={selected ? "page" : undefined}
+				className={cn(sidebarRowClassName(selected), lit && "font-semibold text-foreground")}
+			>
+				<AgentAvatar
+					color={agent.color}
+					face={agent.face}
+					shape={agent.shape}
+					size={18}
+					className="shrink-0"
+				/>
+				<span className="min-w-0 flex-1 truncate-fade">{agent.name}</span>
+				<span className={END_SLOT}>
+					<UnreadMarker {...news} />
+				</span>
+			</Link>
+		</li>
 	);
 }
 
 /**
- * What a chat's row says of it at its end: that it needs the viewer, as a
- * dot, otherwise how many messages are unread.
+ * Threads hanging under a bot or a chat: the first few, and the one open on
+ * the page wherever it is, then how many more.
  */
-function ChatMarker({
-	needsYou,
-	unreadMessages,
+function ThreadTree({
+	pod,
+	threads,
+	isSelected,
+	before,
 }: {
-	/** A decision waits on the viewer, or an unread message mentions them. */
-	needsYou: boolean;
-	unreadMessages: number;
+	pod: Pod;
+	/** Newest first. */
+	threads: readonly ChatListItem[];
+	isSelected: (conversationId: string | undefined) => boolean;
+	/** A first row before the threads, such as the bot's Routines. */
+	before?: ReactNode;
 }) {
-	if (needsYou) {
-		return (
-			<span className="mr-1.5 size-2 shrink-0 rounded-full bg-primary">
-				<span className="sr-only">Needs you</span>
-			</span>
-		);
-	}
-	if (unreadMessages === 0) return null;
+	// Showing all its rows, after Show more, until the page is left.
+	const [unclipped, setUnclipped] = useState(false);
+	const shownThreads = unclipped ? Infinity : THREADS_BEFORE_SHOW_MORE;
+	const shown = threads.filter(
+		(row, index) => index < shownThreads || isSelected(row.conversation.id),
+	);
+	const hidden = threads.length - shown.length;
 	return (
-		<CountBadge
-			count={unreadMessages}
-			label={countOf(unreadMessages, "unread message", "unread messages")}
-			size="md"
-		/>
+		<ul
+			className={`m-0 mt-px ml-[17px] flex list-none flex-col gap-px border-border border-l p-0 ${NESTED_INDENT}`}
+		>
+			{before && <li>{before}</li>}
+			{shown.map((row) => (
+				<li key={row.conversation.id}>
+					<ThreadRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
+				</li>
+			))}
+			{hidden > 0 && (
+				<li>
+					<button type="button" onClick={() => setUnclipped(true)} className={quietButtonClassName}>
+						Show {hidden} more
+					</button>
+				</li>
+			)}
+		</ul>
+	);
+}
+
+/**
+ * A bot's routines, as its first row, whether it runs any yet or not, which
+ * opens its Routines page. A red dot while one of them failed its latest run;
+ * shaded while its page is open.
+ */
+function BotRoutines({
+	pod,
+	agent,
+	routines,
+	selected,
+}: {
+	pod: Pod;
+	agent: Agent;
+	routines: readonly ListedRoutine[];
+	selected: boolean;
+}) {
+	return (
+		<Link
+			{...routinesLink(pod, agent)}
+			aria-current={selected ? "page" : undefined}
+			className={cn(
+				threadRowClassName(selected),
+				routines.some((row) => row.mentionsYou) && "font-semibold text-foreground",
+			)}
+		>
+			<RefreshCcw aria-hidden size={14} strokeWidth={1.75} className="shrink-0" />
+			<span className="min-w-0 flex-1 truncate">Routines</span>
+			{routines.some((row) => row.routine.failed) && <FailedDot />}
+		</Link>
+	);
+}
+
+/** A red dot at a row's end while a routine's latest run failed. */
+function FailedDot() {
+	return (
+		<span className="mr-1 size-1.5 shrink-0 rounded-full bg-destructive-text">
+			<span className="sr-only">Latest run failed</span>
+		</span>
+	);
+}
+
+/** A small grey text button under a bot's threads, such as Show more. */
+const quietButtonClassName =
+	"focus-ring flex h-7 w-full items-center rounded-[6px] px-2 text-left text-[12px] text-subtle-foreground hover:text-muted-foreground";
+
+/** A row under a bot, shaded while it is the one open. */
+function threadRowClassName(selected: boolean): string {
+	return cn(
+		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors",
+		selected ? "bg-row-selected text-foreground" : "text-muted-foreground hover:text-foreground",
+	);
+}
+
+/**
+ * A thread under its bot: its title, bold while it has unread messages, and
+ * at its end a dot while it waits on the viewer. A done thread is ticked and
+ * greyer.
+ */
+function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; selected: boolean }) {
+	// Listed while it is the one open, as it is just after it is marked done.
+	const done = row.conversation.doneAt !== null;
+	// In a Personal pod a conversation is with the bot, so goes by its name.
+	const title = pod.kind === "personal" && row.agent ? row.agent.name : row.conversation.title;
+	const needsYou = row.needsApproval || row.mentionsYou;
+	const lit = !done && (row.unreadMessages > 0 || needsYou);
+	return (
+		<Link
+			{...conversationLink({ pod, conversationId: row.conversation.id })}
+			aria-current={selected ? "page" : undefined}
+			className={cn(
+				threadRowClassName(selected),
+				done && !selected && "text-subtle-foreground",
+				lit && "font-semibold text-foreground",
+			)}
+		>
+			{done && <Check aria-hidden size={12} strokeWidth={2.25} className="shrink-0" />}
+			<span className="min-w-0 flex-1 truncate-fade">{title}</span>
+			<span className={END_SLOT}>
+				{!done && <UnreadMarker unreadMessages={row.unreadMessages} needsYou={needsYou} />}
+			</span>
+		</Link>
+	);
+}
+
+/** How far a part of the sidebar sits in from what holds it: less while the sidebar is narrow, to leave names room. */
+export const NESTED_INDENT = "pl-1.5 @[248px]/sidebar:pl-3";
+
+/**
+ * The end of a sidebar row, as wide as the + beside a section's name, so a
+ * row's dot, its +, and the section's + all line up.
+ */
+const END_SLOT = "grid w-[22px] shrink-0 place-items-center";
+
+/**
+ * At a row's end: a dot while it waits on the viewer, as a decision or a
+ * mention does. Unread messages show in the row's bold name, so they are only
+ * counted for a screen reader.
+ */
+function UnreadMarker({ unreadMessages, needsYou }: { unreadMessages: number; needsYou: boolean }) {
+	const unread = unreadMessages > 0 && countOf(unreadMessages, "unread message", "unread messages");
+	if (!needsYou) return unread ? <span className="sr-only">{unread}</span> : null;
+	return (
+		<span className="size-1.5 rounded-full bg-foreground">
+			<span className="sr-only">{unread ? `${unread}, needs you` : "Needs you"}</span>
+		</span>
 	);
 }

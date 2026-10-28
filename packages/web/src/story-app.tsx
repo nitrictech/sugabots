@@ -32,7 +32,7 @@ import { podsWithBots } from "@/shell/story-fixtures.ts";
 /*
  * The whole app, for a story: the real routes at an address, answered by
  * `appHandlers` through the Storybook MSW worker. A story that shows a screen
- * as it appears in the app, with its rail, list and settings around it, uses
+ * as it appears in the app, with its sidebar and settings around it, uses
  * this rather than rendering the screen alone and guessing at its context.
  *
  * Fixtures are the design's example workspace, from `story-fixtures.ts`.
@@ -74,6 +74,7 @@ export function storyConversationFor(agent: Agent): ConversationThread {
 		podId: agent.podId,
 		hostAgentId: agent.id,
 		title: `Conversation with ${agent.name}`,
+		startedInChatId: null,
 		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
@@ -87,6 +88,7 @@ export const storyModel = {
 	providerActive: true,
 	modelId: "claude-sonnet-4-20250514",
 	displayName: "Claude Sonnet",
+	capabilities: ["tools", "vision", "reasoning"],
 };
 
 const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key) => ({
@@ -462,6 +464,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			]),
 		),
 		http.get(api("/agents/:agentId/routines"), () => HttpResponse.json([])),
+		// No computers set up, unless a story says otherwise.
+		http.get(api("/workspaces/:workspace/sandbox-providers/access"), () =>
+			HttpResponse.json({ enabled: false }),
+		),
 		http.get(api("/agents/:agentId/routines/:routineId/triggers/:triggerId/secret"), () =>
 			HttpResponse.json({ kind: "set", secret: "whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u" }),
 		),

@@ -1,6 +1,6 @@
 import type { PodColor } from "@sugabots/contracts";
 import { cn } from "cn";
-import { MessagesSquare } from "lucide-react";
+import { Hash } from "lucide-react";
 import { podPalettes } from "@/shell/PodTile.tsx";
 
 /** Each size the pod's chat tile is drawn at: corner radius and icon size, in pixels. */
@@ -37,7 +37,7 @@ export function PodChatTile({
 				background: color === null ? undefined : podPalettes[color].tile,
 			}}
 		>
-			<MessagesSquare size={icon} strokeWidth={2} />
+			<Hash size={icon} strokeWidth={2} />
 		</span>
 	);
 }

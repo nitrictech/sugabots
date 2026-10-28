@@ -19,7 +19,6 @@ import {
 	useNavigate,
 	useParams,
 	useRouter,
-	useSearch,
 } from "@tanstack/react-router";
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
@@ -34,10 +33,10 @@ import {
 	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { conversationLink, podChatLink, podLink } from "@/lib/links.ts";
+import { conversationLink, podChatLink, podLink, routineThreadLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
-import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
+import { defaultPod, findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import { type Session, SessionContext, useSession } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
@@ -48,14 +47,14 @@ import {
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
-import { ArtifactPage, ArtifactsPage } from "@/screens/Artifacts.tsx";
+import { ArtifactsPage } from "@/screens/Artifacts.tsx";
 import type { Staged } from "@/screens/ConversationChat.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
-import { ActivityList } from "@/shell/ActivityList.tsx";
-import { ApprovalList } from "@/shell/ApprovalList.tsx";
-import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
+import { Approvals } from "@/shell/Approvals.tsx";
+import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
-import { ListAndPane, Panes, Shell } from "@/shell/Shell.tsx";
+import { RoutinesPage } from "@/shell/Routines.tsx";
+import { Panes, Shell } from "@/shell/Shell.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -901,40 +900,27 @@ function SettingsSectionRoute() {
 	);
 }
 
-/**
- * What is new across the workspace, with the chat, run or collaboration of
- * the one chosen beside it.
- */
+/** Inbox: what is new across the workspace, and the chat, run or collaboration of each, opened in its place. */
 const activityRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/activity",
-	component: ActivityRoute,
-});
-
-function ActivityRoute() {
-	const { conversation } = useParams({ strict: false });
-	const { item } = useSearch({ strict: false });
-	return (
-		<ListAndPane
-			open={conversation !== undefined}
-			list={(className) => <ActivityList selectedItemId={item} className={className} />}
-		>
-			<Outlet />
-		</ListAndPane>
-	);
-}
-
-const activityIndexRoute = createRoute({
-	getParentRoute: () => activityRoute,
-	path: "/",
 	component: () => (
-		<EmptyState title="Nothing open">Choose something on the left to open its chat.</EmptyState>
+		<Panes>
+			<Inbox>
+				<Outlet />
+			</Inbox>
+		</Panes>
 	),
 });
 
+/** With nothing chosen, how much is unread sits beside the list; on a phone the list is the page. */
+const activityIndexRoute = createRoute({
+	getParentRoute: () => activityRoute,
+	path: "/",
+	component: InboxOverview,
+});
+
 interface ActivityChatSearch extends ConversationSearch {
-	/** The row the pane was opened from, which the list marks. */
-	item?: string;
 	/** A message to jump to in the chat, such as the mention the row is. */
 	message?: string;
 	/** A routine run or collaboration shown as the pane itself, in place of the chat. */
@@ -946,7 +932,6 @@ const activityChatRoute = createRoute({
 	path: "/$pod/$conversation",
 	validateSearch: (search: Record<string, unknown>): ActivityChatSearch => ({
 		...validateConversationSearch(search),
-		...idParam(search, "item"),
 		...idParam(search, "message"),
 		...idParam(search, "threadPage"),
 	}),
@@ -989,31 +974,21 @@ const activityChatRoute = createRoute({
 	},
 });
 
-/** Every approval across the workspace, with the one chosen in full beside them. */
+/** Every approval across the workspace, and each one in full on its own page. */
 const approvalsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/approvals",
-	component: ApprovalsRoute,
-});
-
-function ApprovalsRoute() {
-	const { call } = useParams({ strict: false });
-	return (
-		<ListAndPane
-			open={call !== undefined}
-			list={(className) => <ApprovalList selectedCallId={call} className={className} />}
-		>
+	component: () => (
+		<Panes>
 			<Outlet />
-		</ListAndPane>
-	);
-}
+		</Panes>
+	),
+});
 
 const approvalsIndexRoute = createRoute({
 	getParentRoute: () => approvalsRoute,
 	path: "/",
-	component: () => (
-		<EmptyState title="Nothing open">Choose a request to see it in full.</EmptyState>
-	),
+	component: Approvals,
 });
 
 const approvalRoute = createRoute({
@@ -1039,8 +1014,7 @@ function AgentsRoute() {
 				<EmptyState title="Could not load your pods" />
 			</Panes>
 		);
-	const first =
-		pods?.find((pod) => pod.kind === "shared") ?? pods?.find((pod) => pod.kind === "personal");
+	const first = defaultPod(pods);
 	if (!first) {
 		return (
 			<Panes>
@@ -1051,40 +1025,6 @@ function AgentsRoute() {
 	return <Navigate {...podLink(first)} replace />;
 }
 
-/**
- * A conversation list beside the thread, or the artifacts, it opens. The list
- * is tucked away while something is open large beside the thread.
- */
-function ConversationLayout({
-	pod,
-	selected,
-	paneOpen,
-	listTuckedAway,
-	children,
-}: {
-	pod: Pod;
-	selected: ListSelection | undefined;
-	/** Whether something is open beside the list, which covers it on a phone. */
-	paneOpen: boolean;
-	listTuckedAway: boolean;
-	children: React.ReactNode;
-}) {
-	return (
-		<ListAndPane
-			open={paneOpen}
-			list={(className) => (
-				<ConversationList
-					pod={pod}
-					selected={selected}
-					className={listTuckedAway ? "hidden" : className}
-				/>
-			)}
-		>
-			{children}
-		</ListAndPane>
-	);
-}
-
 const podRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/pods/$pod",
@@ -1092,19 +1032,12 @@ const podRoute = createRoute({
 	component: PodRoute,
 });
 
+/** A pod's page beside the sidebar. On a phone, the pod's own address shows the sidebar alone. */
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
-	const { agent: handle, conversation } = useParams({ strict: false });
-	const { artifact: stagedArtifact, desktop: stagedDesktop } = useSearch({ strict: false });
 	const matchRoute = useMatchRoute();
-	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
-	const openingPodChat = Boolean(matchRoute({ to: podChatRoute.fullPath }));
-	const startingThread = Boolean(
-		matchRoute({ to: newThreadRoute.fullPath }) || matchRoute({ to: routineThreadRoute.fullPath }),
-	);
+	const atPod = Boolean(matchRoute({ to: podRoute.fullPath }));
 	const { data: pods, isPending, error } = usePods();
-	const { found: inConversation } = useConversationPlace(podSlug, conversation);
-	const selected = selectionOf(conversation, inConversation, openingPodChat);
 	const pod = findPod(pods, podSlug);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!pod) {
@@ -1119,26 +1052,10 @@ function PodRoute() {
 		);
 	}
 	return (
-		<ConversationLayout
-			pod={pod}
-			selected={selected}
-			paneOpen={selected !== undefined || startingThread || handle !== undefined || artifactsOpen}
-			listTuckedAway={stagedArtifact !== undefined || stagedDesktop !== undefined}
-		>
+		<Panes className={atPod ? "max-md:hidden" : undefined}>
 			<Outlet />
-		</ConversationLayout>
+		</Panes>
 	);
-}
-
-/** The row of the list a pod's page has open: a chat or thread, or the pod's first chat while it opens. */
-function selectionOf(
-	conversationId: string | undefined,
-	place: ConversationPlace | undefined,
-	openingPodChat: boolean,
-): ListSelection | undefined {
-	if (openingPodChat) return { kind: "podChat" };
-	if (conversationId && place) return { kind: "conversation", conversationId };
-	return undefined;
 }
 
 const podIndexRoute = createRoute({
@@ -1179,7 +1096,7 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 }
 
 /**
- * Where a pod opens its top chat beside the list. On a phone, touching a chat's
+ * Where a pod opens its top chat beside the sidebar. On a phone, touching a chat's
  * link preloads it instead, through `agentRoute`'s loader.
  */
 function preloadChatScreenForWideLayout() {
@@ -1213,7 +1130,7 @@ const artifactRoute = createRoute({
 		const { pod: podSlug, artifact } = artifactRoute.useParams();
 		const { version } = artifactRoute.useSearch();
 		const pod = findPod(usePods().data, podSlug);
-		return pod ? <ArtifactPage pod={pod} artifactId={artifact} version={version} /> : null;
+		return pod ? <ArtifactsPage pod={pod} selectedId={artifact} version={version} /> : null;
 	},
 });
 
@@ -1269,28 +1186,87 @@ function idParam<Name extends string>(
 	};
 }
 
-/** A routine's own thread, opened first if it has none, then shown at its own address. */
-const routineThreadRoute = createRoute({
+/** The pod's routines, with the one chosen beside them: its own thread, where its runs post. */
+const routinesRoute = createRoute({
 	getParentRoute: () => podRoute,
-	path: "/routines/$routine",
+	path: "/routines",
+	// The bot whose routines the page is, when none of them is open yet.
+	validateSearch: (search: Record<string, unknown>): { bot?: string } =>
+		typeof search.bot === "string" ? { bot: search.bot } : {},
+	component: () => {
+		const { pod: podSlug } = routinesRoute.useParams();
+		const { routine } = useParams({ strict: false });
+		const { bot } = routinesRoute.useSearch();
+		const pod = findPod(usePods().data, podSlug);
+		return pod ? (
+			<RoutinesPage pod={pod} selectedRoutineId={routine} botHandle={bot}>
+				<Outlet />
+			</RoutinesPage>
+		) : null;
+	},
+});
+
+/** With none chosen, the bot's first routine, or the pod's, opens beside the list; on a phone the list is the page. */
+const routinesIndexRoute = createRoute({
+	getParentRoute: () => routinesRoute,
+	path: "/",
+	component: () => {
+		const pod = findPod(usePods().data, routinesIndexRoute.useParams().pod);
+		const { bot } = routinesIndexRoute.useSearch();
+		const sideBySide = useMediaQuery(SIDE_BY_SIDE);
+		const { data: list } = useChatList(pod?.slug);
+		const first = list?.routines.find((row) => bot === undefined || row.agent.handle === bot);
+		if (!pod || !sideBySide || !first) return null;
+		return <Navigate {...routineThreadLink(pod, first.routine.id)} replace />;
+	},
+});
+
+/** A routine's own thread, opened first if it has none, beside the pod's routines. */
+const routineThreadRoute = createRoute({
+	getParentRoute: () => routinesRoute,
+	path: "/$routine",
+	validateSearch: validateConversationSearch,
 	loader: () => ConversationPage.preload(),
 	component: () => {
 		const { pod: podSlug, routine } = routineThreadRoute.useParams();
 		const pod = findPod(usePods().data, podSlug);
-		return pod ? <OpenRoutineFeed pod={pod} routineId={routine} /> : null;
+		return pod ? <RoutineFeed key={routine} pod={pod} routineId={routine} /> : null;
 	},
 });
 
-function OpenRoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
+/** The routine's own thread, opened first when it has none, as a chat beside the routines. */
+function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
+	const opened = useOpenRoutineFeed(pod, routineId);
+	const navigate = routineThreadRoute.useNavigate();
+	const search = routineThreadRoute.useSearch();
+	if (opened.isError) {
+		return (
+			<EmptyState title="Could not open this routine">
+				It may have been removed. Reload this page to try again.
+			</EmptyState>
+		);
+	}
+	if (!opened.data) return null;
+	const conversationId = opened.data.id;
 	return (
-		<NavigateWhenOpened
-			pod={pod}
-			opened={useOpenRoutineFeed(pod, routineId)}
-			failure={{
-				title: "Could not open this routine",
-				body: "It may have been removed. Reload this page to try again.",
-			}}
-		/>
+		<PodConversationScreen podSlug={pod.slug} conversationId={conversationId}>
+			{(found, user) => (
+				<ConversationPage
+					conversation={found.conversation}
+					pod={found.pod}
+					conversationId={conversationId}
+					user={user}
+					threadId={search.thread}
+					onThreadChange={(thread) =>
+						void navigate({ search: (previous) => ({ ...previous, thread }) })
+					}
+					staged={stagedOf(search)}
+					onStagedChange={(staged) =>
+						void navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }) })
+					}
+				/>
+			)}
+		</PodConversationScreen>
 	);
 }
 
@@ -1471,7 +1447,7 @@ function PodConversationScreen({
 	if (!user) return null;
 	return (
 		// The screen's code can arrive after its data. Without a boundary of its
-		// own, React would hide the rail and list with it while it loads.
+		// own, React would hide the sidebar with it while it loads.
 		<Suspense fallback={null}>{children(found, user)}</Suspense>
 	);
 }
@@ -1505,7 +1481,7 @@ function PodAgentScreen({
 	if (!user) return null;
 	return (
 		// The screen's code can arrive after its data. Without a boundary of its
-		// own, React would hide the rail and list with it while it loads.
+		// own, React would hide the sidebar with it while it loads.
 		<Suspense fallback={null}>{children(found, user)}</Suspense>
 	);
 }
@@ -1558,7 +1534,7 @@ const routeTree = rootRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
 			podChatRoute,
-			routineThreadRoute,
+			routinesRoute.addChildren([routinesIndexRoute, routineThreadRoute]),
 			newThreadRoute,
 			conversationRoute,
 			artifactsRoute,
@@ -1573,7 +1549,7 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
-		// A boundary for every route, so a failed page is replaced inside its parent and the rail
+		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,
 		// Tests mount the real tree over a memory history, so a route's guards
