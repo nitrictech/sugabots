@@ -327,6 +327,12 @@ export const connectionCatalog: readonly ConnectionPreset[] = [
 		description: "Issues and boards",
 		url: "https://mcp.atlassian.com/v1/mcp",
 	},
+	{
+		id: "suga",
+		name: "Suga",
+		description: "Projects, environments and deployments",
+		url: "https://dashboard.suga.app/api/mcp",
+	},
 ];
 
 /** The catalog entry a connection was made from, by its address, if any. */

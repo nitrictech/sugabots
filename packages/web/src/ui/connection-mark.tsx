@@ -35,12 +35,28 @@ export function ConnectionMark({
 		return (
 			<span
 				aria-hidden
-				className={`grid shrink-0 place-items-center border border-border-subtle bg-panel ${box}`}
+				className={
+					colour.hex
+						? `grid shrink-0 place-items-center ${box}`
+						: `grid shrink-0 place-items-center border border-border-subtle bg-panel ${box}`
+				}
+				style={
+					colour.hex
+						? { backgroundColor: `color-mix(in oklab, ${colour.hex} 14%, var(--panel))` }
+						: undefined
+				}
 			>
 				<svg viewBox={colour.viewBox} className={glyphSize} aria-hidden>
 					<g transform={colour.transform}>
 						{colour.paths.map((path) => (
-							<path key={path.d.slice(0, 40)} d={path.d} fill={path.fill} />
+							<path
+								key={path.d.slice(0, 40)}
+								d={path.d}
+								fill={path.fill ?? "none"}
+								stroke={path.stroke}
+								strokeWidth={path.strokeWidth}
+								strokeLinecap={path.strokeLinecap}
+							/>
 						))}
 					</g>
 				</svg>
@@ -103,11 +119,39 @@ const marks: Record<string, { hex: string; d: string }> = {
 	},
 };
 
-/** Marks the brand draws in several colours, as published. */
+/** Marks the brand draws in several colours, or in strokes as well as fills, as published. */
 const colourMarks: Record<
 	string,
-	{ viewBox: string; transform?: string; paths: Array<{ d: string; fill: string }> }
+	{
+		viewBox: string;
+		transform?: string;
+		/** Set for a monochrome brand so the tile tints its panel the same way `marks` does. */
+		hex?: string;
+		paths: Array<{
+			d: string;
+			fill?: string;
+			stroke?: string;
+			strokeWidth?: number;
+			strokeLinecap?: "round" | "butt" | "square";
+		}>;
+	}
 > = {
+	suga: {
+		viewBox: "0 0 550 550",
+		hex: "#000000",
+		paths: [
+			{
+				d: "M225 28.8675C255.94 11.0042 294.06 11.0042 325 28.8675L463.157 108.632C494.097 126.496 513.157 159.508 513.157 195.235V354.765C513.157 390.492 494.097 423.504 463.157 441.368L325 521.133C294.06 538.996 255.94 538.996 225 521.133L86.843 441.368C55.9029 423.504 36.843 390.492 36.843 354.765V195.235C36.843 159.508 55.9029 126.496 86.843 108.632L225 28.8675Z",
+				fill: "var(--foreground)",
+			},
+			{
+				d: "M279 467V328.524C279 291.432 299.531 257.387 332.337 240.079L450 178",
+				stroke: "var(--panel)",
+				strokeWidth: 25,
+				strokeLinecap: "round",
+			},
+		],
+	},
 	slack: {
 		viewBox: "0 0 24 24",
 		paths: [
