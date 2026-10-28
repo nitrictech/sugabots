@@ -19,9 +19,6 @@ export const Row = meta.story({
 /** Tab sits beside a tab's name, such as how many approvals wait. */
 export const Tab = meta.story({ args: { size: "sm", count: 2, label: "2 waiting" } });
 
-/** Tile sits on the corner of a rail tile, whose own name says the count. */
-export const Tile = meta.story({ args: { size: "lg", count: 12, label: undefined } });
-
 /** Capped shows more than 99 as 99+. */
 export const Capped = meta.story({
 	args: { count: 140, label: "140 unread messages" },

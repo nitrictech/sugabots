@@ -19,6 +19,29 @@ export function formatListTime(at: Date, now: Date, locale?: string): string {
 }
 
 /**
+ * How long ago something happened, as a list's time column shows it: the time
+ * for today, then whole days ("5d"), then whole months once a calendar month
+ * has passed ("1m"), then whole years ("1y").
+ */
+export function formatAge(at: Date, now: Date, locale?: string): string {
+	const daysAgo = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
+	if (daysAgo <= 0) return formatClockTime(at, locale);
+	const monthsAgo = wholeMonthsBetween(at, now);
+	if (monthsAgo < 1) return `${daysAgo}d`;
+	if (monthsAgo < MONTHS_IN_YEAR) return `${monthsAgo}m`;
+	return `${Math.floor(monthsAgo / MONTHS_IN_YEAR)}y`;
+}
+
+const MONTHS_IN_YEAR = 12;
+
+/** Calendar months from `from` to `to`, counting one only once its day of the month is reached. */
+function wholeMonthsBetween(from: Date, to: Date): number {
+	const months =
+		(to.getFullYear() - from.getFullYear()) * MONTHS_IN_YEAR + to.getMonth() - from.getMonth();
+	return to.getDate() < from.getDate() ? months - 1 : months;
+}
+
+/**
  * The hour and minute without an AM or PM, as the design writes times: "6:12".
  * The day beside it, or the conversation around it, makes the period plain.
  */

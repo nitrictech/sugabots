@@ -13,96 +13,92 @@
 	color-scheme: dark;
 
 	/*
-	 * Surfaces. The thread and the rail share the ground in dark; light gives
-	 * the rail its own grey so the white thread reads as the working area.
+	 * Surfaces. The thread and the sidebar share the ground in dark; light gives
+	 * the sidebar its own grey so the white thread reads as the working area.
 	 */
-	--background: light-dark(#ffffff, #0b0c0f);
-	--rail: light-dark(#eeeef1, #0b0c0f);
+	--background: light-dark(#ffffff, #0a0a0a);
+	--rail: light-dark(#f7f7f8, #000000);
 	/* The conversation list column, and the grouped rows in settings. */
-	--list: light-dark(#f7f7f9, #111216);
+	--list: light-dark(#f7f7f8, #0f0f11);
 	/* The column beside a chat: Details, or a collaboration or run. */
-	--aside: light-dark(#fbfbfc, #0d0e11);
+	--aside: light-dark(#ffffff, #0a0a0a);
 	/* Behind a page opened beside a chat, such as an artifact. */
-	--stage: light-dark(#f3f3f5, #08090b);
+	--stage: light-dark(#f1f1f3, #0f0f11);
 	/* A card among the messages, such as an approval request. */
-	--card: light-dark(#f2f2f5, #17181d);
+	--card: light-dark(#f7f7f8, #111113);
 	/* A raised panel: a dialog, a settings card, the composer's input. */
-	--panel: light-dark(#ffffff, #15161a);
+	--panel: light-dark(#ffffff, #111113);
 	/* A chip, a secondary button, the search pill. */
-	--chip: light-dark(#eeeef1, #1d1f25);
-	--hover: light-dark(#e4e4e8, #262830);
+	--chip: light-dark(#f1f1f3, #17171a);
+	--hover: light-dark(#e4e4e7, #1f1f23);
 	/* A control already filled with `--hover`, such as Deny, under the pointer. */
-	--hover-strong: light-dark(#cfd0d6, #2f323a);
+	--hover-strong: light-dark(#d4d4d8, #26262a);
 	/* Rows sit on the list column, which is already a step up, so their hover is quieter. */
-	--row-hover: light-dark(#f0f0f3, #191a1f);
+	--row-hover: light-dark(#f1f1f3, #151518);
 	/* A message row under the pointer, barely lifted off the chat. */
-	--message-hover: light-dark(#f8f8fa, #1a1b20);
+	--message-hover: light-dark(#f7f7f8, #111113);
 	/* The open conversation in the list. */
-	--row-selected: light-dark(#e8e8ed, #1d1f25);
+	--row-selected: light-dark(#e4e4e7, #17171a);
 
-	--foreground: light-dark(#16171b, #eceef2);
-	/* A message's words, a step softer than a name or a heading. */
-	--body-foreground: light-dark(#26282e, #dcdee3);
-	--soft-foreground: light-dark(#3d4048, #c9ccd3);
-	/* Light is a shade darker than the design's #646973 so it passes AA on a hover wash. */
-	--muted-foreground: light-dark(#5f646e, #9096a1);
+	--foreground: light-dark(#111113, #ededed);
+	/* A message's words: as strong as a name in dark, a step softer in light. */
+	--body-foreground: light-dark(#1c1c1f, #ededed);
+	--soft-foreground: light-dark(#3f3f46, #c4c4ca);
+	--muted-foreground: light-dark(#52525b, #a1a1aa);
 	/*
-	 * Times, section labels, hints. Light is a shade darker than
-	 * the design's #6f747e so it passes AA on the list column.
+	 * Times, section labels, hints. A shade lighter in dark than the design's
+	 * #6b6b73, and darker in light than its #71717a, so both pass AA on a chip.
 	 */
-	--subtle-foreground: light-dark(#696e78, #7d838e);
-	--disabled-foreground: light-dark(#b4b7bf, #4a4e57);
+	--subtle-foreground: light-dark(#6b6b73, #808089);
+	--disabled-foreground: light-dark(#a1a1aa, #52525b);
 	/* A text action, such as Cancel or Create in a dialog header. */
-	--link: light-dark(#4f5bd5, #aebbff);
+	--link: light-dark(#111113, #ededed);
 
 	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
-	--border-subtle: light-dark(#efeff2, #1a1b20);
-	--border: light-dark(#eaeaee, #1d1f25);
-	--border-strong: light-dark(#e8e8ec, #2a2c33);
-	--border-dashed: light-dark(#cfd0d6, #2f323a);
+	--border-subtle: light-dark(#f1f1f3, #1c1c1f);
+	--border: light-dark(#e4e4e7, #1c1c1f);
+	--border-strong: light-dark(#d4d4d8, #26262a);
+	--border-dashed: light-dark(#d4d4d8, #3f3f46);
 	/* The send button with nothing to send. */
-	--chip-strong: light-dark(#dcdee3, #23252c);
-	/*
-	 * A pod tile, and a slot in one with no bot in it. Light is a step darker
-	 * than the design's #eaeaee, which all but vanished on the rail's grey.
-	 */
-	--tile: light-dark(#dcdee3, #1d1f25);
+	--chip-strong: light-dark(#e4e4e7, #1f1f23);
+	/* A pod tile, and a slot in one with no bot in it. */
+	--tile: light-dark(#e4e4e7, #26262a);
 	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
 	/*
-	 * The accent is the same in both themes. Your bubbles and primary buttons
-	 * use the base, and switches sit a step brighter so they read at their size.
+	 * There is no hue: the accent is the strongest ink, near-black in light and
+	 * near-white in dark, so primary buttons, switches and counts invert the page.
 	 */
-	--primary: oklch(0.52 0.17 268);
-	--primary-foreground: #ffffff;
-	--primary-hover: oklch(0.57 0.17 268);
-	--switch-on: oklch(0.56 0.17 268);
-	--primary-tint-border: oklch(0.62 0.17 268);
+	--primary: light-dark(#111113, #ededed);
+	--primary-foreground: light-dark(#ffffff, #0a0a0a);
+	--primary-hover: light-dark(#26262a, #d4d4d8);
+	--switch-on: var(--primary);
+	--primary-tint-border: light-dark(#a1a1aa, #52525b);
 	/*
 	 * `--ring` is a solid colour, because that is what a shadcn-registry
 	 * component means by `ring-ring`. Our own focus treatment is a soft halo
 	 * rather than a hard ring, so the translucent value it needs lives beside
 	 * it as `--ring-halo` and `focus-ring` composes the two.
 	 */
-	--ring: oklch(0.62 0.17 268);
-	--ring-halo: oklch(0.62 0.17 268 / 0.3);
+	--ring: light-dark(#71717a, #a1a1aa);
+	--ring-halo: light-dark(rgba(10, 10, 10, 0.12), rgba(255, 255, 255, 0.2));
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
 	/* How full a bot's short-term memory is. */
-	--meter: oklch(0.62 0.15 268);
-	/* The count of what is unread or waiting, on a rail tile, a list row or a tab, and the hand when a chat waits for your approval. */
-	--rail-count: oklch(0.56 0.17 268);
-	--approval-marker: oklch(0.56 0.17 268);
-	/* A reaction you are among, under a message: an accent wash edged in the accent. Others' are a card on a chip's edge. */
-	--reaction-mine: light-dark(oklch(0.95 0.035 268), oklch(0.27 0.07 268));
-	--reaction-mine-foreground: light-dark(oklch(0.42 0.17 268), #dfe4ff);
+	--meter: var(--primary);
+	/* The count of what is unread or waiting, on Inbox, a menu row or a tab, and the hand when a chat waits for your approval. */
+	--rail-count: var(--primary);
+	--approval-marker: var(--primary);
+	/* A reaction you are among, under a message: a grey wash edged in the accent. Others' are a card on a chip's edge. */
+	--reaction-mine: light-dark(#f1f1f3, #1f1f23);
+	--reaction-mine-foreground: var(--foreground);
 
 	/* Red is only for errors and delete. */
-	--destructive: #ef4444;
+	--destructive: #f0505e;
 	/*
 	 * Red text, such as Delete pod, and the wash behind it on hover. Light is a
 	 * shade darker than the design's #d6384e so it passes AA on a chip.
 	 */
-	--destructive-text: light-dark(#c42d45, #f47a8a);
+	--destructive-text: light-dark(#c42d45, #f08a94);
 	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	/* A routine's failed run: its card, its edge, its heading, and why it failed. */
 	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
@@ -111,7 +107,7 @@
 	--failed-card-text: light-dark(#7a2b38, #e3c3c8);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
 	/* A dot for something that went ahead, such as an allowed request. */
-	--success: #22c55e;
+	--success: #3fcb6b;
 	/* Green text for something that worked. Both pass AA on a panel. */
 	--success-text: light-dark(#1a7f37, #4ade80);
 
@@ -123,14 +119,14 @@
 	--file-page-line: light-dark(#d4d6dc, #b9bcc4);
 	--file-page-heading: light-dark(#9a9ea8, #8b8f99);
 	--file-badge-sheet: #1a7a43;
-	--file-badge-other: light-dark(#5f646e, #4b5060);
+	--file-badge-other: light-dark(#52525b, #3f3f46);
 	/* Over the chat while files are dragged onto it, and the wash inside its dashed edge. */
-	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(11, 12, 15, 0.8));
-	--drop-target: light-dark(oklch(0.96 0.03 268 / 0.7), oklch(0.2 0.03 268 / 0.55));
+	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(10, 10, 10, 0.8));
+	--drop-target: light-dark(rgba(241, 241, 243, 0.7), rgba(23, 23, 26, 0.6));
 
 	/* A person with no photo: initials on a grey disc. */
-	--person-avatar: light-dark(#dcdee3, #3a3d45);
-	--person-avatar-foreground: light-dark(#3d4048, #dfe1e6);
+	--person-avatar: light-dark(#e4e4e7, #26262a);
+	--person-avatar-foreground: light-dark(#3f3f46, #ededed);
 
 	/* Separation is by colour and hairline, not shadow; only floating things cast one. */
 	--scrim: rgba(0, 0, 0, 0.55);
@@ -336,6 +332,37 @@
 	&:focus-within {
 		border-color: var(--primary-tint-border);
 		box-shadow: var(--ring-shadow);
+	}
+}
+
+/*
+ * A line cut short at its end by fading out rather than an ellipsis, which
+ * reads badly after a dash or a space. A line that fits never reaches the fade.
+ */
+@utility truncate-fade {
+	overflow: hidden;
+	white-space: nowrap;
+	mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+/* A row that scrolls sideways under a swipe or its own arrows, without a bar. */
+@utility no-scrollbar {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+/*
+ * A scroller whose bar shows only while the pointer is over it or focus is
+ * in it, so a long list does not carry a bar the whole time.
+ */
+@utility scrollbar-on-hover {
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent;
+	&:hover,
+	&:focus-within {
+		scrollbar-color: var(--color-border-dashed) transparent;
 	}
 }
 

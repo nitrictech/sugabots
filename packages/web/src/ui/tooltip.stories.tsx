@@ -28,7 +28,7 @@ export const Below = meta.story({
 	},
 });
 
-/** To the side, as the rail's tiles show their pod's name. */
+/** To the side, for a control at the edge of a column. */
 export const Right = meta.story({
 	args: { defaultOpen: true, side: "right", label: "Revenue" },
 	play: async () => {

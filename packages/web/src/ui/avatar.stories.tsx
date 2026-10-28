@@ -14,7 +14,7 @@ const meta = preview.meta({
 	args: { person: { name: "Ryan Eyes", email: "ryan@example.com" } },
 });
 
-/** Initials on a grey disc at each size the app uses: rows, lists, the rail, a page's hero. */
+/** Initials on a grey disc at each size the app uses: rows, lists, the sidebar, a page's hero. */
 export const Sizes = meta.story({
 	render: (args) => (
 		<div style={{ display: "flex", alignItems: "center", gap: 16 }}>

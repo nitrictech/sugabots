@@ -1,13 +1,13 @@
-import { Settings } from "lucide-react";
 import { fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { IconButton } from "./icon-button.tsx";
+import { SettingsIcon } from "./settings-icon.tsx";
 
 const meta = preview.meta({
 	title: "Controls/IconButton",
 	component: IconButton,
 	tags: ["ai-generated"],
-	args: { label: "Workspace settings", children: <Settings />, onClick: fn() },
+	args: { label: "Workspace settings", children: <SettingsIcon />, onClick: fn() },
 	argTypes: {
 		variant: { control: "select", options: ["quiet", "outline", "pane", "bar", "round"] },
 		size: { control: "select", options: ["sm", "default", "lg"] },
@@ -25,7 +25,7 @@ export const Pane = meta.story({ args: { variant: "pane", size: "lg" } });
 
 /** Bar sits in the header across the top of a list, chat or sidebar, such as a sidebar's Close. */
 export const Bar = meta.story({
-	args: { variant: "bar", children: <Settings size={16} strokeWidth={2} /> },
+	args: { variant: "bar", children: <SettingsIcon size={16} strokeWidth={2} /> },
 });
 
 /** Round is a filled circle, for a Close or a ⋯ beside other controls. */
