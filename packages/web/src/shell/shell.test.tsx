@@ -57,6 +57,13 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+/** Opens the workspace's menu from yours, at the foot of the sidebar. */
+async function openWorkspaceMenu() {
+	const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+	fireEvent.click(await within(sidebar).findByRole("button", { name: /^Account:/ }));
+	fireEvent.click(await screen.findByRole("menuitem", { name: workspace.name }));
+}
+
 describe("the shell", () => {
 	it("ignores a panel name it does not know rather than failing the route", async () => {
 		// `agent` and `history` were panels until the design made an agent a page
@@ -84,7 +91,7 @@ describe("the workspace choice", () => {
 			throw new Error("Storage disabled");
 		});
 		const router = mount(linearPage);
-		await screen.findByRole("navigation", { name: "Pods" });
+		await screen.findByRole("navigation", { name: "Sidebar" });
 
 		chooseWorkspace(other.id);
 		await router.navigate({ to: "/" });
@@ -96,7 +103,7 @@ describe("the workspace choice", () => {
 	it("follows workspace choices made in another tab", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 		const router = mount(linearPage);
-		await screen.findByRole("navigation", { name: "Pods" });
+		await screen.findByRole("navigation", { name: "Sidebar" });
 		localStorage.setItem("sugabots-workspace", other.id);
 
 		window.dispatchEvent(
@@ -107,21 +114,18 @@ describe("the workspace choice", () => {
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 	});
 
-	it("switches to another workspace from the rail and opens it next time", async () => {
+	it("switches to another workspace from your menu and opens it next time", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 		const router = mount(linearPage);
 
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		fireEvent.click(
-			await within(rail).findByRole("button", { name: `Workspace: ${workspace.name}` }),
-		);
+		await openWorkspaceMenu();
 		fireEvent.click(await screen.findByRole("menuitem", { name: other.name }));
 
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
 	});
 
-	it("sets up a new workspace from the rail with the first run's steps", async () => {
+	it("sets up a new workspace from your menu with the first run's steps", async () => {
 		client.api.workspaces.create.mockImplementation(() => {
 			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 			return Effect.succeed(other);
@@ -199,7 +203,7 @@ describe("the workspace choice", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Start chatting" }));
 
-		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
 		expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/chief");
 	});
 
@@ -217,7 +221,7 @@ describe("the workspace choice", () => {
 		const router = mount(`/${workspace.slug}/agents`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-		expect(screen.queryByRole("navigation", { name: "Pods" })).toBeNull();
+		expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(router.state.location.pathname).toBe("/onboarding");
@@ -230,7 +234,7 @@ describe("the workspace choice", () => {
 		);
 		const router = mount(linearPage);
 
-		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
 		expect(router.state.location.pathname).toBe(linearPage);
 	});
 
@@ -251,7 +255,7 @@ describe("the workspace choice", () => {
 		chooseWorkspace(unfinished.id);
 		const router = mount("/");
 
-		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
 		expect(router.state.location.pathname).toMatch(/^\/suga\//);
 	});
 
@@ -417,10 +421,7 @@ describe("the workspace choice", () => {
 	});
 
 	async function startNewWorkspace(router: ReturnType<typeof mount>) {
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		fireEvent.click(
-			await within(rail).findByRole("button", { name: `Workspace: ${workspace.name}` }),
-		);
+		await openWorkspaceMenu();
 		fireEvent.click(await screen.findByRole("menuitem", { name: "New workspace" }));
 		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
 		await screen.findByRole("heading", { name: "Name your workspace" });
@@ -428,57 +429,56 @@ describe("the workspace choice", () => {
 	}
 });
 
-describe("the rail", () => {
-	it("lists each shared pod and Personal, and marks the pod you are in", async () => {
-		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
+describe("the sidebar", () => {
+	it("lists each shared pod, then Personal, one after another", async () => {
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 		mount(linearPage);
 
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		await within(rail).findByRole("link", { name: "Personal" });
-		const names = within(rail)
-			.getAllByRole("link")
-			.map((link) => link.getAttribute("aria-label"));
-		expect(names).toEqual(["Activity", "Approvals", "Suga-Team", "Sales", "Personal", "Settings"]);
-		expect(within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current")).toBe(
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		await within(sidebar).findByRole("group", { name: "Personal" });
+		expect(
+			within(sidebar)
+				.getAllByRole("group")
+				.map((pod) => pod.getAttribute("aria-label")),
+		).toEqual(["Suga-Team", "Sales", "Personal"]);
+	});
+
+	it("keeps listing every pod while you are away from them", async () => {
+		const router = mount("/suga/pods/sales");
+
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		await within(sidebar).findByRole("group", { name: "Sales" });
+		await router.navigate({ to: "/$workspace/activity", params: { workspace: "suga" } });
+
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/activity"));
+		expect(within(sidebar).getByRole("group", { name: "Sales" })).toBeDefined();
+		expect(within(sidebar).getByRole("link", { name: "Inbox" }).getAttribute("aria-current")).toBe(
 			"page",
 		);
 	});
 
-	it("opens a pod's settings from its menu and leads back to the Chat", async () => {
-		const router = mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		fireEvent.contextMenu(await within(rail).findByRole("link", { name: "Sales" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Pod settings" }));
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/pods/sales"));
-		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
-
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
-	});
-
-	it("makes a new bot in the pod whose menu it is chosen from", async () => {
+	it("makes a new bot in the pod shown from its + beside Bots", async () => {
 		mount(linearPage);
 
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		fireEvent.contextMenu(await within(rail).findByRole("link", { name: "Sales" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "New bot" }));
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		fireEvent.click(await within(sidebar).findByRole("button", { name: "New bot in Suga-Team" }));
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		expect(within(dialog).queryByRole("button", { name: /^Pod:/ })).toBeNull();
 	});
 
-	it("opens your profile from your avatar", async () => {
+	it("opens your preferences from your menu", async () => {
 		mount(linearPage);
 
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		expect(within(rail).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
-			"/suga/settings/profile",
-		);
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		fireEvent.click(await within(sidebar).findByRole("button", { name: /^Account:/ }));
+		expect(
+			(await screen.findByRole("menuitem", { name: "Preferences" })).getAttribute("href"),
+		).toBe("/suga/settings/profile");
 	});
 });
 
-describe("the conversation list", () => {
-	it("lists a pod's threads newest first, under its chat, marking the open one", async () => {
-		localStorage.setItem(`sugabots-list-grouping:${pods[0]?.id}`, "recent");
+describe("the pod's conversations", () => {
+	it("lists a pod's chat, then its bots, with the open thread's bot open on it", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
@@ -499,21 +499,26 @@ describe("the conversation list", () => {
 		);
 		mount(linearPage);
 
-		const list = await screen.findByRole("region", { name: "Suga-Team" });
-		const rows = await within(await within(list).findByRole("list")).findAllByRole("link");
-		expect(rows.map((row) => row.textContent)).toEqual([
-			expect.stringContaining("General"),
-			expect.stringContaining("Linear Handler"),
-			expect.stringContaining("Issue Triager"),
-		]);
-		expect(rows[1]?.getAttribute("aria-current")).toBe("page");
+		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
+		const thread = await within(sidebar).findByRole("link", {
+			name: `Conversation with ${linear.name}`,
+		});
+		// Open on the bot while its chat is found, then on the chat once it has its address.
+		await waitFor(() => expect(thread.getAttribute("aria-current")).toBe("page"));
+		expect(within(sidebar).getByRole("link", { name: "General" })).toBeDefined();
+		expect(
+			within(sidebar).getByRole("button", { name: linear.name }).getAttribute("aria-expanded"),
+		).toBe("true");
+		expect(
+			within(sidebar).getByRole("button", { name: triager.name }).getAttribute("aria-expanded"),
+		).toBe("false");
 		expect(client.api.chats.list).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 			query: { pod: pods[0]?.slug },
 		});
 	});
 
-	it("keeps a bot's section folded after the page is reloaded", async () => {
+	it("keeps a bot open after the page is reloaded", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
@@ -522,23 +527,18 @@ describe("the conversation list", () => {
 			}),
 		);
 		mount("/suga/pods/suga-team");
-		const list = await screen.findByRole("region", { name: "Suga-Team" });
-		fireEvent.click(await within(list).findByRole("button", { name: linear.name }));
+		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
+		fireEvent.click(await within(sidebar).findByRole("button", { name: linear.name }));
 		expect(
-			within(list).queryByRole("link", { name: `Conversation with ${linear.name}` }),
-		).toBeNull();
+			within(sidebar).getByRole("link", { name: `Conversation with ${linear.name}` }),
+		).toBeDefined();
 
 		cleanup();
 		mount("/suga/pods/suga-team");
 
-		const reloaded = await screen.findByRole("region", { name: "Suga-Team" });
-		const heading = await within(reloaded).findByRole("button", {
-			name: new RegExp(`^${linear.name}`),
-		});
-		expect(heading.getAttribute("aria-expanded")).toBe("false");
-		expect(
-			within(reloaded).queryByRole("link", { name: `Conversation with ${linear.name}` }),
-		).toBeNull();
+		const reloaded = await screen.findByRole("group", { name: "Suga-Team" });
+		const bot = await within(reloaded).findByRole("button", { name: linear.name });
+		expect(bot.getAttribute("aria-expanded")).toBe("true");
 	});
 
 	it("loads a thread while the pointer is on its row", async () => {
@@ -562,9 +562,10 @@ describe("the conversation list", () => {
 			}),
 		);
 		mount("/suga/pods/suga-team");
-		const list = await screen.findByRole("region", { name: "Suga-Team" });
+		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
+		fireEvent.click(await within(sidebar).findByRole("button", { name: linear.name }));
 
-		fireEvent.mouseEnter(await within(list).findByRole("link", { name: linearChat.title }));
+		fireEvent.mouseEnter(await within(sidebar).findByRole("link", { name: linearChat.title }));
 
 		await waitFor(() =>
 			expect(client.api.chats.messages).toHaveBeenCalledWith(
@@ -577,29 +578,15 @@ describe("the conversation list", () => {
 		expect(client.api.chats.open).not.toHaveBeenCalled();
 	});
 
-	it("opens its pod's settings and leads back to the Chat", async () => {
-		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
-		const router = mount(chat);
-
-		const list = await screen.findByRole("region", { name: "Suga-Team" });
-		fireEvent.click(within(list).getByRole("link", { name: "Pod settings" }));
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/suga/settings/pods/suga-team"),
-		);
-		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
-
-		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
-	});
-
-	it("says a pod has no bots yet, and offers the first", async () => {
+	it("offers a pod's first bot while it has none", async () => {
 		client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [], threads: [], routines: [] }));
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.filter((agent) => agent.podId !== pods[1]?.id)),
 		);
 		mount("/suga/pods/sales");
 
-		expect(await screen.findByText("No bots in Sales yet")).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "New bot" }));
+		const sales = await screen.findByRole("group", { name: "Sales" });
+		fireEvent.click(await within(sales).findByRole("button", { name: "Add a bot" }));
 		expect(await screen.findByRole("dialog", { name: "New bot" })).toBeDefined();
 	});
 
@@ -609,8 +596,9 @@ describe("the conversation list", () => {
 		);
 		mount("/suga/pods/suga-team");
 
-		await screen.findByRole("region", { name: "Suga-Team" });
-		expect(screen.queryByRole("button", { name: "New bot" })).toBeNull();
+		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
+		await within(sidebar).findByRole("heading", { name: "Bots" });
+		expect(within(sidebar).queryByRole("button", { name: /^New bot/ })).toBeNull();
 	});
 });
 
@@ -1229,7 +1217,7 @@ describe("creating a pod", () => {
 		expect(create.hasAttribute("disabled")).toBe(false);
 	});
 
-	it("creates one in a colour no other pod has, and puts it in the rail", async () => {
+	it("creates one in a colour no other pod has, and opens it", async () => {
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
@@ -1325,7 +1313,7 @@ describe("creating an agent", () => {
 		expect(screen.queryByRole("button", { name: "Delete pod" })).toBeNull();
 	});
 
-	it("creates a bot with the face chosen, in its pod, and opens its settings", async () => {
+	it("creates a bot in the look and colour chosen, in its pod, and opens its settings", async () => {
 		const made = {
 			...linear,
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
@@ -1342,20 +1330,22 @@ describe("creating an agent", () => {
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: `  ${made.name}  ` },
 		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Colour, shape and eyes" }));
 		fireEvent.click(within(dialog).getByRole("radio", { name: "orange" }));
-		fireEvent.click(within(dialog).getByRole("radio", { name: "arc" }));
+		fireEvent.click(within(dialog).getByRole("button", { name: "Back" }));
 		client.api.agents.list.mockReturnValue(Effect.succeed([...agents, made]));
 		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		await waitFor(() => {
 			expect(client.api.agents.create).toHaveBeenCalledWith({
 				params: { podId: made.podId },
+				// The looks on offer are drawn at random; the colour is the one chosen.
 				payload: {
 					name: made.name,
 					model: made.model,
 					color: "orange",
-					shape: "circle",
-					face: "arc",
+					shape: expect.any(String),
+					face: expect.any(String),
 				},
 			});
 		});
@@ -1397,7 +1387,7 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "New bot" }));
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		fireEvent.click(within(dialog).getByRole("button", { name: `Pod: ${first.name}` }));
-		fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(second.name) }));
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: second.name }));
 		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Scout" } });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
 
@@ -1473,15 +1463,21 @@ describe("workspace settings", () => {
 	});
 
 	it("switches a model off without moving it", async () => {
+		// One that neither new bots nor the system bots use, which would hold it on.
+		const model = {
+			...(anthropic.models[0] as ProviderModel),
+			id: "0199a3a0-0000-7000-8000-0000000000d3",
+			modelId: "claude-haiku-4-5",
+		};
+		client.api.modelProviders.list.mockReturnValue(
+			Effect.succeed([openai, { ...anthropic, models: [...anthropic.models, model] }]),
+		);
 		client.api.modelProviders.updateModel.mockReturnValue(Effect.void);
 		mount(providerPage(anthropic));
 
-		const model = anthropic.models[0] as ProviderModel;
-		fireEvent.click(
-			await screen.findByRole("switch", {
-				name: `Bots can use ${model.displayName ?? model.modelId}`,
-			}),
-		);
+		const toggle = await screen.findByRole("switch", { name: `Bots can use ${model.modelId}` });
+		await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+		fireEvent.click(toggle);
 
 		await waitFor(() =>
 			expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
@@ -2368,7 +2364,8 @@ describe("the app's badge", () => {
 		);
 		mount(linearPage);
 
-		await screen.findByRole("link", { name: /2 unread messages/ });
+		fireEvent.click(await screen.findByRole("button", { name: "Suga-Team" }));
+		await within(screen.getByRole("group", { name: "Suga-Team" })).findByText(/2 unread messages/);
 		expect(document.title).toBe("Sugabots");
 		expect(setAppBadge).not.toHaveBeenCalled();
 	});

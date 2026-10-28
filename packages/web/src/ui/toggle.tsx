@@ -25,7 +25,7 @@ export function Toggle({
 			className={`focus-ring relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-150 disabled:cursor-default disabled:opacity-45 ${checked ? "bg-switch-on" : "bg-border-strong"}`}
 		>
 			<span
-				className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-transform duration-150 ${checked ? "translate-x-4" : ""}`}
+				className={`absolute top-0.5 left-0.5 size-4 rounded-full transition-transform duration-150 ${checked ? "translate-x-4 bg-primary-foreground" : "bg-white dark:bg-subtle-foreground"}`}
 			/>
 		</button>
 	);

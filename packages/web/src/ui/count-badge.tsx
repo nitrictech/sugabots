@@ -8,8 +8,6 @@ const sizes = {
 	sm: "h-4 min-w-[18px] px-[5px] text-[10.5px]",
 	/** At the end of a list row. */
 	md: "h-[18px] min-w-5 px-1.5 text-[11px]",
-	/** On the corner of a rail tile. */
-	lg: "h-[22px] min-w-[22px] px-[5px] text-[11px] leading-none",
 } as const;
 
 /**

@@ -1,30 +1,26 @@
 import type {
-	Agent,
 	Artifact,
 	ArtifactAuthor,
 	ArtifactSummary,
 	ArtifactVersionSummary,
 	Pod,
 } from "@sugabots/contracts";
-import { useMutation } from "@tanstack/react-query";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronDown, Download, Link2, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { Check, ChevronDown, Download, FileText, Link2, Trash2 } from "lucide-react";
+import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import {
 	useArtifact,
 	useArtifacts,
 	useArtifactVersions,
 	useDeleteArtifact,
-	useFetchArtifact,
 } from "@/lib/artifacts.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentChatLink, artifactLink, artifactsLink } from "@/lib/links.ts";
+import { artifactLink, artifactsLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
-import { Panes } from "@/shell/Shell.tsx";
+import { usePaneWidth } from "@/lib/pane-width.ts";
+import { Page } from "@/shell/Page.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
-import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
 	DropdownMenu,
@@ -34,175 +30,169 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
+import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
 
 type Loading = "loading" | "failed";
 
-/** The documents and pages a pod's bots have made, newest first. */
-export function ArtifactsPage({ pod }: { pod: Pod }) {
+/**
+ * The documents and pages a pod's bots have made, newest first, with the one
+ * chosen open beside them, at its current version or the one `version` names.
+ */
+export function ArtifactsPage({
+	pod,
+	selectedId,
+	version,
+}: {
+	pod: Pod;
+	selectedId?: string;
+	version?: number;
+}) {
 	const { data, isError } = useArtifacts(pod.id);
-	const fetchArtifact = useFetchArtifact(pod.id);
-	const download = useMutation({
-		mutationFn: async (artifactId: string) => downloadArtifact(await fetchArtifact(artifactId)),
-	});
-	const remove = useDeleteArtifact(pod.id);
-	const { agents } = useAgents();
+	const navigate = useNavigate();
 	return (
 		<ArtifactListView
 			pod={pod}
 			artifacts={data ?? (isError ? "failed" : "loading")}
-			agents={agents ?? []}
+			selectedId={selectedId}
 			now={new Date()}
-			download={{
-				error: download.error ? failureMessage(download.error) : undefined,
-				onDownload: download.mutate,
-			}}
-			deletion={
-				pod.permissions.deleteArtifacts
-					? {
-							pending: remove.isPending,
-							error: remove.error ? failureMessage(remove.error) : undefined,
-							onDelete: (artifactId, onDeleted) =>
-								remove.mutate(artifactId, { onSuccess: onDeleted }),
-						}
-					: undefined
-			}
-		/>
+		>
+			{selectedId && (
+				<ArtifactStage
+					key={selectedId}
+					pod={pod}
+					artifactId={selectedId}
+					version={version}
+					onVersionChange={(version) => void navigate(artifactLink(pod, selectedId, { version }))}
+					onClose={() => void navigate(artifactsLink(pod))}
+				/>
+			)}
+		</ArtifactListView>
 	);
 }
 
 export function ArtifactListView({
 	pod,
 	artifacts,
-	agents,
+	selectedId,
 	now,
-	download,
-	deletion,
+	children,
 }: {
 	pod: Pod;
 	artifacts: readonly ArtifactSummary[] | Loading;
-	/** The workspace's bots, whose chats the artifacts they made open in. */
-	agents: readonly Agent[];
+	/** The artifact open beside the list, which its row marks. */
+	selectedId?: string;
 	now: Date;
-	download: { error?: string; onDownload: (artifactId: string) => void };
-	/** Without it, the rows have no Delete. */
-	deletion?: {
-		pending: boolean;
-		error?: string;
-		onDelete: (artifactId: string, onDeleted: () => void) => void;
-	};
+	/** The artifact open beside the list, if one is. */
+	children?: ReactNode;
 }) {
-	const [confirmingDelete, setConfirmingDelete] = useState<ArtifactSummary>();
+	// As wide as the viewer last dragged it, or most of the page until they do.
+	const [width, setWidth] = usePaneWidth("artifact");
+	const pane = useRef<HTMLDivElement>(null);
 	return (
-		<Panes>
-			<div className="min-h-0 flex-1 overflow-y-auto">
-				<div className="mx-auto flex w-full max-w-[960px] flex-col gap-7 px-4 pt-9 pb-12 md:px-8">
-					<h1 className="m-0 px-3 font-bold text-[30px] text-foreground tracking-[-0.02em] max-md:px-1">
-						Artifacts
-					</h1>
-					{download.error && (
-						<Alert className="mx-3 max-md:mx-1">Could not download it. {download.error}</Alert>
-					)}
-					{artifacts === "failed" ? (
-						<EmptyState title="Could not load the artifacts">
-							The API did not answer. Reload, or check that it is running.
+		<div className="flex min-h-0 min-w-0 flex-1">
+			<Page title="Artifacts">
+				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
+					<div className="flex h-full pb-[10%]">
+						<EmptyState
+							title={`No artifacts in ${pod.name} yet`}
+							icon={<FileText strokeWidth={1.75} />}
+						>
+							When a bot writes you a doc, report or page, it's saved here so the whole pod can find
+							it later.
 						</EmptyState>
-					) : artifacts === "loading" ? null : artifacts.length === 0 ? (
-						<EmptyState title={`No artifacts in ${pod.name} yet`}>
-							Ask a bot for a plan, a report or a page to keep, and it is kept here.
-						</EmptyState>
-					) : (
-						<div className="flex flex-col gap-6">
-							{byMonth(artifacts, now).map((month) => (
-								<section key={month.label} aria-label={month.label}>
-									<h2 className="m-0 px-3 pb-1.5 font-medium text-sm text-subtle-foreground">
-										{month.label}
+					</div>
+				) : (
+					<div className="flex flex-col gap-5 px-4 pt-4 pb-12">
+						{artifacts === "failed" ? (
+							<EmptyState title="Could not load the artifacts">
+								The API did not answer. Reload, or check that it is running.
+							</EmptyState>
+						) : artifacts === "loading" ? null : (
+							byWhen(artifacts, now).map((group) => (
+								<section
+									key={group.label}
+									aria-label={group.label}
+									className="flex flex-col gap-0.5"
+								>
+									<h2 className="m-0 px-2 pb-1.5 font-medium text-subtle-foreground text-xs">
+										{group.label}
 									</h2>
 									<ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-										{month.artifacts.map((artifact) => (
-											<li
-												key={artifact.id}
-												className="flex items-center gap-3 rounded-[14px] pr-3 transition-colors hover:bg-hover"
-											>
-												<Link
-													{...openingLink(pod, artifact, agents)}
-													className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-[14px] py-2.5 pl-3"
-												>
-													<KindMark kind={artifact.kind} />
-													<span className="flex min-w-0 flex-1 flex-col">
-														<span className="truncate font-semibold text-foreground text-md">
-															{artifact.title}
-														</span>
-														<span className="truncate text-muted-foreground text-sm">
-															{artifact.createdBy
-																? `By ${artifact.createdBy.name}`
-																: "By a removed bot"}
-														</span>
-													</span>
-													<time
-														dateTime={artifact.updatedAt}
-														className="shrink-0 text-sm text-subtle-foreground"
-													>
-														Updated {updatedWhen(new Date(artifact.updatedAt), now)}
-													</time>
-												</Link>
-												<ArtifactMenu
+										{group.artifacts.map((artifact) => (
+											<li key={artifact.id}>
+												<ArtifactRow
 													pod={pod}
-													artifactId={artifact.id}
-													label={`More for ${artifact.title}`}
-													onDownload={() => download.onDownload(artifact.id)}
-													onDelete={deletion && (() => setConfirmingDelete(artifact))}
+													artifact={artifact}
+													selected={artifact.id === selectedId}
+													now={now}
 												/>
 											</li>
 										))}
 									</ul>
 								</section>
-							))}
-						</div>
-					)}
+							))
+						)}
+					</div>
+				)}
+			</Page>
+			{children && (
+				<div
+					ref={pane}
+					style={
+						width === undefined ? undefined : ({ "--pane-width": `${width}px` } as CSSProperties)
+					}
+					className="relative flex min-h-0 min-w-0 border-border border-l md:w-[clamp(360px,var(--pane-width,58%),calc(100%_-_320px))] md:shrink-0"
+				>
+					<ResizeHandle
+						label="Resize the artifact"
+						pane={pane}
+						edge="start"
+						min={360}
+						onResize={setWidth}
+					/>
+					{children}
 				</div>
-			</div>
-			{deletion && (
-				<DeleteDialog
-					open={confirmingDelete !== undefined}
-					onOpenChange={(open) => {
-						if (!open) setConfirmingDelete(undefined);
-					}}
-					title={`Delete ${confirmingDelete?.title ?? "this artifact"}?`}
-					description={DELETE_DESCRIPTION}
-					pending={deletion.pending}
-					error={deletion.error}
-					onDelete={() => {
-						if (!confirmingDelete) return;
-						deletion.onDelete(confirmingDelete.id, () => setConfirmingDelete(undefined));
-					}}
-				/>
 			)}
-		</Panes>
+		</div>
 	);
 }
 
-/** One artifact on its own page, from the pod's list, which Close goes back to. */
-export function ArtifactPage({
+/** An artifact in the list: what kind it is, its title, which version, who made it, and when it last changed. */
+function ArtifactRow({
 	pod,
-	artifactId,
-	version,
+	artifact,
+	selected,
+	now,
 }: {
 	pod: Pod;
-	artifactId: string;
-	version?: number;
+	artifact: ArtifactSummary;
+	selected: boolean;
+	now: Date;
 }) {
-	const navigate = useNavigate();
+	const kind = ARTIFACT_KINDS[artifact.kind];
 	return (
-		<Panes>
-			<ArtifactStage
-				pod={pod}
-				artifactId={artifactId}
-				version={version}
-				onVersionChange={(version) => void navigate(artifactLink(pod, artifactId, { version }))}
-				onClose={() => void navigate(artifactsLink(pod))}
-			/>
-		</Panes>
+		<Link
+			{...artifactLink(pod, artifact.id)}
+			aria-current={selected ? "page" : undefined}
+			className={cn(
+				"focus-ring flex items-center gap-3 rounded-[10px] p-2 transition-colors",
+				selected ? "bg-row-selected" : "hover:bg-message-hover",
+			)}
+		>
+			<KindMark kind={artifact.kind} />
+			<span className="flex min-w-0 flex-1 flex-col leading-snug">
+				<span className="truncate font-medium text-[13px] text-foreground">{artifact.title}</span>
+				<span className="truncate text-subtle-foreground text-xs">
+					{[kind.label, `v${artifact.version}`, artifact.createdBy?.name ?? "A removed bot"].join(
+						", ",
+					)}
+				</span>
+			</span>
+			<time dateTime={artifact.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
+				{formatListTime(new Date(artifact.updatedAt), now)}
+			</time>
+		</Link>
 	);
 }
 
@@ -286,6 +276,7 @@ export function ArtifactStageView({
 	deletion?: Deletion;
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const router = useRouter();
 	if (typeof artifact !== "object") {
 		return (
 			<Stage label="Artifact" icon={null} title="" onClose={onClose}>
@@ -299,6 +290,11 @@ export function ArtifactStageView({
 	}
 	const kind = ARTIFACT_KINDS[artifact.kind];
 	const shown = artifact.shownVersion;
+	function copyLink() {
+		if (typeof artifact !== "object") return;
+		const href = router.buildLocation(artifactLink(pod, artifact.id)).href;
+		void navigator.clipboard?.writeText(new URL(href, window.location.origin).href).catch(() => {});
+	}
 	return (
 		<Stage
 			label={artifact.title}
@@ -322,12 +318,22 @@ export function ArtifactStageView({
 						now={now}
 						onVersionChange={onVersionChange}
 					/>
-					<ArtifactMenu
-						pod={pod}
-						artifactId={artifact.id}
-						onDownload={() => downloadArtifact(artifact)}
-						onDelete={deletion && (() => setConfirmingDelete(true))}
-					/>
+					<MoreMenu>
+						<DropdownMenuItem onClick={() => downloadArtifact(artifact)}>
+							<Download aria-hidden />
+							Download
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={copyLink}>
+							<Link2 aria-hidden />
+							Copy link
+						</DropdownMenuItem>
+						{deletion && (
+							<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
+								<Trash2 aria-hidden />
+								Delete
+							</DropdownMenuItem>
+						)}
+					</MoreMenu>
 				</>
 			}
 			onClose={onClose}
@@ -352,48 +358,6 @@ export function ArtifactStageView({
 	);
 }
 
-/**
- * The ⋯ beside an artifact: download it, copy the address of its page to send
- * to someone else in the pod, and, given `onDelete`, delete it.
- */
-function ArtifactMenu({
-	pod,
-	artifactId,
-	label,
-	onDownload,
-	onDelete,
-}: {
-	pod: Pod;
-	artifactId: string;
-	label?: string;
-	onDownload: () => void;
-	onDelete?: () => void;
-}) {
-	const router = useRouter();
-	function copyLink() {
-		const href = router.buildLocation(artifactLink(pod, artifactId)).href;
-		void navigator.clipboard?.writeText(new URL(href, window.location.origin).href).catch(() => {});
-	}
-	return (
-		<MoreMenu label={label}>
-			<DropdownMenuItem onClick={onDownload}>
-				<Download aria-hidden />
-				Download
-			</DropdownMenuItem>
-			<DropdownMenuItem onClick={copyLink}>
-				<Link2 aria-hidden />
-				Copy link
-			</DropdownMenuItem>
-			{onDelete && (
-				<DropdownMenuItem variant="destructive" onClick={onDelete}>
-					<Trash2 aria-hidden />
-					Delete
-				</DropdownMenuItem>
-			)}
-		</MoreMenu>
-	);
-}
-
 /** Which version is shown, and the others to switch to. */
 function VersionPicker({
 	artifact,
@@ -411,14 +375,15 @@ function VersionPicker({
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
+				aria-label={`Version ${shown.number} of ${artifact.version}`}
 				className={cn(
-					"focus-ring inline-flex h-[29px] shrink-0 items-center gap-1.5 rounded-full bg-chip px-3 font-medium text-sm transition-colors hover:bg-hover",
+					"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-strong pr-2 pl-2.5 text-xs transition-colors hover:bg-row-hover",
 					isCurrent ? "text-soft-foreground" : "text-foreground",
 				)}
 			>
-				Version {shown.number}
+				v{shown.number}
 				{isCurrent ? "" : ` of ${artifact.version}`}
-				<ChevronDown aria-hidden size={14} />
+				<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{versions.map((version) => (
@@ -454,50 +419,33 @@ function writtenWhen(at: Date, now: Date): string {
 	return `on ${shown}`;
 }
 
-/**
- * Where an artifact in the list opens: large beside the chat of the bot that
- * made it, so what was said about it is there too, or on a page of its own
- * once that bot has been removed or has left the pod.
- */
-function openingLink(pod: Pod, artifact: ArtifactSummary, agents: readonly Agent[]) {
-	const maker = agents.find(
-		(agent) => agent.id === artifact.createdBy?.agentId && agent.podId === pod.id,
-	);
-	return maker
-		? agentChatLink({ pod, agent: maker }, { artifact: artifact.id })
-		: artifactLink(pod, artifact.id);
-}
-
-interface Month {
-	/** "October", with the year when it is not this one: "April 2025". */
+interface Group {
+	/** "Today", "Earlier this week", then the month: "October", with its year when not this one. */
 	label: string;
 	artifacts: ArtifactSummary[];
 }
 
-/** The artifacts, newest first, under the month each was last updated in. */
-function byMonth(artifacts: readonly ArtifactSummary[], now: Date): Month[] {
-	const months: Month[] = [];
+const WEEK_MS = 7 * 24 * 60 * 60_000;
+
+/** The artifacts, newest first, under when each was last updated: today, this week, then by month. */
+function byWhen(artifacts: readonly ArtifactSummary[], now: Date): Group[] {
+	const groups: Group[] = [];
 	for (const artifact of artifacts) {
 		const updated = new Date(artifact.updatedAt);
-		const label = updated.toLocaleDateString(undefined, {
-			month: "long",
-			year: updated.getFullYear() === now.getFullYear() ? undefined : "numeric",
-		});
-		const last = months.at(-1);
+		const label =
+			updated.toDateString() === now.toDateString()
+				? "Today"
+				: now.getTime() - updated.getTime() < WEEK_MS
+					? "Earlier this week"
+					: updated.toLocaleDateString(undefined, {
+							month: "long",
+							year: updated.getFullYear() === now.getFullYear() ? undefined : "numeric",
+						});
+		const last = groups.at(-1);
 		if (last?.label === label) last.artifacts.push(artifact);
-		else months.push({ label, artifacts: [artifact] });
+		else groups.push({ label, artifacts: [artifact] });
 	}
-	return months;
-}
-
-/** When an artifact was last updated, to follow "Updated": "at 2:46" today, else "Oct 2". */
-function updatedWhen(at: Date, now: Date): string {
-	if (at.toDateString() === now.toDateString()) return `at ${formatClockTime(at)}`;
-	return at.toLocaleDateString(undefined, {
-		day: "numeric",
-		month: "short",
-		year: at.getFullYear() === now.getFullYear() ? undefined : "numeric",
-	});
+	return groups;
 }
 
 /** Saves the artifact as shown, as a file named after its title. */
@@ -522,9 +470,9 @@ function KindMark({ kind }: { kind: ArtifactSummary["kind"] }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-chip text-soft-foreground"
+			className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-chip text-muted-foreground"
 		>
-			<Icon size={18} strokeWidth={2} />
+			<Icon size={16} strokeWidth={1.75} />
 		</span>
 	);
 }

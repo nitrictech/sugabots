@@ -830,6 +830,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await listed(asAdministrator)).toEqual(["Assistant theirs"]);
 	});
 
+	it("names a new bot's first conversation for its onboarding into the pod", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
+		);
+
+		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+
+		expect(opened.title).toMatch(/^Onboarding .+ to .+$/);
+	});
+
 	it("starts the creator's interview once without posting a user message", async () => {
 		await onDatabase((db) =>
 			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
@@ -1881,6 +1891,29 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 		});
 
+		it("shows what a routine run said in the routine's thread", async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+			);
+			const accepted = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			await botWrites(accepted.threadId, "Two PRs merged.\nThe release branch is green.", 1);
+			const feed = (await view.list({ workspace: workspaceId, pod: podId }))?.routines[0]
+				?.conversation;
+
+			expect((await view.messages(feed?.id ?? ""))?.items).toEqual([
+				expect.objectContaining({
+					kind: "routine",
+					threadId: accepted.threadId,
+					report: "Two PRs merged.\nThe release branch is green.",
+				}),
+			]);
+		});
+
 		it("lists a collaboration in the person's chats", async () => {
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			const childThreadId = await collaborate(current.id, current.id);
@@ -1896,6 +1929,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					conversationId: current.id,
 					unread: true,
 				}),
+			);
+		});
+
+		it("reads a collaboration with the conversation it was asked in", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const childThreadId = await collaborate(current.id, current.id);
+
+			await chats.markRead(current.id);
+
+			expect((await view.activity(workspaceId)).items).toContainEqual(
+				expect.objectContaining({ kind: "collaboration", threadId: childThreadId, unread: false }),
 			);
 		});
 

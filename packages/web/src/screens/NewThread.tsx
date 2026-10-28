@@ -1,6 +1,7 @@
 import type { AgentParticipant, Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useAgents, useModelName } from "@/lib/agents.ts";
 import { THREAD_NOT_STARTED, useOpenPodChat, useThreadStarter } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { conversationLink } from "@/lib/links.ts";
@@ -12,10 +13,11 @@ import { PeopleChatHeader } from "./ChatHeader.tsx";
 import { firstBotNamed, mentionableIn } from "./mentions.tsx";
 
 /**
- * Starting a thread in a pod from its first message: with the bot it names,
- * which a chip puts in the message, or between people when it names none.
- * Sending starts the thread and opens it. Started from a bot, its message
- * names that bot to begin with.
+ * Starting a thread in a pod from its first message. Opened from a bot, it
+ * asks what the bot should work on, in the middle of the page, and the thread
+ * is with that bot whatever the message says. Otherwise it is with the bot the
+ * message names, which a chip puts in it, or between people when it names
+ * none. Sending starts the thread and opens it.
  */
 export function NewThread({
 	pod,
@@ -32,9 +34,25 @@ export function NewThread({
 	const attachments = useComposerAttachments(podChat.data?.id);
 	const threads = useThreadStarter(podChat.data?.id, attachments);
 	const navigate = useNavigate();
-	const [draft, setDraft] = useState(agentHandle ? `@${agentHandle} ` : "");
+	const [draft, setDraft] = useState("");
 	const [failed, setFailed] = useState(false);
-	const header = <PeopleChatHeader title={`New thread in ${pod.name}`} back={{ to: "pod", pod }} />;
+	// The bot it was opened from, from the roster the sidebar has already loaded.
+	const { agents } = useAgents();
+	const chosen = agentHandle
+		? agents?.find((agent) => agent.podId === pod.id && agent.handle === agentHandle)
+		: undefined;
+	const threadWith = chosen ?? (details ? firstBotNamed(draft, details.crew) : undefined);
+	// The model that answers: the chosen bot's, or the named one's, from the roster.
+	const threadWithModel = useModelName(
+		agents?.find((agent) => agent.id === threadWith?.id)?.model ?? null,
+	);
+	const title = agentHandle ? "New thread" : `New thread in ${pod.name}`;
+	// The page names itself in its middle; the header is kept on a phone for its Back.
+	const header = (
+		<div className="md:hidden">
+			<PeopleChatHeader title={title} back={{ to: "pod", pod }} />
+		</div>
+	);
 
 	if (podChat.isError) {
 		return (
@@ -53,7 +71,6 @@ export function NewThread({
 	const bots = details?.crew.filter(
 		(member): member is AgentParticipant => member.kind === "agent",
 	);
-	const threadWith = details ? firstBotNamed(draft, details.crew) : undefined;
 
 	async function submit() {
 		setFailed(false);
@@ -63,14 +80,61 @@ export function NewThread({
 		await navigate(conversationLink({ pod, conversationId: started.thread.conversation.id }));
 	}
 
+	const composer = (
+		<ChatComposer
+			label={threadWith ? `Message ${threadWith.name}` : `Message ${pod.name}`}
+			placeholder={chosen ? "Describe the task, paste a link or drop a file" : undefined}
+			model={threadWithModel ?? undefined}
+			value={draft}
+			onValueChange={setDraft}
+			onSubmit={submit}
+			submitLabel="Start thread"
+			sending={threads.isPending}
+			needsText
+			error={failed ? THREAD_NOT_STARTED : undefined}
+			className="w-full"
+			mentionable={mentionable}
+			attachments={attachments}
+		/>
+	);
+
+	// Opened from a bot: a question for it, with the box to answer it in, in the middle of the page.
+	if (agentHandle) {
+		return (
+			<div className="flex min-w-0 flex-1 flex-col">
+				{header}
+				<div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-[12%]">
+					{chosen && (
+						<div className="flex w-full max-w-[640px] flex-col items-center gap-6">
+							<div className="flex flex-col items-center gap-2 text-center">
+								<AgentAvatar
+									color={chosen.color}
+									face={chosen.face}
+									shape={chosen.shape}
+									size={64}
+									className="mb-3"
+								/>
+								<h2 className="m-0 font-semibold text-[18px] text-foreground">
+									What should {chosen.name} work on?
+								</h2>
+								{chosen.description && (
+									<p className="m-0 text-[13px] text-muted-foreground">{chosen.description}</p>
+								)}
+							</div>
+							{composer}
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="flex min-w-0 flex-1 flex-col">
 			{header}
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-4 overflow-y-auto px-5 pt-6 pb-4">
 				<div className="flex flex-col gap-1.5">
-					<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">
-						New thread in {pod.name}
-					</h2>
+					<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">{title}</h2>
 					<p className="m-0 text-[14px] text-muted-foreground">
 						Name a bot to start the thread with it, or write to the people here.
 					</p>
@@ -93,19 +157,7 @@ export function NewThread({
 				)}
 			</div>
 			<div className="shrink-0 px-4 md:px-5">
-				<ChatComposer
-					label={threadWith ? `Message ${threadWith.name}` : `Message ${pod.name}`}
-					value={draft}
-					onValueChange={setDraft}
-					onSubmit={submit}
-					submitLabel="Start thread"
-					sending={threads.isPending}
-					needsText
-					error={failed ? THREAD_NOT_STARTED : undefined}
-					className="w-full"
-					mentionable={mentionable}
-					attachments={attachments}
-				/>
+				{composer}
 				<div className="flex h-[26px] items-center">
 					<p className="m-0 px-1 text-[12.5px] text-muted-foreground">
 						{threadWith

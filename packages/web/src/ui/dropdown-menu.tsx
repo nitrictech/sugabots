@@ -1,7 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "cn";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 
 /*
  * A menu that floats over the page, drawn as the design draws every popover: a
@@ -73,6 +73,31 @@ function DropdownMenuItem({
 	);
 }
 
+/** An item with a checkbox at its start, ticked while it is on, which leaves the menu open so several can be turned on. */
+function DropdownMenuCheckboxItem({
+	className,
+	children,
+	...props
+}: MenuPrimitive.CheckboxItem.Props) {
+	return (
+		<MenuPrimitive.CheckboxItem
+			data-slot="dropdown-menu-checkbox-item"
+			className={cn(itemClassName, "group/checkbox", className)}
+			{...props}
+		>
+			<span
+				aria-hidden
+				className="grid size-3.5 shrink-0 place-items-center rounded-[3.5px] border border-disabled-foreground text-primary-foreground transition-colors group-data-checked/checkbox:border-primary group-data-checked/checkbox:bg-primary"
+			>
+				<MenuPrimitive.CheckboxItemIndicator className="flex">
+					<Check className="size-2.5" strokeWidth={3.5} />
+				</MenuPrimitive.CheckboxItemIndicator>
+			</span>
+			{children}
+		</MenuPrimitive.CheckboxItem>
+	);
+}
+
 /** A set of items of which one is chosen, such as a setting's values. */
 function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
 	return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
@@ -104,6 +129,33 @@ function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.
 	);
 }
 
+/**
+ * An item that opens another menu beside it, such as a workspace's own
+ * actions, on hover or when chosen. Its menu is a `DropdownMenuContent`
+ * inside the same `DropdownMenuSub`.
+ */
+function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
+	return <MenuPrimitive.SubmenuRoot {...props} />;
+}
+
+/** The item that opens a submenu, with a chevron at its end, lit while its menu is open. */
+function DropdownMenuSubTrigger({
+	className,
+	children,
+	...props
+}: MenuPrimitive.SubmenuTrigger.Props) {
+	return (
+		<MenuPrimitive.SubmenuTrigger
+			data-slot="dropdown-menu-sub-trigger"
+			className={cn(itemClassName, "data-popup-open:bg-chip", className)}
+			{...props}
+		>
+			{children}
+			<ChevronRight aria-hidden className="ml-auto text-subtle-foreground" />
+		</MenuPrimitive.SubmenuTrigger>
+	);
+}
+
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
 	return <ContextMenuPrimitive.Root {...props} />;
 }
@@ -132,10 +184,13 @@ export {
 	ContextMenuContent,
 	ContextMenuTrigger,
 	DropdownMenu,
+	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
 	DropdownMenuSeparator,
+	DropdownMenuSub,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 };

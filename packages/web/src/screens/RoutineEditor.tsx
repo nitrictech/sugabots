@@ -741,7 +741,7 @@ function ResultsRow({
 }) {
 	return (
 		<SwitchRow
-			label="Also post result in the pod's chat"
+			label="Also post result in the pod's channel"
 			checked={results === "post_to_chat"}
 			onChange={(posted) => onChange(posted ? "post_to_chat" : "keep_in_run")}
 		/>

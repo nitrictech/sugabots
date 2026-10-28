@@ -14,7 +14,7 @@ import type { PlacedRoutine } from "./RoutineEditor.tsx";
 
 /**
  * A routine's latest runs, newest first: how each went, when, what started
- * it, and how long it took. Each opens in Activity, as a page of its own.
+ * it, and how long it took. Each opens from Inbox, as a page of its own.
  */
 export function RecentRuns({ placed }: { placed: PlacedRoutine }) {
 	const { routine, agent } = placed;

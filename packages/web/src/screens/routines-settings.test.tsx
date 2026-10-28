@@ -133,10 +133,10 @@ describe("the workspace's routines", () => {
 		);
 		const router = mount("/suga/settings/routines/new");
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Bot/ }));
+		fireEvent.click(screen.getByRole("button", { name: /^Bot(?!s\b)/ }));
 		expect(screen.getByRole("heading", { name: suga.name })).toBeDefined();
 		expect(screen.getByRole("heading", { name: sales.name })).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: triager.name }));
+		fireEvent.click(within(screen.getByRole("main")).getByRole("button", { name: triager.name }));
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
 			target: { value: "Sweep the queue." },
@@ -233,7 +233,7 @@ describe("the workspace's routines", () => {
 	it("starts a routine made from a bot's settings on that bot", async () => {
 		mount(`/suga/settings/routines/new?agent=${researcher.id}`);
 
-		const bot = await screen.findByRole("button", { name: /^Bot/ });
+		const bot = await screen.findByRole("button", { name: /^Bot(?!s\b)/ });
 		expect(within(bot).getByText(researcher.name)).toBeDefined();
 	});
 
@@ -262,7 +262,7 @@ describe("the workspace's routines", () => {
 		});
 		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		const posted = screen.getByRole("switch", { name: "Also post result in the pod's chat" });
+		const posted = screen.getByRole("switch", { name: "Also post result in the pod's channel" });
 		expect(posted.getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 

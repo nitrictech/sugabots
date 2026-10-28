@@ -1,16 +1,16 @@
 import type { ActivityFeed, ActivityItem, Message } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, userEvent } from "storybook/test";
+import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
- * What is new across the workspace's chats, opened from the rail: mentions of
- * you, read or not, messages you have not read, routine runs and
- * collaborations. A message opens its chat; a run or collaboration opens as a
- * page of its own.
+ * Inbox, opened from the sidebar: what is new across the workspace's chats,
+ * mentions of you, messages you have not read, routine runs and
+ * collaborations, narrowed by kind and by unread or read. A message opens its
+ * chat; a run or collaboration opens as a page of its own.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -113,7 +113,7 @@ const feed: ActivityFeed = {
 };
 
 const meta = preview.meta({
-	title: "Views/Activity",
+	title: "Views/Inbox",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
@@ -125,26 +125,100 @@ const meta = preview.meta({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
 });
 
-/** Mentions, unread messages, routine runs and collaborations together, newest first, beside an empty pane until one is chosen; the rail counts the unread mention. */
+/**
+ * What is unread, newest first: mentions, messages, routine runs and
+ * collaborations together, each with its pod and when; the sidebar's Inbox
+ * counts what is unread.
+ */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(/can you sign off the Acme quote/, {}, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("link", { name: "Activity, 1 unread mention" })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
+		await expect(canvas.queryByText(/that fixed it/)).toBeNull();
+		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
+		await expect(inbox).toHaveAttribute("aria-current", "page");
+		await expect(inbox).toHaveTextContent("3 unread");
 	},
 });
 
-/** Mentions alone, read and unread. */
-export const Mentions = meta.story({
+/** Turning Unread only off shows what has been read too, greyer and without its dot. */
+export const All = meta.story({
+	play: async ({ canvas }) => {
+		const unreadOnly = await canvas.findByRole(
+			"button",
+			{ name: "Unread only" },
+			{ timeout: 10_000 },
+		);
+		await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(unreadOnly);
+		await expect(await canvas.findByText(/that fixed it/)).toBeVisible();
+		await expect(canvas.getByText(/can you sign off the Acme quote/)).toBeVisible();
+	},
+});
+
+/**
+ * The filter menu narrows it to the kinds ticked, several at once, until they
+ * are unticked.
+ */
+export const Filtered = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("tab", { name: /Mentions/ }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: "Filter" }, { timeout: 10_000 }),
 		);
-		await expect(canvas.queryByText(/Renewal notes/)).toBeNull();
+		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Mentions/ }));
+		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Routines/ }));
+		await userEvent.keyboard("{Escape}");
+		const inbox = canvas.getByRole("region", { name: "Inbox" });
+		await expect(within(inbox).getAllByRole("listitem")).toHaveLength(2);
+		await userEvent.click(canvas.getByRole("button", { name: "Filter" }));
+		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Routines/ }));
+		await userEvent.keyboard("{Escape}");
+		await expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
+		await expect(within(inbox).getByText(/can you sign off the Acme quote/)).toBeVisible();
+	},
+});
+
+/** Mark all as read reads every conversation with something unread, and Inbox is caught up. */
+export const MarkAllAsRead = meta.story({
+	beforeEach({ msw }) {
+		const read = new Set<string>();
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+				HttpResponse.json({
+					items: feed.items.map((item) =>
+						read.has(item.conversationId) ? { ...item, unread: false } : item,
+					),
+				}),
+			),
+			http.post(`${API}/conversations/:conversationId/read`, ({ params }) => {
+				read.add(String(params.conversationId));
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Mark all as read" }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByText("You're all caught up.")).toBeVisible();
+		await expect(canvas.queryByRole("button", { name: "Mark all as read" })).toBeNull();
+	},
+});
+
+/** With nothing unread, Inbox says you are caught up. */
+export const CaughtUp = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+				HttpResponse.json({ items: feed.items.map((item) => ({ ...item, unread: false })) }),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("You're all caught up.", {}, { timeout: 10_000 }),
+		).toBeVisible();
 	},
 });
 
@@ -179,8 +253,9 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 const mentionInLongChat = "0199a3a0-0000-7000-8000-000000000904";
 
 /**
- * Choosing a row opens its chat beside the list, marks the row as the open
- * one, and jumps the chat to the message, pointing it out for a moment.
+ * Choosing a row opens its chat beside the list, which marks the row, jumped
+ * to the message and pointing it out for a moment, with a way to the chat
+ * itself.
  */
 export const Opened = meta.story({
 	beforeEach({ msw }) {
@@ -198,12 +273,16 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${growthDesk.handle}?item=${mentionInLongChat}&message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyConversationFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: /Jay Yu mentioned you/ }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Open thread" }, { timeout: 10_000 }),
+		).toBeVisible();
+		const inbox = canvas.getByRole("region", { name: "Inbox" });
+		await expect(
+			await within(inbox).findByRole("link", { name: /Jay Yu mentioned you/ }),
 		).toHaveAttribute("aria-current", "page");
 	},
 });
@@ -218,7 +297,7 @@ const longFeed: ActivityFeed = {
 	})),
 };
 
-/** A feed longer than the window scrolls within its column, and the page itself stays put. */
+/** A feed longer than the window scrolls within the page, and the window itself stays put. */
 export const LongFeed = meta.story({
 	beforeEach({ msw }) {
 		msw.use(

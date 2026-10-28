@@ -110,7 +110,7 @@ export function WorkspaceRoutinesSettings({
 								/>
 							}
 							label={one.routine.name}
-							sub={`${scheduleLabel(one.routine)}, ${one.agent.name}`}
+							sub={[scheduleLabel(one.routine), one.agent.name].filter(Boolean).join(", ")}
 							trailing={one.routine.state === "paused" && <SettingsValue>Paused</SettingsValue>}
 							selected={
 								one.routine.id === selected?.routine.id && (selectedRoutineId ? true : "wide")

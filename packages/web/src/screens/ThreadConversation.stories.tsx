@@ -479,8 +479,9 @@ export const CollaborationThread = meta.story({
 		const line = canvas.getByRole("button", {
 			name: /^Open Collaboration: Issue Triager and Linear Handler/,
 		});
+		await expect(line).toHaveTextContent("Asked Linear Handler");
 		await expect(line).toHaveTextContent("Needs approval");
-		await expect(line).toHaveTextContent("Last reply");
+		await expect(line).toHaveAccessibleName(/Last reply \d/);
 		await userEvent.click(line);
 		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000313");
 	},
@@ -799,7 +800,8 @@ export const Mentions = meta.story({
 		],
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getAllByText("@linear-handler", { selector: "span" })).toHaveLength(2);
+		// A bot is named by its face and name, a person by their handle.
+		await expect(canvas.getAllByText("Linear Handler", { selector: "span" })).toHaveLength(2);
 		await expect(canvas.getByText("@sam-rivera", { selector: "span" })).toBeInTheDocument();
 		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
 		// Mentions add to Streamdown's markdown rather than replacing it.

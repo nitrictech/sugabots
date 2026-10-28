@@ -15,7 +15,7 @@ import { useWorkspace } from "@/lib/workspace.ts";
 /**
  * The agents in the workspace being looked at.
  *
- * One query for the whole roster, which the rail lists and every agent route
+ * One query for the whole roster, which the sidebar lists and every agent route
  * resolves its agent handle out of — the same arrangement pods have, and the
  * reason there is no by-id fetch on the way into a page.
  *

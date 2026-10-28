@@ -1,8 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { growthDesk } from "@/shell/story-fixtures.ts";
+import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { DesktopScreen, DesktopStage, LiveDesktopCard } from "./DesktopViewer.tsx";
 
 const meta = preview.meta({
@@ -64,12 +65,34 @@ export const LiveCard = meta.story({
  */
 export const Opened = meta.story({
 	parameters: { layout: "fullscreen" },
+	decorators: [
+		// The workspace has computers, so the bot's is shown rather than how to set one up.
+		function WithComputers(Story) {
+			const [client] = useState(() => {
+				const queries = createQueryClient();
+				queries.setQueryData(["sandbox-providers", undefined, "access"], { enabled: true });
+				return queries;
+			});
+			return (
+				<QueryClientProvider client={client}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
+	],
 	render: ({ threadId }) => (
 		<div className="fixed inset-0 flex">
-			<DesktopStage threadId={threadId} agent={growthDesk} mayUse onClose={fn()} />
+			<DesktopStage
+				threadId={threadId}
+				agent={{ ...growthDesk, usesSandbox: true }}
+				pod={revenue}
+				mayUse
+				onClose={fn()}
+			/>
 		</div>
 	),
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("Growth Desk's desktop")).toBeVisible();
+		await expect(canvas.getByText("Growth Desk's computer")).toBeVisible();
+		await expect(await canvas.findByText(/couldn't be reached|Starting the desktop/)).toBeVisible();
 	},
 });

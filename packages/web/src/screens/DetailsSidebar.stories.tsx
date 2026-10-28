@@ -185,22 +185,27 @@ const meta = preview.meta({
 	],
 });
 
-/** Default is a bot's contact card beside its chat, each list folded to its first few. */
+/**
+ * Default is a bot beside its chat: its name and model, then each section,
+ * with who is in the thread folded to their faces and a count.
+ */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
-		await expect(canvas.getByText("You")).toBeVisible();
-		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeVisible();
+		await expect(canvas.queryByText("You")).toBeNull();
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "In this thread" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
 	},
 });
 
-/** Expanded opens each folded list and the summary. */
+/** Expanded opens who is in the thread, each folded list, and the summary. */
 export const Expanded = meta.story({
 	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /in this thread$/ }));
+		await expect(canvas.getByText("You")).toBeVisible();
 		for (const more of canvas.getAllByRole("button", { name: "Show more" })) {
 			await userEvent.click(more);
 		}

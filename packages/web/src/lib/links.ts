@@ -87,13 +87,13 @@ interface ConversationInPod {
 	conversationId: string;
 }
 
-/** A routine run or collaboration opened in Activity as a page of its own, beside the list, which marks it. */
+/** A routine run or collaboration opened from Inbox as a page of its own. */
 export function activityThreadLink({ pod, conversationId }: ConversationInPod, threadId: string) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./activity/$pod/$conversation",
 		params: { pod: pod.slug, conversation: conversationId },
-		search: { item: threadId, threadPage: threadId },
+		search: { threadPage: threadId },
 	});
 }
 
@@ -120,7 +120,17 @@ export function newThreadLink(pod: Pick<Pod, "slug">, agent?: Pick<Agent, "handl
 	});
 }
 
-/** A routine's own thread, where its runs post, opened first when it has none yet. */
+/** A pod's routines, with the first open beside them where there is room. */
+export function routinesLink(pod: Pick<Pod, "slug">, bot?: { handle: string }) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/routines",
+		params: { pod: pod.slug },
+		search: bot ? { bot: bot.handle } : {},
+	});
+}
+
+/** A routine's own thread, where its runs post, beside the pod's routines; opened first when it has none yet. */
 export function routineThreadLink(pod: Pick<Pod, "slug">, routineId: string) {
 	return linkOptions({
 		from: "/$workspace",

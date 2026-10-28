@@ -137,7 +137,7 @@ export const SelectMention = meta.story({
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Ask @sam-rivera ");
 		// The chosen person shows in the draft as a chip of their name.
-		await expect(within(input).getByText("Sam Rivera")).toBeVisible();
+		await expect(within(input).getByText("@sam-rivera")).toBeVisible();
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(args.onSubmit).not.toHaveBeenCalled();
 		// A name is matched as it is written, spaces and all.
@@ -193,10 +193,10 @@ export const EditMention = meta.story({
 
 		await userEvent.clear(input);
 		await userEvent.type(input, "@sam-rivera hello");
-		await expect(within(input).getByText("Sam Rivera")).toBeVisible();
+		await expect(within(input).getByText("@sam-rivera")).toBeVisible();
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("@sam-rivera hello");
 		await userEvent.keyboard("{Backspace>7/}");
-		await expect(within(input).queryByText("Sam Rivera")).not.toBeInTheDocument();
+		await expect(within(input).queryByText("@sam-rivera")).not.toBeInTheDocument();
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("");
 	},
 });
@@ -258,7 +258,7 @@ export const TextAgainstAChip = meta.story({
 		await expect(within(input).getByText("Issue Triager")).toBeVisible();
 		// To just after the space that follows the chip, which goes.
 		await userEvent.keyboard("{ArrowLeft>12/}{Backspace}");
-		await expect(input.textContent).toBe("Issue Triagerwe can start");
+		await expect(input.textContent).toBe("@Issue Triagerwe can start");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("@issue-triager we can start");
 	},
 });
@@ -269,7 +269,26 @@ export const MentionChip = meta.story({
 	play: async ({ canvas }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await expect(within(input).getByText("Issue Triager")).toBeVisible();
-		await expect(input.textContent).toBe("Issue Triager can you check the quote?");
+		await expect(input.textContent).toBe("@Issue Triager can you check the quote?");
+	},
+});
+
+/**
+ * LineKeysPastAChip: ⇧⌘← selects to the start of the line and ⌘⌫ deletes to
+ * it, going past a chip, where the browser on its own stops at the chip.
+ */
+export const LineKeysPastAChip = meta.story({
+	args: { value: "@issue-triager can you check the quote?" },
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.click(input);
+		await userEvent.keyboard("{End}{Shift>}{Meta>}{ArrowLeft}{/Meta}{/Shift}");
+		// The range, not the selection, reads out a chip, whose text can't be selected on its own.
+		await expect(document.getSelection()?.getRangeAt(0).toString()).toBe(
+			"@Issue Triager can you check the quote?",
+		);
+		await userEvent.keyboard("{End}{Meta>}{Backspace}{/Meta}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("");
 	},
 });
 

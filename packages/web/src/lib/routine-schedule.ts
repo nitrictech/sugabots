@@ -6,6 +6,7 @@ import {
 	type RoutineTriggerInput,
 	type Weekday,
 } from "@sugabots/contracts";
+import { formatClockTime } from "@/lib/list-time.ts";
 
 /*
  * A routine's schedule as people pick and read it: every so many days, weeks
@@ -165,11 +166,12 @@ export function scheduleSummary(schedule: CalendarSchedule): string {
 
 /**
  * How a routine starts, short enough for a list's line: its first trigger,
- * and how many more it has: "Daily at 22:00", "Webhook +2", "Run by hand".
+ * and how many more it has: "Daily at 22:00", "Webhook +2". Nothing for one
+ * with no trigger, which runs only when somebody runs it.
  */
-export function scheduleLabel(routine: Routine): string {
+export function scheduleLabel(routine: Routine): string | undefined {
 	const [first, ...more] = routine.triggers;
-	if (!first) return "Run by hand";
+	if (!first) return undefined;
 	return more.length > 0 ? `${triggerLabel(first)} +${more.length}` : triggerLabel(first);
 }
 
@@ -263,4 +265,37 @@ function cronDays(field: string): Weekday[] | undefined {
 		.split(",")
 		.map((day) => DAY_OPTIONS.find((option) => option.cron === (day === "7" ? "0" : day))?.value);
 	return days.every((day): day is Weekday => day !== undefined) ? days : undefined;
+}
+
+/** When the routine runs next on a schedule, in words: "Today at 14:00", "Tomorrow at 7:00", "Mon at 9:00"; none off a schedule. */
+export function nextRunAt(routine: Routine, now = new Date()): string | undefined {
+	const [next] = routine.triggers
+		.flatMap((trigger) =>
+			trigger.kind === "cron" && trigger.nextScheduledAt ? [trigger.nextScheduledAt] : [],
+		)
+		.sort();
+	if (!next) return undefined;
+	const at = new Date(next);
+	const daysAhead = Math.round(
+		(new Date(at).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86_400_000,
+	);
+	const day =
+		daysAhead <= 0
+			? "Today"
+			: daysAhead === 1
+				? "Tomorrow"
+				: daysAhead < 7
+					? at.toLocaleDateString(undefined, { weekday: "short" })
+					: at.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+	return `${day} at ${formatClockTime(at)}`;
+}
+
+/** When the routine runs next, in words: its soonest time on a schedule, or what starts it, if anything does. */
+export function nextRunWords(routine: Routine): string | undefined {
+	const next = nextRunAt(routine);
+	if (next) return `Next run ${next.replace(/^(Today|Tomorrow)/, (day) => day.toLowerCase())}`;
+	if (routine.triggers.length > 0 && routine.triggers.every(({ kind }) => kind === "webhook")) {
+		return "Runs when its address is called";
+	}
+	return scheduleLabel(routine);
 }

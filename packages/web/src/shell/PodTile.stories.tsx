@@ -20,7 +20,7 @@ const meta = preview.meta({
 	args: { bots: revenue, color: "green" as const, size: 44 as const },
 });
 
-/** Default is a pod on the rail: its first four bots' faces, each with its own colour and eyes, on the pod's colour. */
+/** Default is a pod in settings: its first four bots' faces, each with its own colour and eyes, on the pod's colour. */
 export const Default = meta.story({});
 
 /** Partial fills the slots with no bot with faint discs. */
@@ -43,7 +43,7 @@ export const Neutral = meta.story({
 	args: { color: null },
 });
 
-/** Colours shows every pod colour, empty and with a bot in it, as a rail of pods would. */
+/** Colours shows every pod colour, empty and with a bot in it, as a list of pods would. */
 export const Colours = meta.story({
 	render: () => (
 		<div className="flex flex-col gap-3">

@@ -16,8 +16,10 @@ import { query, serviceOperations, transaction, writtenRow } from "../../databas
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
+	collaboration,
 	message,
 	messageReaction,
+	pod,
 	routineExecution,
 	thread,
 	threadParticipant,
@@ -25,6 +27,7 @@ import {
 } from "../../database/schema.ts";
 import { Ids } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
@@ -225,6 +228,16 @@ export interface Interface {
 /** What a conversation is called until its first summary gives it a title of its own. */
 const conversationTitle = (botName: string) => `Conversation with ${botName}`;
 
+/**
+ * A bot's conversation as it is opened: its onboarding, while the bot still
+ * has to interview somebody about what it's for, and otherwise a conversation.
+ */
+function firstConversationTitle(host: { name: string; prompt: string; podName: string }): string {
+	return host.prompt === INTERVIEW_PROMPT
+		? `Onboarding ${host.name} to ${host.podName}`
+		: conversationTitle(host.name);
+}
+
 /** One person's emoji on a message in a thread. */
 export interface Reaction {
 	readonly threadId: string;
@@ -356,8 +369,9 @@ export const make = Effect.gen(function* () {
 						if (existing) return existing;
 						const [host] = yield* query((db) =>
 							db
-								.select({ name: agent.name })
+								.select({ name: agent.name, prompt: agent.prompt, podName: pod.name })
 								.from(agent)
+								.innerJoin(pod, eq(pod.id, placement.podId))
 								.where(eq(agent.id, placement.hostAgentId))
 								.limit(1),
 						);
@@ -372,7 +386,7 @@ export const make = Effect.gen(function* () {
 									hostAgentId: placement.hostAgentId,
 									conversationId: id,
 									type: "conversation",
-									title: conversationTitle(host?.name ?? "a bot"),
+									title: host ? firstConversationTitle(host) : conversationTitle("a bot"),
 									initiatorUserId: placement.initiatorUserId,
 								})
 								.returning(),
@@ -958,9 +972,25 @@ export const make = Effect.gen(function* () {
 								.from(routineExecution)
 								.innerJoin(run, eq(run.id, routineExecution.threadId))
 								.where(eq(run.conversationId, threadId));
+							// A collaboration starts while its asking reply is written, so after the
+							// time that reply is stamped with; reading the conversation reads it too,
+							// once that reply is done.
+							const asked = alias(thread, "asked_thread");
+							const newestCollaboration = db
+								.select({ at: sql`max(${collaboration.createdAt})` })
+								.from(collaboration)
+								.innerJoin(asked, eq(asked.id, collaboration.childThreadId))
+								.where(
+									and(
+										eq(asked.conversationId, threadId),
+										sql`${collaboration.createdAt} < coalesce((${oldestStreaming}), 'infinity')`,
+									),
+								);
 							return db
 								.select({
-									at: sql<string | null>`greatest(max(${message.createdAt}), (${newestRun}))::text`,
+									at: sql<
+										string | null
+									>`greatest(max(${message.createdAt}), (${newestRun}), (${newestCollaboration}))::text`,
 								})
 								.from(message)
 								.where(

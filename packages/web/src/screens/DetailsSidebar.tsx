@@ -1,4 +1,3 @@
-import { botColorVariables } from "@sugabots/avatars";
 import type {
 	Agent,
 	FilePart,
@@ -9,13 +8,14 @@ import type {
 } from "@sugabots/contracts";
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { FileText, RefreshCw, Settings2 } from "lucide-react";
+import { cn } from "cn";
+import { ChevronDown, FileText } from "lucide-react";
 import { useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
-import { agentSettingsLink, routineSettingsLink } from "@/lib/links.ts";
-import { formatListTime } from "@/lib/list-time.ts";
+import { agentSettingsLink, routineThreadLink } from "@/lib/links.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRoutineActions, useRoutines } from "@/lib/routines.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -23,23 +23,24 @@ import { useThreadActivity } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
+import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { ScribeNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
-import { ContextMeter } from "./ContextMeter.tsx";
+import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 
 /** How many rows a list shows before Show more. */
-const PARTICIPANTS_SHOWN = 3;
 const FILES_SHOWN = 3;
 const ROUTINES_SHOWN = 2;
 /** A summary longer than this is folded to four lines until asked for the rest. */
 const SUMMARY_FOLDED_OVER = 240;
 
 /**
- * A bot as a contact card, beside its chat: its face, name, pod and model, the way to
- * its settings, then what the chat is about, how much of the bot's short-term memory it
- * fills, who is in it and the files shared there, the apps it can reach and the
- * routines it runs.
+ * A bot beside its chat: its face, name and model, and the way to its
+ * settings, then what the chat is about, how much of the bot's short-term
+ * memory it fills, the routines it runs, the apps it can reach, who is in the
+ * chat and the files shared there.
  */
 export function DetailsSidebar({
 	agent,
@@ -62,42 +63,48 @@ export function DetailsSidebar({
 	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(agent.model);
 	return (
-		<ChatSidebar label="Details" onClose={onClose}>
-			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
-				<div className="flex items-center gap-3.5" style={botColorVariables(agent.color)}>
+		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
+				<div className="flex items-center gap-3 px-5 pt-5 pb-4">
 					<AgentAvatar
 						color={agent.color}
 						face={agent.face}
 						shape={agent.shape}
-						size={56}
+						size={36}
 						className="shrink-0"
 					/>
-					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<h3 className="m-0 truncate font-bold text-[18px] text-foreground">{agent.name}</h3>
-						<p className="m-0 truncate text-md text-muted-foreground">{pod.name} pod</p>
-						<p className="m-0 truncate text-sm text-subtle-foreground">
+					<div className="flex min-w-0 flex-1 flex-col leading-snug">
+						<h3 className="m-0 truncate font-semibold text-[14px] text-foreground">{agent.name}</h3>
+						<p className="m-0 truncate text-subtle-foreground text-xs">
 							{modelName ?? "No model chosen"}
 						</p>
 					</div>
+					<IconButton
+						label="Bot settings"
+						variant="bar"
+						render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
+						className="border border-border-strong"
+					>
+						<SettingsIcon size={15} />
+					</IconButton>
 				</div>
-				<Link
-					{...agentSettingsLink({ pod, agent })}
-					state={backToChat}
-					className="focus-ring flex h-9 items-center justify-center gap-2 rounded-[8px] border border-border-strong font-medium text-[13.5px] text-foreground transition-colors hover:bg-panel"
-				>
-					<Settings2 aria-hidden size={15} strokeWidth={2} className="text-soft-foreground" />
-					Bot settings
-				</Link>
 				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
 				{activity?.context && (
-					<SidebarSection title="Short-term memory">
+					<SidebarSection
+						title="Memory"
+						end={
+							<span className="font-mono text-muted-foreground text-xs">
+								{usedPercentOf(activity.context)}%
+							</span>
+						}
+					>
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}
-				<InThisThread participants={contents.participants} user={user} />
-				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 				<Routines pod={pod} agent={agent} />
 				<Tools pod={pod} agent={agent} />
+				<InThisThread participants={contents.participants} user={user} />
+				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
 	);
@@ -122,8 +129,8 @@ export function PeopleDetails({
 	onClose: () => void;
 }) {
 	return (
-		<ChatSidebar label="Details" onClose={onClose}>
-			<div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[18px] pt-5 pb-6">
+		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
 				<InThisThread participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
@@ -131,7 +138,13 @@ export function PeopleDetails({
 	);
 }
 
-/** Everyone in the thread: each bot, and each person, the viewer as You. */
+/** How many faces the folded In this thread shows before counting the rest. */
+const FACES_SHOWN = 4;
+
+/**
+ * Everyone in the thread: their faces and how many, which opens the list of
+ * them, each bot, and each person, the viewer as You.
+ */
 function InThisThread({
 	participants,
 	user,
@@ -139,15 +152,65 @@ function InThisThread({
 	participants: readonly ThreadParticipant[];
 	user: SessionUser;
 }) {
+	const [open, setOpen] = useState(false);
 	if (participants.length === 0) return null;
+	const hidden = participants.length - FACES_SHOWN;
 	return (
-		<SidebarSection title="In this thread">
-			<Expandable items={[...participants]} shown={PARTICIPANTS_SHOWN}>
-				{(participant) => (
-					<ParticipantRow key={participant.id} participant={participant} user={user} />
-				)}
-			</Expandable>
+		<SidebarSection
+			title="In this thread"
+			end={
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-label={`${participants.length} in this thread`}
+					onClick={() => setOpen(!open)}
+					className="focus-ring -mr-1 flex items-center gap-2 rounded-md py-0.5 pr-1 pl-2 hover:bg-row-hover"
+				>
+					<span aria-hidden className="flex pl-1.5">
+						{participants.slice(0, FACES_SHOWN).map((participant) => (
+							<span key={participant.id} className="-ml-1.5 rounded-full ring-2 ring-background">
+								<Face participant={participant} size={20} />
+							</span>
+						))}
+						{hidden > 0 && (
+							<span className="-ml-1.5 grid size-5 place-items-center rounded-full bg-chip font-semibold text-[9px] text-muted-foreground ring-2 ring-background">
+								+{hidden}
+							</span>
+						)}
+					</span>
+					<span aria-hidden className="text-muted-foreground text-xs">
+						{participants.length}
+					</span>
+					<ChevronDown
+						aria-hidden
+						size={12}
+						strokeWidth={2}
+						className={cn("text-subtle-foreground transition-transform", open && "rotate-180")}
+					/>
+				</button>
+			}
+		>
+			{open && (
+				<ul className="m-0 flex list-none flex-col p-0">
+					{participants.map((participant) => (
+						<ParticipantRow key={participant.id} participant={participant} user={user} />
+					))}
+				</ul>
+			)}
 		</SidebarSection>
+	);
+}
+
+function Face({ participant, size }: { participant: ThreadParticipant; size: number }) {
+	return participant.kind === "agent" ? (
+		<AgentAvatar
+			color={participant.color}
+			face={participant.face}
+			shape={participant.shape}
+			size={size}
+		/>
+	) : (
+		<PersonAvatar person={participant} size={size} />
 	);
 }
 
@@ -164,17 +227,17 @@ function SharedFiles({
 		<SidebarSection title="Files">
 			<Expandable items={[...files].reverse()} shown={FILES_SHOWN}>
 				{(file) => (
-					<li key={file.id} className="border-border border-b last:border-b-0">
+					<li key={file.id}>
 						<a
 							href={fileUrlOf(file.id)}
 							target="_blank"
 							rel="noreferrer"
-							className="focus-ring flex items-center gap-2.5 px-3.5 py-[9px] transition-colors hover:bg-panel"
+							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover"
 						>
-							<span className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground">
-								<FileText aria-hidden size={14} strokeWidth={2} />
+							<span className="grid size-[22px] shrink-0 place-items-center rounded-[6px] border border-border-strong text-muted-foreground">
+								<FileText aria-hidden size={12} strokeWidth={2} />
 							</span>
-							<span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
+							<span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
 								{file.name}
 							</span>
 						</a>
@@ -196,7 +259,7 @@ function Summary({
 	const [open, setOpen] = useState(false);
 	if (scribeHasModel === false) {
 		return (
-			<SidebarSection title="Summary" className="px-3.5 py-3">
+			<SidebarSection title="Summary">
 				<ScribeNotSetUp />
 			</SidebarSection>
 		);
@@ -204,12 +267,13 @@ function Summary({
 	const text = summary?.content;
 	const folds = text !== undefined && text.length > SUMMARY_FOLDED_OVER;
 	return (
-		<SidebarSection
-			title="Summary"
-			note={summary && `Updated ${formatListTime(new Date(summary.updatedAt), new Date())}`}
-		>
+		<SidebarSection title="Summary">
 			<p
-				className={`m-0 px-3.5 py-3 text-[14px] leading-[1.55] ${text ? "text-foreground" : "text-muted-foreground"} ${folds && !open ? "line-clamp-4" : ""}`}
+				className={cn(
+					"m-0 text-[13px] leading-[1.55]",
+					text ? "text-soft-foreground" : "text-muted-foreground",
+					folds && !open && "line-clamp-3",
+				)}
 			>
 				{text ?? "A summary will appear after the first reply."}
 			</p>
@@ -226,23 +290,14 @@ function ParticipantRow({
 	user: SessionUser;
 }) {
 	return (
-		<li className="flex items-center gap-2.5 border-border border-b px-3.5 py-[9px] last:border-b-0">
+		<li className="flex h-[34px] items-center gap-2.5">
 			<span aria-hidden className="contents">
-				{participant.kind === "agent" ? (
-					<AgentAvatar
-						color={participant.color}
-						face={participant.face}
-						shape={participant.shape}
-						size={26}
-					/>
-				) : (
-					<PersonAvatar person={participant} size={26} />
-				)}
+				<Face participant={participant} size={22} />
 			</span>
-			<span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
+			<span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
 				{participant.name}
 			</span>
-			<span className="text-sm text-subtle-foreground">
+			<span className="text-subtle-foreground text-xs">
 				{participant.kind === "agent" ? "Bot" : participant.id === user.id ? "You" : "Member"}
 			</span>
 		</li>
@@ -250,11 +305,10 @@ function ParticipantRow({
 }
 
 /**
- * The bot's routines, each opening its page in settings, with a switch to
+ * The bot's routines, each opening its page with its runs, with a switch to
  * pause or resume it for whoever may manage them.
  */
 function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
-	const backToChat = useBackToHere("Chat");
 	const routines = useRoutines(agent.id);
 	const actions = useRoutineActions();
 	const list = routines.data ?? [];
@@ -263,24 +317,17 @@ function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
 		<SidebarSection title="Routines">
 			<Expandable items={list} shown={ROUTINES_SHOWN}>
 				{(routine) => (
-					<li
-						key={routine.id}
-						className="flex items-center gap-2.5 border-border border-b pr-3.5 last:border-b-0"
-					>
+					<li key={routine.id} className="flex items-center gap-3 py-1">
 						<Link
-							{...routineSettingsLink(routine)}
-							state={backToChat}
-							className="focus-ring flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-3.5 transition-colors hover:text-link"
+							{...routineThreadLink(pod, routine.id)}
+							className="focus-ring flex min-w-0 flex-1 flex-col rounded-sm leading-snug hover:[&>span:first-child]:underline"
 						>
-							<span className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground">
-								<RefreshCw aria-hidden size={13} strokeWidth={2.2} />
-							</span>
-							<span className="flex min-w-0 flex-1 flex-col gap-px">
-								<span className="truncate text-[14px] text-foreground">{routine.name}</span>
+							<span className="truncate text-[13px] text-foreground">{routine.name}</span>
+							{scheduleLabel(routine) && (
 								<span className="truncate text-subtle-foreground text-xs">
 									{scheduleLabel(routine)}
 								</span>
-							</span>
+							)}
 						</Link>
 						<Toggle
 							label={`${routine.name} on`}
@@ -304,29 +351,37 @@ function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
 	);
 }
 
-/** The apps the bot can reach, which are its pod's connections, each opening the bot's settings. */
+/** The apps the bot can reach, which are its pod's connections, with how many of their tools it may use, each opening the bot's settings. */
 export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(pod.id);
 	const list = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
 	if (list.length === 0) return null;
 	return (
-		<SidebarSection title="Tools" card={false} className="flex flex-wrap gap-1.5">
-			{list.map((connection) => (
-				<Link
-					key={connection.id}
-					{...agentSettingsLink({ pod, agent })}
-					state={backToChat}
-					className="focus-ring flex h-[30px] min-w-0 items-center gap-[7px] rounded-[8px] border border-border-strong pr-2.5 pl-1 font-medium text-[13px] text-soft-foreground transition-colors hover:bg-panel"
-				>
-					<ConnectionMark
-						presetId={connectionMarkFor(connection)}
-						name={connection.name}
-						size="md"
-					/>
-					<span className="truncate">{connection.name}</span>
-				</Link>
-			))}
+		<SidebarSection title="Tools">
+			<ul className="m-0 flex list-none flex-col p-0">
+				{list.map((connection) => (
+					<li key={connection.id}>
+						<Link
+							{...agentSettingsLink({ pod, agent })}
+							state={backToChat}
+							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover"
+						>
+							<ConnectionMark
+								presetId={connectionMarkFor(connection)}
+								name={connection.name}
+								size="md"
+							/>
+							<span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+								{connection.name}
+							</span>
+							<span className="shrink-0 text-subtle-foreground text-xs">
+								{countOf(usableToolCount(connection), "tool", "tools")}
+							</span>
+						</Link>
+					</li>
+				))}
+			</ul>
 		</SidebarSection>
 	);
 }

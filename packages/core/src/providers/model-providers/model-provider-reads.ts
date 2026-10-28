@@ -96,6 +96,9 @@ export const offeredModels = (workspaceId: string) =>
 					providerActive: provider.active,
 					modelId: model.modelId,
 					displayName: model.displayName,
+					capabilities: model.capabilities.filter(
+						(capability) => !model.disabledCapabilities.includes(capability),
+					),
 				})),
 				defaultModel: defaultModel ?? null,
 			}),

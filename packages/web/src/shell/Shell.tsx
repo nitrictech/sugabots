@@ -5,9 +5,9 @@ import { useAppBadge } from "@/lib/app-badge.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
-import { Rail } from "@/shell/Rail.tsx";
+import { Sidebar } from "@/shell/Sidebar.tsx";
 
-/** The frame: the pod rail, then whatever the address shows beside it. */
+/** The frame: the sidebar, then whatever the address shows beside it. */
 export function Shell() {
 	useWorkspaceEvents();
 	useVisibleHeight();
@@ -17,39 +17,17 @@ export function Shell() {
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (
 		<div className="relative flex h-[var(--visible-height,100dvh)] min-w-0 overflow-hidden bg-background">
-			<Rail />
+			<Sidebar />
 			<Outlet />
 		</div>
 	);
 }
 
-/** The thread column: everything to the right of the conversation list. */
+/** The thread column: everything to the right of the sidebar and any list beside it. */
 export function Panes({ children, className }: { children: ReactNode; className?: string }) {
 	return (
 		<main className={cn("relative flex min-w-0 flex-1 flex-col bg-background", className)}>
 			{children}
 		</main>
-	);
-}
-
-/**
- * A list column beside the pane it opens. On a phone the two take turns: while
- * something is `open`, the pane covers the list; otherwise the list is the page.
- * `list` is given the class that hides it while it is covered.
- */
-export function ListAndPane({
-	open,
-	list,
-	children,
-}: {
-	open: boolean;
-	list: (className: string | undefined) => ReactNode;
-	children: ReactNode;
-}) {
-	return (
-		<>
-			{list(open ? "max-md:hidden" : undefined)}
-			<Panes className={open ? undefined : "max-md:hidden"}>{children}</Panes>
-		</>
 	);
 }

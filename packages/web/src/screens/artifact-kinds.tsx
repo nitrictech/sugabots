@@ -131,7 +131,7 @@ function LivePage({
 					<button
 						type="button"
 						onClick={expanded ? collapse : () => setExpanded(true)}
-						className="focus-ring flex h-8 items-center gap-1.5 rounded-full border border-border-strong bg-panel px-3.5 font-semibold text-[13px] text-foreground shadow-popover transition-colors hover:bg-hover"
+						className="focus-ring flex h-8 items-center gap-1.5 rounded-[8px] border border-border-strong bg-panel px-3.5 font-semibold text-[13px] text-foreground shadow-popover transition-colors hover:bg-hover"
 					>
 						{expanded ? <ChevronUp aria-hidden size={15} /> : <ChevronDown aria-hidden size={15} />}
 						{expanded ? "Show less" : "Show all"}

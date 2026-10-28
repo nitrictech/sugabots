@@ -64,6 +64,8 @@ export const conversationThreadSchema = Schema.Struct({
 	...conversationFields,
 	/** The bot it is with; null when it is between people. */
 	hostAgentId: Schema.NullOr(uuidSchema),
+	/** The pod's chat it was started from, by its id; null when it was started with a bot directly. */
+	startedInChatId: Schema.NullOr(uuidSchema),
 	/** When somebody marked it done; null while it is open. */
 	doneAt: Schema.NullOr(isoTimestampSchema),
 });
@@ -365,6 +367,8 @@ export const chatMessageItemSchema = Schema.Union([
 		/** How far the run has got, and, once it failed, why, in words fit for people. */
 		state: routineExecutionStateSchema,
 		error: Schema.NullOr(Schema.String),
+		/** What the run's bot last said in it, or null while it has said nothing. */
+		report: Schema.NullOr(Schema.String),
 		createdAt: isoTimestampSchema,
 	}),
 	/** In a routine's thread: the routine, by its id, paused itself after failing twice in a row. */

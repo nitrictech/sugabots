@@ -1,4 +1,3 @@
-import { botColorVariables } from "@sugabots/avatars";
 import { splitAroundMentions, type ThreadParticipant } from "@sugabots/contracts";
 import { cn } from "cn";
 import {
@@ -15,8 +14,7 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { participantWithHandle } from "./mentions.tsx";
+import { MentionChip, participantWithHandle } from "./mentions.tsx";
 
 /*
  * A message box whose text is plain, with `@handle` for a mention, but which
@@ -61,6 +59,7 @@ export function MentionEditor({
 	ref,
 	id,
 	label,
+	placeholder = label,
 	value,
 	onValueChange,
 	onCaretChange,
@@ -75,8 +74,10 @@ export function MentionEditor({
 }: {
 	ref?: Ref<MentionEditorHandle>;
 	id: string;
-	/** Names the box for assistive technology, and is its placeholder. */
+	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
 	label: string;
+	/** What the empty box says, when that is not its name. */
+	placeholder?: string;
 	value: string;
 	/** The new text, and where the caret is in it. */
 	onValueChange: (value: string, caret: number) => void;
@@ -201,7 +202,7 @@ export function MentionEditor({
 					aria-hidden
 					className="pointer-events-none absolute inset-x-0 top-0 truncate py-[3px] text-[15px] text-subtle-foreground leading-[22px]"
 				>
-					{label}
+					{placeholder}
 				</span>
 			)}
 			{/* biome-ignore lint/a11y/useSemanticElements: a textarea cannot hold a mention's face. */}
@@ -227,8 +228,26 @@ export function MentionEditor({
 				onKeyDown={(event) => {
 					onKeyDown(event);
 					if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+					const root = event.currentTarget;
+					// A chip can't be edited, so the browser stops a jump or a selection to the line's end at it.
+					const toLine = lineKey(event);
+					if (toLine) {
+						event.preventDefault();
+						const { anchor, focus } = directedSelectionOf(root);
+						const target = lineEdge(textOf(root), focus, toLine);
+						if (event.shiftKey) selectBetween(root, anchor, target);
+						else placeCaret(root, target);
+						return;
+					}
+					if (event.key === "Backspace" && event.metaKey) {
+						const { start, end } = selectionOf(root);
+						if (start !== end) return;
+						event.preventDefault();
+						replace({ start: lineEdge(textOf(root), start, "start"), end }, "");
+						return;
+					}
 					if (event.key === "Backspace" || event.key === "Delete") {
-						const chip = chipBesideCaret(event.currentTarget, event.key);
+						const chip = chipBesideCaret(root, event.key);
 						if (!chip) return;
 						event.preventDefault();
 						replace(chip, "");
@@ -260,39 +279,17 @@ export function MentionEditor({
 			/>
 			{createPortal(
 				mentionable.map((participant) => (
-					<MentionChip key={participant.id} participant={participant} />
+					<MentionChip
+						key={participant.id}
+						participant={participant}
+						{...{ [MENTION_ATTRIBUTE]: `@${participant.handle}` }}
+						contentEditable={false}
+						className="select-none"
+					/>
 				)),
 				templates,
 			)}
 		</div>
-	);
-}
-
-/** How a finished mention is drawn in the box; copied into it from the hidden templates. */
-function MentionChip({ participant }: { participant: ThreadParticipant }) {
-	return (
-		<span
-			{...{ [MENTION_ATTRIBUTE]: `@${participant.handle}` }}
-			contentEditable={false}
-			className={cn(
-				"mx-px inline-flex select-none items-center gap-[5px] rounded-[6px] py-px pr-1.5 pl-[3px] align-middle font-medium text-[14px] leading-[18px]",
-				participant.kind === "agent"
-					? "bg-bot-tint text-bot-mono"
-					: "bg-chip pl-1.5 text-foreground",
-			)}
-			style={participant.kind === "agent" ? botColorVariables(participant.color) : undefined}
-		>
-			{participant.kind === "agent" && (
-				<AgentAvatar
-					color={participant.color}
-					face={participant.face}
-					shape={participant.shape}
-					size={16}
-					className="shrink-0"
-				/>
-			)}
-			{participant.name}
-		</span>
 	);
 }
 
@@ -507,33 +504,63 @@ function caretOf(root: HTMLElement): number {
 	return selectionOf(root).end;
 }
 
-/** Puts the caret `offset` into the text, after a chip it falls inside. */
-function placeCaret(root: HTMLElement, offset: number) {
-	const selection = document.getSelection();
-	if (!selection) return;
-	const range = document.createRange();
+/** Where `offset` into the text is in the box, after a chip it falls inside. */
+function pointAt(root: HTMLElement, offset: number): { node: Node; offset: number } {
 	let remaining = offset;
-	let placed = false;
 	for (const [index, node] of root.childNodes.entries()) {
 		const length = textOfNode(node, index).length;
-		if (node.nodeType === Node.TEXT_NODE && remaining <= length) {
-			range.setStart(node, remaining);
-			placed = true;
-			break;
-		}
-		if (remaining < length) {
-			range.setStartAfter(node);
-			placed = true;
-			break;
-		}
+		if (node.nodeType === Node.TEXT_NODE && remaining <= length) return { node, offset: remaining };
+		// Right before a chip is before it; anywhere inside one is after it.
+		if (remaining === 0) return { node: root, offset: index };
+		if (remaining < length) return { node: root, offset: index + 1 };
 		remaining -= length;
 	}
-	if (!placed) {
-		const filler =
-			root.lastChild instanceof HTMLElement && root.lastChild.hasAttribute(FILLER_ATTRIBUTE);
-		range.setStart(root, filler ? root.childNodes.length - 1 : root.childNodes.length);
+	const filler =
+		root.lastChild instanceof HTMLElement && root.lastChild.hasAttribute(FILLER_ATTRIBUTE);
+	return { node: root, offset: filler ? root.childNodes.length - 1 : root.childNodes.length };
+}
+
+/** Puts the caret `offset` into the text, after a chip it falls inside. */
+function placeCaret(root: HTMLElement, offset: number) {
+	selectBetween(root, offset, offset);
+}
+
+/** Selects the text from `anchor` to `focus`, which may be before it. */
+function selectBetween(root: HTMLElement, anchor: number, focus: number) {
+	const selection = document.getSelection();
+	if (!selection) return;
+	const from = pointAt(root, anchor);
+	const to = pointAt(root, focus);
+	selection.setBaseAndExtent(from.node, from.offset, to.node, to.offset);
+}
+
+/** The selection as offsets into the text: where it was started, and where it ends now. */
+function directedSelectionOf(root: HTMLElement): { anchor: number; focus: number } {
+	const selection = document.getSelection();
+	if (!selection?.anchorNode || !selection.focusNode || !root.contains(selection.anchorNode)) {
+		const end = textOf(root).length;
+		return { anchor: end, focus: end };
 	}
-	range.collapse(true);
-	selection.removeAllRanges();
-	selection.addRange(range);
+	return {
+		anchor: offsetOf(root, selection.anchorNode, selection.anchorOffset),
+		focus: offsetOf(root, selection.focusNode, selection.focusOffset),
+	};
+}
+
+/**
+ * Which edge of the line a key goes to: Home and End, or ⌘← and ⌘→ on a Mac,
+ * with Shift to select there; none for any other key.
+ */
+function lineKey(event: KeyboardEvent<HTMLElement>): "start" | "end" | undefined {
+	if (event.altKey || event.ctrlKey) return undefined;
+	if (event.key === "Home" || (event.metaKey && event.key === "ArrowLeft")) return "start";
+	if (event.key === "End" || (event.metaKey && event.key === "ArrowRight")) return "end";
+	return undefined;
+}
+
+/** The start or end of the line of `text` that `offset` is on, as lines are broken in it. */
+function lineEdge(text: string, offset: number, edge: "start" | "end"): number {
+	if (edge === "start") return text.lastIndexOf("\n", offset - 1) + 1;
+	const next = text.indexOf("\n", offset);
+	return next === -1 ? text.length : next;
 }

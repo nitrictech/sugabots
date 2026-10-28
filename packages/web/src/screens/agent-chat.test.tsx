@@ -43,6 +43,7 @@ const chat: ConversationThread = {
 	podId: linear.podId,
 	hostAgentId: linear.id,
 	title: `Conversation with ${linear.name}`,
+	startedInChatId: null,
 	doneAt: null,
 	createdAt: "2026-09-18T08:00:00.000Z",
 	updatedAt: "2026-09-18T09:30:00.000Z",
@@ -450,11 +451,9 @@ describe("ongoing agent Chat", () => {
 		expect(client.api.pods.list).toHaveBeenCalledOnce();
 		expect(client.api.agents.list).toHaveBeenCalledOnce();
 		// By the address's slug: it does not wait for the pods to learn the pod's id.
-		expect(client.api.chats.list).toHaveBeenCalledOnce();
-		expect(client.api.chats.list).toHaveBeenCalledWith({
-			params: { workspace: workspace.id },
-			query: { pod: "suga-team" },
-		});
+		expect(
+			client.api.chats.list.mock.calls.filter(([request]) => request.query.pod === "suga-team"),
+		).toHaveLength(1);
 	});
 
 	it("opens a chat the pod's list does not have yet", async () => {
@@ -527,8 +526,8 @@ describe("ongoing agent Chat", () => {
 
 		expect(await screen.findByText(`${linear.name} won't reply.`)).toBeTruthy();
 		const box = screen.getByLabelText(`Message ${podmate.name}`);
-		// The finished mention is drawn in the box as the person's name.
-		expect(within(box).getByText(podmate.name)).toBeTruthy();
+		// The finished mention is drawn in the box as the person's handle, as a sent message draws it.
+		expect(within(box).getByText(`@${podmate.handle}`)).toBeTruthy();
 
 		writeDraft(box, `@${podmate.handle} and @${linear.handle}, can you check?`);
 
@@ -975,13 +974,10 @@ describe("ongoing agent Chat", () => {
 		expect(
 			within(routinePanel).getByRole("heading", { name: routineExecution.routineName }),
 		).toBeDefined();
-		expect(within(routinePanel).getByText("Routine run")).toBeDefined();
 		expect(within(routinePanel).getByText(routineMessage.content)).toBeDefined();
 		expect(within(routinePanel).queryByText(routineExecution.instructions)).toBeNull();
 		expect(
-			within(routinePanel)
-				.getByRole("link", { name: "View routine definition" })
-				.getAttribute("href"),
+			within(routinePanel).getByRole("link", { name: "Routine settings" }).getAttribute("href"),
 		).toBe(`/suga/settings/routines/${routineExecution.routineId}`);
 		expect(within(routinePanel).getByLabelText("View webhook payload")).toBeDefined();
 		expect(within(routinePanel).queryByText(/Routine instructions:/)).toBeNull();
@@ -1117,6 +1113,7 @@ describe("ongoing agent Chat", () => {
 			"section",
 		);
 		if (!members) throw new Error("In this thread has no section");
+		fireEvent.click(within(members).getByRole("button", { name: /in this thread$/ }));
 		const [first, second, ...rest] = within(members).getAllByRole("listitem");
 		expect(first?.textContent).toContain("You");
 		expect(second?.textContent).toContain(linear.name);
@@ -1144,8 +1141,7 @@ describe("a message opened from Activity", () => {
 		content: "Can you look at the release?",
 		createdAt: "2026-09-17T09:00:00.000Z",
 	};
-	const opened = (messageId: string) =>
-		`/suga/activity/suga-team/${chat.id}?item=${messageId}&message=${messageId}`;
+	const opened = (messageId: string) => `/suga/activity/suga-team/${chat.id}?message=${messageId}`;
 
 	beforeEach(() => {
 		client.api.chats.messages.mockImplementation(({ query }: { query?: { cursor?: string } }) =>
@@ -1188,23 +1184,23 @@ describe("a message opened from Activity", () => {
 		expect(screen.getByRole("log", { name: "Chat messages" })).toBeDefined();
 	});
 
-	it("shows a routine run chosen in Activity as a page of its own, with the way back and to its chat", async () => {
-		mount(`/suga/activity/suga-team/${chat.id}?item=${routineId}&threadPage=${routineId}`);
+	it("shows a routine run chosen in Inbox as a page of its own, with the way back and to its chat", async () => {
+		mount(`/suga/activity/suga-team/${chat.id}?threadPage=${routineId}`);
 
 		expect(
 			await screen.findByRole("heading", { name: routineExecution.routineName }),
 		).toBeDefined();
 		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		expect(screen.getByRole("link", { name: "Back to Activity" }).getAttribute("href")).toBe(
+		expect(screen.getByRole("link", { name: "Back to Inbox" }).getAttribute("href")).toBe(
 			"/suga/activity",
 		);
-		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(
+		expect(screen.getByRole("link", { name: "Open thread" }).getAttribute("href")).toBe(
 			conversationPage,
 		);
 	});
 
 	it("ignores an address naming something other than a message", async () => {
-		mount(`/suga/activity/suga-team/${chat.id}?item=a%22b&message=a%22b`);
+		mount(`/suga/activity/suga-team/${chat.id}?message=a%22b`);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();
 		expect(screen.queryByText("Could not find the message you opened in this chat.")).toBeNull();
