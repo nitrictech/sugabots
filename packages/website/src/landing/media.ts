@@ -19,7 +19,7 @@ type DemoVideo = {
 
 /** Made by `bun run capture video`, which prints its length. */
 export const demoVideo: DemoVideo = {
-	duration: "0:58",
+	duration: "0:59",
 	src: "/demo/sugabots-demo.mp4",
 	poster: "/demo/sugabots-demo-poster.webp",
 };

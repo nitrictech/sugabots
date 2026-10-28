@@ -25,7 +25,7 @@ const OUTPUT = join(REPO, "packages/website/public/screenshots");
 interface Shot {
 	/** The file's name in `public/screenshots`, before its system and `.webp`. */
 	name: string;
-	/** The picture behind the window: a colour no other slide has, matching the bot it shows where it shows one. */
+	/** The picture behind the window: a form and grey its neighbouring slides don't share. */
 	backdrop: Backdrop;
 	/** Opens the app on what the slide shows. */
 	prepare(stage: Stage): Promise<void>;
@@ -35,7 +35,7 @@ interface Shot {
 const SHOTS: Shot[] = [
 	{
 		name: "one-thread",
-		backdrop: { form: "swoop", family: "green" },
+		backdrop: { form: "swoop", family: "silver" },
 		async prepare(stage) {
 			// Growth's chat, where its people talk and start threads with its bots.
 			await openPodChat(stage, "growth");
@@ -44,11 +44,12 @@ const SHOTS: Shot[] = [
 	},
 	{
 		name: "routines",
-		backdrop: { form: "rings", family: "purple" },
+		backdrop: { form: "rings", family: "graphite" },
 		async prepare(stage) {
-			// Ticket Desk's, so the slide's purple matches its bot.
-			await stage.open(`/${WORKSPACE}/pods/support`);
+			// Ticket Desk's Routines page, with its morning queue open beside the list.
+			await stage.open(`/${WORKSPACE}/pods/support/routines?bot=ticket-desk`);
 			await stage.app
+				.getByRole("region", { name: "Routines" })
 				.getByRole("link", { name: /^Morning queue/ })
 				.first()
 				.click();
@@ -57,7 +58,7 @@ const SHOTS: Shot[] = [
 	},
 	{
 		name: "artifacts",
-		backdrop: { form: "sur", family: "blue" },
+		backdrop: { form: "sur", family: "ink" },
 		async prepare(stage) {
 			await openSeededThread(stage, "engineering", "What changed in Postgres 18");
 			await stage.app.getByRole("button", { name: "Preview" }).last().click();
@@ -67,7 +68,7 @@ const SHOTS: Shot[] = [
 	},
 	{
 		name: "usage",
-		backdrop: { form: "wave", family: "teal" },
+		backdrop: { form: "wave", family: "silver" },
 		async prepare(stage) {
 			await stage.open(`/${WORKSPACE}/settings/usage`);
 			await stage.app.getByText("Growth Desk").first().waitFor();
@@ -75,7 +76,7 @@ const SHOTS: Shot[] = [
 	},
 	{
 		name: "mcp-connections",
-		backdrop: { form: "petals", family: "orange" },
+		backdrop: { form: "petals", family: "graphite" },
 		async prepare(stage) {
 			await stage.open(`/${WORKSPACE}/settings/pods/engineering`);
 			await stage.app.getByText("Linear", { exact: true }).first().click();
@@ -93,10 +94,10 @@ const SHOTS: Shot[] = [
  */
 const SANDBOXES: Shot = {
 	name: "sandboxes",
-	backdrop: { form: "petals", family: "red" },
+	backdrop: { form: "petals", family: "ink" },
 	async prepare(stage) {
 		await openSeededThread(stage, "engineering", "Can you review PR #482");
-		await stage.app.getByRole("button", { name: "Sandbox desktop" }).click();
+		await stage.app.getByRole("button", { name: "Computer" }).click();
 		await stage.app.locator("canvas").first().waitFor();
 		await stage.app.getByText("Starting the desktop…").waitFor({ state: "detached" });
 	},
@@ -151,13 +152,9 @@ async function take(stage: Stage, shot: Shot, work: string) {
 	}
 }
 
-/**
- * The pod's chat. A pod opens on what was last open in it, which the video
- * leaves on a thread, so this goes to General from there.
- */
+/** The pod's chat, General: by its own address, since every pod's General is in the sidebar. */
 async function openPodChat(stage: Stage, pod: string) {
-	await stage.open(`/${WORKSPACE}/pods/${pod}`);
-	await stage.app.getByRole("link", { name: "General", exact: true }).first().click();
+	await stage.open(`/${WORKSPACE}/pods/${pod}/chat`);
 	await stage.app.getByRole("heading", { name: "General" }).first().waitFor();
 }
 

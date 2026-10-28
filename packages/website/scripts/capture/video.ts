@@ -26,8 +26,8 @@ const LAYOUT = {
 	app: { width: 1280, height: 720 },
 	windowWidth: 0.82,
 };
-/** The sur form in the logo's four colours, the rainbow the headline's highlight uses. */
-const BACKDROP: Backdrop = { form: "sur", family: "logo" };
+/** The sur form in the middle greys, so the dark window stands out against it. */
+const BACKDROP: Backdrop = { form: "sur", family: "graphite" };
 /** The video plays this much faster than it was acted, so the bots' streaming doesn't drag. */
 const SPEED = 1.3;
 const FRAMES_PER_SECOND = 30;
@@ -107,13 +107,13 @@ const SCENES: Scene[] = [
 	},
 	{
 		about:
-			"Doreen mentions Anita in Support's chat. She sees it in Activity and answers, and Doreen closes the ticket.",
+			"Doreen mentions Anita in Support's chat. She sees it in Inbox and answers, and Doreen closes the ticket.",
 		async play(stage, director) {
 			void director.stage(["cue", "mention"]);
-			const activity = stage.app.getByRole("link", { name: /^Activity, \d+ unread mention/ });
-			await activity.waitFor({ timeout: 20_000 });
+			const inbox = stage.app.getByRole("link", { name: /^Inbox\b.*\d+ unread/ });
+			await inbox.waitFor({ timeout: 20_000 });
 			await stage.page.waitForTimeout(1000);
-			await click(stage, activity);
+			await click(stage, inbox);
 			await stage.page.waitForTimeout(1000);
 			await click(stage, stage.app.getByRole("link", { name: /mentioned you/ }).first());
 			await stage.page.waitForTimeout(1600);

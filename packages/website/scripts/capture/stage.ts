@@ -155,7 +155,7 @@ function stageHtml(layout: StageLayout) {
 <head>
 <meta charset="utf-8">
 <style>
-	html, body { margin: 0; width: 100%; height: 100%; overflow: clip; background: #0b0c0f; }
+	html, body { margin: 0; width: 100%; height: 100%; overflow: clip; background: #0a0a0a; }
 	#camera {
 		position: absolute; inset: 0; transform-origin: 0 0;
 		transition: transform ${CAMERA_MILLISECONDS}ms cubic-bezier(0.65, 0, 0.35, 1);
@@ -167,13 +167,13 @@ function stageHtml(layout: StageLayout) {
 	#window {
 		position: absolute;
 		left: ${window.x}px; top: ${window.y}px; width: ${window.width}px; height: ${window.height}px;
-		border-radius: ${Math.round(window.width / 90)}px; background: #0b0c0f;
+		border-radius: ${Math.round(window.width / 90)}px; background: #0a0a0a;
 		/* Clipped, not hidden: the unscaled iframe is larger than the window, and a hidden overflow can still be scrolled, which Playwright does to reach what it clicks. */
 		overflow: clip;
 		box-shadow:
 			0 0 0 1px rgb(255 255 255 / 0.1),
-			0 ${window.height / 40}px ${window.height / 12}px rgb(10 8 30 / 0.45),
-			0 ${window.height / 12}px ${window.height / 4}px rgb(10 8 30 / 0.35);
+			0 ${window.height / 40}px ${window.height / 12}px rgb(0 0 0 / 0.5),
+			0 ${window.height / 12}px ${window.height / 4}px rgb(0 0 0 / 0.4);
 	}
 	#frame {
 		width: ${layout.app.width}px; height: ${layout.app.height + TITLE_BAR_PX}px;
@@ -196,20 +196,20 @@ function stageHtml(layout: StageLayout) {
 const titleBarCss = `
 	.bar {
 		height: ${TITLE_BAR_PX}px; flex: none; display: flex; align-items: center;
-		background: #1a1b20; border-bottom: 1px solid #26282e;
+		background: #111113; border-bottom: 1px solid #1c1c1f;
 	}
 	.mac { gap: 8px; padding-left: 14px; }
 	.mac i { width: 12px; height: 12px; border-radius: 50%; display: block; }
 	.windows { justify-content: flex-end; }
 	.windows span { width: 46px; height: 100%; display: grid; place-items: center; }
 	.linux { justify-content: flex-end; gap: 10px; padding-right: 10px; }
-	.linux span { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #2b2d34; }
-	.linux span.close { background: #3a3c44; }
+	.linux span { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #26262a; }
+	.linux span.close { background: #3f3f46; }
 	svg { display: block; }
 `;
 
 const glyph = (path: string, size = 10) =>
-	`<svg width="${size}" height="${size}" viewBox="0 0 10 10" fill="none" stroke="#c9ccd3" stroke-width="1">${path}</svg>`;
+	`<svg width="${size}" height="${size}" viewBox="0 0 10 10" fill="none" stroke="#c4c4ca" stroke-width="1">${path}</svg>`;
 
 /** Each system's title bar: macOS's traffic lights, Windows' caption buttons, GNOME's round buttons. */
 const titleBarHtml: Record<Chrome, string> = {
