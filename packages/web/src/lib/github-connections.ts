@@ -28,14 +28,14 @@ export function useMakeGitHubApp(podId: string) {
 	});
 }
 
-/** Opens a new tab to GitHub to install the connection's app, or to change which repositories it reaches. */
+/** Leaves for GitHub to install the connection's app, or to change which repositories it reaches. */
 export function useInstallGitHubApp(podId: string) {
 	return useMutation({
 		mutationFn: async (connectionId: string) => {
 			const { url } = await Effect.runPromise(
 				client.api.gitHubConnections.installUrl({ params: { podId, connectionId } }),
 			);
-			window.open(url, "_blank", "noopener,noreferrer");
+			window.location.assign(url);
 		},
 	});
 }
@@ -111,13 +111,11 @@ export function useConnectionRepositories(podId: string, connectionId: string | 
 	};
 }
 
-/** GitHub takes a manifest only as a posted form, so a new tab goes with one. */
+/** GitHub takes a manifest only as a posted form, so the browser leaves with one. */
 function postToGitHub({ url, manifest }: GitHubAppForm) {
 	const form = document.createElement("form");
 	form.method = "post";
 	form.action = url;
-	form.target = "_blank";
-	form.rel = "noopener noreferrer";
 	const field = document.createElement("input");
 	field.type = "hidden";
 	field.name = "manifest";
