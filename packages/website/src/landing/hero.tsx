@@ -11,10 +11,7 @@ export function Hero() {
 		<section id="top" className={cn(siteColumn, pageTop, "flex flex-col gap-16 sm:gap-24")}>
 			<div className="flex flex-col items-start gap-7">
 				<h1 className="max-w-[820px] text-[clamp(40px,6vw,72px)]/[1.02] font-bold tracking-[-0.035em] text-balance">
-					<span className="landing-logo-gradient bg-clip-text text-transparent">
-						{siteMeta.headline.accent}
-					</span>{" "}
-					{siteMeta.headline.rest}.
+					{siteMeta.headline}.
 				</h1>
 				<p className="max-w-[560px] text-[clamp(17px,1.6vw,20px)]/[1.5] text-pretty text-landing-muted">
 					{siteMeta.description}

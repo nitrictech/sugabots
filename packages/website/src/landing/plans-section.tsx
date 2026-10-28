@@ -138,7 +138,7 @@ function Plan({ name, summary, badge, children }: PlanProps) {
 				<div className="flex items-start justify-between gap-4">
 					<h3 className="text-[21px]/[1.25] font-semibold tracking-[-0.01em]">{name}</h3>
 					{badge && (
-						<span className="shrink-0 rounded-full border border-landing-accent/40 bg-landing-accent/15 px-2.5 py-0.5 text-xs font-semibold text-landing-link">
+						<span className="shrink-0 rounded-full border border-landing-control bg-landing-chip px-2.5 py-0.5 text-xs font-semibold text-landing-text">
 							{badge}
 						</span>
 					)}

@@ -9,13 +9,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Resvg } from "@resvg/resvg-js";
-import { formatHex, interpolate, parse, toGamut } from "culori";
+import { formatHex, parse, toGamut } from "culori";
 import satori from "satori";
 import colors from "tailwindcss/colors";
 import { siteMeta } from "../src/site-meta.ts";
-
-/** The highlights' rainbow, as `.landing-logo-gradient` in `src/styles.css` draws it. */
-const ACCENT_STOPS = ["#fb7185", "#fdba74", "#86efac", "#7dd3fc"];
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -25,17 +22,6 @@ function hex(tailwindColor: string): string {
 	const parsed = parse(tailwindColor);
 	if (!parsed) throw new Error(`Unparseable Tailwind colour: ${tailwindColor}`);
 	return formatHex(toSrgb(parsed));
-}
-
-/** Each letter of `word` with the colour from its place along the highlights' rainbow, mixed as CSS mixes `in oklch`. */
-function accentLetters(word: string) {
-	const along = interpolate(ACCENT_STOPS, "oklch");
-	const letters = [...word];
-	return letters.map((letter, offset) => ({
-		letter,
-		offset,
-		color: formatHex(toSrgb(along(letters.length === 1 ? 0 : offset / (letters.length - 1)))),
-	}));
 }
 
 function readModule(specifier: string): Buffer {
@@ -93,15 +79,7 @@ const image = (
 					letterSpacing: -2,
 				}}
 			>
-				{/* satori draws no gradient text, so each letter takes its colour from along the hero's rainbow. */}
-				<span style={{ display: "flex" }}>
-					{accentLetters(siteMeta.headline.accent).map(({ letter, color, offset }) => (
-						<span key={offset} style={{ color }}>
-							{letter}
-						</span>
-					))}
-				</span>
-				{`${siteMeta.headline.rest}.`.split(" ").map((word) => (
+				{`${siteMeta.headline}.`.split(" ").map((word) => (
 					<span key={word}>{word}</span>
 				))}
 			</div>

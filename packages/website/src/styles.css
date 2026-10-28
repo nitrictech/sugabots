@@ -51,35 +51,34 @@
  * docs use the themed tokens below instead.
  */
 @theme {
-	--color-landing-page: #0b0c0f;
-	--color-landing-card: #111216;
-	--color-landing-raised: #15161a;
-	--color-landing-bubble: #17181d;
-	--color-landing-chip: #1d1f25;
-	--color-landing-button: #262830;
+	--color-landing-page: #0a0a0a;
+	--color-landing-card: #0f0f11;
+	--color-landing-raised: #111113;
+	--color-landing-bubble: #111113;
+	--color-landing-chip: #17171a;
+	--color-landing-button: #1f1f23;
 
-	--color-landing-line: #1d1f25;
-	--color-landing-frame: #23252c;
-	--color-landing-control: #2a2c33;
-	--color-landing-rule: #2f323a;
-	--color-landing-control-hover: #4a4d57;
+	--color-landing-line: #1c1c1f;
+	--color-landing-frame: #1f1f23;
+	--color-landing-control: #26262a;
+	--color-landing-rule: #3f3f46;
+	--color-landing-control-hover: #52525b;
 
-	--color-landing-text: #eceef2;
-	--color-landing-message: #dcdee3;
-	--color-landing-button-text: #dfe1e6;
-	--color-landing-secondary: #c9ccd3;
-	--color-landing-muted: #9096a1;
-	--color-landing-faint: #7d838e;
-	--color-landing-link: #c3cdff;
+	--color-landing-text: #ededed;
+	--color-landing-message: #ededed;
+	--color-landing-button-text: #ededed;
+	--color-landing-secondary: #c4c4ca;
+	--color-landing-muted: #a1a1aa;
+	--color-landing-faint: #808089;
 	/* The app's own link colour, for the demos' in-app lines. */
-	--color-landing-app-link: #aebbff;
+	--color-landing-app-link: #ededed;
 
-	/* The site's accent: indigo. */
-	--color-landing-accent: oklch(0.56 0.17 268);
-	--color-landing-accent-hover: oklch(0.6 0.17 268);
-	/* The accent the app's pills and buttons use, in the demos of the app. */
-	--color-landing-pill: oklch(0.52 0.17 268);
-	/* The logo's four dots, in order: the site's palette, and its highlights' gradient. */
+	/* The site has no hue of its own, as the app has none: focus rings and highlights are grey. */
+	--color-landing-accent: #a1a1aa;
+	/* The app's primary button, the strongest ink, in the demos of the app. */
+	--color-landing-pill: #ededed;
+	--color-landing-pill-hover: #d4d4d8;
+	/* The logo's four dots, in order. */
 	--color-landing-logo-green: #22c55e;
 	--color-landing-logo-blue: #38bdf8;
 	--color-landing-logo-red: #f43f5e;
@@ -212,11 +211,6 @@
 
 .docs-steps > ol > li > p:first-child {
 	@apply mt-1 text-lg font-bold text-foreground;
-}
-
-/* The highlights' gradient: the logo's four colours, lightened, in rainbow order. Mirrored, letter by letter, in scripts/generate-og-image.tsx. */
-.landing-logo-gradient {
-	background-image: linear-gradient(in oklch 90deg, #fb7185, #fdba74, #86efac, #7dd3fc);
 }
 
 /*

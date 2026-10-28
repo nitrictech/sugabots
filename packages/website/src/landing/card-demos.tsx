@@ -44,7 +44,7 @@ export function ThreadDemo() {
 					className={cn(
 						"mt-1 flex h-6 items-center gap-[5px] self-start rounded-lg border px-2 text-[12.5px] font-medium tabular-nums transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-landing-accent",
 						reacted
-							? "border-landing-accent/50 bg-landing-accent/18 text-landing-text"
+							? "border-landing-text bg-landing-button text-landing-text"
 							: "border-transparent bg-landing-chip text-landing-secondary hover:border-landing-control",
 					)}
 				>
@@ -95,14 +95,14 @@ export function ApprovalDemo() {
 							<button
 								type="button"
 								onClick={() => setAnswer("allowed")}
-								className="rounded-full bg-landing-pill px-4 py-[7px] text-white transition-colors hover:bg-landing-accent-hover focus-visible:ring-2 focus-visible:ring-landing-accent/60 outline-none"
+								className="h-[31px] rounded-[8px] bg-landing-pill px-4 text-landing-page transition-colors hover:bg-landing-pill-hover focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Allow
 							</button>
 							<button
 								type="button"
 								onClick={() => setAnswer("denied")}
-								className="rounded-full bg-landing-button px-4 py-[7px] transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent/60 outline-none"
+								className="h-[31px] rounded-[8px] bg-landing-button px-4 transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Deny
 							</button>
