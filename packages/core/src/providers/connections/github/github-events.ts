@@ -34,6 +34,7 @@ export function activityOf(
 		event: kind,
 		repository: repository.full_name,
 		sender: sender.login,
+		comment: null,
 		...details,
 		text: details.text === null ? null : details.text.slice(0, MAX_TEXT_CHARACTERS),
 	});
@@ -71,6 +72,7 @@ export function activityOf(
 								...aboutPullRequest(pull_request),
 								url: comment.html_url,
 								text: `On ${comment.path}:\n\n${comment.body}`,
+								comment: { id: comment.id, kind: "code_comment" },
 							})
 						: undefined,
 			});
@@ -85,6 +87,7 @@ export function activityOf(
 								url: comment.html_url,
 								text: comment.body,
 								branch: null,
+								comment: { id: comment.id, kind: "comment" },
 							})
 						: undefined,
 			});
@@ -181,7 +184,12 @@ const ReviewEvent = Schema.Struct({
 const ReviewCommentEvent = Schema.Struct({
 	action: Schema.String,
 	pull_request: PullRequest,
-	comment: Schema.Struct({ body: Schema.String, path: Schema.String, html_url: Schema.String }),
+	comment: Schema.Struct({
+		id: Schema.Int,
+		body: Schema.String,
+		path: Schema.String,
+		html_url: Schema.String,
+	}),
 });
 
 const Issue = Schema.Struct({
@@ -196,7 +204,7 @@ const Issue = Schema.Struct({
 const IssueCommentEvent = Schema.Struct({
 	action: Schema.String,
 	issue: Issue,
-	comment: Schema.Struct({ body: Schema.String, html_url: Schema.String }),
+	comment: Schema.Struct({ id: Schema.Int, body: Schema.String, html_url: Schema.String }),
 });
 
 const IssueEvent = Schema.Struct({ action: Schema.String, issue: Issue });

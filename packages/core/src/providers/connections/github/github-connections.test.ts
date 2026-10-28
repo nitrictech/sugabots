@@ -3,6 +3,7 @@ import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
+import type { Connected } from "./connected.ts";
 import {
 	INSTALLATION_ID,
 	installedConnection,
@@ -18,6 +19,10 @@ import {
 } from "./github.test-support.ts";
 import { GitHubApps } from "./github-app.ts";
 import { GitHubConnections } from "./github-connections.ts";
+import * as GitHubReads from "./github-reads.ts";
+
+/** What GitHub shows the stand-in's app, `acme-sugabots`, as the author of. */
+const BOT_LOGIN = "acme-sugabots[bot]";
 
 /**
  * A pod's GitHub connection, its own app installed on `acme`, which reaches
@@ -56,7 +61,112 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 					head: { ref, repo: { full_name: fullName } },
 				});
 	};
-	const github = standInGitHub(mintsTokens, listsRenamed, listsRepositories, pullRequests);
+	// Issue #20 and comment 30 are the app's own; #21, pull request #22 and comment 31 are someone's.
+	const issuesAndComments: Route = ({ method, path }) => {
+		const issue = /^\/repos\/acme\/web\/issues\/(\d+)$/.exec(path);
+		if (issue) {
+			const number = Number(issue[1]);
+			const author = number === 20 ? BOT_LOGIN : "octocat";
+			return json({
+				number,
+				title: "Login",
+				state: "open",
+				body: null,
+				labels: [],
+				created_at: "2026-10-27T00:00:00Z",
+				html_url: `https://github.com/acme/web/issues/${number}`,
+				user: { login: author },
+				...(number === 22 ? { pull_request: {} } : {}),
+			});
+		}
+		const comment = /^\/repos\/acme\/web\/issues\/comments\/(\d+)$/.exec(path);
+		if (!comment) return undefined;
+		const id = Number(comment[1]);
+		if (method === "DELETE") return new Response(null, { status: 204 });
+		return json({
+			id,
+			html_url: `https://github.com/acme/web/issues/20#issuecomment-${id}`,
+			user: { login: id === 30 ? BOT_LOGIN : "octocat" },
+		});
+	};
+	// Comment 41 on #5's code answers comment 40, which starts its thread.
+	const codeComments: Route = ({ method, path }) => {
+		if (method === "GET" && path === "/repos/acme/web/pulls/comments/41") {
+			return json({ user: { login: "octocat" }, in_reply_to_id: 40 });
+		}
+		return method === "POST" && path === "/repos/acme/web/pulls/5/comments/40/replies"
+			? json({ id: 42, html_url: "https://github.com/acme/web/pull/5#discussion_r42" }, 201)
+			: undefined;
+	};
+	// #23 has eight pages of comments, one on each, the eighth newest.
+	const longThread: Route = ({ path, search }) => {
+		if (path !== "/repos/acme/web/issues/23/comments") return undefined;
+		const page = Number(new URLSearchParams(search).get("page"));
+		const last = "https://api.github.com/repositories/101/issues/23/comments?per_page=100&page=8";
+		return Response.json(
+			[{ id: page, user: { login: "octocat" }, body: `Comment ${page}`, created_at: "" }],
+			{
+				headers: {
+					link: `<${last.replace("page=8", `page=${page + 1}`)}>; rel="next", <${last}>; rel="last"`,
+				},
+			},
+		);
+	};
+	const searches: Route = ({ path }) =>
+		path === "/search/issues" ? json({ total_count: 0, items: [] }) : undefined;
+	// Job 9's log is at GitHub's storage, where its address is signed for it; job 10's is long.
+	const jobLogs: Route = ({ path }) => {
+		const job = /^\/repos\/acme\/web\/actions\/jobs\/(\d+)\/logs$/.exec(path)?.[1];
+		if (job) {
+			return new Response(null, {
+				status: 302,
+				headers: { location: `https://storage.example.com/logs/${job}?signature=signed` },
+			});
+		}
+		if (path === "/logs/10") {
+			const lines = Array.from(
+				{ length: 5_000 },
+				(_, at) => `2026-10-27T01:00:00.0000000Z Step ${at}`,
+			);
+			return new Response(`${lines.join("\n")}\n`);
+		}
+		return path === "/logs/9"
+			? new Response(
+					"2026-10-27T01:00:00.0000000Z Run tests\n2026-10-27T01:00:01.0000000Z FAIL login.test.ts\n",
+				)
+			: undefined;
+	};
+	// Until set, the installation refuses tokens that write issues, as an app made before they were asked for.
+	let grantsIssues = true;
+	// Once set, the installation no longer reaches the connection's repositories.
+	let lostRepositories = false;
+	const refusesTokens: Route = ({ method, path, body }) => {
+		if (method !== "POST" || !path.endsWith("/access_tokens")) return undefined;
+		if (lostRepositories) {
+			return json(
+				{
+					message:
+						"There is at least one repository that does not exist or is not accessible to the parent installation.",
+				},
+				422,
+			);
+		}
+		return !grantsIssues && JSON.stringify(body).includes('"issues":"write"')
+			? json({ message: "The permissions requested are not granted to this installation." }, 422)
+			: undefined;
+	};
+	const github = standInGitHub(
+		refusesTokens,
+		mintsTokens,
+		listsRenamed,
+		listsRepositories,
+		pullRequests,
+		issuesAndComments,
+		codeComments,
+		longThread,
+		searches,
+		jobLogs,
+	);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
 	let fixture: Awaited<ReturnType<typeof workspaceWithPod>>;
@@ -163,6 +273,184 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 				body: { title: "Fix the login" },
 			}),
 		]);
+	});
+
+	it("labels and closes anyone's issue, but changes the words only of the app's own, and of a pull request only its labels and assignees", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		type Change = Parameters<Connected["updateIssue"]>[0];
+		const unchanged = {
+			repository: "acme/web",
+			title: undefined,
+			body: undefined,
+			state: undefined,
+			closedReason: undefined,
+			labels: undefined,
+			assignees: undefined,
+		};
+		const update = (number: number, changed: Partial<Change>) =>
+			runOnPostgres(connected.updateIssue({ ...unchanged, ...changed, number }));
+
+		await update(21, { labels: ["bug"] });
+		await update(21, { state: "closed", closedReason: "duplicate" });
+		await update(20, { title: "Login loops" });
+		await update(22, { assignees: ["octocat"] });
+		await expect(update(21, { title: "Login loops" })).rejects.toMatchObject({
+			_tag: "NotBotIssue",
+		});
+		await expect(update(22, { state: "closed" })).rejects.toMatchObject({
+			_tag: "IssueIsPullRequest",
+		});
+
+		const patched = github.asked.filter((request) => request.method === "PATCH");
+		expect(patched.map(({ path, body }) => ({ path, body }))).toEqual([
+			{ path: "/repos/acme/web/issues/21", body: { labels: ["bug"] } },
+			{
+				path: "/repos/acme/web/issues/21",
+				body: { state: "closed", state_reason: "duplicate" },
+			},
+			{ path: "/repos/acme/web/issues/20", body: { title: "Login loops" } },
+			{ path: "/repos/acme/web/issues/22", body: { assignees: ["octocat"] } },
+		]);
+	});
+
+	it("replies to a comment on code in its thread, through the comment that starts it", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+
+		const replied = await runOnPostgres(
+			connected.replyToCodeComment({
+				repository: "acme/web",
+				number: 5,
+				commentId: 41,
+				body: "Done.",
+			}),
+		);
+
+		expect(replied).toEqual({
+			commentId: 42,
+			url: "https://github.com/acme/web/pull/5#discussion_r42",
+		});
+	});
+
+	it("reads a long thread's first and newest comments, saying some between were left out", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+
+		const read = await runOnPostgres(
+			connected.read((http, token) =>
+				GitHubReads.getIssue(http, token, { repository: "acme/web", number: 23 }),
+			),
+		);
+
+		expect(read.comments.map((comment) => comment.body)).toEqual([
+			"Comment 1",
+			"Comment 5",
+			"Comment 6",
+			"Comment 7",
+			"Comment 8",
+		]);
+		expect(read.note).toMatch(/left out/);
+	});
+
+	it("searches issues unless asked for pull requests, which GitHub requires it to say", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const search = (query: string) =>
+			runOnPostgres(
+				connected.read((http, token) =>
+					GitHubReads.searchIssues(http, token, { repository: "acme/web", query, page: 1 }),
+				),
+			);
+
+		await search("login error");
+		await search("is:pr login error");
+
+		const queries = github.asked
+			.filter(({ path }) => path === "/search/issues")
+			.map(({ search }) => new URLSearchParams(search).get("q"));
+		expect(queries).toEqual([
+			"login error is:issue repo:acme/web",
+			"is:pr login error repo:acme/web",
+		]);
+	});
+
+	it("tells a repository the installation no longer reaches apart from a permission it lacks", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		lostRepositories = true;
+		try {
+			await expect(
+				runOnPostgres(
+					connected.commentOnIssue({ repository: "acme/web", number: 21, body: "On it." }),
+				),
+			).rejects.toMatchObject({ _tag: "GitHubRequestFailed", status: 422 });
+		} finally {
+			lostRepositories = false;
+		}
+	});
+
+	it("edits and deletes the app's own comments, and no one else's", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+		const comment = { repository: "acme/web", kind: "comment" as const };
+
+		await runOnPostgres(connected.editComment({ ...comment, commentId: 30, body: "Fixed." }));
+		await runOnPostgres(connected.deleteComment({ ...comment, commentId: 30 }));
+		await expect(
+			runOnPostgres(connected.editComment({ ...comment, commentId: 31, body: "Fixed." })),
+		).rejects.toMatchObject({ _tag: "NotBotComment", author: "octocat" });
+		await expect(
+			runOnPostgres(connected.deleteComment({ ...comment, commentId: 31 })),
+		).rejects.toMatchObject({ _tag: "NotBotComment" });
+
+		const changed = github.asked.filter(({ method }) => method === "PATCH" || method === "DELETE");
+		expect(changed.map(({ method, path }) => `${method} ${path}`)).toEqual([
+			"PATCH /repos/acme/web/issues/comments/30",
+			"DELETE /repos/acme/web/issues/comments/30",
+		]);
+	});
+
+	it("says what the app must be granted when its installation hasn't been", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		grantsIssues = false;
+		try {
+			await expect(
+				runOnPostgres(
+					connected.commentOnIssue({ repository: "acme/web", number: 21, body: "On it." }),
+				),
+			).rejects.toMatchObject({ _tag: "GitHubPermissionNotGranted", permissions: "Issues: write" });
+		} finally {
+			grantsIssues = true;
+		}
+	});
+
+	it("reads the end of a job's log from where GitHub keeps it, without sending the token there", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+		github.asked.length = 0;
+
+		const read = await runOnPostgres(connected.jobLog({ repository: "acme/web", jobId: 9 }));
+
+		expect(read).toEqual({ truncated: false, log: "Run tests\nFAIL login.test.ts\n" });
+		const fromStorage = github.asked.find(({ path }) => path === "/logs/9");
+		expect(fromStorage?.bearer).toBe("");
+	});
+
+	it("gives only the end of a long job's log, in whole lines", async () => {
+		const connected = await runOnPostgres(connections.forPod(pod()));
+		if (!connected) throw new Error("Not connected");
+
+		const read = await runOnPostgres(connected.jobLog({ repository: "acme/web", jobId: 10 }));
+
+		expect(read.truncated).toBe(true);
+		expect(read.log.length).toBeLessThanOrEqual(30_000);
+		expect(read.log).toMatch(/^Step \d+\n/);
+		expect(read.log.endsWith("Step 4999\n")).toBe(true);
 	});
 
 	it("adds a repository and removes one, each a change of the connection's configuration", async () => {

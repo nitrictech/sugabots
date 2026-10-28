@@ -16,9 +16,9 @@ import {
 	type GitHubConnectionSettings,
 	user,
 } from "../../../database/schema.ts";
-import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { Egress, type EgressHttpClient } from "../../network/egress.ts";
+import { Egress } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
+import { Connected } from "./connected.ts";
 import { openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
 import { activityOf, type RepositoryActivity } from "./github-events.ts";
@@ -95,7 +95,8 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const credentials = yield* Credentials.Service;
 	const connections = yield* ConnectionRepository.Service;
-	const http = (yield* Egress.Service).providers.for({ baseUrl: GitHub.API_URL });
+	const egress = yield* Egress.Service;
+	const http = egress.providers.for({ baseUrl: GitHub.API_URL });
 
 	const managed = (podId: string) =>
 		Effect.map(authorization.pod(podId, "connection.manage"), podOf);
@@ -254,7 +255,7 @@ export const make = Effect.gen(function* () {
 					);
 					const app = row && installedApp(credentials, row);
 					if (!row?.settings || !app) return undefined;
-					return new Connected(row, app, row.settings.repositories, http);
+					return new Connected(row, app, row.settings, { api: http, storage: egress.webFetch });
 				}),
 			),
 
@@ -324,217 +325,6 @@ function installedApp(
 		installation: { id: settings.installationId, account: settings.account },
 		privateKey: openAppCredential(credentials, appCredentialEncrypted).privateKey,
 	};
-}
-
-/** Bots push only to branches under this, so they can't move anyone else's. */
-export const BOT_BRANCH_PREFIX = "sugabots/";
-
-/** The username git sends an installation token with. */
-const TOKEN_USERNAME = "x-access-token";
-
-/**
- * A pod's GitHub connection as its turns and sandbox use it: each token is
- * for its account's installation, and only for its repositories.
- */
-export class Connected {
-	readonly connection: ConnectionRow;
-	/** Its repositories' paths, as GitHub last wrote them. */
-	readonly repositories: readonly string[];
-	/** GitHub's id for each of its repositories, by path. */
-	private readonly ids: ReadonlyMap<string, number>;
-	private readonly app: GitHub.InstalledApp;
-	private readonly http: EgressHttpClient;
-
-	constructor(
-		connection: ConnectionRow,
-		app: GitHub.InstalledApp,
-		repositories: readonly GitHubConnectionRepository[],
-		http: EgressHttpClient,
-	) {
-		this.connection = connection;
-		this.app = app;
-		this.repositories = repositories.map((one) => one.path);
-		this.ids = new Map(repositories.map((one) => [one.path, one.id]));
-		this.http = http;
-	}
-
-	get account() {
-		return this.app.installation.account;
-	}
-
-	/**
-	 * GitHub's id for `repository`, as `repository()` gives it. Asking for
-	 * another is a mistake, not a token for every repository the app reaches.
-	 */
-	private idOf(repository: string): number {
-		const id = this.ids.get(repository);
-		if (id === undefined)
-			throw new Error(`${repository} isn't one of the connection's repositories`);
-		return id;
-	}
-
-	/** `repository` as the connection has it, if it is one of its, whatever its case. */
-	repository(repository: string): string | undefined {
-		return this.repositories.find((one) => one.toLowerCase() === repository.toLowerCase());
-	}
-
-	/** A read-only token for the connection's repositories. */
-	readToken() {
-		return Effect.map(
-			GitHub.accessToken(this.http, this.app, {
-				repositoryIds: [...this.ids.values()],
-				permissions: GitHub.READ_PERMISSIONS,
-			}),
-			(token) => token.token,
-		);
-	}
-
-	/**
-	 * What the pod's sandbox reads the repositories with: git's sign-in to the
-	 * account's paths, added outside the sandbox by its provider. Nothing for
-	 * GitHub's API, whose paths don't all name the account: bots read through
-	 * the connection's tools instead.
-	 */
-	sandboxSignIn() {
-		return Effect.map(
-			GitHub.accessToken(this.http, this.app, {
-				repositoryIds: [...this.ids.values()],
-				permissions: { contents: "read", metadata: "read" },
-			}),
-			(token): SandboxSignIn => ({
-				credentials: [
-					{
-						host: new URL(GitHub.WEB_URL).host,
-						pathPrefix: `/${this.account}/`,
-						header: "Authorization",
-						value: GitHub.redactedBasicAuthorization({
-							username: TOKEN_USERNAME,
-							token: token.token,
-						}),
-					},
-				],
-				expiresAt: token.expiresAt,
-			}),
-		);
-	}
-
-	/** A token that can push to `repository` alone. */
-	writeCredential(repository: string) {
-		return Effect.map(
-			Effect.suspend(() =>
-				GitHub.accessToken(this.http, this.app, {
-					repositoryIds: [this.idOf(repository)],
-					permissions: { contents: "write" },
-				}),
-			),
-			(token): GitHub.GitCredential => ({ username: TOKEN_USERNAME, token: token.token }),
-		);
-	}
-
-	/** Opens a pull request from `head`, into `base` or the repository's default branch. */
-	openPullRequest(request: {
-		repository: string;
-		head: string;
-		base: string | undefined;
-		title: string;
-		body: string;
-		draft: boolean;
-	}) {
-		const { http, app } = this;
-		const idOf = (repository: string) => this.idOf(repository);
-		return Effect.gen(function* () {
-			const { token } = yield* GitHub.accessToken(http, app, {
-				repositoryIds: [idOf(request.repository)],
-				permissions: { pull_requests: "write", contents: "read" },
-			});
-			return yield* GitHub.openPullRequest(http, token, {
-				...request,
-				base: request.base ?? (yield* GitHub.defaultBranch(http, token, request.repository)),
-			});
-		});
-	}
-
-	/**
-	 * Changes a pull request bots opened, from a branch under
-	 * {@link BOT_BRANCH_PREFIX} in `repository` itself, so bots can't rewrite
-	 * or close anyone else's. What isn't given stays as it is.
-	 */
-	updatePullRequest(request: {
-		repository: string;
-		number: number;
-		title: string | undefined;
-		body: string | undefined;
-		base: string | undefined;
-		state: "open" | "closed" | undefined;
-		draft: boolean | undefined;
-	}) {
-		const { http, app } = this;
-		const idOf = (repository: string) => this.idOf(repository);
-		return Effect.gen(function* () {
-			const { token } = yield* GitHub.accessToken(http, app, {
-				repositoryIds: [idOf(request.repository)],
-				permissions: { pull_requests: "write", contents: "read" },
-			});
-			const head = yield* GitHub.pullRequestHead(http, token, request);
-			const fromBotBranch =
-				head.branch.startsWith(BOT_BRANCH_PREFIX) &&
-				head.branchRepository?.toLowerCase() === request.repository.toLowerCase();
-			if (!fromBotBranch) {
-				return yield* new NotBotPullRequest({ number: request.number, branch: head.branch });
-			}
-			if (request.draft !== undefined && request.draft !== head.draft) {
-				yield* GitHub.setPullRequestDraft(http, token, {
-					nodeId: head.nodeId,
-					draft: request.draft,
-				});
-			}
-			return yield* GitHub.updatePullRequest(http, token, request);
-		});
-	}
-
-	/** Comments on pull request `number`, anyone's. */
-	commentOnPullRequest(request: { repository: string; number: number; body: string }) {
-		return Effect.flatMap(
-			Effect.suspend(() =>
-				GitHub.accessToken(this.http, this.app, {
-					repositoryIds: [this.idOf(request.repository)],
-					permissions: { pull_requests: "write" },
-				}),
-			),
-			({ token }) => GitHub.comment(this.http, token, request),
-		);
-	}
-
-	/** Runs `read` with a read-only token for the connection's repositories. */
-	read<A>(
-		read: (http: EgressHttpClient, token: string) => Effect.Effect<A, GitHub.GitHubRequestFailed>,
-	) {
-		return Effect.flatMap(this.readToken(), (token) => read(this.http, token));
-	}
-}
-
-/** What a pod's sandbox is signed in to GitHub with, and when it must be replaced. */
-export interface SandboxSignIn {
-	readonly credentials: readonly Sandboxes.Credential[];
-	readonly expiresAt: GitHub.AccessToken["expiresAt"];
-}
-
-/** A pull request that isn't from a bot's branch, which bots may comment on but not change. */
-export class NotBotPullRequest
-	extends Schema.TaggedError<NotBotPullRequest>()("NotBotPullRequest", {
-		number: Schema.Int,
-		branch: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return `Pull request #${this.number} is from ${this.branch}, not a branch under ${BOT_BRANCH_PREFIX}`;
-	}
-	get userMessage() {
-		return userText`Bots can only change pull requests from their own branches.`;
-	}
 }
 
 /** A GitHub connection whose app isn't installed on an account yet. */
