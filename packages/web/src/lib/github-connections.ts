@@ -28,14 +28,14 @@ export function useMakeGitHubApp(podId: string) {
 	});
 }
 
-/** Leaves for GitHub to install the connection's app, or to change which repositories it reaches. */
+/** Opens a new tab to GitHub to install the connection's app, or to change which repositories it reaches. */
 export function useInstallGitHubApp(podId: string) {
 	return useMutation({
 		mutationFn: async (connectionId: string) => {
 			const { url } = await Effect.runPromise(
 				client.api.gitHubConnections.installUrl({ params: { podId, connectionId } }),
 			);
-			window.location.assign(url);
+			window.open(url, "_blank", "noopener,noreferrer");
 		},
 	});
 }
