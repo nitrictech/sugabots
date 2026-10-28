@@ -617,7 +617,7 @@ export const ChoosingDaysAndABot = meta.story({
 		await expect(
 			await canvas.findByRole("button", { name: /^Mon Fri at 9:00/ }),
 		).toBeInTheDocument();
-		await userEvent.click(canvas.getByRole("button", { name: /^Bot/ }));
+		await userEvent.click(canvas.getByRole("button", { name: /^Bot(?!s\b)/ }));
 		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
 	},
 });
