@@ -50,7 +50,7 @@ import {
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
-import { agentSettingsLink, conversationLink } from "@/lib/links.ts";
+import { agentSettingsLink, conversationLink, routineThreadLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
@@ -187,6 +187,12 @@ export function ConversationChat({
 	const newest = items.at(-1);
 	useMarkReadWhileSeen(conversationId, newest, latestInView);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+	// The routine runs the messages shown are the results of, by the run's thread.
+	const runsResulting = new Map(
+		shownMessages.flatMap((message) =>
+			message.routineResultOf ? [[message.routineResultOf.threadId, message.routineResultOf]] : [],
+		),
+	);
 	const threadActivityAt = new Map(
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
@@ -318,8 +324,15 @@ export function ConversationChat({
 		void navigate(conversationLink({ pod, conversationId: threadId }));
 	}
 
-	/** Starts a thread from `message`, with this channel's bot if it is one, or opens the one it has. */
+	/**
+	 * Starts a thread from `message`, with this channel's bot if it is one, or
+	 * opens the one it has; a routine's result opens the run it came from instead.
+	 */
 	async function threadFromMessage(message: Message) {
+		if (message.routineResultOf) {
+			openThread(message.routineResultOf.threadId);
+			return;
+		}
 		try {
 			const thread = await threadFrom.mutateAsync(message.id);
 			await navigate(conversationLink({ pod, conversationId: thread.id }));
@@ -351,6 +364,12 @@ export function ConversationChat({
 	}
 
 	function openThread(nextThreadId: string) {
+		// A run a result in the pod's chat came from is in its routine's thread, so it opens there.
+		const run = isPodChat ? runsResulting.get(nextThreadId) : undefined;
+		if (run) {
+			void navigate(routineThreadLink(pod, run.routineId, run));
+			return;
+		}
 		opener.current = document.activeElement as HTMLElement;
 		onThreadChange(nextThreadId);
 	}

@@ -148,6 +148,50 @@ export const PodChat = meta.story({
 	},
 });
 
+/** A routine's result, posted by its bot in the pod's chat. */
+const routineResult: Message = {
+	...said("23", "bot", "Six of the overnight leads replied.", "2026-09-18T06:14:00.000Z"),
+	threadId: storyPodChatFor(revenue).id,
+	routineResultOf: {
+		executionId: "0199a3a0-0000-7000-8000-0000000005e1",
+		threadId: "0199a3a0-0000-7000-8000-0000000005e2",
+		routineId: "0199a3a0-0000-7000-8000-0000000005e3",
+		routineName: "Overnight outbound",
+	},
+};
+
+/**
+ * A routine's result in the pod's chat says which routine it is from, and a
+ * thread from it opens the run it came from rather than starting a new one.
+ */
+export const PodChatRoutineResult = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/messages/:messageId/thread`, () => {
+				throw new Error("A routine's result started a thread of its own");
+			}),
+			...appHandlers({ podChatMessages: { [revenue.id]: [...podChat, routineResult] } }),
+		);
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas, userEvent }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const result = (await within(log).findByText(/overnight leads replied/)).closest("article");
+		if (!result) throw new Error("The routine's result is not a message row");
+		await expect(
+			within(result).getByRole("button", { name: "From Overnight outbound" }),
+		).toBeInTheDocument();
+		const startThread = within(result).getByRole("button", { name: "Start a thread" });
+		// The toolbar comes in while the message holds focus.
+		startThread.focus();
+		await userEvent.click(startThread);
+		await waitFor(
+			() => expect(canvas.queryByRole("heading", { name: "General", level: 1 })).toBeNull(),
+			{ timeout: 5_000 },
+		);
+	},
+});
+
 /** A pod's chat before anyone has written in it opens on the pod: who is in it, and what it is for. */
 export const PodChatEmpty = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,

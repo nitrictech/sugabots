@@ -471,10 +471,14 @@ export const routineTriggerAuthorSchema = Schema.Struct({
 
 export type RoutineTriggerAuthor = typeof routineTriggerAuthorSchema.Type;
 
-/** The run whose result a message in the agent's chat is, and the thread its work is in. */
+/**
+ * The run whose result a message is, in the routine's thread or a pod's chat:
+ * the routine, and the thread the run's work is in.
+ */
 export const routineResultOfSchema = Schema.Struct({
 	executionId: uuidSchema,
 	threadId: uuidSchema,
+	routineId: uuidSchema,
 	routineName: routineNameSchema,
 });
 

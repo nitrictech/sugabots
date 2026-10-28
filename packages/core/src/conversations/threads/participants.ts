@@ -213,7 +213,7 @@ export const messageRelations = {
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
 	files: { columns: fileColumns, orderBy: { position: "asc" } },
-	routineExecution: { columns: { id: true, threadId: true, routineName: true } },
+	routineExecution: { columns: { id: true, threadId: true, routineId: true, routineName: true } },
 	replyTo: quotedMessageColumns,
 	reactions: reactionColumns,
 } as const;
@@ -229,7 +229,10 @@ export interface MessageWithRelations extends schema.MessageRow {
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	files: AttachedFileRow[];
-	routineExecution: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "routineName"> | null;
+	routineExecution: Pick<
+		schema.RoutineExecutionRow,
+		"id" | "threadId" | "routineId" | "routineName"
+	> | null;
 	replyTo: QuotedMessage | null;
 	reactions: ReactionRow[];
 }
@@ -260,6 +263,7 @@ export function messageFromRelations(
 					routineResultOf: {
 						executionId: run.id,
 						threadId: run.threadId,
+						routineId: run.routineId,
 						routineName: run.routineName,
 					},
 				}

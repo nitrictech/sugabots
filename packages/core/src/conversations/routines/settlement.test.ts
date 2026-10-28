@@ -685,12 +685,13 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				routineResultOf: {
 					executionId: run.executionId,
 					threadId: accepted.threadId,
+					routineId: expect.any(String),
 					routineName: expect.any(String),
 				},
 			}),
 		});
 		expect(await podChatPosts("Morning! Two PRs merged overnight.")).toEqual([
-			{ id: expect.any(String), routineExecutionId: null, chatId: expect.any(String) },
+			{ id: expect.any(String), routineExecutionId: run.executionId, chatId: expect.any(String) },
 		]);
 		expect(posted[0]).toMatchObject({
 			threadType: "routine_feed",
