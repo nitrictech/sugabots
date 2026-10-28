@@ -1287,7 +1287,7 @@ function OpenPodChat({ pod }: { pod: Pod }) {
 		<NavigateWhenOpened
 			pod={pod}
 			opened={useOpenPodChat(pod)}
-			failure={{ title: "Could not open this pod's chat", body: API_DID_NOT_ANSWER }}
+			failure={{ title: "Could not open this pod's channel", body: API_DID_NOT_ANSWER }}
 		/>
 	);
 }

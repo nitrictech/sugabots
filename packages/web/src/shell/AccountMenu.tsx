@@ -13,13 +13,12 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
 /**
  * You, at the foot of the sidebar. The menu names you, leads to your
  * preferences and signs you out, and its workspace item opens the workspace's
- * own menu: inviting people, its settings, and any other workspace you belong
- * to, or a new one.
+ * own menu: inviting people, and any other workspace you belong to, or a new
+ * one. The workspace's settings are in the sidebar.
  *
  * Choosing a workspace goes to its address, which is what decides the
  * workspace under `/$workspace`; `chooseWorkspace` also makes it the one `/`
@@ -76,18 +75,6 @@ export function AccountMenu({
 						>
 							<UserPlus />
 							Invite people
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							render={
-								<Link
-									to="/$workspace/settings"
-									params={{ workspace: current.slug }}
-									state={settingsBack}
-								/>
-							}
-						>
-							<SettingsIcon />
-							Workspace settings
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						{workspaces.map((workspace) =>

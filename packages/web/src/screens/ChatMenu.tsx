@@ -16,8 +16,8 @@ import {
 import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
- * Beside a pod's chat's name, for whoever may change the pod: renaming the
- * chat, and, unless it is the pod's first, archiving it, which takes it off
+ * Beside a channel's name, for whoever may change the pod: renaming the
+ * channel, and, unless it is the pod's first, archiving it, which takes it off
  * the pod's list and goes back to the pod. Its threads stay where they are.
  */
 export function ChatMenu({
@@ -60,19 +60,19 @@ export function ChatMenu({
 				<DropdownMenuContent align="end" className="min-w-48">
 					<DropdownMenuItem onClick={() => setRenaming(true)}>
 						<Pencil aria-hidden size={16} />
-						Rename chat
+						Rename channel
 					</DropdownMenuItem>
 					{archivable && (
 						<DropdownMenuItem variant="destructive" onClick={() => setArchiving(true)}>
 							<Archive aria-hidden size={16} />
-							Archive chat
+							Archive channel
 						</DropdownMenuItem>
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 			<Dialog open={renaming} onOpenChange={setRenaming}>
 				<ChatNameDialog
-					title="Rename chat"
+					title="Rename channel"
 					name={name}
 					action="Save"
 					onSave={async (renamed) => {
@@ -88,7 +88,7 @@ export function ChatMenu({
 				description="It leaves the pod's list for everyone. Threads started from it stay."
 				confirmLabel="Archive"
 				pending={archive.isPending}
-				error={archive.isError ? "The chat was not archived. Try again." : undefined}
+				error={archive.isError ? "The channel was not archived. Try again." : undefined}
 				onDelete={archiveAndLeave}
 			/>
 		</>

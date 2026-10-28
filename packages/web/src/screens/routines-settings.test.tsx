@@ -262,7 +262,7 @@ describe("the workspace's routines", () => {
 		});
 		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		const posted = screen.getByRole("switch", { name: "Also post result in the pod's chat" });
+		const posted = screen.getByRole("switch", { name: "Also post result in the pod's channel" });
 		expect(posted.getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 

@@ -237,18 +237,6 @@ export function ConversationListView({
 									(selected?.kind === "bot" && group.agent?.handle === selected.handle) ||
 									group.threads.some((row) => isSelected(row.conversation.id)) ||
 									holdsRoutine;
-								// In a Personal pod a bot keeps one conversation, which its row opens, unless it has routines to show.
-								if (pod.kind === "personal" && group.agent && botRoutines.length === 0) {
-									return (
-										<DirectBotItem
-											key={group.key}
-											pod={pod}
-											agent={group.agent}
-											threads={group.threads}
-											selected={holdsSelected}
-										/>
-									);
-								}
 								const open =
 									openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey);
 								const toggle = () => {
@@ -662,50 +650,6 @@ function BotItem({
 			{open && !empty && (
 				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
 			)}
-		</li>
-	);
-}
-
-/**
- * A bot in a Personal pod, whose one conversation with the viewer its row
- * opens: bold while something there is new, with a dot while it waits on the
- * viewer, and shaded while it is open.
- */
-function DirectBotItem({
-	pod,
-	agent,
-	threads,
-	selected,
-}: {
-	pod: Pod;
-	agent: Agent;
-	threads: readonly ChatListItem[];
-	selected: boolean;
-}) {
-	const news = newsIn(threads);
-	const lit = hasNews(news);
-	const conversation = threads[0]?.conversation;
-	return (
-		<li className="flex flex-col">
-			<Link
-				{...(conversation
-					? conversationLink({ pod, conversationId: conversation.id })
-					: agentChatLink({ pod, agent }))}
-				aria-current={selected ? "page" : undefined}
-				className={cn(sidebarRowClassName(selected), lit && "font-semibold text-foreground")}
-			>
-				<AgentAvatar
-					color={agent.color}
-					face={agent.face}
-					shape={agent.shape}
-					size={18}
-					className="shrink-0"
-				/>
-				<span className="min-w-0 flex-1 truncate-fade">{agent.name}</span>
-				<span className={END_SLOT}>
-					<UnreadMarker {...news} />
-				</span>
-			</Link>
 		</li>
 	);
 }

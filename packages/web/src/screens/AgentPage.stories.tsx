@@ -408,8 +408,8 @@ export const NamedChat = meta.story({
 		);
 		await expect(canvas.getByRole("textbox", { name: "Message Pricing" })).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "More for Pricing" }));
-		await expect(await screen.findByRole("menuitem", { name: "Rename chat" })).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Archive chat" })).toBeVisible();
+		await expect(await screen.findByRole("menuitem", { name: "Rename channel" })).toBeVisible();
+		await expect(screen.getByRole("menuitem", { name: "Archive channel" })).toBeVisible();
 	},
 });
 

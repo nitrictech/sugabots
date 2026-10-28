@@ -372,7 +372,10 @@ export const OpenDoneThread = meta.story({
 	},
 });
 
-/** A Personal pod has no chats, and each conversation goes by its bot's name. */
+/**
+ * A Personal pod has no channels. Each bot opens on its Routines and its
+ * conversation, which goes by the bot's name.
+ */
 export const PersonalPod = meta.story({
 	args: {
 		pod: personal,
@@ -393,6 +396,7 @@ export const PersonalPod = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.queryByRole("heading", { name: "Channels" })).toBeNull();
+		await expect(canvas.getByRole("link", { name: /^Routines/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Chief" })).toHaveAttribute(
 			"aria-current",
 			"page",

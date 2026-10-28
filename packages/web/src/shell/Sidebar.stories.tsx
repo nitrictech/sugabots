@@ -212,9 +212,9 @@ export const FoldingSections = meta.story({
 });
 
 /**
- * Personal open: each of its bots keeps one conversation with you, so a bot
- * is a row that opens it, bold while something there is new, with no threads
- * to fold.
+ * Personal open: each of its bots folds open, as a shared pod's do, on its
+ * Routines and the one conversation it keeps with you, bold while something
+ * there is new.
  */
 export const PersonalPod = meta.story({
 	args: {
@@ -244,16 +244,11 @@ export const PersonalPod = meta.story({
 	},
 	play: async ({ canvas }) => {
 		const personalPod = canvas.getByRole("group", { name: "Personal" });
-		const growth = within(personalPod).getByRole("link", { name: /^Growth Desk/ });
-		await expect(growth).toHaveAttribute(
-			"href",
-			expect.stringContaining(storyConversationFor(growthDesk).id),
-		);
-		await expect(growth).toHaveTextContent("2 unread messages");
+		await expect(within(personalPod).getByRole("button", { name: /^Growth Desk/ })).toBeVisible();
+		await expect(within(personalPod).getByRole("link", { name: /^Routines/ })).toBeVisible();
 		await expect(
 			within(personalPod).getByRole("link", { name: /^Lead Researcher/ }),
 		).toHaveAttribute("aria-current", "page");
-		await expect(within(personalPod).queryByRole("button", { name: "Growth Desk" })).toBeNull();
 	},
 });
 
@@ -338,8 +333,8 @@ export const AccountMenu = meta.story({
 			within(workspaceMenu).getByRole("menuitem", { name: "Invite people" }),
 		).toHaveAttribute("href", "/suga/settings/members");
 		await expect(
-			within(workspaceMenu).getByRole("menuitem", { name: "Workspace settings" }),
-		).toHaveAttribute("href", "/suga/settings");
+			within(workspaceMenu).queryByRole("menuitem", { name: "Workspace settings" }),
+		).toBeNull();
 		await expect(within(workspaceMenu).getByRole("menuitem", { name: "Nitric" })).toHaveAttribute(
 			"href",
 			"/nitric/agents",
