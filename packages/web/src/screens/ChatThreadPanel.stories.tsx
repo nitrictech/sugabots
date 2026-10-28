@@ -212,9 +212,12 @@ export const WaitingOnApproval = meta.story({
 	},
 });
 
+/** Where a run opens: as a page of its own in Inbox, never beside a chat. */
+const RUN_PAGE = { kind: "page" as const, back: { to: "activity" as const }, trailing: null };
+
 /** A routine run a webhook started: its name, what it posted, and the payload behind the braces. */
 export const RoutineRun = meta.story({
-	args: { threadId: RUN },
+	args: { threadId: RUN, frame: RUN_PAGE },
 	render: (args) => (
 		<Preview run={routineRun(false)}>
 			<div className="relative flex h-screen justify-end bg-background">
@@ -233,7 +236,7 @@ export const RoutineRun = meta.story({
 
 /** A run that failed says why, above what it managed. */
 export const FailedRoutineRun = meta.story({
-	args: { threadId: RUN },
+	args: { threadId: RUN, frame: RUN_PAGE },
 	render: (args) => (
 		<Preview run={routineRun(true)}>
 			<div className="relative flex h-screen justify-end bg-background">

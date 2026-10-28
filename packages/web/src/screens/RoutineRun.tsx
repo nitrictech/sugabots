@@ -118,7 +118,6 @@ export function RunMessage({
 	conversationId,
 	latest,
 	mentionable,
-	onOpenThread,
 }: {
 	item: RunItem;
 	agent: AgentParticipant;
@@ -129,11 +128,9 @@ export function RunMessage({
 	latest: boolean;
 	/** Who the report may mention, drawn as chips. */
 	mentionable: ThreadParticipant[];
-	onOpenThread: (threadId: string) => void;
 }) {
 	const controls = useRoutineControls(conversationId, routine);
 	const outcome = outcomeOf(item.state);
-	const open = () => onOpenThread(item.threadId);
 	const report = outcome === "passed" ? item.report : null;
 	return (
 		<article
@@ -152,7 +149,7 @@ export function RunMessage({
 					<span className="text-subtle-foreground text-xs">
 						{formatClockTime(new Date(item.createdAt))}
 					</span>
-					{!report && <RunStatus outcome={outcome} onOpen={open} />}
+					{!report && <RunStatus outcome={outcome} />}
 				</div>
 				{report ? (
 					<div className="min-w-0 self-stretch break-words text-[15px] text-body-foreground leading-[1.5]">

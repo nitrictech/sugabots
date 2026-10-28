@@ -130,20 +130,12 @@ export function routinesLink(pod: Pick<Pod, "slug">, bot?: { handle: string }) {
 	});
 }
 
-/**
- * A routine's own thread, where its runs post, beside the pod's routines;
- * opened first when it has none yet. With `run`, that run's thread is open beside it.
- */
-export function routineThreadLink(
-	pod: Pick<Pod, "slug">,
-	routineId: string,
-	run?: { threadId: string },
-) {
+/** A routine's own thread, where its runs post, beside the pod's routines; opened first when it has none yet. */
+export function routineThreadLink(pod: Pick<Pod, "slug">, routineId: string) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./pods/$pod/routines/$routine",
 		params: { pod: pod.slug, routine: routineId },
-		search: run ? { thread: run.threadId } : {},
 	});
 }
 

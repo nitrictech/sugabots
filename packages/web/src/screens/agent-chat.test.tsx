@@ -983,40 +983,22 @@ describe("ongoing agent Chat", () => {
 		}
 	});
 
-	it("opens a routine run's panel from the thread query", async () => {
-		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
+	it("never opens a routine run beside the chat, even from the thread query", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
 
-		const routinePanel = await screen.findByRole("complementary", { name: routineEntry.title });
-		expect(
-			within(routinePanel).getByRole("heading", { name: routineExecution.routineName }),
-		).toBeDefined();
-		expect(within(routinePanel).getByText(routineMessage.content)).toBeDefined();
-		expect(within(routinePanel).queryByText(routineExecution.instructions)).toBeNull();
-		expect(
-			within(routinePanel).getByRole("link", { name: "Routine settings" }).getAttribute("href"),
-		).toBe(`/suga/settings/routines/${routineExecution.routineId}`);
-		expect(within(routinePanel).getByLabelText("View webhook payload")).toBeDefined();
-		expect(within(routinePanel).queryByText(/Routine instructions:/)).toBeNull();
-		expect(within(routinePanel).queryByText(/Trigger data \(untrusted\):/)).toBeNull();
-		expect(within(routinePanel).queryByRole("textbox")).toBeNull();
-		expect(router.state.location.search.thread).toBe(routineId);
+		await screen.findByText(mainMessage.content);
+		expect(screen.queryByRole("complementary", { name: routineEntry.title })).toBeNull();
 	});
 
-	it("returns from a Routine collaboration to its parent Routine", async () => {
-		mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
-		const routinePanel = await screen.findByRole("complementary", { name: routineEntry.title });
-		fireEvent.click(
-			within(routinePanel).getByRole("button", {
-				name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
-			}),
-		);
+	it("offers no way back to a run from its collaboration beside the chat", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineCollaborationId}`);
 
 		const collaborationPanel = await screen.findByRole("complementary", {
 			name: routineCollaborationEntry.title,
 		});
-		fireEvent.click(within(collaborationPanel).getByRole("button", { name: "Back to Routine" }));
-
-		expect(await screen.findByRole("complementary", { name: routineEntry.title })).toBeDefined();
+		expect(
+			within(collaborationPanel).queryByRole("button", { name: "Back to Routine" }),
+		).toBeNull();
 	});
 
 	it("opens with whom the chat is with, when there is nothing older", async () => {
@@ -1193,11 +1175,11 @@ describe("a message opened from Activity", () => {
 		).toBeDefined();
 	});
 
-	it("keeps the chat when a run is opened beside it from one of its lines", async () => {
+	it("keeps the chat, with no run beside it, when its address names a run", async () => {
 		mount(`${opened(mainMessage.id)}&thread=${routineId}`);
 
-		expect(await screen.findByRole("complementary", { name: routineEntry.title })).toBeDefined();
-		expect(screen.getByRole("log", { name: "Chat messages" })).toBeDefined();
+		expect(await screen.findByRole("log", { name: "Chat messages" })).toBeDefined();
+		expect(screen.queryByRole("complementary", { name: routineEntry.title })).toBeNull();
 	});
 
 	it("shows a routine run chosen in Inbox as a page of its own, with the way back and to its chat", async () => {

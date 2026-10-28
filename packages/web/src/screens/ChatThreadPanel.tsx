@@ -59,11 +59,15 @@ export function ChatThreadPanel({
 	const heading = useRef<HTMLHeadingElement>(null);
 	const timeline = useRef<HTMLDivElement>(null);
 	const details = query.data;
-	const type = openableThreadType(entry?.type ?? details?.thread.type);
+	const type = openableThreadType(entry?.type ?? details?.thread.type, frame);
 	const routineExecution = details?.routineExecution;
-	const parentRoutine = history.find(
-		(item) => item.threadId === details?.thread.parentThreadId && item.type === "routine",
-	);
+	// Beside a chat a run never opens, so neither is there a way back to one.
+	const parentRoutine =
+		frame.kind === "sidebar"
+			? undefined
+			: history.find(
+					(item) => item.threadId === details?.thread.parentThreadId && item.type === "routine",
+				);
 	const host = details?.participants.find(
 		(participant): participant is AgentParticipant =>
 			participant.kind === "agent" && participant.id === details.thread.hostAgentId,
@@ -309,6 +313,11 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 	);
 }
 
-function openableThreadType(type: string | undefined): ChatThreadType | undefined {
-	return type === "collaboration" || type === "routine" ? type : undefined;
+/** The kind of thread `type` is, when it may open in `frame`: a run only as a page of its own, never beside a chat. */
+function openableThreadType(
+	type: string | undefined,
+	frame: ThreadFrame,
+): ChatThreadType | undefined {
+	if (type === "collaboration") return type;
+	return type === "routine" && frame.kind !== "sidebar" ? type : undefined;
 }
