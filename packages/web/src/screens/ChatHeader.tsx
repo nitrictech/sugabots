@@ -1,11 +1,12 @@
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronLeft, CircleCheck, PanelRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, CircleCheck, PanelRight, RotateCcw, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { ChatSandbox } from "./SandboxButton.tsx";
+import { ChatSandbox, PhoneChatSandbox } from "./SandboxButton.tsx";
 
 /** The list a page covers on a phone, which its Back returns to. */
 export type BackTo = { to: "pod"; pod: Pod } | { to: "activity" };
@@ -60,36 +61,46 @@ export function ChatHeader({
 }) {
 	const name = title ?? agent.name;
 	return (
-		<HeaderBar back={back}>
-			<h1 className={TITLE_CLASS_NAME}>
-				{details ? (
-					<button
-						type="button"
-						onClick={() => details.onChange(!details.open)}
-						className="focus-ring block max-w-full truncate rounded-md text-left"
-					>
-						{name}
-					</button>
-				) : (
-					name
-				)}
-			</h1>
-			<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
-			{done && <DoneButton {...done} />}
-			{details && <DetailsButton {...details} />}
-			{trailing}
-		</HeaderBar>
+		<>
+			<PhoneHeader
+				back={back}
+				face={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={52} />}
+				name={agent.name}
+				details={details}
+				trailing={
+					<PhoneChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
+				}
+			/>
+			<HeaderBar>
+				<h1 className={TITLE_CLASS_NAME}>
+					{details ? (
+						<button
+							type="button"
+							onClick={() => details.onChange(!details.open)}
+							className="focus-ring block max-w-full truncate rounded-md text-left"
+						>
+							{name}
+						</button>
+					) : (
+						name
+					)}
+				</h1>
+				<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
+				{done && <DoneButton {...done} />}
+				{details && <DetailsButton {...details} />}
+				{trailing}
+			</HeaderBar>
+		</>
 	);
 }
 
 /** The title across the top of a chat, as a page's is: its name, in the same type and place. */
 const TITLE_CLASS_NAME = "m-0 min-w-0 flex-1 truncate font-medium text-[14px] text-foreground";
 
-/** The bar across the top of a chat: Back on a phone, then what goes in it, the same height and inset as a page's. */
-function HeaderBar({ back, children }: { back: BackTo; children: ReactNode }) {
+/** The bar across the top of a chat from a tablet up, the same height and inset as a page's. */
+function HeaderBar({ children }: { children: ReactNode }) {
 	return (
-		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:pl-12">
-			<HeaderBack back={back} />
+		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:hidden">
 			{children}
 		</header>
 	);
@@ -122,21 +133,108 @@ export function PeopleChatHeader({
 	back,
 	trailing,
 	details,
+	face = <ChatFace icon={<Users />} />,
 }: HeaderPlace & {
 	title: string;
+	/** What a phone shows over its title: a channel's #, the routine's bot, or people. */
+	face?: ReactNode;
 	/** What else can be done with it, at the end of the header. */
 	menu?: ReactNode;
 	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
 	done?: DoneToggle;
 }) {
 	return (
-		<HeaderBar back={back}>
-			<h1 className={TITLE_CLASS_NAME}>{title}</h1>
-			{done && <DoneButton {...done} />}
-			{details && <DetailsButton {...details} />}
-			{menu}
-			{trailing}
-		</HeaderBar>
+		<>
+			<PhoneHeader back={back} face={face} name={title} details={details} />
+			<HeaderBar>
+				<h1 className={TITLE_CLASS_NAME}>{title}</h1>
+				{done && <DoneButton {...done} />}
+				{details && <DetailsButton {...details} />}
+				{menu}
+				{trailing}
+			</HeaderBar>
+		</>
+	);
+}
+
+/**
+ * A chat's header on a phone, floating over the top of the chat as it fades
+ * in under it: Back, its face over its name, which open its Details where it
+ * has them, and `trailing`, such as the bot's computer.
+ */
+function PhoneHeader({
+	back,
+	face,
+	name,
+	details,
+	trailing,
+}: {
+	back: BackTo;
+	face: ReactNode;
+	name: string;
+	details?: DetailsToggle;
+	trailing?: ReactNode;
+}) {
+	const nameplate = (
+		<>
+			<span className="relative z-[1] flex">{face}</span>
+			<span className="glass -mt-1.5 flex h-[30px] max-w-[220px] items-center rounded-[15px] px-3">
+				<span className="min-w-0 truncate font-medium text-[14px] text-foreground">{name}</span>
+			</span>
+		</>
+	);
+	return (
+		<div className="pointer-events-none absolute inset-x-0 top-0 z-20 md:hidden">
+			<div
+				aria-hidden
+				className="h-[150px] bg-linear-to-b from-60% from-background to-transparent"
+			/>
+			<div className="pointer-events-auto absolute inset-x-4 top-[calc(env(safe-area-inset-top)+12px)] flex items-start gap-3">
+				<PhoneBack back={back} />
+				<span className="flex min-w-0 flex-1 justify-center">
+					{details ? (
+						<button
+							type="button"
+							onClick={() => details.onChange(true)}
+							aria-label={`${name}: details`}
+							className="focus-ring flex min-w-0 max-w-full flex-col items-center rounded-2xl"
+						>
+							{nameplate}
+						</button>
+					) : (
+						<h1 className="m-0 flex min-w-0 max-w-full flex-col items-center font-medium text-[14px]">
+							{nameplate}
+						</h1>
+					)}
+				</span>
+				{trailing ?? <span className="w-9 shrink-0" />}
+			</div>
+		</div>
+	);
+}
+
+/** A round, frosted Back at the top left of a phone's chat, to the list the chat covers. */
+function PhoneBack({ back }: { back: BackTo }) {
+	const className =
+		"focus-ring glass grid size-9 shrink-0 place-items-center rounded-full text-foreground";
+	const chevron = <ChevronLeft aria-hidden size={18} strokeWidth={2.25} />;
+	return back.to === "pod" ? (
+		<Link {...podLink(back.pod)} aria-label={`Back to ${back.pod.name}`} className={className}>
+			{chevron}
+		</Link>
+	) : (
+		<Link {...activityLink()} aria-label="Back to Inbox" className={className}>
+			{chevron}
+		</Link>
+	);
+}
+
+/** A chat's face where it has no bot's: a rounded tile holding `icon`, as a channel's # or people. */
+export function ChatFace({ icon }: { icon: ReactNode }) {
+	return (
+		<span className="grid size-[52px] place-items-center rounded-[30%] bg-chip text-soft-foreground [&>svg]:size-6 [&>svg]:stroke-[1.75]">
+			{icon}
+		</span>
 	);
 }
 

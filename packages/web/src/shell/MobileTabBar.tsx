@@ -3,7 +3,7 @@ import type { Pod } from "@sugabots/contracts";
 import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Inbox, ShieldCheck } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { podLink } from "@/lib/links.ts";
 import { defaultPod, findPod, usePods } from "@/lib/pods.ts";
@@ -21,10 +21,12 @@ type Tab = "home" | "inbox" | "approvals" | "you";
 export function MobileTabBar() {
 	const { workspace } = useWorkspace();
 	const homePod = useHomePod();
+	const typing = useTyping();
 	const { unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const user = useSession().user;
 	const open = useOpenTab();
-	if (!workspace) return null;
+	// While something is typed, the keyboard and what is typed into have the room.
+	if (!workspace || typing) return null;
 	const params = { workspace: workspace.slug };
 	return (
 		<nav
@@ -84,6 +86,30 @@ export function MobileTabBar() {
 				}
 			/>
 		</nav>
+	);
+}
+
+/** Whether focus is in something written into, such as the composer, while the keyboard is up. */
+function useTyping(): boolean {
+	const [typing, setTyping] = useState(false);
+	useEffect(() => {
+		const check = () => setTyping(isWrittenInto(document.activeElement));
+		document.addEventListener("focusin", check);
+		document.addEventListener("focusout", check);
+		return () => {
+			document.removeEventListener("focusin", check);
+			document.removeEventListener("focusout", check);
+		};
+	}, []);
+	return typing;
+}
+
+function isWrittenInto(element: Element | null): boolean {
+	if (!(element instanceof HTMLElement)) return false;
+	if (element.isContentEditable || element instanceof HTMLTextAreaElement) return true;
+	return (
+		element instanceof HTMLInputElement &&
+		!["button", "checkbox", "radio", "submit", "range", "color", "file"].includes(element.type)
 	);
 }
 

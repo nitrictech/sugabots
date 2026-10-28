@@ -49,7 +49,7 @@ export function RoutinePanel({
 	const folds = instructions !== undefined && instructions.length > INSTRUCTIONS_FOLDED_OVER;
 	return (
 		<ChatSidebar label="Routine" onClose={onClose} headerless className="xl:w-[300px]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 max-md:pt-14">
 				<div className="flex flex-col gap-1 px-5 pt-4 pb-4">
 					<div className="flex h-8 items-center gap-2">
 						<StatusDot className={active ? "bg-success" : "bg-disabled-foreground"} />

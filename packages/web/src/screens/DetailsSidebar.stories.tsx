@@ -141,6 +141,7 @@ const meta = preview.meta({
 			],
 			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
 		},
+		onOpenDesktop: fn(),
 		onClose: fn(),
 	},
 	decorators: [
@@ -193,11 +194,11 @@ export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
-		await expect(canvas.queryByText("You")).toBeNull();
+		await expect(canvas.getByText("You")).not.toBeVisible();
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "In this thread" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
-		await expect(canvas.queryByText("Sam Park")).toBeNull();
+		await expect(canvas.getByText("Sam Park")).not.toBeVisible();
 	},
 });
 
@@ -223,11 +224,19 @@ export const ClosedFromItsHeader = meta.story({
 	},
 });
 
-/** On a phone it covers the header too, so it has a Close that calls back to put it away. */
-export const CloseOnAPhone = meta.story({
+/**
+ * On a phone it is a page over the chat, headed by the bot and the ways to a
+ * new thread, its computer and its settings, with everyone in the thread
+ * listed and a Back that puts it away.
+ */
+export const OnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
+		await expect(canvas.getByRole("link", { name: "New thread" })).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Computer" }));
+		await expect(args.onOpenDesktop).toHaveBeenCalled();
+		await expect(canvas.getByText("You")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Back" }));
 		await expect(args.onClose).toHaveBeenCalled();
 	},
 });

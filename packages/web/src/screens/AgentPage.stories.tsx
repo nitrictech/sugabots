@@ -649,7 +649,11 @@ export const DetailsOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: growthDesk.name }, { timeout: 10_000 }),
+			await canvas.findByRole(
+				"button",
+				{ name: `${growthDesk.name}: details` },
+				{ timeout: 10_000 },
+			),
 		);
 		await expect(await canvas.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
 	},
@@ -904,7 +908,7 @@ export const SandboxInUse = meta.story({
 	},
 });
 
-/** The same on a phone: the pulse and a screen, at the right of the centred header. */
+/** The same on a phone: a pulse on the computer at the right of the header. */
 export const SandboxInUseOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	beforeEach({ msw }) {

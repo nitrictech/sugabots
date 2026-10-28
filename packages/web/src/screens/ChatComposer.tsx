@@ -164,18 +164,24 @@ export function ChatComposer({
 					onChoose={insertMention}
 				/>
 			)}
-			<div className="focus-ring-within flex flex-col rounded-xl border border-border-strong bg-panel transition-colors">
-				{replyingTo && (
-					<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
-				)}
-				<AttachmentTray
-					items={attachments.items}
-					onRemove={attachments.remove}
-					onRetry={attachments.retry}
-					focusDraft={() => editor.current?.focus()}
-				/>
-				<LeftOutNote count={attachments.leftOut} />
-				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3">
+			{/*
+			 * On a phone one rounded row, as the design draws it: attach, the
+			 * message and Send, under whatever is held above them.
+			 */}
+			<div className="focus-ring-within flex flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:grid max-md:min-h-[46px] max-md:grid-cols-[auto_minmax(0,1fr)_auto] max-md:items-center max-md:rounded-[23px] max-md:py-1 max-md:pr-1 max-md:pl-1.5">
+				<div className="flex flex-col empty:hidden max-md:col-span-3 max-md:row-start-1">
+					{replyingTo && (
+						<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
+					)}
+					<AttachmentTray
+						items={attachments.items}
+						onRemove={attachments.remove}
+						onRetry={attachments.retry}
+						focusDraft={() => editor.current?.focus()}
+					/>
+					<LeftOutNote count={attachments.leftOut} />
+				</div>
+				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3 max-md:col-start-2 max-md:row-start-2 max-md:px-1 max-md:py-1.5">
 					<MentionEditor
 						ref={editor}
 						id={id}
@@ -207,27 +213,33 @@ export function ChatComposer({
 						}
 					/>
 				</div>
-				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5">
-					<AttachButton
-						full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
-						onAttach={attachments.attach}
-					/>
-					<Tooltip label="Mention a bot or person" side="top">
-						<button
-							type="button"
-							aria-label="Mention a bot or person"
-							onClick={startMention}
-							className={toolButtonClassName}
-						>
-							<AtSign size={16} strokeWidth={2} />
-						</button>
-					</Tooltip>
-					<span className="flex-1" />
+				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5 max-md:contents">
+					<span className="flex max-md:col-start-1 max-md:row-start-2">
+						<AttachButton
+							full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+							onAttach={attachments.attach}
+						/>
+					</span>
+					<span className="flex max-md:hidden">
+						<Tooltip label="Mention a bot or person" side="top">
+							<button
+								type="button"
+								aria-label="Mention a bot or person"
+								onClick={startMention}
+								className={toolButtonClassName}
+							>
+								<AtSign size={16} strokeWidth={2} />
+							</button>
+						</Tooltip>
+					</span>
+					<span className="flex-1 max-md:hidden" />
 					{/* Beside Send: what holds the message back, else the model that answers, else how to send it. */}
 					{filesNote(attachments.items) === undefined && model ? (
-						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs">{model}</span>
+						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs max-md:hidden">
+							{model}
+						</span>
 					) : (
-						<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
+						<span className="pr-2 text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
 							{filesNote(attachments.items) ?? "Enter to send"}
 						</span>
 					)}
@@ -237,7 +249,7 @@ export function ChatComposer({
 						disabled={
 							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
 						}
-						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong"
+						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:col-start-3 max-md:row-start-2 max-md:size-9 max-md:rounded-full"
 					>
 						<Send size={15} strokeWidth={2.2} />
 					</button>

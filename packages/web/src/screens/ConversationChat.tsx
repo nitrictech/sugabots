@@ -16,7 +16,7 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Pause } from "lucide-react";
+import { Hash, Pause } from "lucide-react";
 import {
 	type CSSProperties,
 	Fragment,
@@ -72,7 +72,13 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { ChatHeader, type ChatPlace, type HeaderPlace, PeopleChatHeader } from "./ChatHeader.tsx";
+import {
+	ChatFace,
+	ChatHeader,
+	type ChatPlace,
+	type HeaderPlace,
+	PeopleChatHeader,
+} from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
@@ -377,7 +383,18 @@ export function ConversationChat({
 				};
 	const header =
 		conversation.kind === "botThread" && details?.routine ? (
-			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} />
+			<PeopleChatHeader
+				{...headerPlace}
+				title={title ?? details.thread.title}
+				face={
+					<AgentAvatar
+						color={conversation.agent.color}
+						face={conversation.agent.face}
+						shape={conversation.agent.shape}
+						size={52}
+					/>
+				}
+			/>
 		) : conversation.kind === "botThread" ? (
 			<ChatHeader
 				{...headerPlace}
@@ -392,6 +409,7 @@ export function ConversationChat({
 				back={headerPlace.back}
 				trailing={headerPlace.trailing}
 				title={podChatName}
+				face={<ChatFace icon={<Hash />} />}
 				menu={
 					listedChat &&
 					pod.permissions.rename && (
@@ -491,7 +509,8 @@ export function ConversationChat({
 							followingLatest.current = atFoot;
 							setLatestInView(atFoot);
 						}}
-						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
+						// On a phone, room above the first message for the header floating over it.
+						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-[150px]"
 					>
 						{/* Anchored to the bottom, so a short chat sits just above the composer. */}
 						<div className="flex min-h-full w-full flex-col justify-end">
@@ -681,6 +700,7 @@ export function ConversationChat({
 						threadId={details.thread.id}
 						user={user}
 						contents={contents}
+						onOpenDesktop={openDesktop}
 						onClose={() => place.onDetailsChange(false)}
 					/>
 				) : (
@@ -1060,8 +1080,11 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 	const bots = details.crew.filter((member) => member.kind === "agent").length;
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<PodChatTile color={pod.color} size={64} />
-			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">{name}</h2>
+			{/* A phone's header already shows the chat's face. */}
+			<PodChatTile color={pod.color} size={64} className="max-md:hidden" />
+			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em] max-md:text-[20px]">
+				{name}
+			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
 				This is the start of {name}, with {countOf(people, "person", "people")} and{" "}
 				{countOf(bots, "bot", "bots")}. Talk here, or mention a bot to start a thread with it.
@@ -1077,8 +1100,15 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 function ChatIntro({ agent, direct }: { agent: Agent; direct: boolean }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
-			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
+			{/* A phone's header already shows the bot's face. */}
+			<AgentAvatar
+				color={agent.color}
+				face={agent.face}
+				shape={agent.shape}
+				size={64}
+				className="max-md:hidden"
+			/>
+			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em] max-md:text-[20px]">
 				{agent.name}
 			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
