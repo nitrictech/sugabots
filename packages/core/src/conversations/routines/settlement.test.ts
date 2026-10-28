@@ -672,8 +672,10 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
 		const posted = await resultsOf(run.executionId);
-		expect(posted).toHaveLength(1);
-		const conversationId = posted[0]?.conversationId;
+		// The result in the routine's thread, and its copy in the pod's chat, both linked to the run.
+		expect(posted.map((row) => row.threadType).sort()).toEqual(["pod_chat", "routine_feed"]);
+		const inFeed = posted.find((row) => row.threadType === "routine_feed");
+		const conversationId = inFeed?.conversationId;
 		if (!conversationId) throw new Error("The result was posted outside a conversation");
 		const page = await onPostgresAs(userId)(Context.get(conversations, ChatView.Service)).messages(
 			conversationId,
@@ -693,8 +695,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await podChatPosts("Morning! Two PRs merged overnight.")).toEqual([
 			{ id: expect.any(String), routineExecutionId: run.executionId, chatId: expect.any(String) },
 		]);
-		expect(posted[0]).toMatchObject({
-			threadType: "routine_feed",
+		expect(inFeed).toMatchObject({
 			message: {
 				authorAgentId: agentId,
 				status: "complete",
