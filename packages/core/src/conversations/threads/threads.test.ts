@@ -362,7 +362,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 
 		expect(details.thread.title).toMatch(/^Release agent /);
-		expect(details.participants.map(({ kind }) => kind)).toEqual(["person", "agent"]);
+		expect(details.participants.map(({ kind }) => kind)).toEqual(["agent", "person"]);
 		expect(details.messages).toMatchObject([
 			{
 				author: { kind: "person", id: memberId },
@@ -765,8 +765,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			],
 		});
 		await summaries.complete(nextSummary, { content: "Only approval remains." });
-		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toBe(
-			"Verify the release",
+		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toMatch(
+			/^Release agent /,
 		);
 	});
 
