@@ -28,7 +28,7 @@ import {
 	prefetchConversation,
 	useChatList,
 	useConversationPlace,
-	useOpenConversation,
+	useOpenBotChannel,
 	useOpenPodChat,
 	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
@@ -1292,7 +1292,7 @@ function OpenPodChat({ pod }: { pod: Pod }) {
 	);
 }
 
-/** A bot's newest conversation, opened first if it has none, then shown at its own address. */
+/** A bot's channel, opened first if nobody has, then shown at its own address. */
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
@@ -1303,14 +1303,14 @@ const agentRoute = createRoute({
 		const search = agentRoute.useSearch();
 		return (
 			<PodAgentScreen podSlug={pod} handle={agent}>
-				{(found) => <OpenConversation pod={found.pod} agent={found.agent} search={search} />}
+				{(found) => <OpenBotChannel pod={found.pod} agent={found.agent} search={search} />}
 			</PodAgentScreen>
 		);
 	},
 });
 
-/** Opens `agent`'s newest conversation in `pod`, keeping what `search` opens beside it. */
-function OpenConversation({
+/** Opens `agent`'s channel in `pod`, keeping what `search` opens beside it. */
+function OpenBotChannel({
 	pod,
 	agent,
 	search,
@@ -1322,8 +1322,8 @@ function OpenConversation({
 	return (
 		<NavigateWhenOpened
 			pod={pod}
-			opened={useOpenConversation(pod, agent.id)}
-			failure={{ title: "Could not open this chat", body: API_DID_NOT_ANSWER }}
+			opened={useOpenBotChannel(pod, agent.id)}
+			failure={{ title: "Could not open this channel", body: API_DID_NOT_ANSWER }}
 			search={search}
 		/>
 	);

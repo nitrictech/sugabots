@@ -244,30 +244,32 @@ export function refreshAfterThreadChange(queries: QueryClient, workspaceId: stri
 }
 
 /**
- * The bot's newest thread in the pod, for an address that names the bot
- * rather than the thread. It is read from the pod's conversation list,
- * which the screen loads anyway, so one that exists costs no request of its
- * own. Only a bot the list shows without one, because it never had one or it
- * began after the list loaded, has one opened with a request.
+ * The bot's channel in the pod, for an address that names the bot rather
+ * than the channel. It is read from the pod's conversation list, which the
+ * screen loads anyway, so one that exists costs no request of its own. Only
+ * a bot the list shows without one, because nobody opened it yet or it was
+ * opened after the list loaded, has one opened with a request.
  */
-export function useOpenConversation(pod: Pod, hostAgentId: string) {
+export function useOpenBotChannel(pod: Pod, hostAgentId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: ["conversation-with", workspaceId, pod.id, hostAgentId],
+		queryKey: ["bot-channel", workspaceId, pod.id, hostAgentId],
 		queryFn: workspaceId
 			? async ({ signal }) => {
 					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-					const listed = list.threads.find((item) => item.agent?.id === hostAgentId)?.conversation;
+					const listed = list.channels.find(
+						(item) => item.conversation.hostAgentId === hostAgentId,
+					)?.conversation;
 					if (listed) return listed;
 					const opened = await Effect.runPromise(
-						client.api.chats.open({
+						client.api.chats.openBotChannel({
 							params: { workspace: workspaceId },
 							payload: { podId: pod.id, hostAgentId },
 						}),
 						{ signal },
 					);
-					// The list was loaded without the thread just opened.
+					// The list was loaded without the channel just opened.
 					void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
 					return opened;
 				}
@@ -278,6 +280,7 @@ export function useOpenConversation(pod: Pod, hostAgentId: string) {
 /** Which kind of conversation is open, and the bot it is with when it has one. */
 export type ConversationKind =
 	| { kind: "podChat" }
+	| { kind: "botChannel"; agent: Agent }
 	| { kind: "botThread"; agent: Agent }
 	| { kind: "peopleThread" };
 
@@ -303,20 +306,25 @@ export function useConversationPlace(
 	const list = useChatList(podSlug);
 	const listedPodChat =
 		list.data?.chats.some((chat) => chat.conversation.id === conversationId) ?? false;
+	const listedChannel = list.data?.channels.find((item) => item.conversation.id === conversationId);
 	const listedThread =
 		list.data?.threads.find((item) => item.conversation.id === conversationId) ??
 		list.data?.routines.find((item) => item.conversation?.id === conversationId);
-	const listed = listedPodChat || listedThread !== undefined;
+	const listed = listedPodChat || listedChannel !== undefined || listedThread !== undefined;
 	const unlisted = useQuery({
 		...threadQuery(conversationId),
 		enabled: conversationId !== undefined && list.isSuccess && !listed,
 	});
 	const pod = findPod(pods.data, podSlug);
 	const thread = unlisted.data?.thread?.podId === pod?.id ? unlisted.data?.thread : undefined;
-	const hostAgentId = listedThread ? (listedThread.agent?.id ?? null) : thread?.hostAgentId;
-	const agent = roster.agents?.find((candidate) => candidate.id === hostAgentId);
+	const hostAgentId =
+		listedChannel?.agent.id ??
+		(listedThread ? (listedThread.agent?.id ?? null) : thread?.hostAgentId);
+	const agent =
+		roster.agents?.find((candidate) => candidate.id === hostAgentId) ?? listedChannel?.agent;
 	const conversation = conversationKindOf({
 		isPodChat: listedPodChat || thread?.type === "pod_chat",
+		isBotChannel: listedChannel !== undefined || thread?.type === "bot_channel",
 		isThread:
 			listedThread !== undefined ||
 			thread?.type === "conversation" ||
@@ -335,14 +343,16 @@ export function useConversationPlace(
 	};
 }
 
-/** Which kind a conversation is, once enough is known to say; a thread with a bot waits for the bot. */
+/** Which kind a conversation is, once enough is known to say; a channel or thread with a bot waits for the bot. */
 function conversationKindOf(known: {
 	isPodChat: boolean;
+	isBotChannel: boolean;
 	isThread: boolean;
 	hostAgentId: string | null | undefined;
 	agent: Agent | undefined;
 }): ConversationKind | undefined {
 	if (known.isPodChat) return { kind: "podChat" };
+	if (known.isBotChannel) return known.agent && { kind: "botChannel", agent: known.agent };
 	if (!known.isThread) return undefined;
 	if (known.hostAgentId === null) return { kind: "peopleThread" };
 	return known.agent && { kind: "botThread", agent: known.agent };

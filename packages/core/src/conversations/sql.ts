@@ -146,11 +146,13 @@ export const routineTrigger = pgTable(
 /**
  * The thread types people open and post in, each one a conversation of its
  * own: a thread with a bot or between people (`conversation`), a pod's chat,
- * and a routine's thread. The others are opened under one of these.
+ * a bot's channel, and a routine's thread. The others are opened under one of
+ * these.
  */
 export const CONVERSATION_TYPES = [
 	"conversation",
 	"pod_chat",
+	"bot_channel",
 	"routine_feed",
 ] as const satisfies readonly ThreadType[];
 
@@ -194,7 +196,7 @@ export const thread = pgTable(
 		initiatorUserId: uuid("initiator_user_id").references(() => user.id, {
 			onDelete: "restrict",
 		}),
-		/** On a thread started from a pod's chat: the message in the chat it hangs off. */
+		/** On a thread started from a pod's chat or a bot's channel: the message there it hangs off. */
 		originMessageId: uuid("origin_message_id").references((): AnyPgColumn => message.id, {
 			onDelete: "set null",
 		}),

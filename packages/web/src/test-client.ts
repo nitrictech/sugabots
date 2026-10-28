@@ -109,7 +109,7 @@ export const client = {
 			approvals: vi.fn(),
 			activity: vi.fn(),
 			markRead: vi.fn(),
-			open: vi.fn(),
+			openBotChannel: vi.fn(),
 			openPodChat: vi.fn(),
 			openRoutineFeed: vi.fn(),
 			startThread: vi.fn(),

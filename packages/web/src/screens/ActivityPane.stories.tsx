@@ -7,8 +7,8 @@ import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	StoryApp,
+	storyChannelFor,
 	storyChatDetails,
-	storyConversationFor,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
@@ -20,7 +20,7 @@ import {
 
 const API = import.meta.env.VITE_API_URL as string;
 
-const chat = storyConversationFor(growthDesk);
+const chat = storyChannelFor(growthDesk);
 const bot = {
 	kind: "agent" as const,
 	id: growthDesk.id,

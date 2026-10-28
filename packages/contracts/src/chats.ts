@@ -72,6 +72,19 @@ export const conversationThreadSchema = Schema.Struct({
 
 export type ConversationThread = typeof conversationThreadSchema.Type;
 
+/**
+ * A bot's channel in a pod: one long conversation with the bot, shared by
+ * everyone in the pod, which threads branch off.
+ */
+export const botChannelSchema = Schema.Struct({
+	kind: Schema.Literal("bot_channel"),
+	...conversationFields,
+	/** The bot the channel is with. */
+	hostAgentId: uuidSchema,
+});
+
+export type BotChannel = typeof botChannelSchema.Type;
+
 /** A routine's own thread, where each of its runs posts. */
 export const routineFeedSchema = Schema.Struct({
 	kind: Schema.Literal("routine_feed"),
@@ -83,9 +96,10 @@ export const routineFeedSchema = Schema.Struct({
 
 export type RoutineFeed = typeof routineFeedSchema.Type;
 
-/** Something people open and post in: a pod's chat, a thread, or a routine's thread. */
+/** Something people open and post in: a pod's chat, a bot's channel, a thread, or a routine's thread. */
 export const conversationSchema = Schema.Union([
 	podChatSchema,
+	botChannelSchema,
 	conversationThreadSchema,
 	routineFeedSchema,
 ]);
@@ -284,8 +298,8 @@ export type ListedRoutine = typeof listedRoutineSchema.Type;
 /**
  * A pod's conversation list: its chats not archived, the first one first and
  * the rest in the order they were started, each with how many of its messages
- * the person has not read, and none until somebody first opens one; its
- * threads, most recent message first; and its routines.
+ * the person has not read, and none until somebody first opens one; its bots'
+ * channels; its threads, most recent message first; and its routines.
  */
 export const chatListSchema = Schema.Struct({
 	chats: Schema.mutable(
@@ -293,6 +307,21 @@ export const chatListSchema = Schema.Struct({
 			Schema.Struct({
 				conversation: podChatSchema,
 				unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			}),
+		),
+	),
+	/** Its bots' channels, none until somebody first opens one. */
+	channels: Schema.mutable(
+		Schema.Array(
+			Schema.Struct({
+				/** The bot it is with, so the list can show it before the pod's bots load. */
+				agent: agentSchema,
+				conversation: botChannelSchema,
+				unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+				/** A tool call in the channel is waiting for a decision the person may make. */
+				needsApproval: Schema.Boolean,
+				/** A message in the channel the person has not read mentions them. */
+				mentionsYou: Schema.Boolean,
 			}),
 		),
 	),
@@ -343,13 +372,13 @@ export const startedThreadSchema = Schema.Struct({
 
 export type StartedThread = typeof startedThreadSchema.Type;
 
-/** The bot to open a conversation with, and the pod it is in. */
-export const openConversationSchema = Schema.Struct({
+/** The bot whose channel to open, and the pod it is in. */
+export const openBotChannelSchema = Schema.Struct({
 	podId: uuidSchema,
 	hostAgentId: uuidSchema,
 });
 
-export type OpenConversation = typeof openConversationSchema.Type;
+export type OpenBotChannel = typeof openBotChannelSchema.Type;
 
 export const customerThreadTypeSchema = Schema.Literals(["collaboration", "routine"]);
 

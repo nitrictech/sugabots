@@ -179,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			return runtime.runPromise(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
-					const opened = yield* chats.open({
+					const opened = yield* chats.openBotChannel({
 						workspace: input.workspaceId,
 						podId: input.podId,
 						hostAgentId: input.hostAgentId,

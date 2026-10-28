@@ -130,7 +130,7 @@ function useSidebarPlace(): SidebarPlace {
 						: agent && matchRoute({ to: "/$workspace/pods/$pod/agents/$agent" })
 							? { kind: "bot", handle: agent }
 							: startingWith
-								? { kind: "bot", handle: startingWith }
+								? { kind: "newThread", handle: startingWith }
 								: undefined,
 		inSettings,
 		coversPhone: !matchRoute({ to: "/$workspace/pods/$pod" }),

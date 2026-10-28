@@ -1,6 +1,7 @@
 import {
 	type Agent,
 	administersWorkspace,
+	type BotChannel,
 	type ConversationThread,
 	type ModelProvider,
 	type Pod,
@@ -333,14 +334,28 @@ export const scribe = builtInAgents[0] as SystemAgent;
 export const compaction = builtInAgents[1] as SystemAgent;
 
 /** The conversation with `agent`, one per bot, by the bot's id. */
-export function conversationWith(agent: Agent): ConversationThread {
+export function channelWith(agent: Agent): BotChannel {
 	return {
-		kind: "thread",
+		kind: "bot_channel",
 		id: `${agent.id.slice(0, -4)}c${agent.id.slice(-3)}`,
 		workspaceId: agent.workspaceId,
 		podId: agent.podId,
 		hostAgentId: agent.id,
-		title: `Conversation with ${agent.name}`,
+		title: agent.name,
+		createdAt: "2026-09-18T08:00:00.000Z",
+		updatedAt: "2026-09-18T08:00:00.000Z",
+	};
+}
+
+/** A thread with `agent`, nothing said in it yet. */
+export function threadWith(agent: Agent): ConversationThread {
+	return {
+		kind: "thread",
+		id: `${agent.id.slice(0, -4)}d${agent.id.slice(-3)}`,
+		workspaceId: agent.workspaceId,
+		podId: agent.podId,
+		hostAgentId: agent.id,
+		title: `Thread with ${agent.name}`,
 		startedInChatId: null,
 		doneAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
@@ -348,9 +363,9 @@ export function conversationWith(agent: Agent): ConversationThread {
 	};
 }
 
-/** The conversation with `agent` as the thread API returns it, with nothing said yet. */
-export function conversationDetails(agent: Agent): ThreadDetails {
-	const conversation = conversationWith(agent);
+/** The channel of `agent` as the thread API returns it, with nothing said yet. */
+export function channelDetails(agent: Agent): ThreadDetails {
+	const conversation = channelWith(agent);
 	const participant = {
 		kind: "agent" as const,
 		id: agent.id,
@@ -365,7 +380,7 @@ export function conversationDetails(agent: Agent): ThreadDetails {
 		thread: {
 			...thread,
 			conversationId: conversation.id,
-			type: "conversation",
+			type: "bot_channel",
 			status: "done",
 			parentThreadId: null,
 			initiatorUserId: null,
@@ -446,19 +461,18 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.routines.getSecret.mockReturnValue(
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
-	// A conversation with every crew bot in the pod, nothing said in any yet.
+	// A channel for every crew bot in the pod, nothing said in any yet.
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);
 		return Effect.succeed({
 			chats: [],
 			routines: [],
-			threads: agents
+			threads: [],
+			channels: agents
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === pod?.id)
 				.map((agent) => ({
 					agent,
-					conversation: conversationWith(agent),
-					lastMessage: null,
-					waitingOn: null,
+					conversation: channelWith(agent),
 					unreadMessages: 0,
 					needsApproval: false,
 					mentionsYou: false,
@@ -466,21 +480,23 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		});
 	});
 	const crew = [...agents, personalAssistant];
-	client.api.chats.open.mockImplementation(({ payload }: { payload: { hostAgentId: string } }) => {
-		const agent = crew.find((one) => one.id === payload.hostAgentId);
-		return agent
-			? Effect.succeed(conversationWith(agent))
-			: Effect.fail(new NotFound({ message: userText`No conversation fixture` }));
-	});
+	client.api.chats.openBotChannel.mockImplementation(
+		({ payload }: { payload: { hostAgentId: string } }) => {
+			const agent = crew.find((one) => one.id === payload.hostAgentId);
+			return agent
+				? Effect.succeed(channelWith(agent))
+				: Effect.fail(new NotFound({ message: userText`No channel fixture` }));
+		},
+	);
 	client.api.chats.openPodChat.mockReturnValue(
 		Effect.fail(new NotFound({ message: userText`No pod chat fixture` })),
 	);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
-		const agent = crew.find((one) => conversationWith(one).id === params.threadId);
+		const agent = crew.find((one) => channelWith(one).id === params.threadId);
 		return agent
-			? Effect.succeed(conversationDetails(agent))
+			? Effect.succeed(channelDetails(agent))
 			: Effect.fail(new NotFound({ message: userText`No such thread` }));
 	});
 	client.api.threads.activity.mockReturnValue(

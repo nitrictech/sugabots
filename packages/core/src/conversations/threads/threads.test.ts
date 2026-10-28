@@ -94,7 +94,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		message: string;
 	}) {
 		const chats = chatsAs(input.initiatorUserId);
-		const opened = await chats.open({
+		const opened = await chats.openBotChannel({
 			workspace: input.workspaceId,
 			podId: input.podId,
 			hostAgentId: input.hostAgentId,

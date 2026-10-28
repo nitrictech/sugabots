@@ -132,6 +132,7 @@ const outboundFailure: RoutineExecution = {
 
 const chatList: ChatList = {
 	chats: [{ conversation: storyPodChatFor(revenue), unreadMessages: 0 }],
+	channels: [],
 	threads: [],
 	routines: [
 		{

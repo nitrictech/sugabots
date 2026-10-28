@@ -62,8 +62,8 @@ export function ActivityPane({
 			Open thread
 		</Link>
 	);
-	// Runs and collaborations are a bot's, so only a thread with a bot has them.
-	if (threadPageId && conversation.kind === "botThread") {
+	// Runs and collaborations are a bot's, so only a channel or thread with a bot has them.
+	if (threadPageId && (conversation.kind === "botThread" || conversation.kind === "botChannel")) {
 		return (
 			<ActivityThread
 				agent={conversation.agent}

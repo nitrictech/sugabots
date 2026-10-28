@@ -175,7 +175,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("shows a chat to whoever reaches its pod, and to nobody else", async () => {
-		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const opened = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const [outsider, stranger] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -205,8 +209,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 	});
 
-	it("lists a pod's threads newest message first, and no bot nobody has talked to", async () => {
-		const quiet = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+	it("lists a pod's bot channels apart from its threads, newest message first", async () => {
+		const quiet = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		const started = await chats.startThread({
 			podChatId: podChat.id,
@@ -230,11 +238,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				needsApproval: false,
 				mentionsYou: false,
 			},
+		]);
+		expect(list?.channels).toEqual([
 			{
 				agent: expect.objectContaining({ id: agentId }),
-				conversation: expect.objectContaining({ id: quiet.id }),
-				lastMessage: null,
-				waitingOn: null,
+				conversation: expect.objectContaining({
+					kind: "bot_channel",
+					id: quiet.id,
+					hostAgentId: agentId,
+				}),
 				unreadMessages: 0,
 				needsApproval: false,
 				mentionsYou: false,
@@ -370,7 +382,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const { conversation: current } = await chats.startThread({
+			podChatId: podChat.id,
+			messageId: crypto.randomUUID(),
+			content: "Can you check the renewal numbers?",
+			hostAgentId: agentId,
+		});
 		const doneAt = async () =>
 			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
 				(item) => item.conversation.id === current.id,
@@ -388,9 +406,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("says when a message the person has not read mentions them", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const mentioned = async () =>
-			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
+			(await view.list({ workspace: workspaceId, pod: podId }))?.channels.find(
 				(item) => item.conversation.id === current.id,
 			)?.mentionsYou;
 		expect(await mentioned()).toBe(false);
@@ -450,7 +472,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("previews a bot's reply as the chat shows it, without the words before a tool call", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const { conversation: current } = await chats.startThread({
+			podChatId: podChat.id,
+			messageId: crypto.randomUUID(),
+			content: "Can you try again?",
+			hostAgentId: agentId,
+		});
 		await onDatabase((db) =>
 			db.insert(message).values({
 				threadId: current.id,
@@ -493,12 +521,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			return written;
 		};
 		const hostRow = async () =>
-			(await view.list({ workspace: workspaceId, pod: podId }))?.threads.find(
-				(item) => item.agent?.id === agentId,
+			(await view.list({ workspace: workspaceId, pod: podId }))?.channels.find(
+				(item) => item.conversation.hostAgentId === agentId,
 			);
 
 		it("counts what a bot writes after the person last read the chat", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -519,7 +551,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("stops counting what came before the person's own reply", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await botWrites(current.id, "Hello!", -2);
 			await botWrites(current.id, "Anything else?", -1);
 			expect(await hostRow()).toMatchObject({ unreadMessages: 2 });
@@ -533,7 +569,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("keeps a reply that finishes after the chat was read unread", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -571,7 +611,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("keeps a reply unread that began before something the person read while it was written", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -611,7 +655,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("shows how far the person has read, and announces it only when they read further", async () => {
 			const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const reply = await botWrites(current.id, "Hello!", 1);
 			const readsAnnounced = async () =>
 				(
@@ -643,8 +691,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("adds up each pod's unread messages for the rail", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
-			const other = await chats.open({
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			const other = await chats.openBotChannel({
 				workspace: workspaceId,
 				podId,
 				hostAgentId: recipientAgentId,
@@ -670,7 +722,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("marks a chat waiting on a tool call the person may decide", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -830,14 +886,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await listed(asAdministrator)).toEqual(["Assistant theirs"]);
 	});
 
-	it("names a new bot's first conversation for its onboarding into the pod", async () => {
-		await onDatabase((db) =>
-			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
+	it("names a bot's channel for its bot", async () => {
+		const [host] = await onDatabase((db) =>
+			db.select({ name: agent.name }).from(agent).where(eq(agent.id, agentId)),
 		);
 
-		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const opened = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 
-		expect(opened.title).toMatch(/^Onboarding .+ to .+$/);
+		expect(opened.title).toBe(host?.name);
 	});
 
 	it("starts the creator's interview once without posting a user message", async () => {
@@ -845,7 +905,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
 		);
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
-		const [opened, again] = await Promise.all([chats.open(input), chats.open(input)]);
+		const [opened, again] = await Promise.all([
+			chats.openBotChannel(input),
+			chats.openBotChannel(input),
+		]);
 		expect(again.id).toBe(opened.id);
 		expect((await view.messages(opened.id)).items).toEqual([]);
 		const runs = await runOnPostgres(runningTurns(opened.id));
@@ -866,7 +929,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prompt.messages).toHaveLength(1);
 		expect(prompt.messages[0]?.content).toContain("Start the interview now");
 		expect(prompt.messages[0]?.content).toContain("They have not sent a message yet");
-		await chats.open(input);
+		await chats.openBotChannel(input);
 		const resumed = await prepareRunnable(execution, run);
 		expect(resumed.responseMessage.id).toBe(prepared.responseMessage.id);
 		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
@@ -894,9 +957,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.where(eq(agent.id, agentId)),
 		);
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
-		const opened = await chats.open(input);
+		const opened = await chats.openBotChannel(input);
 		const creator = onPostgresAs(administratorId)(Context.get(conversations, Chats.Service));
-		expect((await creator.open(input)).id).toBe(opened.id);
+		expect((await creator.openBotChannel(input)).id).toBe(opened.id);
 		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
 	});
 
@@ -905,17 +968,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db.update(agent).set({ prompt: INTERVIEW_PROMPT, model: null }).where(eq(agent.id, agentId)),
 		);
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
-		const opened = await chats.open(input);
+		const opened = await chats.openBotChannel(input);
 		await onDatabase((db) =>
 			db.update(agent).set({ model: "test/model" }).where(eq(agent.id, agentId)),
 		);
-		expect((await chats.open(input)).id).toBe(opened.id);
+		expect((await chats.openBotChannel(input)).id).toBe(opened.id);
 		expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
 	});
 
 	it("does not start an interview in a conversation that already has a message", async () => {
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
-		const opened = await chats.open(input);
+		const opened = await chats.openBotChannel(input);
 		await onDatabase((db) =>
 			db.insert(message).values({
 				threadId: opened.id,
@@ -929,7 +992,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await onDatabase((db) =>
 			db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, agentId)),
 		);
-		await chats.open(input);
+		await chats.openBotChannel(input);
 		expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
 	});
 
@@ -940,7 +1003,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.set({ prompt: INTERVIEW_PROMPT, createdById: administratorId })
 				.where(eq(agent.id, agentId)),
 		);
-		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const opened = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
 	});
 
@@ -948,14 +1015,21 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		"does not start a bot with written instructions %j",
 		async (prompt) => {
 			await onDatabase((db) => db.update(agent).set({ prompt }).where(eq(agent.id, agentId)));
-			const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const opened = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			expect(await runOnPostgres(runningTurns(opened.id))).toEqual([]);
 		},
 	);
 
-	it("opens one conversation when asked twice at once, and queues its messages in it", async () => {
+	it("opens one channel when asked twice at once, and queues its messages in it", async () => {
 		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
-		const [first, retried] = await Promise.all([chats.open(input), chats.open(input)]);
+		const [first, retried] = await Promise.all([
+			chats.openBotChannel(input),
+			chats.openBotChannel(input),
+		]);
 		expect(retried.id).toBe(first.id);
 		expect(
 			await onDatabase((db) =>
@@ -964,7 +1038,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.from(thread)
 					.where(
 						and(
-							eq(thread.type, "conversation"),
+							eq(thread.type, "bot_channel"),
 							eq(thread.podId, podId),
 							eq(thread.hostAgentId, agentId),
 						),
@@ -1058,7 +1132,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const messageId = crypto.randomUUID();
 
 		await expect(
@@ -1075,7 +1153,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("retries the same message without creating another message or turn", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const send = {
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1102,8 +1184,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("quotes the message a reply answers, but only one in the same chat", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
-		const elsewhere = await chats.open({
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const elsewhere = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: recipientAgentId,
@@ -1146,7 +1232,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("lets people react to a message once per emoji, announcing each change", async () => {
 		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1196,7 +1286,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("refuses a reaction to a reply still being written, and a new emoji past the limit", async () => {
 		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1235,7 +1329,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("says which messages wait for the agent's next turn, and announces when one starts waiting", async () => {
 		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const post = (content: string) =>
 			chats.post({ conversationId: current.id, messageId: crypto.randomUUID(), content });
 		const changesAnnounced = async () =>
@@ -1263,7 +1361,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("queues nothing posted before a turn resumed from an earlier reply starts waiting", async () => {
 		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 		const turns = Context.get(conversations, Turns.Service);
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1292,7 +1394,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("announces a person's message before the agent it brings into the thread", async () => {
-		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
 		// The chat's agent has not joined its thread yet, so the message brings it in.
 		await onDatabase((db) =>
 			db
@@ -1412,12 +1518,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("shows an agent collaboration in the asking chat only", async () => {
-		const initiatorChat = await chats.open({
+		const initiatorChat = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: agentId,
 		});
-		const recipientChat = await chats.open({
+		const recipientChat = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: recipientAgentId,
@@ -1736,7 +1842,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		};
 
 		it("lists a call waiting on the person's decision, then among the answered once decided", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const callId = await askForApproval(current.id);
 
 			expect(await view.approvals(workspaceId)).toEqual({
@@ -1770,7 +1880,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists a call waiting on the person's decision behind many they may not decide", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const created = await routines.create(
 				{ agentId },
 				{ name: "Overnight filing", instructions: "File it.", triggers: [{ kind: "webhook" }] },
@@ -1822,7 +1936,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("leaves out a request to change the pod's sandbox, which only its managers decide", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await askForApproval(current.id, "request_network_access");
 			const callId = await askForApproval(current.id);
 
@@ -1832,7 +1950,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists what the person has not read, and keeps what mentions them once read", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const news = await botWrites(current.id, "The deploy finished.", 1);
 			const mention = await botWrites(current.id, "@chat-member can you check it?", 2);
 
@@ -1855,7 +1977,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("does not take an email address for a mention", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			await chats.markRead(current.id);
 			await botWrites(current.id, "Mail it to ops@chat-member.example", 1);
 
@@ -1915,7 +2041,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists a collaboration in the person's chats", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const childThreadId = await collaborate(current.id, current.id);
 
 			expect((await view.activity(workspaceId)).items).toContainEqual(
@@ -1933,7 +2063,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("reads a collaboration with the conversation it was asked in", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const childThreadId = await collaborate(current.id, current.id);
 
 			await chats.markRead(current.id);
@@ -1944,7 +2078,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("counts a routine run and a collaboration caught up with once the person writes after them", async () => {
-			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
 			const created = await routines.create(
 				{ agentId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
@@ -1990,7 +2128,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	describe("sending files", () => {
 		/** The chat, with the member's uploads to it. */
 		async function aChatWithFiles() {
-			const { id: conversationId } = await chats.open({
+			const { id: conversationId } = await chats.openBotChannel({
 				workspace: workspaceId,
 				podId,
 				hostAgentId: agentId,
@@ -2151,7 +2289,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("keeps an uploaded file as the type it was given, or else the type its name suggests", async () => {
-		const { id: conversationId } = await chats.open({
+		const { id: conversationId } = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: agentId,

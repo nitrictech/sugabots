@@ -85,7 +85,7 @@ import {
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
 import { Turns } from "../turns/turns.ts";
-import { toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
+import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 
 /**
  * What the chat screens show, of the conversations the current actor can see:
@@ -192,6 +192,10 @@ export const make = Effect.gen(function* () {
 							mentionsYou: mentioning.has(row.conversation.id),
 						};
 					});
+					const channels = yield* query((db) => botChannels(db, listing));
+					const channelIds = channels.map(({ channel }) => channel.id);
+					const channelMarksOf = yield* conversationMarks(workspaceId, channelIds);
+					const channelMentions = yield* query((db) => unreadMentionsIn(db, userId, channelIds));
 					const chats = yield* query((db) => podChats(db, podId));
 					const chatsUnread = yield* query((db) =>
 						unreadMessageCounts(
@@ -231,6 +235,18 @@ export const make = Effect.gen(function* () {
 							conversation: toPodChat(chat),
 							unreadMessages: chatsUnread.get(chat.id) ?? 0,
 						})),
+						channels: channels.flatMap(({ channel, agent: host }) => {
+							const crew = crewAgentRow(host);
+							if (!crew) return [];
+							return [
+								{
+									agent: toAgent(crew),
+									conversation: toBotChannel(channel),
+									...channelMarksOf(channel.id),
+									mentionsYou: channelMentions.has(channel.id),
+								},
+							];
+						}),
 						threads: items.sort(byLatestMessage),
 					};
 				}),
@@ -248,12 +264,14 @@ export const make = Effect.gen(function* () {
 					};
 					const listed = yield* query((db) => listedConversations(db, listing));
 					const chats = yield* query((db) => podChatsReached(db, listing));
+					const channels = yield* query((db) => botChannels(db, listing));
 					const counted = [
 						...listed.map(({ conversation }) => ({
 							id: conversation.id,
 							podId: conversation.podId,
 						})),
 						...chats,
+						...channels.map(({ channel }) => ({ id: channel.id, podId: channel.podId })),
 					];
 					const marksOf = yield* conversationMarks(
 						workspaceId,
@@ -505,6 +523,23 @@ const podChats = Effect.fn("ChatView.podChats")(function* (db: Executor, podId: 
 		.orderBy(desc(thread.main), asc(thread.createdAt), asc(thread.id));
 });
 
+/** The bots' channels in the pods the listing covers, each with its bot, in the order they were opened. */
+const botChannels = Effect.fn("ChatView.botChannels")(function* (db: Executor, input: Listing) {
+	return yield* db
+		.select({ channel: thread, agent })
+		.from(thread)
+		.innerJoin(agent, eq(agent.id, thread.hostAgentId))
+		.where(
+			and(
+				eq(thread.type, "bot_channel"),
+				eq(thread.workspaceId, input.workspaceId),
+				input.scope === "everyReachablePod" ? undefined : eq(thread.podId, input.scope.pod),
+				input.reachesPod(thread.podId),
+			),
+		)
+		.orderBy(asc(thread.createdAt), asc(thread.id));
+});
+
 /** The chats not archived of every pod the listing reaches. */
 const podChatsReached = Effect.fn("ChatView.podChatsReached")(function* (
 	db: Executor,
@@ -722,7 +757,10 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 		.from(message)
 		.innerJoin(
 			thread,
-			and(eq(thread.id, message.threadId), inArray(thread.type, ["conversation", "pod_chat"])),
+			and(
+				eq(thread.id, message.threadId),
+				inArray(thread.type, ["conversation", "pod_chat", "bot_channel"]),
+			),
 		)
 		.leftJoin(user, eq(user.id, message.authorUserId))
 		.leftJoin(author, eq(author.id, message.authorAgentId))

@@ -1,4 +1,4 @@
-import type { ConversationThread, PodChat, RoutineFeed } from "@sugabots/contracts";
+import type { BotChannel, ConversationThread, PodChat, RoutineFeed } from "@sugabots/contracts";
 import type * as schema from "../../database/schema.ts";
 
 /** A pod's chat as the API describes it. Throws on a thread of another type. */
@@ -10,6 +10,14 @@ export function toPodChat(row: schema.ThreadRow): PodChat {
 		main: row.main,
 		archivedAt: row.archivedAt?.toISOString() ?? null,
 	};
+}
+
+/** A bot's channel as the API describes it. Throws on a thread of another type. */
+export function toBotChannel(row: schema.ThreadRow): BotChannel {
+	if (row.type !== "bot_channel" || !row.hostAgentId) {
+		throw new Error(`Thread ${row.id} is not a bot's channel`);
+	}
+	return { kind: "bot_channel", ...commonFields(row), hostAgentId: row.hostAgentId };
 }
 
 /** A thread with a bot or between people as the API describes it. Throws on a thread of another type. */

@@ -30,12 +30,14 @@ import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * Which row of the list is open: the pod's first chat while it is being
- * opened, a bot's conversation while it is being found by the bot's handle,
- * or a conversation, which is a chat, a thread or a routine's thread.
+ * opened, a bot's channel while it is being found by the bot's handle, a new
+ * thread being started with a bot, or a conversation, which is a chat, a
+ * channel, a thread or a routine's thread.
  */
 export type ListSelection =
 	| { kind: "podChat" }
 	| { kind: "bot"; handle: string }
+	| { kind: "newThread"; handle: string }
 	| { kind: "conversation"; conversationId: string }
 	| { kind: "routine"; routineId: string }
 	/** A bot's Routines page, while none of its routines is open. */
@@ -44,9 +46,12 @@ export type ListSelection =
 /** One of a shared pod's chats in its list. */
 export type ListedChat = ChatList["chats"][number];
 
+/** A bot's channel in its pod's list. */
+export type ListedChannel = ChatList["channels"][number];
+
 /**
  * The pod's conversations in the sidebar: a shared pod's chats, then each of
- * its bots, which opens to show its threads.
+ * its bots, which opens its channel and unfolds to show its threads.
  */
 export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListSelection }) {
 	const list = useChatList(pod.slug);
@@ -66,6 +71,7 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 						: undefined
 				}
 				bots={crewIn(agents, pod)}
+				channels={list.data?.channels ?? []}
 				rows={list.data?.threads ?? []}
 				routines={list.data?.routines ?? []}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
@@ -106,6 +112,7 @@ export function ConversationListView({
 	pod,
 	chats,
 	bots,
+	channels = [],
 	rows,
 	routines = [],
 	status,
@@ -120,6 +127,8 @@ export function ConversationListView({
 	chats?: { list: readonly ListedChat[]; onNew: () => void };
 	/** The pod's bots, each listed whether or not it has a thread yet. */
 	bots: readonly Agent[];
+	/** The bots' channels, none until somebody first opens one. */
+	channels?: readonly ListedChannel[];
 	/** The pod's threads, newest message first. */
 	rows: readonly ChatListItem[];
 	/** The pod's routines, each listed under the bot that runs it. */
@@ -140,8 +149,8 @@ export function ConversationListView({
 	const selectedKey =
 		selected?.kind === "conversation"
 			? selected.conversationId
-			: selected?.kind === "bot"
-				? `bot:${selected.handle}`
+			: selected?.kind === "bot" || selected?.kind === "newThread"
+				? `${selected.kind}:${selected.handle}`
 				: selected?.kind === "routine"
 					? `routine:${selected.routineId}`
 					: selected?.kind === "routines"
@@ -172,6 +181,7 @@ export function ConversationListView({
 	const groups = groupByBot(
 		bots,
 		listed.filter((row) => !startedInChatOf(row, byChat)),
+		channels,
 	);
 
 	return (
@@ -214,7 +224,12 @@ export function ConversationListView({
 					label="Bots"
 					open={!folded.has(botsKey)}
 					onToggle={() => toggleFolded(botsKey)}
-					news={newsIn(groups.flatMap((group) => group.threads))}
+					news={newsIn(
+						groups.flatMap((group) => [
+							...group.threads,
+							...(group.channel ? [group.channel] : []),
+						]),
+					)}
 					action={
 						onNewBot && (
 							<IconButton label={`New bot in ${pod.name}`} size="sm" onClick={onNewBot}>
@@ -228,17 +243,22 @@ export function ConversationListView({
 						{status === "ready" && groups.length === 0 && <NoBots onNewBot={onNewBot} />}
 						<ul className="m-0 flex list-none flex-col gap-px p-0">
 							{groups.map((group) => {
-								// A thread opened under a closed bot opens it, so the viewer can see where they are.
 								const botRoutines = routinesOf(group.agent?.id);
 								const holdsRoutine =
 									botRoutines.some((row) => row.routine.id === selectedRoutineId) ||
 									(selected?.kind === "routines" && group.agent?.handle === selected.handle);
 								const holdsSelected =
-									(selected?.kind === "bot" && group.agent?.handle === selected.handle) ||
+									(selected?.kind === "newThread" && group.agent?.handle === selected.handle) ||
 									group.threads.some((row) => isSelected(row.conversation.id)) ||
 									holdsRoutine;
-								const open =
-									openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey);
+								const channelOpen =
+									(selected?.kind === "bot" && group.agent?.handle === selected.handle) ||
+									isSelected(group.channel?.conversation.id);
+								// A bot is open while its channel or anything under it is; the threads
+								// between people, which have no channel, open and close by hand.
+								const open = group.agent
+									? channelOpen || holdsSelected
+									: openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey);
 								const toggle = () => {
 									if (openBots.has(group.key) === open) toggleBot(group.key);
 									setClosedOver(open && holdsSelected ? selectedKey : undefined);
@@ -246,7 +266,7 @@ export function ConversationListView({
 								return (
 									<BotItem
 										key={group.key}
-										starting={selected?.kind === "bot" && group.agent?.handle === selected.handle}
+										channelOpen={channelOpen}
 										pod={pod}
 										group={group}
 										open={open}
@@ -431,10 +451,14 @@ function PodChatRow({
 	);
 }
 
-/** A bot's open threads, newest first; or the threads between people, when `agent` is null. */
+/**
+ * A bot, with its channel once somebody opened it, and its open threads,
+ * newest first; or the threads between people, when `agent` is null.
+ */
 interface BotGroup {
 	key: string;
 	agent: Agent | null;
+	channel?: ListedChannel;
 	threads: ChatListItem[];
 }
 
@@ -445,7 +469,11 @@ const PEOPLE_GROUP_KEY = "people";
  * here, in order of the bots' names so each stays where it was as
  * threads move, then the threads between people.
  */
-function groupByBot(bots: readonly Agent[], threads: readonly ChatListItem[]): BotGroup[] {
+function groupByBot(
+	bots: readonly Agent[],
+	threads: readonly ChatListItem[],
+	channels: readonly ListedChannel[],
+): BotGroup[] {
 	const groups = new Map<string, BotGroup>();
 	const groupFor = (agent: Agent | null) => {
 		const key = agent?.id ?? PEOPLE_GROUP_KEY;
@@ -456,6 +484,7 @@ function groupByBot(bots: readonly Agent[], threads: readonly ChatListItem[]): B
 		return group;
 	};
 	for (const bot of bots) groupFor(bot);
+	for (const row of channels) groupFor(row.agent).channel = row;
 	for (const row of threads) groupFor(row.agent).threads.push(row);
 	return [...groups.values()].sort((a, b) => {
 		if (!a.agent) return 1;
@@ -491,13 +520,6 @@ function startedInChatOf(
 	);
 }
 
-/** Whether something under a bot is new to the viewer or waits on them. */
-function needsAttention(group: BotGroup): boolean {
-	return group.threads.some(
-		(row) => row.needsApproval || row.mentionsYou || row.unreadMessages > 0,
-	);
-}
-
 /** A bot's own part of its row: its face and name, filling the row up to its end. */
 const botClassName =
 	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left text-[14px]";
@@ -506,17 +528,18 @@ const botClassName =
 const THREADS_BEFORE_SHOW_MORE = 4;
 
 /**
- * A bot on one line, which opens to show its threads, or, with none, opens a
- * new thread with it. At its end, folded,
- * how many of their messages are unread, or how many threads it has when none
- * are; under the pointer or while it is open, a + that starts a new thread
- * with it.
+ * A bot on one line, which opens its channel, with its routines and threads
+ * under it while it or one of them is open. At its end, what is new in its
+ * channel and, folded, under it; under the pointer, a + that starts a new
+ * thread with it. The threads between people,
+ * which have no channel, unfold from the whole row, where a caret takes the
+ * place of their mark under the pointer or on focus.
  */
 function BotItem({
 	pod,
 	group,
 	open,
-	starting,
+	channelOpen,
 	onToggle,
 	isSelected,
 	routines,
@@ -525,26 +548,23 @@ function BotItem({
 	pod: Pod;
 	group: BotGroup;
 	open: boolean;
-	/** Whether a new thread with the bot is being started, which marks it when it has no other. */
-	starting: boolean;
+	/** Whether the bot's channel is the page open, or being opened. */
+	channelOpen: boolean;
+	/** Folds the threads between people away or opens them; a bot opens with its channel instead. */
 	onToggle: () => void;
 	isSelected: (conversationId: string | undefined) => boolean;
-	/** The bot's Routines row, under its threads, when it runs any. */
+	/** The bot's Routines row, over its threads, when it runs any. */
 	routines?: ReactNode;
 	/** Whether one of its routines' threads mentions the viewer. */
 	routinesNeedYou?: boolean;
 }) {
-	const { agent } = group;
-	const attention = !open && (needsAttention(group) || routinesNeedYou);
-	const count = group.threads.length;
-	// Folded, a bot is bold over unread threads, and tells a screen reader how many messages.
-	const unread = group.threads.reduce((sum, row) => sum + row.unreadMessages, 0);
+	const { agent, channel } = group;
+	// Unfolded, what is new in the threads shows on their own rows.
+	const folded = newsIn(open ? [] : group.threads);
+	const unread = (channel?.unreadMessages ?? 0) + folded.unreadMessages;
 	const waiting =
-		routinesNeedYou || group.threads.some((row) => row.needsApproval || row.mentionsYou);
-	const name = agent ? agent.name : "People";
-	const empty = count === 0 && !routines;
-	// The bot is the open row while a new thread with it is started.
-	const current = starting;
+		channel?.needsApproval || channel?.mentionsYou || folded.needsYou || (!open && routinesNeedYou);
+	const attention = unread > 0 || waiting === true;
 	const mark = agent ? (
 		<AgentAvatar
 			color={agent.color}
@@ -556,24 +576,47 @@ function BotItem({
 	) : (
 		<Users aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
 	);
-	const label = <span className="min-w-0 flex-1 truncate-fade">{name}</span>;
+	// Under the pointer or on focus, a caret takes the mark's place, as on a pod.
+	const markWithCaret = (
+		<span className="grid size-[18px] shrink-0 place-items-center *:col-start-1 *:row-start-1">
+			<span className="grid group-hover/bot:invisible group-has-focus-visible/bot:invisible">
+				{mark}
+			</span>
+			<ChevronRight
+				aria-hidden
+				size={14}
+				strokeWidth={2.25}
+				className={cn(
+					"invisible text-muted-foreground transition-transform group-hover/bot:visible group-has-focus-visible/bot:visible",
+					open && "rotate-90",
+				)}
+			/>
+		</span>
+	);
+	const nameClassName =
+		attention || channelOpen
+			? "text-foreground"
+			: "text-muted-foreground group-hover/bot:text-foreground";
+	const label = (
+		<span className={cn("min-w-0 flex-1 truncate-fade", attention && "font-semibold")}>
+			{agent ? agent.name : "People"}
+		</span>
+	);
 	return (
 		<li className="flex flex-col">
 			<div
 				className={cn(
 					"group/bot flex h-8 items-center rounded-[6px] pr-1.5",
-					current ? "bg-row-selected" : "hover:bg-row-hover",
+					channelOpen ? "bg-row-selected" : "hover:bg-row-hover",
 				)}
 			>
-				{empty ? (
-					// With no thread to show, the bot opens a new one with it.
+				{agent ? (
 					<Link
-						{...newThreadLink(pod, agent ?? undefined)}
-						aria-current={current ? "page" : undefined}
-						className={cn(
-							botClassName,
-							current ? "text-foreground" : "text-muted-foreground group-hover/bot:text-foreground",
-						)}
+						{...(channel
+							? conversationLink({ pod, conversationId: channel.conversation.id })
+							: agentChatLink({ pod, agent }))}
+						aria-current={channelOpen ? "page" : undefined}
+						className={cn(botClassName, nameClassName)}
 					>
 						{mark}
 						{label}
@@ -582,58 +625,25 @@ function BotItem({
 					<button
 						type="button"
 						aria-expanded={open}
-						aria-current={current ? "page" : undefined}
 						onClick={onToggle}
-						className={cn(
-							botClassName,
-							attention || current
-								? "text-foreground"
-								: "text-muted-foreground group-hover/bot:text-foreground",
-							attention && "font-semibold",
-						)}
+						className={cn(botClassName, nameClassName)}
 					>
-						{/* Under the pointer or on focus, a caret takes the mark's place, as on a pod. */}
-						<span className="grid size-[18px] shrink-0 place-items-center *:col-start-1 *:row-start-1">
-							<span className="grid group-hover/bot:invisible group-has-focus-visible/bot:invisible">
-								{mark}
-							</span>
-							<ChevronRight
-								aria-hidden
-								size={14}
-								strokeWidth={2.25}
-								className={cn(
-									"invisible text-muted-foreground transition-transform group-hover/bot:visible group-has-focus-visible/bot:visible",
-									open && "rotate-90",
-								)}
-							/>
-						</span>
+						{markWithCaret}
 						{label}
 					</button>
 				)}
 				{/* What is unread stays in view; the + comes in beside it under the pointer or on focus. */}
 				{attention && (
 					<span className={END_SLOT}>
-						<UnreadMarker unreadMessages={unread} needsYou={waiting} />
+						<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
 					</span>
 				)}
-				{/* Otherwise the count and the + share the end: the count while folded, the + under the pointer or on focus. */}
 				<span
 					className={cn(
-						"size-[22px] shrink-0 place-items-center *:col-start-1 *:row-start-1",
+						"size-[22px] shrink-0 place-items-center",
 						attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
 					)}
 				>
-					{!attention && count > 0 && (
-						<span
-							aria-hidden
-							className={cn(
-								"text-[12px] text-subtle-foreground tabular-nums group-has-focus-visible/bot:invisible group-hover/bot:invisible",
-								open && "invisible",
-							)}
-						>
-							{count}
-						</span>
-					)}
 					<IconButton
 						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
 						size="sm"
@@ -647,7 +657,7 @@ function BotItem({
 					</IconButton>
 				</span>
 			</div>
-			{open && !empty && (
+			{open && (group.threads.length > 0 || routines) && (
 				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
 			)}
 		</li>

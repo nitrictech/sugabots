@@ -32,9 +32,9 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("open", ({ params, payload }) =>
+			.handle("openBotChannel", ({ params, payload }) =>
 				chats
-					.open({ ...payload, workspace: params.workspace })
+					.openBotChannel({ ...payload, workspace: params.workspace })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("openRoutineFeed", ({ params }) =>

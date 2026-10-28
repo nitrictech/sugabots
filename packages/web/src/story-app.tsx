@@ -1,6 +1,6 @@
 import type {
 	Agent,
-	ChatListItem,
+	BotChannel,
 	ChatMessageItem,
 	ConversationThread,
 	Message,
@@ -65,11 +65,26 @@ export const storyPods: Pod[] = podsWithBots.map(({ pod }) =>
 export const storyBots: Agent[] = podsWithBots.flatMap(({ bots }) => bots);
 
 /** One thread per bot, by the bot's id. */
+export function storyChannelFor(agent: Agent): BotChannel {
+	const suffix = agent.id.slice(-4);
+	return {
+		kind: "bot_channel",
+		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
+		workspaceId: agent.workspaceId,
+		podId: agent.podId,
+		hostAgentId: agent.id,
+		title: agent.name,
+		createdAt: "2026-09-18T06:00:00.000Z",
+		updatedAt: "2026-09-18T06:10:00.000Z",
+	};
+}
+
+/** A thread with `agent`, apart from its channel. */
 export function storyConversationFor(agent: Agent): ConversationThread {
 	const suffix = agent.id.slice(-4);
 	return {
 		kind: "thread",
-		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
+		id: `0199a3a0-0000-7000-8000-00000000d${suffix.slice(1)}`,
 		workspaceId: agent.workspaceId,
 		podId: agent.podId,
 		hostAgentId: agent.id,
@@ -140,7 +155,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 
 /** What a chat's thread holds: its messages, and who is in it. */
 export function storyChatDetails(agent: Agent, messages: Message[] = []): ThreadDetails {
-	const chat = storyConversationFor(agent);
+	const chat = storyChannelFor(agent);
 	const bot = {
 		kind: "agent" as const,
 		id: agent.id,
@@ -158,7 +173,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 			podId: agent.podId,
 			hostAgentId: agent.id,
 			conversationId: chat.id,
-			type: "conversation",
+			type: "bot_channel",
 			title: chat.title,
 			status: "done",
 			parentThreadId: null,
@@ -244,7 +259,7 @@ export function storyPodChatDetails(
 
 /** What a chat's sidebar shows: a summary, and who has written lately. */
 export function storyChatActivity(agent: Agent, messages: Message[] = []): ThreadActivity {
-	const chat = storyConversationFor(agent);
+	const chat = storyChannelFor(agent);
 	const details = storyChatDetails(agent, messages);
 	return {
 		summary: {
@@ -291,7 +306,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const messages = data.messages ?? {};
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
 	const botForThread = (threadId: string) =>
-		bots.find((bot) => storyConversationFor(bot).id === threadId);
+		bots.find((bot) => storyChannelFor(bot).id === threadId);
 	const podForChat = (threadId: string) =>
 		pods.find((pod) => pod.kind === "shared" && storyPodChatFor(pod).id === threadId);
 
@@ -343,33 +358,22 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			// By the pod's id or its slug, as the API takes it.
 			const named = new URL(request.url).searchParams.get("pod");
 			const pod = pods.find((one) => one.id === named || one.slug === named);
-			// A conversation with each bot somebody has written to.
-			const items: ChatListItem[] = bots
+			// A channel with each of the pod's bots.
+			const channels = bots
 				.filter((bot) => bot.podId === pod?.id)
-				.flatMap((bot) => {
-					const last = messages[bot.id]?.at(-1);
-					if (!last) return [];
-					return [
-						{
-							agent: bot,
-							conversation: storyConversationFor(bot),
-							lastMessage: {
-								preview: last.content,
-								authorUserId: last.author.kind === "person" ? last.author.id : null,
-								at: last.createdAt,
-							},
-							waitingOn: null,
-							unreadMessages: 0,
-							needsApproval: false,
-							mentionsYou: false,
-						},
-					];
-				});
+				.map((bot) => ({
+					agent: bot,
+					conversation: storyChannelFor(bot),
+					unreadMessages: 0,
+					needsApproval: false,
+					mentionsYou: false,
+				}));
 			return HttpResponse.json({
 				routines: [],
 				chats:
 					pod?.kind === "shared" ? [{ conversation: storyPodChatFor(pod), unreadMessages: 0 }] : [],
-				threads: items,
+				channels,
+				threads: [],
 			});
 		}),
 		http.post(api("/workspaces/:workspace/pods/:podId/chat"), ({ params }) => {
@@ -378,11 +382,11 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				? HttpResponse.json(storyPodChatFor(pod))
 				: new HttpResponse(null, { status: 404 });
 		}),
-		http.post(api("/workspaces/:workspace/conversations"), async ({ request }) => {
+		http.post(api("/workspaces/:workspace/bot-channels"), async ({ request }) => {
 			const body = (await request.json()) as { hostAgentId: string };
 			const bot = botById(body.hostAgentId);
 			return bot
-				? HttpResponse.json(storyConversationFor(bot))
+				? HttpResponse.json(storyChannelFor(bot))
 				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
