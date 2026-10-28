@@ -1,7 +1,7 @@
 import type { Message, ThreadDetails } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
@@ -155,7 +155,14 @@ function Preview({ children, run }: { children: React.ReactNode; run?: ThreadDet
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
 		client.setQueryData(["thread", THREAD], collaboration);
-		if (run) client.setQueryData(["thread", RUN], run);
+		if (run?.routineExecution) {
+			client.setQueryData(["thread", RUN], run);
+			// The run is its routine's latest, so a failure may be retried.
+			client.setQueryData(["routines", "runs", run.routineExecution.routineId], {
+				items: [run.routineExecution],
+				nextCursor: null,
+			});
+		}
 		client.setQueryData(["connections", revenue.id], []);
 		// The run's link to its routine is found through the bot's pod.
 		client.setQueryData(
@@ -234,7 +241,10 @@ export const RoutineRun = meta.story({
 	},
 });
 
-/** A run that failed says why, above what it managed. */
+/**
+ * A run that failed says why, as its bot's post in the routine's thread does,
+ * and, as the routine's latest run, offers to run it again.
+ */
 export const FailedRoutineRun = meta.story({
 	args: { threadId: RUN, frame: RUN_PAGE },
 	render: (args) => (
@@ -245,6 +255,9 @@ export const FailedRoutineRun = meta.story({
 		</Preview>
 	),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("alert")).toHaveTextContent("HubSpot did not answer");
+		const failure = await canvas.findByRole("article", { name: "Overnight outbound: Failed" });
+		await expect(failure).toHaveTextContent("HubSpot did not answer within 30 seconds.");
+		await expect(within(failure).getByRole("button", { name: "Retry" })).toBeVisible();
+		await expect(canvas.queryByRole("alert")).toBeNull();
 	},
 });

@@ -1,6 +1,6 @@
 import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Braces, ChevronLeft, CircleAlert, ExternalLink } from "lucide-react";
+import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -16,6 +16,7 @@ import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
+import { FailedRunMessage } from "./RoutineRun.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
@@ -161,14 +162,8 @@ export function ChatThreadPanel({
 						{query.isLoadingOlder ? "Loading…" : "Load older messages"}
 					</Button>
 				)}
-				{type === "routine" && routineExecution?.error && (
-					<p
-						role="alert"
-						className="mx-[18px] mb-4 flex items-start gap-2 rounded-lg bg-destructive-hover px-3 py-2.5 text-destructive-text text-sm"
-					>
-						<CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-						{routineExecution.error}
-					</p>
+				{type === "routine" && routineExecution?.state === "failed" && (
+					<FailedRunMessage execution={routineExecution} agent={host} />
 				)}
 				<ThreadConversation
 					fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
