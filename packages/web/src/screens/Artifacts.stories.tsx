@@ -92,91 +92,51 @@ const meta = preview.meta({
 });
 
 /**
- * A pod's artifacts, newest first under the month each was last updated in,
- * each with who made it and when, and a menu to download it. Each opens beside
- * the chat of the bot that made it.
+ * A pod's artifacts, newest first under when each was last updated, each with
+ * its kind, version and who made it. Each opens beside the list.
  */
 export const List = meta.story({
-	args: { onDownload: fn() },
-	render: ({ onDownload }) => (
-		<ArtifactListView
-			pod={revenue}
-			artifacts={[plan, dashboard]}
-			agents={[growthDesk]}
-			now={now}
-			download={{ onDownload }}
-		/>
-	),
-	play: async ({ args, canvas, userEvent }) => {
+	render: () => <ArtifactListView pod={revenue} artifacts={[plan, dashboard]} now={now} />,
+	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /Q4 outreach plan/ })).toHaveAttribute(
 			"href",
-			expect.stringContaining(`/agents/${growthDesk.handle}?artifact=${plan.id}`),
+			expect.stringContaining(`/artifacts/${plan.id}`),
 		);
-		// Its bot has been removed, so it opens on a page of its own.
-		await expect(canvas.getByRole("link", { name: /Pipeline by stage/ })).toHaveAttribute(
-			"href",
-			expect.stringContaining(`/artifacts/${dashboard.id}`),
+		await expect(canvas.getByRole("link", { name: /Q4 outreach plan/ })).toHaveTextContent(
+			"Document, v3, Growth Desk",
 		);
-		const september = canvas.getByRole("region", { name: "September" });
-		await expect(within(september).getByText("By a removed bot")).toBeVisible();
-		await expect(within(september).getByText("Updated Sep 24")).toBeVisible();
-		await expect(canvas.getByRole("region", { name: "October" })).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "More for Pipeline by stage" }));
-		await expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Download" }));
-		await expect(args.onDownload).toHaveBeenCalledWith(dashboard.id);
+		const earlier = canvas.getByRole("region", { name: "Earlier this week" });
+		await expect(within(earlier).getByText(/A removed bot$/)).toBeVisible();
+		await expect(canvas.getByRole("region", { name: "Today" })).toBeVisible();
 	},
 });
 
-/** Those who manage the pod can delete one from its menu, once they confirm it. */
-export const ListDelete = meta.story({
-	args: { onDelete: fn() },
-	render: ({ onDelete }) => (
-		<ArtifactListView
-			pod={revenue}
-			artifacts={[plan, dashboard]}
-			agents={[growthDesk]}
-			now={now}
-			download={{ onDownload: fn() }}
-			deletion={{ pending: false, onDelete }}
-		/>
-	),
-	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "More for Q4 outreach plan" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-		const dialog = await screen.findByRole("dialog", { name: "Delete Q4 outreach plan?" });
-		await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-		await expect(args.onDelete).toHaveBeenCalledWith(plan.id, expect.any(Function));
-	},
-});
-
-/** A download that failed says so above the list. */
-export const ListDownloadFailed = meta.story({
+/** One open beside the list, its row marked. */
+export const ListWithOneOpen = meta.story({
 	render: () => (
-		<ArtifactListView
-			pod={revenue}
-			artifacts={[plan, dashboard]}
-			agents={[growthDesk]}
-			now={now}
-			download={{ error: "The API did not answer.", onDownload: fn() }}
-		/>
+		<ArtifactListView pod={revenue} artifacts={[plan, dashboard]} selectedId={plan.id} now={now}>
+			<ArtifactStageView
+				pod={revenue}
+				artifact={atVersion(plan, 3, planContent)}
+				versions={versions}
+				now={now}
+				onVersionChange={fn()}
+				onClose={fn()}
+			/>
+		</ArtifactListView>
 	),
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Could not download it/)).toBeVisible();
+		await expect(canvas.getByRole("link", { name: /Q4 outreach plan/ })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(canvas.getByRole("heading", { name: "Risks" })).toBeVisible();
 	},
 });
 
 /** Before any bot has made one, the page says how one gets here. */
 export const Empty = meta.story({
-	render: () => (
-		<ArtifactListView
-			pod={revenue}
-			artifacts={[]}
-			agents={[growthDesk]}
-			now={now}
-			download={{ onDownload: fn() }}
-		/>
-	),
+	render: () => <ArtifactListView pod={revenue} artifacts={[]} now={now} />,
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(`No artifacts in ${revenue.name} yet`)).toBeVisible();
 	},
@@ -207,10 +167,14 @@ export const Document = meta.story({
 		await expect(await screen.findByRole("menuitem", { name: "Download" })).toBeVisible();
 		await expect(screen.getByRole("menuitem", { name: "Copy link" })).toBeVisible();
 		await expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+		await userEvent.keyboard("{Escape}");
+		// The accessibility check after the story would otherwise catch the
+		// menu's focus guards while it is still closing.
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 	},
 });
 
-/** Those who manage the pod can delete an artifact, once they confirm it. */
+/** Those who manage the pod can delete an artifact from its menu, once they confirm it. */
 export const Delete = meta.story({
 	args: { onDelete: fn() },
 	render: ({ onDelete }) => (
