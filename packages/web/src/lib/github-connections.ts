@@ -111,11 +111,13 @@ export function useConnectionRepositories(podId: string, connectionId: string | 
 	};
 }
 
-/** GitHub takes a manifest only as a posted form, so the browser leaves with one. */
+/** GitHub takes a manifest only as a posted form, so a new tab goes with one. */
 function postToGitHub({ url, manifest }: GitHubAppForm) {
 	const form = document.createElement("form");
 	form.method = "post";
 	form.action = url;
+	form.target = "_blank";
+	form.rel = "noopener noreferrer";
 	const field = document.createElement("input");
 	field.type = "hidden";
 	field.name = "manifest";
