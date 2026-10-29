@@ -301,10 +301,7 @@ export function DesktopScreen({
 		};
 		element.addEventListener("keydown", keepPasteShortcut, { capture: true });
 		document.addEventListener("paste", pasteIntoDesktop);
-		// Phones close a background page's connections when the person
-		// switches apps or locks the screen, and may only report it once the
-		// page is back. A connection lost while the page was hidden reconnects
-		// as soon as the page is shown again.
+		// A hidden page's connection may be closed, and only reported closed once the page is shown.
 		let hiddenWhileConnected = document.hidden;
 		let droppedWhileHidden = false;
 		const reconnect = () => setAttempt((count) => count + 1);
