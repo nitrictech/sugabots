@@ -425,57 +425,20 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			});
 		});
 
-		it("asks the person to approve new instructions once the bot is set up", async () => {
+		it("saves new instructions straight away once the bot is set up", async () => {
 			await onDatabase((db) =>
-				db.update(agent).set({ prompt: "You triage support tickets." }).where(eq(agent.id, hostId)),
-			);
-			const proposed = {
-				instructions: "You triage support tickets and billing questions.",
-				description: "Sorts support tickets and billing questions by urgency.",
-			};
-			let approvalAsked: unknown;
-			const model = Models.fromStream((input) =>
-				Effect.sync(() => {
-					const toolApproval = input.toolApproval as
-						| Record<string, (input: unknown) => unknown>
-						| undefined;
-					approvalAsked = toolApproval?.[SAVE_INSTRUCTIONS_TOOL]?.(proposed);
-					return streamed(chunks("I'll update my instructions."), {
-						approvalRequests: [
-							{
-								type: "tool-approval-request",
-								approvalId: "approval-instructions",
-								toolCall: {
-									type: "tool-call",
-									toolCallId: "sdk-1",
-									toolName: SAVE_INSTRUCTIONS_TOOL,
-									input: proposed,
-								},
-							},
-						] as never,
-						responseMessages: [
-							{ role: "assistant", content: "I'll update my instructions." },
-						] as never,
-					});
-				}),
+				db
+					.update(agent)
+					.set({ prompt: "You answer billing questions." })
+					.where(eq(agent.id, hostId)),
 			);
 
-			const outcome = await segmentWith(model);
+			await segmentWith(savingInstructions());
 
-			expect(approvalAsked).toBe("user-approval");
-			expect(outcome).toEqual({ _tag: "Suspended", approvals: ["approval-instructions"] });
-			expect(await storedAgent()).toMatchObject({ prompt: "You triage support tickets." });
-			const calls = await onDatabase((db) =>
-				db.select().from(toolCall).where(eq(toolCall.turnId, prepared.turnId)),
-			);
-			expect(calls).toMatchObject([
-				{
-					tool: SAVE_INSTRUCTIONS_TOOL,
-					input: proposed,
-					approvalStatus: "pending",
-					mutating: true,
-				},
-			]);
+			expect(await storedAgent()).toEqual({
+				prompt: "You triage support tickets.",
+				description: "Sorts support tickets by urgency.",
+			});
 		});
 	});
 });

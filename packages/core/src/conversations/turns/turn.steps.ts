@@ -33,10 +33,6 @@ import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import {
-	SAVE_INSTRUCTIONS_TOOL,
-	savingInstructionsNeedsApproval,
-} from "../tools/save-instructions/tool.ts";
-import {
 	callToolApproval,
 	findApprovalTarget,
 	toolCatalogNote,
@@ -454,7 +450,6 @@ const streamReply = (
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				if ("builtIn" in binding) {
-					if (binding.tool === SAVE_INSTRUCTIONS_TOOL) continue;
 					if (!sandbox.usable || !sandbox.requests[binding.tool]) {
 						return yield* new ApprovedToolChanged({ tool: binding.tool });
 					}
@@ -473,10 +468,6 @@ const streamReply = (
 			}
 			const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
 				...callToolApproval(connections.tools),
-				[SAVE_INSTRUCTIONS_TOOL]: () =>
-					savingInstructionsNeedsApproval(prepared.context.agent)
-						? "user-approval"
-						: "not-applicable",
 				// A request refused outright runs at once, to be recorded as refused.
 				...Object.fromEntries(
 					Object.entries(sandbox.requests).map(([key, request]) => [
@@ -604,23 +595,21 @@ const streamReply = (
 								ToolCallRepository.PendingToolApproval,
 								"tool" | "input" | "binding" | "mutating"
 						  >
-						| undefined =
-						sandbox.requests[request.toolCall.toolName] ||
-						request.toolCall.toolName === SAVE_INSTRUCTIONS_TOOL
+						| undefined = sandbox.requests[request.toolCall.toolName]
+						? {
+								tool: request.toolCall.toolName,
+								input: request.toolCall.input,
+								binding: { kind: "built-in" },
+								mutating: true,
+							}
+						: target
 							? {
-									tool: request.toolCall.toolName,
-									input: request.toolCall.input,
-									binding: { kind: "built-in" },
-									mutating: true,
+									tool: target.key,
+									input: target.input,
+									binding: bindingOf(target.offered),
+									mutating: target.offered.mutating,
 								}
-							: target
-								? {
-										tool: target.key,
-										input: target.input,
-										binding: bindingOf(target.offered),
-										mutating: target.offered.mutating,
-									}
-								: undefined;
+							: undefined;
 					if (!asked) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}

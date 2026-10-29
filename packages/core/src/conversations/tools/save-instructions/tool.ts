@@ -4,18 +4,8 @@ import { Effect, Schema } from "effect";
 import { AuthenticatedUserId, CurrentActor } from "../../../authorization/current-actor.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { AgentAdministration } from "../../../workspaces/agents/agent-administration.ts";
-import { INTERVIEW_PROMPT } from "../../../workspaces/agents/interview-prompt.ts";
 
 export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
-
-/**
- * Whether the person an agent answers approves the exact text before it saves
- * its instructions. A new agent saves what it worked out in its interview
- * straight away, so it can get on with the work; once it has been set up, its
- * instructions change only with that approval.
- */
-export const savingInstructionsNeedsApproval = (agent: { prompt: string }) =>
-	agent.prompt !== INTERVIEW_PROMPT;
 
 export type SaveInstructionsResult =
 	| {
