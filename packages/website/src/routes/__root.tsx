@@ -2,18 +2,49 @@ import rubikUrl from "@fontsource-variable/rubik/files/rubik-latin-wght-normal.w
 import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
-import { type ReactNode, useEffect } from "react";
+import { type ComponentProps, type ReactNode, useEffect } from "react";
 import { startAnalytics } from "@/analytics";
+import { NotFoundPage } from "@/components/not-found-page";
 import { pageUrl, siteMeta } from "@/site-meta";
 import stylesUrl from "../styles.css?url";
 
+const documentMeta = [
+	{ charSet: "utf-8" },
+	{ name: "viewport", content: "width=device-width, initial-scale=1" },
+];
+
+const assetLinks: ComponentProps<"link">[] = [
+	{ rel: "stylesheet", href: stylesUrl },
+	// Fetched with the stylesheet rather than after it, so headings don't re-wrap when it arrives.
+	{
+		rel: "preload",
+		href: rubikUrl,
+		as: "font",
+		type: "font/woff2",
+		crossOrigin: "anonymous",
+	},
+	{ rel: "icon", type: "image/svg+xml", href: logoUrl },
+];
+
 export const Route = createRootRoute({
-	head: ({ matches }) => {
+	head: ({ match, matches }) => {
+		// Set when the root shows the not-found page in place of its child routes, both for an address
+		// no route matches and for a docs address with no page. TanStack has no public flag for this,
+		// and the match's `status` stays "success".
+		if (match._notFound) {
+			return {
+				meta: [
+					...documentMeta,
+					{ title: "Page not found | Sugabots" },
+					{ name: "robots", content: "noindex" },
+				],
+				links: assetLinks,
+			};
+		}
 		const url = pageUrl(matches.at(-1)?.pathname ?? "/");
 		return {
 			meta: [
-				{ charSet: "utf-8" },
-				{ name: "viewport", content: "width=device-width, initial-scale=1" },
+				...documentMeta,
 				{ title: siteMeta.title },
 				{ name: "description", content: siteMeta.description },
 				{ property: "og:type", content: "website" },
@@ -25,29 +56,10 @@ export const Route = createRootRoute({
 				{ property: "og:image:height", content: "630" },
 				{ name: "twitter:card", content: "summary_large_image" },
 			],
-			links: [
-				{ rel: "canonical", href: url },
-				{ rel: "stylesheet", href: stylesUrl },
-				// Fetched with the stylesheet rather than after it, so headings don't re-wrap when it arrives.
-				{
-					rel: "preload",
-					href: rubikUrl,
-					as: "font",
-					type: "font/woff2",
-					crossOrigin: "anonymous",
-				},
-				{ rel: "icon", type: "image/svg+xml", href: logoUrl },
-			],
+			links: [{ rel: "canonical", href: url }, ...assetLinks],
 		};
 	},
-	notFoundComponent: () => (
-		<main className="mx-auto flex max-w-3xl flex-col gap-2 px-6 py-16">
-			<h1 className="text-4xl font-extrabold tracking-tight">Page not found</h1>
-			<a href="/" className="text-muted-foreground hover:text-foreground">
-				Back to Sugabots
-			</a>
-		</main>
-	),
+	notFoundComponent: NotFoundPage,
 	shellComponent: RootDocument,
 });
 

@@ -10,6 +10,7 @@ import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import type { ShikiTransformer } from "shiki";
 import { defineConfig, type Plugin } from "vite";
 import { markdownPath } from "./src/markdown.ts";
+import { NOT_FOUND_PAGE_PATH, NOT_FOUND_PRERENDER_HEADER } from "./src/not-found.ts";
 import { sitePagePaths } from "./src/site-pages.ts";
 
 /** Puts a code block's language, and any `title="…"` from its fence, on its `<pre>` for the docs' code frame. */
@@ -80,7 +81,15 @@ export default defineConfig({
 		// at the address the site links to, without redirecting to add a trailing slash. Route
 		// discovery is off because it lists `/docs/` beside `/docs`, a second copy of the page.
 		tanstackStart({
-			pages: [{ path: "/" }, { path: "/docs" }, ...textFiles()],
+			pages: [
+				{ path: "/" },
+				{ path: "/docs" },
+				{
+					path: NOT_FOUND_PAGE_PATH,
+					prerender: { headers: { [NOT_FOUND_PRERENDER_HEADER]: "true" } },
+				},
+				...textFiles(),
+			],
 			prerender: {
 				enabled: true,
 				crawlLinks: true,
