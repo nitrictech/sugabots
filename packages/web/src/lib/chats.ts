@@ -567,7 +567,7 @@ function useStartThread(podChatId: string | undefined) {
 				client.api.chats.startThread({ params: { conversationId: podChatId }, payload }),
 			);
 		},
-		onSettled: () => podChatId && refreshPodChat(queries, workspaceId, podChatId),
+		onSettled: () => podChatId && refreshThreadsFrom(queries, workspaceId, podChatId),
 	});
 }
 
@@ -615,16 +615,16 @@ export function useThreadStarter(podChatId: string | undefined, attachments: Com
 }
 
 /**
- * Starts a thread between people from a message in the pod's chat
- * `podChatId`, or finds the one it has.
+ * Starts a thread from a message in `conversationId`, a pod's chat or a bot's
+ * channel, or finds the one it has.
  */
-export function useThreadFrom(podChatId: string) {
+export function useThreadFrom(conversationId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
 		mutationFn: (messageId: string) =>
 			Effect.runPromise(client.api.chats.threadFrom({ params: { messageId } })),
-		onSettled: () => refreshPodChat(queries, workspaceId, podChatId),
+		onSettled: () => refreshThreadsFrom(queries, workspaceId, conversationId),
 	});
 }
 
@@ -733,10 +733,14 @@ function useRefreshChat(conversationId: string) {
 		]);
 }
 
-/** Fetches again what shows the threads started from a pod's chat: the chat and the pod's list. */
-function refreshPodChat(queries: QueryClient, workspaceId: string | undefined, podChatId: string) {
+/** Fetches again what shows the threads started from `conversationId`: it and the pod's list. */
+function refreshThreadsFrom(
+	queries: QueryClient,
+	workspaceId: string | undefined,
+	conversationId: string,
+) {
 	return Promise.all([
-		queries.invalidateQueries({ queryKey: ["chat-messages", podChatId] }),
+		queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
 		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 	]);
 }

@@ -930,7 +930,7 @@ const start = (podChatId: string, messageId: string, botId: string, text: string
 					ConversationEvent.ThreadOpened({
 						workspaceId: row.workspaceId,
 						podId: row.podId,
-						podChatId: podChat.id,
+						parentThreadId: podChat.id,
 						threadId: row.id,
 					}),
 				]);

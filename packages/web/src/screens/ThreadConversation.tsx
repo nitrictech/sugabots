@@ -152,9 +152,9 @@ export function ThreadConversation({
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
 	onReply?: (message: Message) => void;
-	/** In a pod's chat: starts a thread from the message. */
+	/** In a pod's chat or a bot's channel: starts a thread from the message. */
 	onStartThread?: (message: Message) => void;
-	/** In a pod's chat: the lines of the threads started from the message, drawn under it. */
+	/** In a pod's chat or a bot's channel: the lines of the threads started from the message, drawn under it. */
 	threadLinesOf?: (message: Message) => ReactNode;
 	/**
 	 * In a routine's own thread, where each result already sits under its run,

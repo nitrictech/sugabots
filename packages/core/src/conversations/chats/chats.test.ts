@@ -462,6 +462,48 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(details.startedFrom).toMatchObject({ id: said.id });
 	});
 
+	it("starts one thread with the bot from a message in its channel, which answers in it", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const [said] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: channel.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Northwind's renewal is due Friday." }],
+					content: "Northwind's renewal is due Friday.",
+				})
+				.returning(),
+		);
+		if (!said) throw new Error("Could not post the bot's message");
+
+		const [first, again] = await Promise.all([
+			chats.threadFrom(said.id),
+			chats.threadFrom(said.id),
+		]);
+
+		expect(again.id).toBe(first.id);
+		expect(first).toMatchObject({
+			hostAgentId: agentId,
+			title: "Northwind's renewal is due Friday.",
+		});
+		expect((await view.messages(channel.id))?.items).toContainEqual(
+			expect.objectContaining({ kind: "thread", threadId: first.id, originMessageId: said.id }),
+		);
+		await chats.post({
+			conversationId: first.id,
+			messageId: crypto.randomUUID(),
+			content: "Draft the reminder to them.",
+		});
+		expect(await runOnPostgres(runningTurns(first.id))).toHaveLength(1);
+	});
+
 	it("lists a pod by its slug as by its id, as an address names it", async () => {
 		const byId = await view.list({ workspace: workspaceId, pod: podId });
 		const [room] = await onDatabase((db) =>

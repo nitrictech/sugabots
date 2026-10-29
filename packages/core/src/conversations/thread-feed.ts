@@ -128,13 +128,13 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 		],
-		ThreadOpened: ({ workspaceId, podId, podChatId, threadId }) => [
+		ThreadOpened: ({ workspaceId, podId, parentThreadId, threadId }) => [
 			listedThreadChanged(workspaceId, podId, threadId),
 			{
 				channel: workspaceChannel(workspaceId),
 				event: PodAudience.forPod(
 					podId,
-					streamEvent("conversation.thread_changed", { conversationId: podChatId, threadId }),
+					streamEvent("conversation.thread_changed", { conversationId: parentThreadId, threadId }),
 				),
 			},
 		],
