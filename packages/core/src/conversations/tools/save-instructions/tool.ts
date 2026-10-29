@@ -1,13 +1,21 @@
-import { type Agent, DESCRIPTION_MAX_LENGTH, PROMPT_MAX_LENGTH } from "@sugabots/contracts";
+import { DESCRIPTION_MAX_LENGTH, PROMPT_MAX_LENGTH } from "@sugabots/contracts";
 import { tool } from "ai";
-import { eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { AuthenticatedUserId, CurrentActor } from "../../../authorization/current-actor.ts";
-import { query, type RunEffect } from "../../../database/database.ts";
-import { pod, workspace } from "../../../database/schema.ts";
+import type { RunEffect } from "../../../database/database.ts";
 import type { AgentAdministration } from "../../../workspaces/agents/agent-administration.ts";
+import { INTERVIEW_PROMPT } from "../../../workspaces/agents/interview-prompt.ts";
 
 export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
+
+/**
+ * Whether the person an agent answers approves the exact text before it saves
+ * its instructions. A new agent saves what it worked out in its interview
+ * straight away, so it can get on with the work; once it has been set up, its
+ * instructions change only with that approval.
+ */
+export const savingInstructionsNeedsApproval = (agent: { prompt: string }) =>
+	agent.prompt !== INTERVIEW_PROMPT;
 
 export type SaveInstructionsResult =
 	| {
@@ -35,15 +43,15 @@ export function saveInstructionsTool({
 	agentId,
 	askedBy,
 	agents,
-	webAppUrl,
+	settingsUrl,
 	run,
 }: {
 	agentId: string;
 	/** The person whose message the turn answers, or none. */
 	askedBy: string | null;
 	agents: Pick<AgentAdministration.Interface, "update">;
-	/** Where the web app is served, without a trailing slash. */
-	webAppUrl: string;
+	/** The agent's settings page, which shows what it saved. */
+	settingsUrl: string;
 	run: RunEffect;
 }) {
 	return tool({
@@ -68,9 +76,8 @@ export function saveInstructionsTool({
 			if (!askedBy) return { refused: NOBODY_ASKED };
 			return run(
 				agents.update({ agentId, changes: { prompt: instructions, description } }).pipe(
+					Effect.as<SaveInstructionsResult>({ saved: true, settingsUrl }),
 					CurrentActor.provide(AuthenticatedUserId.vouchedFor(askedBy)),
-					Effect.andThen((saved) => settingsUrlOf(saved, webAppUrl)),
-					Effect.map((settingsUrl): SaveInstructionsResult => ({ saved: true, settingsUrl })),
 					Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>
 						Effect.succeed<SaveInstructionsResult>({ refused: MAY_NOT_EDIT }),
 					),
@@ -80,22 +87,3 @@ export function saveInstructionsTool({
 		},
 	});
 }
-
-/** The address of `saved`'s page in the web app's settings, which shows its instructions. */
-const settingsUrlOf = (saved: Agent, webAppUrl: string) =>
-	query((db) =>
-		db
-			.select({ workspaceSlug: workspace.slug, podSlug: pod.slug })
-			.from(pod)
-			.innerJoin(workspace, eq(workspace.id, pod.workspaceId))
-			.where(eq(pod.id, saved.podId))
-			.limit(1),
-	).pipe(
-		Effect.flatMap(([row]) =>
-			row
-				? Effect.succeed(
-						`${webAppUrl}/${row.workspaceSlug}/settings/pods/${row.podSlug}/agents/${saved.handle}`,
-					)
-				: Effect.die(new Error("A saved agent is not in a pod")),
-		),
-	);

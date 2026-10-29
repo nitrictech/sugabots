@@ -25,7 +25,11 @@ import {
 } from "../tools/routines/tool.ts";
 import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/sandbox/tools.ts";
 import type { SandboxTools } from "../tools/sandbox.ts";
-import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
+import {
+	SAVE_INSTRUCTIONS_TOOL,
+	saveInstructionsTool,
+	savingInstructionsNeedsApproval,
+} from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
@@ -258,10 +262,16 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			agentId: prepared.context.agent.id,
 			askedBy: prepared.context.askedBy,
 			agents: deps.agents,
-			webAppUrl: deps.webAppUrl,
+			settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/agents/${prepared.context.agent.handle}`,
 			run: deps.run,
 		}),
-		{ ...recording, mutating: true },
+		{
+			...recording,
+			mutating: true,
+			...(savingInstructionsNeedsApproval(prepared.context.agent)
+				? { approval: { approvals: deps.approvals, binding: { kind: "built-in" } } }
+				: {}),
+		},
 	);
 	tools.collaborate = collaborateTool({
 		from: {
