@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect, fn, within } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 
@@ -72,7 +72,7 @@ export const Choosing = meta.story({
 		await userEvent.click(dialog.getByRole("button", { name: "Save" }));
 
 		await expect(movedTo).toHaveBeenCalledWith("Asia/Tokyo");
-		await expect(args.onOpenChange).toHaveBeenCalledWith(false);
+		await waitFor(() => expect(args.onOpenChange).toHaveBeenCalledWith(false));
 	},
 });
 
