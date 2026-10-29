@@ -39,6 +39,18 @@ export const newWorkspaceSchema = Schema.Struct({
 });
 export type NewWorkspace = typeof newWorkspaceSchema.Type;
 
+/**
+ * The workspace's time zone, and how many of its routines have a schedule in
+ * that zone. Those schedules move with the workspace when its zone changes.
+ */
+export const workspaceTimeZoneSchema = Schema.Struct({
+	timeZone: Schema.String,
+	scheduledRoutines: Schema.Number,
+});
+export type WorkspaceTimeZone = typeof workspaceTimeZoneSchema.Type;
+
+export const workspaceTimeZoneChangeSchema = Schema.Struct({ timeZone: timeZoneSchema });
+
 /** `id` is the membership, which role changes and removal address. */
 export const workspaceMemberSchema = Schema.Struct({
 	id: uuidSchema,

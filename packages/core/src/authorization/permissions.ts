@@ -39,7 +39,7 @@ import {
 export type WorkspacePermission =
 	/** Belong to the workspace: see its roster, its enabled models, its own personal pod. */
 	| "workspace.read"
-	/** Rename the workspace and change its address. */
+	/** Rename the workspace, change its address, and move it to another time zone. */
 	| "workspace.update"
 	/** Configure the model and search providers the workspace runs on. */
 	| "workspace.providers.manage"
@@ -283,6 +283,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 	return {
 		createPods: mayInWorkspace(actor, "pod.create"),
+		updateWorkspace: mayInWorkspace(actor, "workspace.update"),
 		manageProviders: mayInWorkspace(actor, "workspace.providers.manage"),
 		manageMembers: mayInWorkspace(actor, "workspace.members.manage"),
 		configureBuiltInAgents: mayInWorkspace(actor, "workspace.builtInAgents.configure"),

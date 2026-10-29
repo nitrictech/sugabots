@@ -30,6 +30,7 @@ import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-admi
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
@@ -109,6 +110,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	// `/me` answers with these beside the user; a case about them supplies its own.
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
 	unimplemented(PodAdministration.Service),
+	unimplemented(WorkspaceTimeZone.Service),
 	unimplemented(Artifacts.Service),
 	unimplemented(ArtifactPages.Service),
 	unimplemented(AgentAdministration.Service),

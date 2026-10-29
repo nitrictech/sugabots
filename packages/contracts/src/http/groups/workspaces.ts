@@ -11,6 +11,8 @@ import {
 	workspaceMemberSchema,
 	workspaceMemberUpdateSchema,
 	workspaceSchema,
+	workspaceTimeZoneChangeSchema,
+	workspaceTimeZoneSchema,
 } from "../../membership.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
@@ -34,6 +36,16 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 			payload: workspaceDetailsSchema,
 			success: workspaceSchema,
 			error: [BadRequest, Conflict, ...refused],
+		}),
+		HttpApiEndpoint.get("timeZone", "/workspaces/:workspace/time-zone", {
+			params: workspace,
+			success: workspaceTimeZoneSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.put("changeTimeZone", "/workspaces/:workspace/time-zone", {
+			params: workspace,
+			payload: workspaceTimeZoneChangeSchema,
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.delete("delete", "/workspaces/:workspace", {
 			params: workspace,

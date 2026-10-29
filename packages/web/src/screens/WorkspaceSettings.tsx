@@ -12,6 +12,7 @@ import {
 	useWorkspaceMembers,
 	useWorkspacePermissions,
 	useWorkspaceRole,
+	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
 import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -31,6 +32,7 @@ import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./Mod
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
+import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
@@ -103,7 +105,13 @@ export function WorkspaceSettings({
 				/>
 			) : (
 				<>
-					{section === "general" && <GeneralSettings role={role} canDelete={may.deleteWorkspace} />}
+					{section === "general" && (
+						<GeneralSettings
+							role={role}
+							canUpdate={may.updateWorkspace}
+							canDelete={may.deleteWorkspace}
+						/>
+					)}
 					{section === "profile" && <ProfileSettings />}
 					{section === "members" && (
 						<WorkspaceMembersSettings
@@ -154,13 +162,18 @@ export function WorkspaceSettings({
 
 function GeneralSettings({
 	role,
+	canUpdate,
 	canDelete,
 }: {
 	role: WorkspaceRole | undefined;
+	canUpdate: boolean;
 	canDelete: boolean;
 }) {
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
+	// Loaded with the page, so the dialog opens with its routines note already in place.
+	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const deleteWorkspace = useDeleteWorkspace();
 	const navigate = useNavigate();
@@ -196,12 +209,22 @@ function GeneralSettings({
 				<SettingsRow
 					label="Time zone"
 					trailing={<SettingsValue>{workspace.timeZone}</SettingsValue>}
+					chevron={canUpdate}
+					onClick={canUpdate ? () => setChoosingTimeZone(true) : undefined}
 				/>
 				<SettingsRow
 					label="Your access"
 					trailing={<SettingsValue>{workspaceRoleLabel(role)}</SettingsValue>}
 				/>
 			</SettingsGroup>
+			{canUpdate && (
+				<TimeZoneDialog
+					workspaceId={workspace.id}
+					current={workspace.timeZone}
+					open={choosingTimeZone}
+					onOpenChange={setChoosingTimeZone}
+				/>
+			)}
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
 			</SettingsGroup>

@@ -1,14 +1,15 @@
 import type { Workspace } from "@sugabots/contracts";
 import { unimplemented } from "@sugabots/core/testing";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
- * Creating a workspace, over a double of `Membership`. What creating one
- * stores is `membership.test.ts`'s.
+ * Creating a workspace and moving it to another time zone, over doubles of
+ * `Membership` and `WorkspaceTimeZone`. What they store is their own tests'.
  */
 
 const resolveUser: UserResolver = async () => ({
@@ -69,6 +70,43 @@ describe("creating a workspace", () => {
 			name: "Nitric",
 			slug: "nitric",
 			timeZone: "Australia/Sydney",
+		});
+
+		expect(response.status).toBe(400);
+	});
+});
+
+const changeWith = (change: WorkspaceTimeZone.Interface["change"], payload: unknown) =>
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(WorkspaceTimeZone.Service, { change })),
+	).request("/workspaces/nitric/time-zone", {
+		method: "PUT",
+		headers: { authorization: "Bearer token", "content-type": "application/json" },
+		body: JSON.stringify(payload),
+	});
+
+describe("moving a workspace to another time zone", () => {
+	it("moves it to the zone it is given", async () => {
+		const change = vi.fn<WorkspaceTimeZone.Interface["change"]>(() => Effect.void);
+
+		const response = await changeWith(change, { timeZone: "Asia/Tokyo" });
+
+		expect(response.status).toBe(204);
+		expect(change).toHaveBeenCalledWith({ workspace: "nitric", timeZone: "Asia/Tokyo" });
+	});
+
+	it("refuses a zone nobody has", async () => {
+		const change = vi.fn<WorkspaceTimeZone.Interface["change"]>(() => Effect.void);
+
+		const response = await changeWith(change, { timeZone: "Mars/Olympus" });
+
+		expect(response.status).toBe(400);
+		expect(change).not.toHaveBeenCalled();
+	});
+
+	it("refuses a time zone the database does not have", async () => {
+		const response = await changeWith(() => Effect.fail(new Membership.TimeZoneUnknown()), {
+			timeZone: "Asia/Tokyo",
 		});
 
 		expect(response.status).toBe(400);

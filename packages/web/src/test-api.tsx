@@ -507,6 +507,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			role,
 			permissions: {
 				createPods: administersWorkspace(role),
+				updateWorkspace: administersWorkspace(role),
 				manageProviders: administersWorkspace(role),
 				manageMembers: administersWorkspace(role),
 				configureBuiltInAgents: administersWorkspace(role),
