@@ -458,6 +458,7 @@ function Tools({
 	const { agents } = useAgents();
 	const webOff = useWebAccess().data?.enabled === false;
 	const sandboxOff = useSandboxAccess().data?.enabled === false;
+	const sandboxOn = agent.usesSandbox && !sandboxOff;
 	const mayManageProviders = useWorkspacePermissions().manageProviders;
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
@@ -560,7 +561,7 @@ function Tools({
 				trailing={
 					pod.permissions.manageSandbox ? (
 						<Toggle
-							checked={agent.usesSandbox && !sandboxOff}
+							checked={sandboxOn}
 							disabled={sandboxOff}
 							label={`${agent.usesSandbox ? "Turn off" : "Turn on"} the sandbox`}
 							tooltip={
@@ -573,11 +574,11 @@ function Tools({
 							onChange={(next) => save({ usesSandbox: next }).catch(() => {})}
 						/>
 					) : (
-						<SettingsValue>{agent.usesSandbox && !sandboxOff ? "On" : "Off"}</SettingsValue>
+						<SettingsValue>{sandboxOn ? "On" : "Off"}</SettingsValue>
 					)
 				}
 			/>
-			{agent.usesSandbox && !sandboxOff ? (
+			{sandboxOn ? (
 				<SettingsRow
 					label="Natural browsing"
 					sub="Show a cursor, scroll smoothly and type at a typing pace, so people watching can follow along. Slower."

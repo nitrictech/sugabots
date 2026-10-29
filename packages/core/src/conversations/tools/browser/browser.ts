@@ -260,7 +260,7 @@ async function browseNaturally(client: Client, accent: string) {
  */
 function naturalBrowsingCode(accent: string) {
 	return `async (page) => {
-	const accent = ${JSON.stringify(accent)};
+	const cursor = ${JSON.stringify(cursorOptions(accent))};
 	const TYPING_DELAY_MILLISECONDS = 70;
 	// Long text is typed faster, so filling in a long field doesn't hold up a turn.
 	const LONGEST_TYPING_MILLISECONDS = 6000;
@@ -268,18 +268,7 @@ function naturalBrowsingCode(accent: string) {
 	const LONGEST_SCROLL_MILLISECONDS = 1500;
 	const context = page.context();
 	context.sugabotsNaturalBrowsing = true;
-	const showCursor = (tab) =>
-		tab.screencast.showActions({
-			cursor: "pointer",
-			// How long the cursor's ring stays on what it's about to use, which Playwright waits for.
-			duration: 700,
-			style: {
-				point: \`width: 28px; height: 28px; border-radius: 50%; border: 3px solid \${accent}; background: \${accent}40\`,
-				highlight: \`outline: 2px solid \${accent}cc; border-radius: 4px\`,
-				// Playwright's name for the action, such as getByRole('button'), which means nothing to people watching.
-				title: "display: none",
-			},
-		});
+	const showCursor = (tab) => tab.screencast.showActions(cursor);
 	await Promise.all(context.pages().map(showCursor));
 	context.on("page", (tab) => showCursor(tab).catch(() => {}));
 
@@ -327,6 +316,21 @@ function naturalBrowsingCode(accent: string) {
 		return this.pressSequentially(value, options);
 	};
 }`;
+}
+
+/** Playwright's cursor, in `accent`, as `page.screencast.showActions` takes it. */
+function cursorOptions(accent: string) {
+	return {
+		cursor: "pointer",
+		// How long the cursor's ring stays on what it's about to use, which Playwright waits for.
+		duration: 700,
+		style: {
+			point: `width: 28px; height: 28px; border-radius: 50%; border: 3px solid ${accent}; background: ${accent}40`,
+			highlight: `outline: 2px solid ${accent}cc; border-radius: 4px`,
+			// Playwright's name for the action, such as getByRole('button'), which means nothing to people watching.
+			title: "display: none",
+		},
+	};
 }
 
 function toBrowserResult(content: unknown, note: UserText | undefined): BrowserResult {

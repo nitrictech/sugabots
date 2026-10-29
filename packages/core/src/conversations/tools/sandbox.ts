@@ -119,18 +119,9 @@ export const make = Effect.gen(function* () {
 			: {},
 	});
 	return Service.of({
-		forTurn: ({
-			pod,
-			turnId,
-			threadId,
-			agentId,
-			color,
-			naturalBrowsing,
-			acceptsImages,
-			usesSandbox,
-			attach,
-		}) =>
+		forTurn: (turn) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
+				const { pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach } = turn;
 				const place = placeOf({ threadId, agentId });
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
 				if (!provider) {
@@ -142,12 +133,7 @@ export const make = Effect.gen(function* () {
 							acceptsImages,
 							attach,
 							openSandbox: NEVER_OPENED,
-							browser: browserSession(NEVER_OPENED, place, {
-								threadId,
-								agentId,
-								color,
-								naturalBrowsing,
-							}),
+							browser: browserSession(NEVER_OPENED, place, turn),
 							run: NEVER_RUN,
 							blocked: [],
 							allowlisted: true,
@@ -187,12 +173,7 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
-				const browser = browserSession(openSandbox, place, {
-					threadId,
-					agentId,
-					color,
-					naturalBrowsing,
-				});
+				const browser = browserSession(openSandbox, place, turn);
 				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
 				const run = <A, E>(effect: Effect.Effect<A, E>) =>
 					runPromiseExit(effect).then((exit) => {
