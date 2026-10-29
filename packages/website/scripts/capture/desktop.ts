@@ -1,24 +1,37 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { botColors } from "@sugabots/avatars/bot-colors";
 import type { BrowserContext } from "playwright";
 import { freePort } from "./environment.ts";
 
 /**
  * A real sandbox desktop for the Sandboxes slide, without a sandbox provider:
  * the sandbox image in plain Docker, its desktop started as Sugabots starts
- * it, with a terminal that has just cloned the repository. The app's desktop
- * viewer is pointed at it in place of the API's relay.
+ * it when a bot uses its browser, in Code Reviewer's colour, with the browser
+ * on Sugabots' own site. The app's desktop viewer is pointed at it in place of
+ * the API's relay.
  */
 
 const IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
-/** A VNC server of its own on the desktop, without a password, as the relay presents it to the viewer. */
-const VIEWER_PORT = 5950;
-const REPOSITORY = "https://github.com/nitrictech/sugabots";
-/** What the terminal has run, typed on the desktop so it shows as a person left it. */
-const COMMANDS = [`git clone --depth 1 ${REPOSITORY}`, "cd sugabots && ls"];
-const TERMINAL = { width: 1040, height: 600, x: 120, y: 60 };
-/** Large enough to read once the desktop is scaled down beside the chat. */
-const TERMINAL_CONFIG = "[general]\nfontname=Monospace 13\n";
-const CLONE_SECONDS = 60;
+/** The desktop's own WebSocket for VNC viewers: display 1's, at 5900 + 1. */
+const VIEWER_PORT = 5901;
+/** Code Reviewer's, the bot the slide shows, which the desktop is drawn in as the app would draw it. */
+const ACCENT = botColors.rose.face;
+/**
+ * The desktop asks viewers for a password, which the API's relay gives and
+ * the viewer, pointed past it, can't. In front of the real Xvnc on the
+ * container's PATH, this starts it without one; its last setting wins.
+ */
+const XVNC_WITHOUT_PASSWORD = '#!/bin/sh\nexec /usr/bin/Xvnc "$@" -SecurityTypes None\n';
+const SITE = "https://sugabots.ai";
+/** The browser's DevTools on display 1, at 9230 + 1, which opens the site in it. */
+const DEVTOOLS = "http://127.0.0.1:9231";
+/** The desktop's screen, as `sugabots-desktop` starts it. */
+const DISPLAY_SIZE = { width: 1280, height: 960 };
+/** The class `sugabots-desktop` gives its browser's windows. */
+const BROWSER_WINDOW_CLASS = "sugabots-browser";
+const LOAD_SECONDS = 30;
+/** How long the site's entrance animations take once its title is set. */
+const SETTLE_MILLISECONDS = 2500;
 
 export interface Desktop {
 	/** Points the app's desktop viewer at this desktop, and says sandboxes are on. */
@@ -54,68 +67,30 @@ export async function startDesktop(): Promise<Desktop | undefined> {
 		execFileSync("docker", ["rm", "-f", container], { stdio: "ignore" });
 	};
 	try {
-		const started = docker(
-			"exec",
-			container,
-			"sugabots-desktop",
-			"desktop",
-			"capture",
-			"/tmp/profile",
-			"/tmp/output",
-		);
-		const display = /display=(\d+)/.exec(started)?.[1];
-		if (display !== "1") throw new Error(`The desktop started on display ${display}, not 1`);
-		docker(
-			"exec",
-			"-d",
-			container,
-			"x11vnc",
-			"-display",
-			":1",
-			"-nopw",
-			"-forever",
-			"-shared",
-			"-quiet",
-			"-rfbport",
-			String(VIEWER_PORT),
-		);
 		docker(
 			"exec",
 			container,
 			"sh",
 			"-c",
-			`mkdir -p ~/.config/lxterminal && printf '${TERMINAL_CONFIG}' > ~/.config/lxterminal/lxterminal.conf`,
+			`printf '${XVNC_WITHOUT_PASSWORD}' > /usr/local/bin/Xvnc && chmod +x /usr/local/bin/Xvnc`,
 		);
-		spawn(
-			"docker",
-			["exec", "-e", "DISPLAY=:1", container, "sugabots-desktop", "open", "terminal"],
-			{
-				stdio: "ignore",
-			},
-		).unref();
-		const terminal =
-			onDesktop("xdotool", "search", "--sync", "--onlyvisible", "--class", "lxterminal")
-				.trim()
-				.split("\n")[0] ?? "";
-		onDesktop(
-			"xdotool",
-			"windowsize",
-			"--sync",
-			terminal,
-			String(TERMINAL.width),
-			String(TERMINAL.height),
-			"windowmove",
-			terminal,
-			String(TERMINAL.x),
-			String(TERMINAL.y),
-			"windowactivate",
-			"--sync",
-			terminal,
+		const started = docker(
+			"exec",
+			container,
+			"sugabots-desktop",
+			"session",
+			"capture",
+			"/tmp/profile",
+			"/tmp/output",
+			"--accent",
+			ACCENT,
 		);
-		for (const command of COMMANDS) {
-			onDesktop("xdotool", "type", "--delay", "20", `${command}\n`);
-			await finished(container);
-		}
+		const display = /display=(\d+)/.exec(started)?.[1];
+		if (display !== "1") throw new Error(`The desktop started on display ${display}, not 1`);
+		await openSite(container);
+		await maximizeBrowser(onDesktop);
+		// The pointer starts in the middle of the screen, over the page.
+		onDesktop("xdotool", "mousemove", String(DISPLAY_SIZE.width), String(DISPLAY_SIZE.height));
 	} catch (error) {
 		stop();
 		throw error;
@@ -139,18 +114,70 @@ export async function startDesktop(): Promise<Desktop | undefined> {
 	};
 }
 
-/** Waits until the terminal's shell has nothing running under it: what it was typed has finished. */
-async function finished(container: string) {
-	const until = Date.now() + CLONE_SECONDS * 1000;
-	await new Promise((resolve) => setTimeout(resolve, 500));
-	while (Date.now() < until) {
-		const busy = execFileSync(
+/** Opens the site in the browser's blank tab, and waits for it to load. */
+async function openSite(container: string) {
+	const devtools = (path: string, method = "GET") =>
+		execFileSync(
 			"docker",
-			["exec", container, "sh", "-c", "pgrep -f '^git ' || pgrep -x ls || true"],
+			[
+				"exec",
+				container,
+				"curl",
+				"-sf",
+				"--retry",
+				"20",
+				"--retry-connrefused",
+				"-X",
+				method,
+				`${DEVTOOLS}${path}`,
+			],
 			{ encoding: "utf8" },
-		).trim();
-		if (!busy) return;
+		);
+	const pages = () =>
+		(
+			JSON.parse(devtools("/json/list")) as {
+				id: string;
+				type: string;
+				url: string;
+				title: string;
+			}[]
+		).filter((target) => target.type === "page");
+	const blank = pages().filter((page) => page.url === "about:blank");
+	devtools(`/json/new?${SITE}`, "PUT");
+	for (const page of blank) devtools(`/json/close/${page.id}`);
+	const until = Date.now() + LOAD_SECONDS * 1000;
+	while (Date.now() < until) {
+		if (pages().some((page) => page.url.startsWith(SITE) && page.title.startsWith("Sugabots"))) {
+			await new Promise((resolve) => setTimeout(resolve, SETTLE_MILLISECONDS));
+			return;
+		}
 		await new Promise((resolve) => setTimeout(resolve, 500));
 	}
-	throw new Error(`The desktop's terminal was still busy after ${CLONE_SECONDS} seconds`);
+	throw new Error(`${SITE} didn't load in the desktop's browser within ${LOAD_SECONDS} seconds`);
+}
+
+/**
+ * Maximizes the browser's window, as a person would. It opens at Chromium's
+ * default size inside a frame of its own drawing, whose shadow the viewer
+ * shows as a black border; a maximized window has none.
+ */
+async function maximizeBrowser(onDesktop: (...args: string[]) => string) {
+	const until = Date.now() + LOAD_SECONDS * 1000;
+	let window: string | undefined;
+	while (!window && Date.now() < until) {
+		try {
+			window = onDesktop("xdotool", "search", "--onlyvisible", "--class", BROWSER_WINDOW_CLASS)
+				.trim()
+				.split("\n")
+				.at(-1);
+		} catch {
+			// xdotool fails when no window matches yet.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+	}
+	if (!window) throw new Error(`The desktop's browser didn't open within ${LOAD_SECONDS} seconds`);
+	// The window manager's Maximize shortcut toggles, and the window may already be maximized.
+	if (!onDesktop("xprop", "-id", window, "_NET_WM_STATE").includes("MAXIMIZED_VERT"))
+		onDesktop("xdotool", "windowactivate", "--sync", window, "key", "alt+F10");
+	await new Promise((resolve) => setTimeout(resolve, SETTLE_MILLISECONDS));
 }
