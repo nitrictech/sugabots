@@ -27,6 +27,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
+import { FormCard } from "./FormCard.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
@@ -589,6 +590,19 @@ function MessageRow({
 					if (segment.type === "tool_call") {
 						const call = segment.toolCall;
 						if (!agent) return null;
+						if (call.form) {
+							return (
+								<div key={segment.key} className="w-full max-w-[460px] pt-1.5 pb-1">
+									<FormCard
+										call={call}
+										form={call.form}
+										agent={agent}
+										threadId={message.threadId}
+										podId={podId}
+									/>
+								</div>
+							);
+						}
 						return (
 							<div key={segment.key} className="w-full max-w-[460px] pt-1.5 pb-1">
 								<ToolApprovalCard

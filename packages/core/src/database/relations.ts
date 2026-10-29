@@ -62,6 +62,16 @@ export const relations = defineRelations(schema, (r) => ({
 	},
 	toolCall: {
 		decidedBy: r.one.user({ from: r.toolCall.decidedById, to: r.user.id }),
+		form: r.one.toolCallForm({ from: r.toolCall.id, to: r.toolCallForm.toolCallId }),
+	},
+	toolCallForm: {
+		response: r.one.toolCallFormResponse({
+			from: r.toolCallForm.toolCallId,
+			to: r.toolCallFormResponse.toolCallId,
+		}),
+	},
+	toolCallFormResponse: {
+		responder: r.one.user({ from: r.toolCallFormResponse.responderId, to: r.user.id }),
 	},
 	collaboration: {
 		parentMessage: r.one.message({

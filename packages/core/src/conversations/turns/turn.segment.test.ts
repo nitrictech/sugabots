@@ -11,6 +11,7 @@ import {
 	message,
 	pod,
 	toolCall,
+	toolCallForm,
 	turn,
 	workspace,
 	workspaceMember,
@@ -22,6 +23,7 @@ import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ASK_FORM_TOOL } from "../tools/ask-form/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
@@ -351,6 +353,55 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		expect(calls).toMatchObject([
 			{ tool: "wiki__wipe", approvalId: "approval-1", approvalStatus: "pending", mutating: true },
 		]);
+	});
+
+	it("parks a form for the thread to fill in, keeping the form as the bot wrote it", async () => {
+		const form = {
+			message: "Which posts should go out?",
+			requestedSchema: {
+				type: "object",
+				properties: {
+					post_keep: { type: "boolean", default: true },
+					post_text: { type: "string", default: "Launch day!" },
+				},
+			},
+		};
+		const model = Models.fromStream(() =>
+			Effect.succeed(
+				streamed(chunks("Have a look."), {
+					approvalRequests: [
+						{
+							type: "tool-approval-request",
+							approvalId: "form-approval",
+							toolCall: {
+								type: "tool-call",
+								toolCallId: "sdk-form",
+								toolName: ASK_FORM_TOOL,
+								input: form,
+							},
+						},
+					] as never,
+					responseMessages: [{ role: "assistant", content: "Have a look." }] as never,
+				}),
+			),
+		);
+
+		const outcome = await segmentWith(model);
+
+		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["form-approval"] });
+		const [parked] = await onDatabase((db) =>
+			db
+				.select({ call: toolCall, request: toolCallForm.request })
+				.from(toolCall)
+				.innerJoin(toolCallForm, eq(toolCallForm.toolCallId, toolCall.id))
+				.where(eq(toolCall.turnId, prepared.turnId)),
+		);
+		expect(parked?.call).toMatchObject({
+			tool: ASK_FORM_TOOL,
+			approvalStatus: "pending",
+			mutating: false,
+		});
+		expect(JSON.stringify(parked?.request)).toBe(JSON.stringify(form));
 	});
 
 	describe("saving its own instructions", () => {

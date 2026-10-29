@@ -18,6 +18,8 @@ unless someone turns them off for it.
   it can't reach your private network unless the installation allows it with
   [`ALLOW_PRIVATE_WEB_FETCH_NETWORK`](/docs/configuration#network).
 - **Search the web** uses the workspace's [search provider](/docs/web-search#choose-a-provider).
+- **Ask with a form** shows a form in the conversation and waits for an answer
+  before the bot carries on. See [Answering a bot's form](#answering-a-bots-form).
 
 To switch one off for a bot, open the bot's settings, go to **Tools**, and use
 **Turn off**.
@@ -61,3 +63,20 @@ one call run. There's no "always allow": the next call asks again.
 - **Admins and members** can answer approvals in chats.
 - **Viewers** see "Waiting for someone with permission to answer this."
 - **Only admins** can answer approvals raised by a [routine](/docs/routines) run.
+
+## Answering a bot's form
+
+A bot can ask the people in a conversation to fill in a form when it needs a
+choice or some details, or wants you to check drafts before it acts on them.
+Fields can be text, numbers, yes or no, or a choice of one or several options,
+and often come filled in with what the bot proposes, so you only change what's
+wrong.
+
+- **Anyone in the conversation** can answer, viewers included. The first
+  answer is the one the bot gets, and everyone sees who gave it.
+- **Send** gives the bot your answers. **Decline** tells it nobody will fill
+  the form in, and it carries on without.
+- The bot's reply waits until someone answers. Stopping the reply closes the
+  form unanswered.
+- Bots don't use forms in [routine](/docs/routines) runs, where nobody is
+  watching to answer.

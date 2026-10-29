@@ -23,9 +23,15 @@ const resolveUser: UserResolver = async () => ({
 	image: null,
 });
 
-function app(decide: Turns.ControlsInterface["decide"]) {
+function app(
+	decide: Turns.ControlsInterface["decide"],
+	answerForm?: Turns.ControlsInterface["answerForm"],
+) {
 	return createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(Turns.Controls, { decide })),
+		Layer.merge(
+			identifiedBy(resolveUser),
+			unimplemented(Turns.Controls, { decide, ...(answerForm && { answerForm }) }),
+		),
 	);
 }
 
@@ -34,6 +40,13 @@ const approve = (routes: ReturnType<typeof app>, decision: string) =>
 		method: "POST",
 		headers: { authorization: "Bearer member", "content-type": "application/json" },
 		body: JSON.stringify({ decision }),
+	});
+
+const answer = (routes: ReturnType<typeof app>, body: unknown) =>
+	routes.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/form-response`, {
+		method: "POST",
+		headers: { authorization: "Bearer member", "content-type": "application/json" },
+		body: JSON.stringify(body),
 	});
 
 describe("tool approval routes", () => {
@@ -72,5 +85,24 @@ describe("tool approval routes", () => {
 
 		expect(response.status).toBe(400);
 		expect(decide).not.toHaveBeenCalled();
+	});
+
+	it("answers the form in the path as the person asking", async () => {
+		const answerForm = vi.fn<Turns.ControlsInterface["answerForm"]>(() => Effect.void);
+		const given = { action: "accept", content: { colour: "red", count: 2, tags: ["a"] } };
+
+		const response = await answer(app(vi.fn(), answerForm), { answer: given });
+
+		expect(response.status).toBe(202);
+		expect(answerForm).toHaveBeenCalledWith({ podId: POD_ID, toolCallId: CALL_ID, answer: given });
+	});
+
+	it("refuses an answer that is not MCP's accept or decline", async () => {
+		const answerForm = vi.fn<Turns.ControlsInterface["answerForm"]>(() => Effect.void);
+
+		const response = await answer(app(vi.fn(), answerForm), { answer: { action: "cancel" } });
+
+		expect(response.status).toBe(400);
+		expect(answerForm).not.toHaveBeenCalled();
 	});
 });

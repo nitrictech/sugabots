@@ -84,6 +84,7 @@ import {
 } from "../threads/participants.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
+import { ASK_FORM_TOOL } from "../tools/ask-form/tool.ts";
 import { Turns } from "../turns/turns.ts";
 import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 
@@ -951,6 +952,12 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 		.limit(ACTIVITY_ITEMS);
 });
 
+/**
+ * A form waits on its thread the way an approval does, but it is answered in
+ * the thread, not allowed or denied, so the approvals leave it out.
+ */
+const notAForm = ne(toolCall.tool, ASK_FORM_TOOL);
+
 /** How many answered approvals the inbox lists, newest first. */
 const ANSWERED_APPROVALS = 50;
 /** At most this many waiting approvals are listed; more than this many waiting is a backlog to clear in its conversations. */
@@ -1019,7 +1026,7 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 	}
 	if (decidable.length === 0) return [];
 	return yield* selectApprovals(db, asking)
-		.where(and(eq(toolCall.approvalStatus, "pending"), or(...decidable)))
+		.where(and(eq(toolCall.approvalStatus, "pending"), notAForm, or(...decidable)))
 		.orderBy(asc(toolCall.startedAt))
 		.limit(WAITING_APPROVALS);
 });
@@ -1037,6 +1044,7 @@ const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function
 				inArray(asking.podId, [...podIds]),
 				inArray(toolCall.approvalStatus, ["allowed", "denied"]),
 				isNotNull(toolCall.decidedAt),
+				notAForm,
 			),
 		)
 		.orderBy(desc(toolCall.decidedAt))
@@ -1129,6 +1137,7 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 				and(
 					inArray(asking.conversationId, [...conversationIds]),
 					eq(toolCall.approvalStatus, "pending"),
+					notAForm,
 				),
 			);
 		if (pending.length === 0) return new Set<string>();

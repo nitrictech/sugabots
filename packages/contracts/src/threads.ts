@@ -8,6 +8,7 @@ import {
 	mediaTypeSchema,
 } from "./attachments.ts";
 import { emailSchema } from "./email.ts";
+import { formAnswerSchema, formRequestSchema } from "./forms.ts";
 import {
 	routineExecutionSchema,
 	routineResultOfSchema,
@@ -229,9 +230,11 @@ export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 /**
  * Who may decide a tool call's approval: `pod`, those who decide the pod's
  * approvals; `sandbox-managers`, those who decide what the pod's sandbox may
- * reach and has installed, for an agent's request to change that.
+ * reach and has installed, for an agent's request to change that; `thread`,
+ * anyone taking part in the thread, for a form an agent asks them to fill in,
+ * which is decided by answering it.
  */
-export const toolApprovalDecidersSchema = Schema.Literals(["pod", "sandbox-managers"]);
+export const toolApprovalDecidersSchema = Schema.Literals(["pod", "sandbox-managers", "thread"]);
 
 export type ToolApprovalDeciders = typeof toolApprovalDecidersSchema.Type;
 
@@ -256,6 +259,31 @@ export const jsonValueSchema = Schema.Unknown.check(
 );
 
 export type JsonValue = typeof jsonValueSchema.Type;
+
+/**
+ * A form an agent asked people in its thread to fill in. `response` is null
+ * until someone answers or declines it; a form whose turn ended unanswered
+ * stays null, its call failed.
+ */
+export const toolCallFormSchema = Schema.Struct({
+	request: formRequestSchema,
+	/**
+	 * The fields' names in the order the agent wrote them, which is the order
+	 * people see them in. Carried apart from `request` because live events pass
+	 * through `jsonb`, which reorders an object's keys.
+	 */
+	fieldOrder: Schema.Array(Schema.String),
+	response: Schema.NullOr(
+		Schema.Struct({
+			answer: formAnswerSchema,
+			/** Null once the person who answered has left. */
+			answeredByName: Schema.NullOr(Schema.String),
+			answeredAt: isoTimestampSchema,
+		}),
+	),
+});
+
+export type ToolCallForm = typeof toolCallFormSchema.Type;
 
 /**
  * One call an agent made to a built-in tool, in the middle of a reply. Sits
@@ -284,6 +312,8 @@ export const toolCallPartSchema = Schema.Struct({
 			}),
 		),
 	),
+	/** Present only on a form an agent asked people to fill in: the form, and the answer once someone gave it. */
+	form: Schema.optional(Schema.NullOr(toolCallFormSchema)),
 	error: Schema.NullOr(Schema.String),
 	/** Whether the tool may have changed something at the other end. */
 	mutating: Schema.Boolean,

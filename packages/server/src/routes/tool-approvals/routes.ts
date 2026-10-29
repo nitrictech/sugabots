@@ -1,4 +1,4 @@
-import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -9,15 +9,25 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 export const toolApprovalRoutes = HttpApiBuilder.group(ServerApi, "toolApprovals", (handlers) =>
 	Effect.gen(function* () {
 		const turns = yield* Turns.Controls;
-		return handlers.handle("decide", ({ params, payload }) =>
-			turns
-				.decide({
-					podId: params.podId,
-					toolCallId: params.toolCallId,
-					decision: payload.decision,
-				})
-				.pipe(asSessionUser, asHttpError(approvalErrors)),
-		);
+		return handlers
+			.handle("decide", ({ params, payload }) =>
+				turns
+					.decide({
+						podId: params.podId,
+						toolCallId: params.toolCallId,
+						decision: payload.decision,
+					})
+					.pipe(asSessionUser, asHttpError(approvalErrors)),
+			)
+			.handle("answerForm", ({ params, payload }) =>
+				turns
+					.answerForm({
+						podId: params.podId,
+						toolCallId: params.toolCallId,
+						answer: payload.answer,
+					})
+					.pipe(asSessionUser, asHttpError(formErrors)),
+			);
 	}),
 );
 
@@ -26,4 +36,11 @@ const approvalErrors = {
 	ToolApprovalNotFound: NotFound,
 	ToolApprovalConflict: Conflict,
 	ToolApprovalForbidden: Forbidden,
+};
+
+const formErrors = {
+	...refusals,
+	ToolApprovalNotFound: NotFound,
+	ToolApprovalConflict: Conflict,
+	FormAnswerInvalid: BadRequest,
 };

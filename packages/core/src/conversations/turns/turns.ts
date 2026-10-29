@@ -14,7 +14,7 @@
  */
 export * as Turns from "./turns.ts";
 
-import type { ToolApprovalDecision } from "@sugabots/contracts";
+import type { FormAnswer, ToolApprovalDecision } from "@sugabots/contracts";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
 import { Artifacts } from "../../artifacts/artifacts.ts";
@@ -29,6 +29,7 @@ import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
+	type FormAnswerInvalid,
 	makeControls,
 	type ToolApprovalConflict,
 	type ToolApprovalForbidden,
@@ -51,6 +52,7 @@ export {
 	newestWithinLimit,
 } from "./context-window.ts";
 export {
+	FormAnswerInvalid,
 	ToolApprovalConflict,
 	ToolApprovalForbidden,
 	ToolApprovalNotFound,
@@ -125,6 +127,25 @@ export interface ControlsInterface {
 	}) => Effect.Effect<
 		void,
 		AuthorizationDenied | ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
+		CurrentActor.Service
+	>;
+	/**
+	 * Answers, or declines, a form a turn asked the people in its thread to
+	 * fill in, as the actor, who must see the thread. The answer is recorded,
+	 * so the thread's watchers see it at once, and the turn resumes with it.
+	 * The first answer stands.
+	 */
+	readonly answerForm: (input: {
+		podId: string;
+		toolCallId: string;
+		answer: FormAnswer;
+	}) => Effect.Effect<
+		void,
+		| AuthorizationDenied
+		| ResourceHidden
+		| ToolApprovalNotFound
+		| ToolApprovalConflict
+		| FormAnswerInvalid,
 		CurrentActor.Service
 	>;
 }

@@ -11,6 +11,7 @@ export * from "./built-in-tools.ts";
 export * from "./chats.ts";
 export * from "./connections.ts";
 export * from "./events.ts";
+export * from "./forms.ts";
 export * from "./github.ts";
 export * from "./me.ts";
 export * from "./membership.ts";

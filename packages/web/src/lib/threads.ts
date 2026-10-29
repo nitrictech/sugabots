@@ -1,5 +1,6 @@
 import {
 	DEFAULT_THREAD_HISTORY_LIMIT,
+	type FormAnswer,
 	type Message,
 	type ThreadDetails,
 	type ToolApprovalDecision,
@@ -129,6 +130,18 @@ export function useThread(threadId: string | undefined) {
 			}
 		},
 	};
+}
+
+/** Answers or declines a form a bot asked the thread to fill in; the thread's events show it answered. */
+export function useAnswerForm(threadId: string, podId: string) {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: async ({ toolCallId, answer }: { toolCallId: string; answer: FormAnswer }) =>
+			Effect.runPromise(
+				client.api.toolApprovals.answerForm({ params: { podId, toolCallId }, payload: { answer } }),
+			),
+		onSuccess: () => queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+	});
 }
 
 export function useReviewToolCall(threadId: string, podId: string) {

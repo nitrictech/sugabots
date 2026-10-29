@@ -162,7 +162,8 @@ export function ToolApprovalCard({
  * What became of an answered request, with a mark for which way it went.
  * `announced` makes it a live region, for an answer the reader just gave.
  */
-function Outcome({
+/** How a request or form was settled, announced only when the reader just settled it. */
+export function Outcome({
 	announced,
 	icon,
 	children,
