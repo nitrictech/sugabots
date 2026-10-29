@@ -465,7 +465,7 @@ export const message = pgTable(
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
-		/** The routine run this message is the result of, posted in the agent's conversation. */
+		/** The routine run this message is the result of, posted in the routine's thread or a pod's chat. */
 		routineExecutionId: uuid("routine_execution_id").references(() => routineExecution.id, {
 			onDelete: "set null",
 		}),
@@ -481,8 +481,9 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorUserId}, ${table.authorAgentId}, ${table.routineTrigger}) = 1`,
 		),
 		index("message_thread_created_at_idx").on(table.threadId, table.createdAt),
+		// A run's result is posted once in each thread it goes to: the routine's, and perhaps a pod's chat.
 		uniqueIndex("message_routine_execution_idx")
-			.on(table.routineExecutionId)
+			.on(table.routineExecutionId, table.threadId)
 			.where(sql`${table.routineExecutionId} is not null`),
 		// What a bot's search_history tool matches against. Stemmed so "hotels"
 		// finds "hotel"; unstemmed as well, so a word the English rules drop or
