@@ -44,24 +44,33 @@ const peekingBots: readonly PeekingBot[] = [
 	},
 ];
 
-const LIFT_STAGGER_MILLISECONDS = 50;
-
 /** The end of the landing page: a row of bots peeking up over the footer's edge. */
 export function PeekingBots() {
 	return (
-		// Under the pointer, they all lift together, each a beat after the last.
 		<Reveal
 			stagger={0.1}
 			delay={0.2}
 			aria-hidden
-			className="group flex items-end justify-center gap-1 overflow-hidden pt-24 sm:gap-1.5 sm:pt-40"
+			className="flex items-end justify-center gap-1 overflow-hidden pt-24 sm:gap-1.5 sm:pt-40"
 		>
-			{peekingBots.map(({ look, place }, index) => (
-				<motion.div key={look.color} variants={riseIn} className={cn("shrink-0", place)}>
+			{peekingBots.map(({ look, place }) => (
+				// Each lifts while the pointer is on its head, not the box around it.
+				<motion.div
+					key={look.color}
+					variants={riseIn}
+					className={cn("group pointer-events-none relative shrink-0", place)}
+				>
 					<BotFace
 						{...look}
-						style={{ transitionDelay: `${index * LIFT_STAGGER_MILLISECONDS}ms` }}
 						className="size-full transition-transform duration-500 ease-landing group-hover:-translate-y-4"
+					/>
+					{/*
+					 * An unseen copy of the head that takes the pointer where it's painted. It
+					 * stays put as the head lifts, so the head doesn't slip out from under the pointer.
+					 */}
+					<BotFace
+						{...look}
+						className="absolute inset-0 size-full opacity-0 [&_*]:pointer-events-auto"
 					/>
 				</motion.div>
 			))}
