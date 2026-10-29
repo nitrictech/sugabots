@@ -14,6 +14,7 @@ const meta = preview.meta({
 		threadId: "0199a3a0-0000-7000-8000-000000000501",
 		agentId: "0199a3a0-0000-7000-8000-000000000502",
 		viewOnly: false,
+		offersReconnect: true,
 	},
 	decorators: [
 		(Story) => (
@@ -28,13 +29,14 @@ const meta = preview.meta({
 
 /**
  * A desktop that can't be reached, as a preview with no sandbox behind it
- * always is: the view says to open it again.
+ * always is, with a way to try again.
  */
 export const Unreachable = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(/couldn't be reached/, {}, { timeout: 10_000 }),
 		).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Reconnect" })).toBeVisible();
 	},
 });
 
@@ -54,6 +56,8 @@ export const LiveCard = meta.story({
 	),
 	play: async ({ canvas, userEvent }) => {
 		await expect(canvas.getByText("Growth Desk is using its browser")).toBeVisible();
+		await canvas.findByText(/couldn't be reached/, {}, { timeout: 10_000 });
+		await expect(canvas.queryByRole("button", { name: "Reconnect" })).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Open Growth Desk's desktop" }));
 		await expect(openDesktop).toHaveBeenCalled();
 	},

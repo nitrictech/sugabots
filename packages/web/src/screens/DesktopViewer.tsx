@@ -139,7 +139,12 @@ function ComputerScreen({
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
 			<div className="@container-[size] flex min-h-0 w-full flex-1 items-center justify-center">
 				<div className="w-[min(100cqw,calc(100cqh*4/3))]">
-					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+					<DesktopScreen
+						threadId={threadId}
+						agentId={agent.id}
+						viewOnly={!inControl}
+						offersReconnect
+					/>
 				</div>
 			</div>
 			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
@@ -202,7 +207,8 @@ export function LiveDesktopCard({
 			className="overflow-hidden rounded-[12px] border border-border bg-panel"
 		>
 			<div className="relative">
-				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly />
+				{/* Covered by the button that opens the desktop, which reconnects there. */}
+				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly offersReconnect={false} />
 				<button
 					type="button"
 					onClick={onOpen}
@@ -241,11 +247,14 @@ export function DesktopScreen({
 	threadId,
 	agentId,
 	viewOnly,
+	offersReconnect,
 }: {
 	threadId: string;
 	agentId: string;
 	/** Shows the desktop without sending input. The API enforces it either way. */
 	viewOnly: boolean;
+	/** Shows a Reconnect button once disconnected, for a screen nothing else covers. */
+	offersReconnect: boolean;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
@@ -365,7 +374,7 @@ export function DesktopScreen({
 			{standing !== "connected" && (
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-sm">
 					<p>{STANDING_TEXT[standing]}</p>
-					{(standing === "idle" || standing === "ended") && (
+					{offersReconnect && (standing === "idle" || standing === "ended") && (
 						<Button variant="outline" onClick={() => setAttempt((count) => count + 1)}>
 							Reconnect
 						</Button>
