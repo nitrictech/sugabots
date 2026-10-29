@@ -412,12 +412,12 @@
 	text-underline-offset: 2px;
 }
 
-/* An ID or a number inline in a message, in mono on a chip so it stands off the words around it. */
+/* An ID or a number inline in a bot's message, on the bot's own tint so it stands off the words around it. */
 .message-markdown :not(pre) > code {
 	padding: 1px 5px;
 	border-radius: 4px;
-	background: var(--chip);
-	color: var(--foreground);
+	background: var(--bot-tint, var(--chip));
+	color: var(--bot-mono, var(--foreground));
 	font: 500 13px var(--font-mono);
 }
 
