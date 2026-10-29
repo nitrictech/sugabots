@@ -63,6 +63,11 @@ ARG SUGABOTS_VERSION SUGABOTS_COMMIT
 ENV SUGABOTS_VERSION=$SUGABOTS_VERSION \
     SUGABOTS_COMMIT=$SUGABOTS_COMMIT
 
+# Where the deployment guide and compose.yml mount the files volume, for
+# BLOB_STORE_FILESYSTEM_ROOT. Owned by the app's user so a new volume mounted
+# on it starts out writable.
+RUN mkdir -p /data/files && chown node:node /data/files
+
 USER node
 EXPOSE 3000
 
