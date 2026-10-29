@@ -217,7 +217,7 @@ export const thread = pgTable(
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'routine_feed', 'system_agent')`,
+			sql`${table.type} in ('conversation', 'pod_chat', 'bot_channel', 'collaboration', 'routine', 'routine_feed', 'system_agent')`,
 		),
 		// A pod's chat is its people's, a conversation may be with a bot or only
 		// people, and every other thread is some bot's.
@@ -247,6 +247,10 @@ export const thread = pgTable(
 		),
 		// One thread per routine.
 		uniqueIndex("thread_routine_feed_idx").on(table.routineId),
+		// One channel per bot in a pod.
+		uniqueIndex("thread_bot_channel_idx")
+			.on(table.podId, table.hostAgentId)
+			.where(sql`${table.type} = 'bot_channel'`),
 		// One thread per message in a pod's chat.
 		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
 		check("thread_main_valid", sql`not ${table.main} or ${table.type} = 'pod_chat'`),

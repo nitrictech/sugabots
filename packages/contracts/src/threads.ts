@@ -24,6 +24,7 @@ export const MAX_THREAD_HISTORY_LIMIT = 100;
 export const threadTypeSchema = Schema.Literals([
 	"conversation",
 	"pod_chat",
+	"bot_channel",
 	"collaboration",
 	"routine",
 	"routine_feed",
