@@ -71,8 +71,8 @@ export const Choosing = meta.story({
 		await userEvent.click(dialog.getByRole("button", { name: /Tokyo/ }));
 		await userEvent.click(dialog.getByRole("button", { name: "Save" }));
 
-		await expect(movedTo).toHaveBeenCalledWith("Asia/Tokyo");
 		await waitFor(() => expect(args.onOpenChange).toHaveBeenCalledWith(false));
+		await expect(movedTo).toHaveBeenCalledWith("Asia/Tokyo");
 	},
 });
 
