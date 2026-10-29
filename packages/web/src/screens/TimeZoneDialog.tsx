@@ -162,9 +162,7 @@ function TimeZoneStep({
 				<div className="-mx-1 flex h-[min(432px,55vh)] flex-col gap-5 overflow-y-auto px-1">
 					{needle === "" && !region ? (
 						<>
-							{deviceChoice && (
-								<SettingsGroup>{zoneRow(deviceChoice)}</SettingsGroup>
-							)}
+							{deviceChoice && <SettingsGroup>{zoneRow(deviceChoice)}</SettingsGroup>}
 							<SettingsGroup label="Regions">{regions.map(regionRow)}</SettingsGroup>
 						</>
 					) : (
