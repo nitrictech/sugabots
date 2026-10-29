@@ -25,8 +25,9 @@ const MAY_NOT_EDIT =
 
 /**
  * The `save_instructions` tool: an agent replaces its own instructions and
- * description, which its pod mates choose whom to ask by, without asking first.
- * It saves as the person it is answering, with their permission to edit the
+ * description, which its pod mates choose whom to ask by: when it sets itself
+ * up in its interview, or when someone asks it to change how it works. It
+ * saves as the person it is answering, with their permission to edit the
  * agent, so it is offered on every turn and refused for anyone who could not
  * make the same change in settings.
  */
@@ -47,7 +48,7 @@ export function saveInstructionsTool({
 }) {
 	return tool({
 		description:
-			"Replace your instructions and description. You read your instructions in every conversation, with everyone in your pod, so they describe your job, never the person you're talking with or one piece of work: leave out their name, schedule, goals and preferences. Save without asking, when you learn something that changes what your job is or how to do it, and pass the whole text each time. Returns your settings page, where people read and change them.",
+			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, or when someone asks you to change how you work. Not for remembering things about a person. Returns your settings page, where people read and change them.",
 		inputSchema: Schema.Struct({
 			instructions: Schema.String.check(
 				Schema.isMinLength(1),
