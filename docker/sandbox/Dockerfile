@@ -31,7 +31,7 @@ ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
 # The tools agents use on a repository, then the desktop: a virtual display,
 # an Xfce session, a browser, a terminal and file manager, and what
-# computer-use tools drive them with.
+# computer-use tools drive them with, and what hides the idle pointer.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		bash ca-certificates curl wget git openssh-client less file procps \
@@ -44,7 +44,7 @@ RUN apt-get update \
 		xfce4-terminal thunar adwaita-icon-theme librsvg2-common librsvg2-bin \
 		xfonts-base dbus-x11 fonts-inter fonts-jetbrains-mono \
 		nix-bin \
-		chromium libnss3-tools xdotool scrot xclip fonts-dejavu fonts-noto-color-emoji \
+		chromium libnss3-tools xdotool scrot xclip unclutter-xfixes fonts-dejavu fonts-noto-color-emoji \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
 	&& rm -rf /var/lib/apt/lists/*
 

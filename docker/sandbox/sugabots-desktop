@@ -106,6 +106,12 @@ desktop() {
 	# wallpaper, and starts any of them again that stops.
 	xfce4-session >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	# Agents drive the browser through Playwright, which never moves the X
+	# pointer, so it would sit wherever it was left, drawn into the picture
+	# viewers see. Hidden until a person's mouse moves it, and again once
+	# it's been still for a few seconds.
+	unclutter --start-hidden >>"$log" 2>&1 &
+	echo $! >>"$pids"
 }
 
 # Draws display N's look in its colour, and points its desktop, on whichever
