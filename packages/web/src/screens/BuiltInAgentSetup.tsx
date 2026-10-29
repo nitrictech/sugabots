@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
-import { Button } from "@/ui/button.tsx";
+import { buttonStyles } from "@/ui/button.tsx";
 
 /**
  * Saying that a built-in agent is not set up, and where to set it up.
@@ -29,13 +29,14 @@ function useCanConfigureBuiltInAgents(): boolean {
 function SystemModelLink({ children }: { children: ReactNode }) {
 	const backToChat = useBackToHere("Chat");
 	return (
-		<Button
-			size="bare"
-			variant="link"
-			render={<Link from="/$workspace" to="./settings/providers/system" state={backToChat} />}
+		<Link
+			from="/$workspace"
+			to="./settings/providers/system"
+			state={backToChat}
+			className={buttonStyles({ variant: "link", size: "bare" })}
 		>
 			{children}
-		</Button>
+		</Link>
 	);
 }
 

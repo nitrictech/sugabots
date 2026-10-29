@@ -15,7 +15,7 @@ import { formatClockTime } from "@/lib/list-time.ts";
 import { nextRunWords } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useRoutines } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { Button } from "@/ui/button.tsx";
+import { Button, buttonStyles } from "@/ui/button.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { formatDay } from "./ThreadConversation.tsx";
 
@@ -174,9 +174,12 @@ export function RunMessage({
 						<Button size="sm" disabled={controls.pending} onClick={() => void controls.runAgain()}>
 							Retry
 						</Button>
-						<Button size="sm" variant="secondary" render={<Link {...podSettingsLink(pod)} />}>
+						<Link
+							{...podSettingsLink(pod)}
+							className={buttonStyles({ variant: "secondary", size: "sm" })}
+						>
 							Fix connection
-						</Button>
+						</Link>
 					</div>
 				)}
 			</div>
