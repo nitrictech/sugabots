@@ -171,16 +171,16 @@ export interface Interface {
 	 * has one result: posting a second fails.
 	 */
 	readonly postRunResult: (input: {
-		run: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "agentId" | "routineName">;
+		run: RunPosting;
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
 	 * Posts a copy of a routine run's result into the pod's chat `chatId`, from
-	 * the run's agent, and announces it.
+	 * the run's agent, as the run's result, which opens the run, and announces it.
 	 */
 	readonly postRunResultToChat: (input: {
 		chatId: string;
-		run: Pick<schema.RoutineExecutionRow, "agentId">;
+		run: RunPosting;
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
@@ -223,6 +223,22 @@ export interface Interface {
 	) => Effect.Effect<MessageReaction[], MessageNotFinished | TooManyReactionEmoji>;
 	/** Takes the person's reaction back, announcing it as `addReaction` does, if it was there. */
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
+}
+
+/** What of a routine run its posted result names. */
+type RunPosting = Pick<
+	schema.RoutineExecutionRow,
+	"id" | "threadId" | "agentId" | "routineId" | "routineName"
+>;
+
+/** The run `run` as the result posted from it links to it. */
+function resultOf(run: RunPosting): NonNullable<Message["routineResultOf"]> {
+	return {
+		executionId: run.id,
+		threadId: run.threadId,
+		routineId: run.routineId,
+		routineName: run.routineName,
+	};
 }
 
 /** One person's emoji on a message in a thread. */
@@ -844,11 +860,7 @@ export const make = Effect.gen(function* () {
 							threadId: runThread.conversationId,
 							agentId: run.agentId,
 							content,
-							result: {
-								executionId: run.id,
-								threadId: run.threadId,
-								routineName: run.routineName,
-							},
+							result: resultOf(run),
 						});
 					}),
 				),
@@ -857,7 +869,14 @@ export const make = Effect.gen(function* () {
 		postRunResultToChat: ({ chatId, run, content }) =>
 			operation(
 				"postRunResultToChat",
-				transaction(postFromRunAgent({ threadId: chatId, agentId: run.agentId, content })),
+				transaction(
+					postFromRunAgent({
+						threadId: chatId,
+						agentId: run.agentId,
+						content,
+						result: resultOf(run),
+					}),
+				),
 			),
 
 		openSystemAgentThread: (input) =>

@@ -1,6 +1,6 @@
 import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Braces, ChevronLeft, CircleAlert, ExternalLink } from "lucide-react";
+import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -16,6 +16,7 @@ import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
+import { FailedRunMessage } from "./RoutineRun.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
@@ -59,11 +60,15 @@ export function ChatThreadPanel({
 	const heading = useRef<HTMLHeadingElement>(null);
 	const timeline = useRef<HTMLDivElement>(null);
 	const details = query.data;
-	const type = openableThreadType(entry?.type ?? details?.thread.type);
+	const type = openableThreadType(entry?.type ?? details?.thread.type, frame);
 	const routineExecution = details?.routineExecution;
-	const parentRoutine = history.find(
-		(item) => item.threadId === details?.thread.parentThreadId && item.type === "routine",
-	);
+	// Beside a chat a run never opens, so neither is there a way back to one.
+	const parentRoutine =
+		frame.kind === "sidebar"
+			? undefined
+			: history.find(
+					(item) => item.threadId === details?.thread.parentThreadId && item.type === "routine",
+				);
 	const host = details?.participants.find(
 		(participant): participant is AgentParticipant =>
 			participant.kind === "agent" && participant.id === details.thread.hostAgentId,
@@ -157,14 +162,8 @@ export function ChatThreadPanel({
 						{query.isLoadingOlder ? "Loading…" : "Load older messages"}
 					</Button>
 				)}
-				{type === "routine" && routineExecution?.error && (
-					<p
-						role="alert"
-						className="mx-[18px] mb-4 flex items-start gap-2 rounded-lg bg-destructive-hover px-3 py-2.5 text-destructive-text text-sm"
-					>
-						<CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-						{routineExecution.error}
-					</p>
+				{type === "routine" && routineExecution?.state === "failed" && (
+					<FailedRunMessage execution={routineExecution} agent={host} />
 				)}
 				<ThreadConversation
 					fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
@@ -309,6 +308,11 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 	);
 }
 
-function openableThreadType(type: string | undefined): ChatThreadType | undefined {
-	return type === "collaboration" || type === "routine" ? type : undefined;
+/** The kind of thread `type` is, when it may open in `frame`: a run only as a page of its own, never beside a chat. */
+function openableThreadType(
+	type: string | undefined,
+	frame: ThreadFrame,
+): ChatThreadType | undefined {
+	if (type === "collaboration") return type;
+	return type === "routine" && frame.kind !== "sidebar" ? type : undefined;
 }

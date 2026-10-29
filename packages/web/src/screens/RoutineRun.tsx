@@ -2,16 +2,18 @@ import type {
 	AgentParticipant,
 	ChatMessageItem,
 	Pod,
+	RoutineExecution,
 	ThreadDetails,
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
+import { useAgentWithPod } from "@/lib/agents.ts";
 import { useRoutineControls } from "@/lib/chats.ts";
 import { podSettingsLink } from "@/lib/links.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { nextRunWords } from "@/lib/routine-schedule.ts";
-import { useRoutines } from "@/lib/routines.ts";
+import { useRecentRuns, useRoutines } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
@@ -118,22 +120,19 @@ export function RunMessage({
 	conversationId,
 	latest,
 	mentionable,
-	onOpenThread,
 }: {
 	item: RunItem;
 	agent: AgentParticipant;
 	pod: Pod;
-	routine: NonNullable<ThreadDetails["routine"]>;
+	routine: Pick<NonNullable<ThreadDetails["routine"]>, "id" | "agentId">;
 	conversationId: string;
 	/** The newest failure while the routine is still failing, which may be retried. */
 	latest: boolean;
 	/** Who the report may mention, drawn as chips. */
 	mentionable: ThreadParticipant[];
-	onOpenThread: (threadId: string) => void;
 }) {
 	const controls = useRoutineControls(conversationId, routine);
 	const outcome = outcomeOf(item.state);
-	const open = () => onOpenThread(item.threadId);
 	const report = outcome === "passed" ? item.report : null;
 	return (
 		<article
@@ -152,7 +151,7 @@ export function RunMessage({
 					<span className="text-subtle-foreground text-xs">
 						{formatClockTime(new Date(item.createdAt))}
 					</span>
-					{!report && <RunStatus outcome={outcome} onOpen={open} />}
+					{!report && <RunStatus outcome={outcome} />}
 				</div>
 				{report ? (
 					<div className="min-w-0 self-stretch break-words text-[15px] text-body-foreground leading-[1.5]">
@@ -182,5 +181,45 @@ export function RunMessage({
 				)}
 			</div>
 		</article>
+	);
+}
+
+/**
+ * A failed run, at the top of its own thread, drawn as it is in its routine's
+ * thread: its bot's message saying why, offering to run it again while it is
+ * the routine's latest run. Nothing until its bot's pod is known.
+ */
+export function FailedRunMessage({
+	execution,
+	agent,
+}: {
+	execution: RoutineExecution;
+	agent: AgentParticipant;
+}) {
+	const placed = useAgentWithPod(execution.agentId);
+	const routine = { id: execution.routineId, agentId: execution.agentId };
+	const latestRun = useRecentRuns({ agentId: execution.agentId, routineId: execution.routineId })
+		.data?.items[0];
+	if (!placed) return null;
+	return (
+		<RunMessage
+			item={{
+				kind: "routine",
+				id: execution.id,
+				threadId: execution.threadId,
+				routineName: execution.routineName,
+				triggerKind: execution.trigger.kind,
+				state: execution.state,
+				error: execution.error,
+				report: null,
+				createdAt: execution.acceptedAt,
+			}}
+			agent={agent}
+			pod={placed.pod}
+			routine={routine}
+			conversationId={execution.conversationId}
+			latest={latestRun?.id === execution.id}
+			mentionable={[]}
+		/>
 	);
 }

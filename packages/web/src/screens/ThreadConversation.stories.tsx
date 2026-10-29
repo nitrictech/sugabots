@@ -214,6 +214,7 @@ export const RoutineResult = meta.story({
 				routineResultOf: {
 					executionId: "0199a3a0-0000-7000-8000-000000000a02",
 					threadId: "0199a3a0-0000-7000-8000-000000000a03",
+					routineId: "0199a3a0-0000-7000-8000-000000000a04",
 					routineName: "Morning standup",
 				},
 			},

@@ -55,6 +55,7 @@ function posted(id: string, author: "bot" | "you", text: string, at: string, res
 				routineResultOf: {
 					executionId: resultOf,
 					threadId: resultOf,
+					routineId: outbound.id,
 					routineName: "Overnight outbound",
 				},
 			}),
