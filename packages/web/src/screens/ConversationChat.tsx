@@ -66,7 +66,7 @@ import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { Button } from "@/ui/button.tsx";
+import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
@@ -1158,13 +1158,13 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 			{agent.name} has no model yet, so it cannot answer.{" "}
 			{pod.permissions.updateAgents ? (
 				<>
-					<Button
-						size="bare"
-						variant="link"
-						render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
+					<Link
+						{...agentSettingsLink({ pod, agent })}
+						state={backToChat}
+						className={buttonStyles({ variant: "link", size: "bare" })}
 					>
 						Choose a model
-					</Button>{" "}
+					</Link>{" "}
 					to start chatting.
 				</>
 			) : (
