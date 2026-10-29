@@ -60,6 +60,14 @@ export const client = {
 			link: vi.fn(),
 			resetLink: vi.fn(),
 		},
+		notifications: {
+			settings: vi.fn(),
+			updatePreferences: vi.fn(),
+			setLevel: vi.fn(),
+			mute: vi.fn(),
+			sendTest: vi.fn(),
+			reportPresence: vi.fn(),
+		},
 		onboarding: {
 			complete: vi.fn(),
 		},
@@ -152,7 +160,7 @@ export const client = {
 			executions: vi.fn(),
 		},
 	},
-	events: { thread: vi.fn(), workspace: vi.fn() },
+	events: { thread: vi.fn(), workspace: vi.fn(), me: vi.fn() },
 	tokens: { get: vi.fn(), set: vi.fn() },
 	auth: {
 		signIn: vi.fn(),

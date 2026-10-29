@@ -138,6 +138,7 @@ describe("authorisation", () => {
 			workspace: () => Effect.undefined,
 			thread: () => Effect.undefined,
 			reachesPod: () => Effect.succeed(false),
+			me: () => Effect.succeed("person:me"),
 		});
 
 		const response = await app.request(`/threads/${THREAD}/events`, {
@@ -154,6 +155,7 @@ describe("authorisation", () => {
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),
 			reachesPod: () => Effect.succeed(true),
+			me: () => Effect.succeed("person:me"),
 		});
 
 		const stream = await open(app, `/threads/${THREAD}/events`);
@@ -269,6 +271,7 @@ describe("the stream", () => {
 				workspace: () => Effect.undefined,
 				thread: () => Effect.succeed(channel),
 				reachesPod: () => Effect.succeed(true),
+				me: () => Effect.succeed("person:me"),
 			},
 			{ recheck: 0 },
 		);
@@ -290,6 +293,7 @@ describe("the stream", () => {
 					return "thread:root" as const;
 				}),
 			reachesPod: () => Effect.succeed(true),
+			me: () => Effect.succeed("person:me"),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);
 		for (let i = 0; i < 3; i++) {

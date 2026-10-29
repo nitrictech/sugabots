@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { notificationContentSchema, presenceSchema } from "./notifications.ts";
 import {
 	collaborationPartSchema,
 	filePartSchema,
@@ -118,6 +119,10 @@ export const eventPayloadSchemas = {
 	 * somebody started from it.
 	 */
 	"conversation.thread_changed": Schema.Struct({ conversationId: uuidSchema, threadId }),
+	/** Something to tell the person about, which their open tabs show. */
+	notification: notificationContentSchema,
+	/** One of the person's tabs says what it is looking at, so their other tabs hold back notifications about it. */
+	presence: presenceSchema,
 	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
 	"collaboration.updated": Schema.Struct({
 		threadId,
@@ -179,6 +184,8 @@ export type DurableEventType = typeof durableEventTypeSchema.Type;
 export const ephemeralEventTypeSchema = Schema.Literals([
 	"message.delta",
 	"person.typing",
+	"notification",
+	"presence",
 ] satisfies KnownEventType[]);
 
 export type EphemeralEventType = typeof ephemeralEventTypeSchema.Type;
@@ -297,13 +304,25 @@ export const workspaceUpdateEventSchema = Schema.Union([
 
 export type WorkspaceUpdateEvent = typeof workspaceUpdateEventSchema.Type;
 
+/** Everything a person's own channel can carry. */
+export const personUpdateEventSchema = Schema.Union([
+	withEnvelope("notification", P.notification),
+	withEnvelope("presence", P.presence),
+	withEnvelope("reset", P.reset.schema),
+]);
+
+export type PersonUpdateEvent = typeof personUpdateEventSchema.Type;
+
 /**
- * A stream carries exactly one channel, and there are two kinds: a workspace,
- * and a thread. A thread's system agents work in child threads but publish on the
- * thread they act on, so a client watching a thread holds one connection.
+ * A stream carries exactly one channel, and there are three kinds: a
+ * workspace, a thread, and a person, which only that person hears. A thread's
+ * system agents work in child threads but publish on the thread they act on,
+ * so a client watching a thread holds one connection.
  */
-export type Channel = `workspace:${string}` | `thread:${string}`;
+export type Channel = `workspace:${string}` | `thread:${string}` | `person:${string}`;
 
 export const workspaceChannel = (workspaceId: string): Channel => `workspace:${workspaceId}`;
 
 export const threadChannel = (threadId: string): Channel => `thread:${threadId}`;
+
+export const personChannel = (userId: string): Channel => `person:${userId}`;

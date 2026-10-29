@@ -3,6 +3,7 @@ export * as Conversations from "./conversations.ts";
 import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
+import { Notifications } from "../notifications/notifications.ts";
 import { AgentAdministration } from "../workspaces/agents/agent-administration.ts";
 import { WorkspaceTimeZone } from "../workspaces/time-zone/workspace-time-zone.ts";
 import { ChatFiles } from "./chats/chat-files.ts";
@@ -61,12 +62,14 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
  * emit to its handlers, in order: the thread feed tells watching clients what
  * happened, routine settlement ends the runs that work finished,
  * collaborations whose collaborator stopped without answering fail, the floor
- * passes after each completed reply, and the reply asks for its thread's
- * summary and, past the compaction line, its compaction once it commits.
+ * passes after each completed reply, the reply asks for its thread's
+ * summary and, past the compaction line, its compaction once it commits, and
+ * people are notified of finished messages and approvals waiting on them.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
 		const outbox = yield* EventOutbox.Service;
+		const notifications = yield* Notifications.Service;
 		// Settlement is built from the services that emit, so `emit` reaches the
 		// handlers through `dispatch`, which exists once they are built. Nothing
 		// emits while they are being built.
@@ -81,6 +84,7 @@ export const layer = Layer.effectContext(
 			Context.get(built, FloorControl.Service).handler,
 			Context.get(built, Summaries.Service).handler,
 			Context.get(built, Compactions.Service).handler,
+			notifications.handler,
 		]);
 		// Internals included: the workflows' steps and the routine scheduler read
 		// them from here. Routes cannot, as `HttpServices` admits only public tags.

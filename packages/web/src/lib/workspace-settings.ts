@@ -40,7 +40,10 @@ export const workspaceSettingGroups = [
 	},
 	{
 		label: "You",
-		sections: [{ id: "profile", label: "Profile", path: "/settings/profile" }],
+		sections: [
+			{ id: "profile", label: "Profile", path: "/settings/profile" },
+			{ id: "notifications", label: "Notifications", path: "/settings/notifications" },
+		],
 	},
 ] as const satisfies ReadonlyArray<{
 	label: string;

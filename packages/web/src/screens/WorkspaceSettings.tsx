@@ -29,6 +29,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
+import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
@@ -113,6 +114,7 @@ export function WorkspaceSettings({
 						/>
 					)}
 					{section === "profile" && <ProfileSettings />}
+					{section === "notifications" && <NotificationsSettings />}
 					{section === "members" && (
 						<WorkspaceMembersSettings
 							workspaceId={workspace.id}

@@ -294,8 +294,9 @@ export function mayDecideApprovals(
 }
 
 /**
- * SQL for "`userId` reaches the pod `podId` names": what `mayInPod(actor,
- * "pod.read", …)` decides for one pod, written again as a `where` clause. A
+ * SQL for "`userId` reaches the pod `podId` names", `userId` being an id or
+ * the column holding one: what `mayInPod(actor, "pod.read", …)` decides for
+ * one pod, written again as a `where` clause. A
  * Personal pod is reached by its owner and by nobody else, and a shared pod by
  * a membership row held by a role granted `pod.read`. The roles come from
  * `rolesGrantedInPod`, but the shape of the rule is repeated here, so a change
@@ -304,7 +305,7 @@ export function mayDecideApprovals(
  * Aliased throughout, so it composes with a query that already joins any of
  * these tables.
  */
-export function reachesPodFor(podId: SQLWrapper, userId: string): SQL<boolean> {
+export function reachesPodFor(podId: SQLWrapper, userId: string | SQLWrapper): SQL<boolean> {
 	return sql`exists (
 		select 1
 		from ${pod} as reach_pod

@@ -5,6 +5,7 @@ import type {
 	ConversationThread,
 	Message,
 	ModelProvider,
+	NotificationSettings,
 	Pod,
 	PodChat,
 	SessionUser,
@@ -296,7 +297,20 @@ export interface StoryAppData {
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
 	referralLink?: string;
+	/** What the person chose to be notified about; nothing chosen when absent. */
+	notifications?: NotificationSettings;
 }
+
+const noNotificationChoices: NotificationSettings = {
+	level: "mentions",
+	pausedUntil: null,
+	quietHours: null,
+	turnFailures: true,
+	routineRuns: "failures",
+	pods: {},
+	bots: {},
+	mutedUntil: { pods: {}, bots: {} },
+};
 
 /**
  * The API as the app's example workspace answers it. Pass overrides for what
@@ -327,6 +341,14 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
 		http.get(api("/referral-link"), () => HttpResponse.json({ url: data.referralLink ?? null })),
+		http.get(api("/notifications"), () =>
+			HttpResponse.json(data.notifications ?? noNotificationChoices),
+		),
+		http.put(api("/notifications/presence"), () => new HttpResponse(null, { status: 204 })),
+		http.put(
+			api("/notifications/:kind/:id/:choice"),
+			() => new HttpResponse(null, { status: 204 }),
+		),
 		http.get(api("/workspaces/:workspace/me"), () =>
 			HttpResponse.json({
 				role: data.role ?? "owner",

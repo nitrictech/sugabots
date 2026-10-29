@@ -1,5 +1,5 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { Pod, Workspace } from "@sugabots/contracts";
+import type { NotificationSettings, Pod, Workspace } from "@sugabots/contracts";
 import { Link, useMatchRoute, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Inbox, Library, ShieldCheck } from "lucide-react";
@@ -7,6 +7,7 @@ import { type CSSProperties, type ReactNode, useRef } from "react";
 import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
 import { artifactsLink } from "@/lib/links.ts";
+import { useNotificationSettings } from "@/lib/notifications.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useSession, useSignOut } from "@/lib/session.ts";
@@ -38,6 +39,7 @@ export function Sidebar() {
 	const { data: pods } = usePods();
 	const { data: markers } = usePodChatMarkers();
 	const { unreadInInbox, waitingApprovals } = useAttentionCounts();
+	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
 	const session = useSession();
@@ -66,6 +68,7 @@ export function Sidebar() {
 			workspaces={workspaces ?? []}
 			user={session.user ?? undefined}
 			settingsBack={place.inSettings ? undefined : backToChat}
+			notificationSettings={notificationSettings}
 			onSignOut={() => void signOut()}
 			className={place.coversPhone ? "max-md:hidden" : undefined}
 			conversationsOf={(pod) => (
@@ -147,6 +150,7 @@ export function SidebarView({
 	workspaces = [],
 	user,
 	settingsBack,
+	notificationSettings,
 	onSignOut,
 	className,
 	conversationsOf,
@@ -166,6 +170,8 @@ export function SidebarView({
 	user?: { name: string; email: string; image?: string | null };
 	/** History state for settings links, so their Back returns to the page they left. */
 	settingsBack?: ReturnType<typeof useBackToHere>;
+	/** What the viewer is notified about, once loaded, which a pod's menu changes. */
+	notificationSettings?: NotificationSettings;
 	onSignOut: () => void;
 	className?: string;
 	/** A pod's chats and bots, under its artifacts and routines. */
@@ -246,6 +252,7 @@ export function SidebarView({
 							holdsSelected={current}
 							onToggle={() => toggleFolded(pod.id)}
 							settingsBack={settingsBack}
+							notificationSettings={notificationSettings}
 						>
 							<div className="flex flex-col gap-px pt-px pb-px">
 								<SidebarLink

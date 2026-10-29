@@ -6,7 +6,8 @@ import { Session } from "../middleware.ts";
 
 /**
  * Live updates as Server-Sent Events: one stream per open thread, one per
- * workspace. A client resumes with `Last-Event-ID` and misses nothing.
+ * workspace, and one for the signed-in person. A client resumes with
+ * `Last-Event-ID` and misses nothing.
  *
  * The body is a stream, not a value, so the SDK reads it with its own event
  * source rather than through the generated client.
@@ -25,6 +26,8 @@ export class EventsApi extends HttpApiGroup.make("events")
 			success: eventStream,
 			error: NotFound,
 		}),
+		/** What is for the signed-in person alone, such as their notifications. */
+		HttpApiEndpoint.get("me", "/me/events", { success: eventStream, error: NotFound }),
 		/** Tells the thread's other watchers the caller is typing in it, as `person.typing`. */
 		HttpApiEndpoint.post("typing", "/threads/:threadId/typing", {
 			params: { threadId: Schema.String },

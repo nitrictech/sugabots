@@ -24,6 +24,7 @@ import { eventRoutes } from "../routes/events/routes.ts";
 import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
+import { notificationRoutes } from "../routes/notifications/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
 import { podSandboxRoutes } from "../routes/pod-sandbox/routes.ts";
 import { podRoutes } from "../routes/pods/routes.ts";
@@ -100,6 +101,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				threadRoutes,
 				usageRoutes,
 				referralRoutes,
+				notificationRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),

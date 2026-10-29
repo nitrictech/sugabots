@@ -70,7 +70,7 @@ export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTi
 	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE, recheck: RECHECK }),
 });
 
-/** The workspace and thread streams, with authorization resolved before streaming. */
+/** The workspace, thread and personal streams, with authorization resolved before streaming. */
 export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
@@ -108,6 +108,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 			.handle("thread", ({ params, request }) =>
 				streamFor(request, () => access.thread(params.threadId)),
 			)
+			.handle("me", ({ request }) => streamFor(request, access.me))
 			.handle("typing", ({ params }) =>
 				Effect.gen(function* () {
 					const channel = yield* access.thread(params.threadId);

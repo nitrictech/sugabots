@@ -22,8 +22,10 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
+import { Notifications } from "@sugabots/core/notifications/notifications";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
+import { unimplemented } from "@sugabots/core/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -76,6 +78,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
 						Layer.succeed(SandboxTools.Service, SandboxTools.none),
 						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
+						unimplemented(Notifications.Service, { handler: () => Effect.void }),
 					),
 				),
 				Layer.provideMerge(Layer.mergeAll(EventOutbox.layer, ConversationWorkflows.lanes)),
