@@ -475,6 +475,7 @@ function context(): TurnContext {
 			prompt: "Check facts carefully.",
 			disabledTools: [],
 			usesSandbox: false,
+			naturalBrowsing: false,
 			color: "orange",
 			acceptsImages: false,
 		},

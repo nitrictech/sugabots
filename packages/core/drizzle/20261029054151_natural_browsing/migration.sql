@@ -1,0 +1,1 @@
+ALTER TABLE "agent" ADD COLUMN "natural_browsing" boolean DEFAULT false NOT NULL;

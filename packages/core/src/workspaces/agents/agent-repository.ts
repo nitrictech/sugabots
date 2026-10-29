@@ -179,6 +179,7 @@ export const make = Effect.gen(function* () {
 										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
 										usesSandbox: input.usesSandbox ?? false,
+										naturalBrowsing: input.naturalBrowsing ?? false,
 									})
 									.returning(),
 							(failure) => nameTaken(failure, { name: input.name, handle }),

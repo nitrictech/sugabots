@@ -169,6 +169,12 @@ export const agentSchema = Schema.Struct({
 	 * and only they may change it. Experimental.
 	 */
 	usesSandbox: Schema.Boolean,
+	/**
+	 * Whether it browses in a way people watching its desktop can follow: a
+	 * cursor that moves to what it clicks, smooth scrolling, and typing at a
+	 * typing pace. Slower, so off unless somebody turns it on, as for a demo.
+	 */
+	naturalBrowsing: Schema.Boolean,
 	createdAt: isoTimestampSchema,
 });
 
@@ -199,6 +205,7 @@ export const newAgentInPodSchema = Schema.Struct({
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),
 	disabledTools: Schema.optional(toolKeysSchema),
 	usesSandbox: Schema.optional(Schema.Boolean),
+	naturalBrowsing: Schema.optional(Schema.Boolean),
 });
 
 export const newAgentSchema = newAgentInPodSchema.mapFields(Struct.assign({ podId: uuidSchema }));

@@ -577,6 +577,24 @@ function Tools({
 					)
 				}
 			/>
+			{agent.usesSandbox && !sandboxOff ? (
+				<SettingsRow
+					label="Natural browsing"
+					sub="Show a cursor, scroll smoothly and type at a typing pace, so people watching can follow along. Slower."
+					trailing={
+						canChange ? (
+							<Toggle
+								checked={agent.naturalBrowsing}
+								label={`${agent.naturalBrowsing ? "Turn off" : "Turn on"} natural browsing`}
+								tooltip={`Toggle to ${agent.naturalBrowsing ? "stop" : "let"} ${agent.name} browse naturally`}
+								onChange={(next) => save({ naturalBrowsing: next }).catch(() => {})}
+							/>
+						) : (
+							<SettingsValue>{agent.naturalBrowsing ? "On" : "Off"}</SettingsValue>
+						)
+					}
+				/>
+			) : null}
 		</SettingsGroup>
 	);
 }

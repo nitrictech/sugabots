@@ -49,6 +49,15 @@ export interface AgentInThread {
 	readonly color: AgentColor;
 }
 
+/** An agent browsing in a thread, in the way it was set to. */
+export interface AgentBrowsing extends AgentInThread {
+	/**
+	 * Whether it browses so people watching can follow: a cursor that moves to
+	 * what it clicks, smooth scrolling, and typing at a typing pace. Slower.
+	 */
+	readonly naturalBrowsing: boolean;
+}
+
 /** The session's name for an agent in a thread: one desktop and browser each. */
 export function sessionName(turn: { threadId: string; agentId: string }) {
 	return `${turn.threadId}-${turn.agentId}`;
@@ -163,7 +172,7 @@ export class DesktopUnavailable
 export function browserSession(
 	openSandbox: OpenSandbox,
 	place: Place,
-	turn: AgentInThread,
+	turn: AgentBrowsing,
 ): BrowserSession {
 	const name = sessionName(turn);
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
@@ -186,6 +195,7 @@ export function browserSession(
 				requestInit: { headers: endpoint.headers },
 			}),
 		);
+		if (turn.naturalBrowsing) await browseNaturally(client, botColors[turn.color].face);
 		return browser.started
 			? {
 					client,
@@ -221,6 +231,102 @@ export function browserSession(
 			if (connected && !("status" in connected)) await connected.client.close();
 		},
 	};
+}
+
+const RUN_CODE_TOOL = "browser_run_code_unsafe";
+
+/**
+ * Has the browser's MCP server act naturally for the rest of this session,
+ * the turn's, in `accent`. Images from before Playwright drew a cursor
+ * refuse it, and the agent browses as it otherwise would.
+ */
+async function browseNaturally(client: Client, accent: string) {
+	await client
+		.callTool({ name: RUN_CODE_TOOL, arguments: { code: naturalBrowsingCode(accent) } })
+		.catch(() => undefined);
+}
+
+/**
+ * Playwright code for the browser's MCP server: a cursor on each tab, drawn
+ * by Playwright, that moves to what the agent uses and rings it; a smooth
+ * scroll to it first; and typing at a typing pace rather than setting a
+ * field's value.
+ *
+ * The scrolling and typing wrap the Locator methods the server's tools act
+ * through, which every MCP session in the server shares, so they're wrapped
+ * once and act naturally only for a session whose browser context is marked.
+ * Each session connects to the browser anew, with a context of its own, so
+ * the next turn's browses plainly unless this runs again.
+ */
+function naturalBrowsingCode(accent: string) {
+	return `async (page) => {
+	const accent = ${JSON.stringify(accent)};
+	const TYPING_DELAY_MILLISECONDS = 70;
+	// Long text is typed faster, so filling in a long field doesn't hold up a turn.
+	const LONGEST_TYPING_MILLISECONDS = 6000;
+	// A smooth scroll that had nowhere to go never says it ended.
+	const LONGEST_SCROLL_MILLISECONDS = 1500;
+	const context = page.context();
+	context.sugabotsNaturalBrowsing = true;
+	const showCursor = (tab) =>
+		tab.screencast.showActions({
+			cursor: "pointer",
+			// How long the cursor's ring stays on what it's about to use, which Playwright waits for.
+			duration: 700,
+			style: {
+				point: \`width: 28px; height: 28px; border-radius: 50%; border: 3px solid \${accent}; background: \${accent}40\`,
+				highlight: \`outline: 2px solid \${accent}cc; border-radius: 4px\`,
+				// Playwright's name for the action, such as getByRole('button'), which means nothing to people watching.
+				title: "display: none",
+			},
+		});
+	await Promise.all(context.pages().map(showCursor));
+	context.on("page", (tab) => showCursor(tab).catch(() => {}));
+
+	const Locator = Object.getPrototypeOf(page.locator("body"));
+	if (Locator.sugabotsWrapped) return;
+	Locator.sugabotsWrapped = true;
+	const natural = (locator) => locator.page().context().sugabotsNaturalBrowsing === true;
+	const scrollSmoothlyTo = (locator) =>
+		locator
+			.evaluate(
+				async (element, longest) => {
+					const box = element.getBoundingClientRect();
+					if (box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth) return;
+					element.scrollIntoView({ behavior: "smooth", block: "center" });
+					await new Promise((ended) => {
+						addEventListener("scrollend", ended, { once: true });
+						setTimeout(ended, longest);
+					});
+				},
+				LONGEST_SCROLL_MILLISECONDS,
+				{ timeout: LONGEST_SCROLL_MILLISECONDS * 2 },
+			)
+			// The action itself reports an element that isn't there.
+			.catch(() => {});
+	for (const name of ["click", "dblclick", "hover", "selectOption", "check", "uncheck", "setChecked"]) {
+		const act = Locator[name];
+		Locator[name] = async function (...args) {
+			if (natural(this)) await scrollSmoothlyTo(this);
+			return act.apply(this, args);
+		};
+	}
+	const pressSequentially = Locator.pressSequentially;
+	Locator.pressSequentially = async function (text, options = {}) {
+		if (!natural(this)) return pressSequentially.call(this, text, options);
+		await scrollSmoothlyTo(this);
+		const delay = Math.min(TYPING_DELAY_MILLISECONDS, LONGEST_TYPING_MILLISECONDS / Math.max(text.length, 1));
+		return pressSequentially.call(this, text, { delay, ...options });
+	};
+	const fill = Locator.fill;
+	// Clicks into the field and types, as a person would.
+	Locator.fill = async function (value, options = {}) {
+		if (!natural(this) || value === "") return fill.call(this, value, options);
+		await this.click(options);
+		await fill.call(this, "", options);
+		return this.pressSequentially(value, options);
+	};
+}`;
 }
 
 function toBrowserResult(content: unknown, note: UserText | undefined): BrowserResult {
