@@ -94,7 +94,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		message: string;
 	}) {
 		const chats = chatsAs(input.initiatorUserId);
-		const opened = await chats.open({
+		const opened = await chats.openBotChannel({
 			workspace: input.workspaceId,
 			podId: input.podId,
 			hostAgentId: input.hostAgentId,
@@ -361,8 +361,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			message: "Check the release\nPay attention to migrations.",
 		});
 
-		expect(details.thread.title).toMatch(/^Conversation with Release agent /);
-		expect(details.participants.map(({ kind }) => kind)).toEqual(["person", "agent"]);
+		expect(details.thread.title).toMatch(/^Release agent /);
+		expect(details.participants.map(({ kind }) => kind)).toEqual(["agent", "person"]);
 		expect(details.messages).toMatchObject([
 			{
 				author: { kind: "person", id: memberId },
@@ -704,10 +704,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		);
 
 		const refreshed = await viewAs(memberId).get(details.thread.id);
-		expect(refreshed?.thread.title).toBe("Verify the release");
-		// The thread holding the summaries is named after its parent, and the
-		// first summary is what gives the parent a real title — so without this
-		// its own name kept the sentence somebody originally typed.
+		// A bot's channel goes by its bot's name, whatever its summaries are titled.
+		expect(refreshed?.thread.title).toMatch(/^Release agent /);
+		// The thread holding the summaries is named after its parent, so it keeps
+		// the channel's name too.
 		const [summariesThread] = await onDatabase((db) =>
 			db
 				.select({ title: thread.title })
@@ -716,7 +716,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
 				),
 		);
-		expect(summariesThread?.title).toBe("Summaries of Verify the release");
+		expect(summariesThread?.title).toMatch(/^Summaries of Release agent /);
 		expect((await viewAs(memberId).activity(details.thread.id))?.summary).toMatchObject({
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
@@ -765,8 +765,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			],
 		});
 		await summaries.complete(nextSummary, { content: "Only approval remains." });
-		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toBe(
-			"Verify the release",
+		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toMatch(
+			/^Release agent /,
 		);
 	});
 

@@ -1,6 +1,12 @@
 export * as Chats from "./chats.ts";
 
-import type { ConversationThread, Message, PodChat, RoutineFeed } from "@sugabots/contracts";
+import type {
+	BotChannel,
+	ConversationThread,
+	Message,
+	PodChat,
+	RoutineFeed,
+} from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, isNotNull, isNull, not, notExists, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -18,7 +24,7 @@ import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { Turns } from "../turns/turns.ts";
-import { toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
+import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 import { threadTitleFrom } from "./thread-title.ts";
 
 /**
@@ -28,16 +34,16 @@ import { threadTitleFrom } from "./thread-title.ts";
  */
 export interface Interface {
 	/**
-	 * The newest conversation with the pod's crew agent, opened on first use, in a workspace
+	 * The channel of the pod's crew agent, opened on first use, in a workspace
 	 * named by its id or its slug. Refused unless the actor reaches the pod and
-	 * the agent is its crew. Starts the creator's interview when the conversation
+	 * the agent is its crew. Starts the creator's interview when the channel
 	 * is empty, the bot has a model, and no turn is already queued.
 	 */
-	readonly open: (input: {
+	readonly openBotChannel: (input: {
 		workspace: string;
 		podId: string;
 		hostAgentId: string;
-	}) => Effect.Effect<ConversationThread, AuthorizationDenied | HostNotCrew, CurrentActor.Service>;
+	}) => Effect.Effect<BotChannel, AuthorizationDenied | HostNotCrew, CurrentActor.Service>;
 	/**
 	 * The shared pod's first chat, opened on first use, in a workspace named by
 	 * its id or its slug. Hidden unless the actor reaches the pod; a Personal
@@ -158,10 +164,10 @@ export const make = Effect.gen(function* () {
 	const turns = yield* Turns.Service;
 	const ids = yield* Ids.Service;
 
-	const startInterview = (conversation: ThreadRow, userId: string) =>
+	const startInterview = (channel: ThreadRow, userId: string) =>
 		Effect.gen(function* () {
-			const hostAgentId = conversation.hostAgentId;
-			if (!hostAgentId || conversation.originMessageId) return;
+			const hostAgentId = channel.hostAgentId;
+			if (!hostAgentId) return;
 			const [eligible] = yield* query((db) =>
 				db
 					.select({ id: agent.id })
@@ -173,18 +179,15 @@ export const make = Effect.gen(function* () {
 							eq(agent.prompt, INTERVIEW_PROMPT),
 							isNotNull(agent.model),
 							notExists(
-								db
-									.select({ id: message.id })
-									.from(message)
-									.where(eq(message.threadId, conversation.id)),
+								db.select({ id: message.id }).from(message).where(eq(message.threadId, channel.id)),
 							),
-							not(Turns.busyIn(sql`${conversation.id}`)),
+							not(Turns.busyIn(sql`${channel.id}`)),
 						),
 					),
 			);
 			if (!eligible) return;
 			yield* turns.ask({
-				threadId: conversation.id,
+				threadId: channel.id,
 				agentId: hostAgentId,
 				triggerMessageId: yield* ids.next,
 				reason: "interview",
@@ -192,9 +195,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		open: (input) =>
+		openBotChannel: (input) =>
 			operation(
-				"open",
+				"openBotChannel",
 				transaction(
 					Effect.gen(function* () {
 						const { workspaceId, actor } = yield* authorization.workspace(
@@ -205,12 +208,12 @@ export const make = Effect.gen(function* () {
 						if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 							return yield* new HostNotCrew();
 						}
-						const thread = yield* threads.openConversation({
+						const channel = yield* threads.openBotChannel({
 							...placement,
 							initiatorUserId: actor.userId,
 						});
-						yield* startInterview(thread, actor.userId);
-						return toConversationThread(thread);
+						yield* startInterview(channel, actor.userId);
+						return toBotChannel(channel);
 					}),
 				),
 			),

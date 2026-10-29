@@ -8,7 +8,7 @@ import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Every approval across the workspace, opened from the sidebar: what waits on
@@ -52,8 +52,8 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			shape: "circle",
 		},
 		podId: revenue.id,
-		threadId: storyConversationFor(growthDesk).id,
-		conversationId: storyConversationFor(growthDesk).id,
+		threadId: storyChannelFor(growthDesk).id,
+		conversationId: storyChannelFor(growthDesk).id,
 	};
 }
 

@@ -15,8 +15,8 @@ import {
 	chatPath,
 	StoryApp,
 	storyBots,
+	storyChannelFor,
 	storyChatDetails,
-	storyConversationFor,
 	storyPodChatDetails,
 	storyPodChatFor,
 	storyUser,
@@ -30,7 +30,7 @@ import {
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const thread = storyConversationFor(growthDesk).id;
+	const thread = storyChannelFor(growthDesk).id;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
 		threadId: thread,
@@ -86,15 +86,18 @@ const meta = preview.meta({
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
 });
 
-/** The chat beside the sidebar, with Details a tap on the header away. */
+/**
+ * A bot's channel beside the sidebar, going by the bot's name and never done,
+ * with Details a tap on the header away.
+ */
 export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
 		await expect(
-			canvas.getByRole("heading", { name: `Conversation with ${growthDesk.name}`, level: 1 }),
+			canvas.getByRole("heading", { name: growthDesk.name, level: 1 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Mark done" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 	},
 });
 
@@ -373,6 +376,7 @@ export const NamedChat = meta.story({
 						{ conversation: storyPodChatFor(revenue), unreadMessages: 0 },
 						{ conversation: pricingChat, unreadMessages: 0 },
 					],
+					channels: [],
 					threads: [],
 					routines: [],
 				}),
@@ -433,11 +437,7 @@ export const PodOnAPhone = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole(
-				"button",
-				{ name: new RegExp(`^${growthDesk.name}`) },
-				{ timeout: 10_000 },
-			),
+			await canvas.findByRole("link", { name: growthDesk.name }, { timeout: 10_000 }),
 		).toBeVisible();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
 	},
@@ -735,11 +735,11 @@ const collaboration: ThreadDetails = {
 		workspaceId: growthDesk.workspaceId,
 		podId: growthDesk.podId,
 		hostAgentId: linearHandler.id,
-		conversationId: storyConversationFor(growthDesk).id,
+		conversationId: storyChannelFor(growthDesk).id,
 		type: "collaboration",
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
-		parentThreadId: storyConversationFor(growthDesk).id,
+		parentThreadId: storyChannelFor(growthDesk).id,
 		initiatorUserId: storyUser.id,
 		doneAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",

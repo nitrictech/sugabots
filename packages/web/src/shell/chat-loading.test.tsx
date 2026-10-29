@@ -31,9 +31,9 @@ it("keeps the sidebar and its conversations visible while the chat screen loads"
 	client.api.agents.list.mockReturnValue(roster.effect);
 	mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-	// The bot whose chat is opening is open in the sidebar, with its thread.
+	// The bot whose channel is opening is open in the sidebar.
 	const rail = await screen.findByRole("navigation", { name: "Sidebar" });
-	await screen.findByRole("link", { name: new RegExp(`Conversation with ${linear.name}`) });
+	await within(rail).findByRole("link", { name: linear.name });
 
 	// React Query hands the answer to components on a zero-delay timer. Until it
 	// runs, nothing has suspended, and these checks would pass even if the frame vanished.
@@ -45,11 +45,9 @@ it("keeps the sidebar and its conversations visible while the chat screen loads"
 	vi.useRealTimers();
 	// Role queries exclude DOM hidden by the enclosing Suspense boundary.
 	expect(screen.getByRole("navigation", { name: "Sidebar" })).toBe(rail);
-	expect(
-		screen
-			.getByRole("link", { name: new RegExp(`Conversation with ${linear.name}`) })
-			.getAttribute("aria-current"),
-	).toBe("page");
+	expect(within(rail).getByRole("link", { name: linear.name }).getAttribute("aria-current")).toBe(
+		"page",
+	);
 	expect(screen.queryAllByRole("heading", { name: linear.name })).toHaveLength(0);
 
 	await act(async () => {
@@ -68,8 +66,8 @@ it("keeps the sidebar, with the bot open, while the new thread screen loads", as
 	mount(`/suga/pods/suga-team/threads/new?agent=${linear.handle}`);
 
 	const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-	const bot = await within(sidebar).findByRole("button", { name: linear.name });
-	expect(bot.getAttribute("aria-expanded")).toBe("true");
+	// Open, its Routines show under it.
+	expect(await within(sidebar).findByRole("link", { name: "Routines" })).toBeDefined();
 
 	await act(async () => {
 		newThreadModule.resolve();

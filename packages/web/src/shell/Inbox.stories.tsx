@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Inbox, opened from the sidebar: what is new across the workspace's chats,
@@ -29,7 +29,7 @@ const feed: ActivityFeed = {
 			preview: "@ryan-eyes can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
 			podId: revenue.id,
-			conversationId: storyConversationFor(growthDesk).id,
+			conversationId: storyChannelFor(growthDesk).id,
 		},
 		{
 			kind: "message",
@@ -47,7 +47,7 @@ const feed: ActivityFeed = {
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
 			podId: revenue.id,
-			conversationId: storyConversationFor(accountManager).id,
+			conversationId: storyChannelFor(accountManager).id,
 		},
 		{
 			kind: "routine",
@@ -69,7 +69,7 @@ const feed: ActivityFeed = {
 			at: minutesAgo(90),
 			unread: true,
 			podId: revenue.id,
-			conversationId: storyConversationFor(growthDesk).id,
+			conversationId: storyChannelFor(growthDesk).id,
 		},
 		{
 			kind: "collaboration",
@@ -97,7 +97,7 @@ const feed: ActivityFeed = {
 			at: minutesAgo(120),
 			unread: false,
 			podId: revenue.id,
-			conversationId: storyConversationFor(growthDesk).id,
+			conversationId: storyChannelFor(growthDesk).id,
 		},
 		{
 			kind: "mention",
@@ -107,7 +107,7 @@ const feed: ActivityFeed = {
 			preview: "Thanks @ryan-eyes, that fixed it.",
 			at: minutesAgo(26 * 60),
 			podId: revenue.id,
-			conversationId: storyConversationFor(growthDesk).id,
+			conversationId: storyChannelFor(growthDesk).id,
 		},
 	],
 };
@@ -230,7 +230,7 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		threadId: storyConversationFor(growthDesk).id,
+		threadId: storyChannelFor(growthDesk).id,
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
@@ -273,7 +273,7 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyConversationFor(growthDesk).id}?message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyChannelFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {

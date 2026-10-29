@@ -8,7 +8,7 @@ import { HttpResponse, http } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyConversationFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * One approval request in full, beside the Approvals list: what it would do,
@@ -50,8 +50,8 @@ function request(
 			shape: "circle",
 		},
 		podId: revenue.id,
-		threadId: storyConversationFor(growthDesk).id,
-		conversationId: storyConversationFor(growthDesk).id,
+		threadId: storyChannelFor(growthDesk).id,
+		conversationId: storyChannelFor(growthDesk).id,
 	};
 }
 

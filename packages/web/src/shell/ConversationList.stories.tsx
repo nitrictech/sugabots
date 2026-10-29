@@ -1,7 +1,7 @@
 import type { ChatListItem } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
-import { storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
+import { storyChannelFor, storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
 import {
 	accountManager,
@@ -101,83 +101,58 @@ const meta = preview.meta({
 });
 
 /**
- * Default is a pod's chat, then its bots, each closed and counting its
- * threads, but for the one holding the open thread, which is open on it.
+ * Default is a pod's chat, then its bots, each folded but for the one holding
+ * the open thread, whose threads show.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("button", { name: leadResearcher.name })).toHaveAttribute(
-			"aria-expanded",
-			"true",
-		);
 		await expect(
 			canvas.getByRole("link", { name: /Conversation with Lead Researcher/ }),
 		).toHaveAttribute("aria-current", "page");
-		await expect(canvas.getByRole("button", { name: /^Growth Desk/ })).toHaveAttribute(
-			"aria-expanded",
-			"false",
-		);
+		await expect(canvas.queryByRole("link", { name: /Conversation with Growth Desk/ })).toBeNull();
 	},
 });
 
 /**
- * A closed bot with something new in it is brighter and counts what is unread
- * in its threads, where it otherwise counts them; opened, each thread counts
- * its unread messages, and one waiting on you says so too.
+ * A folded bot with something new in it is brighter and counts what is
+ * unread in its threads; one with nothing new shows nothing at its end.
  */
 export const UnreadAndWaiting = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		const growth = canvas.getByRole("button", { name: /^Growth Desk/ });
-		await expect(growth.closest("li")).toHaveTextContent("1 unread message, needs you");
+	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByRole("button", { name: leadResearcher.name }).closest("li"),
-		).not.toHaveTextContent("unread");
-		await userEvent.click(growth);
+			canvas.getByRole("link", { name: growthDesk.name }).closest("li"),
+		).toHaveTextContent("1 unread message, needs you");
+		const quiet = canvas.getByRole("link", { name: leadResearcher.name }).closest("li");
+		await expect(quiet).not.toHaveTextContent("unread");
+		await expect(quiet).not.toHaveTextContent(/\d/);
+	},
+});
+
+/** Open, each of a bot's threads counts its unread messages, and one waiting on you says so too. */
+export const UnreadInTheOpenBotsThreads = meta.story({
+	args: {
+		selected: {
+			kind: "conversation" as const,
+			conversationId: storyConversationFor(growthDesk).id,
+		},
+	},
+	play: async ({ canvas }) => {
 		await expect(
 			canvas.getByRole("link", { name: /Conversation with Growth Desk/ }),
 		).toHaveTextContent("1 unread message, needs you");
-		await userEvent.click(canvas.getByRole("button", { name: /^Account Manager/ }));
-		await expect(
-			canvas.getByRole("link", { name: /Conversation with Account Manager/ }),
-		).toHaveTextContent("3 unread messages");
-	},
-});
-
-/** A bot opened stays open when the page is left and come back to, on this device. */
-export const OpenABot = meta.story({
-	args: { selected: undefined },
-	play: async ({ canvas, userEvent }) => {
-		await expect(canvas.queryByRole("link", { name: /Conversation with Growth Desk/ })).toBeNull();
-		await userEvent.click(canvas.getByRole("button", { name: /^Growth Desk/ }));
-		await expect(canvas.getByRole("link", { name: /Conversation with Growth Desk/ })).toBeVisible();
-		await expect(localStorage.getItem(`sugabots-open-bots:${revenue.id}`)).toBe(
-			JSON.stringify([growthDesk.id]),
-		);
-	},
-});
-
-/** Closing the bot that holds the open thread closes it, though the thread stays open. */
-export const CloseTheOpenThreadsBot = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: leadResearcher.name }));
-		await expect(canvas.getByRole("button", { name: leadResearcher.name })).toHaveAttribute(
-			"aria-expanded",
-			"false",
-		);
-		await expect(
-			canvas.queryByRole("link", { name: /Conversation with Lead Researcher/ }),
-		).toBeNull();
 	},
 });
 
 /**
- * A bot with no thread yet is listed all the same, and opens to its Routines,
- * which it has before it runs any; its + starts a thread with it.
+ * A bot with no thread yet is listed all the same, and opened shows its
+ * Routines, which it has before it runs any; its + starts a thread with it.
  */
 export const BotWithNoThreads = meta.story({
-	args: { rows: revenueRows.slice(0, 2), selected: undefined },
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: leadResearcher.name }));
+	args: {
+		rows: revenueRows.slice(0, 2),
+		selected: { kind: "bot", handle: leadResearcher.handle },
+	},
+	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: "Routines" })).toHaveAttribute(
 			"href",
 			expect.stringMatching(new RegExp(`/pods/revenue/routines\\?bot=${leadResearcher.handle}$`)),
@@ -188,36 +163,73 @@ export const BotWithNoThreads = meta.story({
 	},
 });
 
-/** A bot with no thread, opened before, is not marked while something else is open. */
-export const BotWithNoThreadsWhileTheChatIsOpen = meta.story({
-	beforeEach: () =>
-		localStorage.setItem(`sugabots-open-bots:${revenue.id}`, JSON.stringify([leadResearcher.id])),
+/** Every bot is folded, and none marked, while something else is open. */
+export const BotsWhileTheChatIsOpen = meta.story({
 	args: { rows: revenueRows.slice(0, 2), selected: { kind: "podChat" } },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /^General/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
-		await expect(canvas.getByRole("button", { name: leadResearcher.name })).not.toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: leadResearcher.name })).not.toHaveAttribute(
 			"aria-current",
 		);
-		await expect(canvas.getByRole("link", { name: "Routines" })).not.toHaveAttribute(
-			"aria-current",
-		);
+		await expect(canvas.queryByRole("link", { name: "Routines" })).toBeNull();
 	},
 });
 
-/** Starting a thread with a bot marks the bot as the open row. */
-export const StartingWithABotWithNoThreads = meta.story({
+/** A bot's channel, while it is found by the bot's handle, marks the bot as the open row, open on its Routines. */
+export const OpeningABotsChannel = meta.story({
 	args: {
 		rows: revenueRows.slice(0, 2),
 		selected: { kind: "bot", handle: leadResearcher.handle },
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("button", { name: leadResearcher.name })).toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: leadResearcher.name })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
+		await expect(canvas.getByRole("link", { name: "Routines" })).toBeVisible();
+	},
+});
+
+/** Starting a thread with a bot opens it on its Routines and threads, without marking its channel. */
+export const StartingAThreadWithABot = meta.story({
+	args: {
+		rows: revenueRows.slice(0, 2),
+		selected: { kind: "newThread", handle: leadResearcher.handle },
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: "Routines" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: leadResearcher.name })).not.toHaveAttribute(
+			"aria-current",
+		);
+	},
+});
+
+const leadResearcherChannel = {
+	agent: leadResearcher,
+	conversation: storyChannelFor(leadResearcher),
+	unreadMessages: 2,
+	needsApproval: false,
+	mentionsYou: false,
+};
+
+/**
+ * A bot's name opens its channel, and stays bright with what is unread there
+ * whether its threads are folded or not.
+ */
+export const ChannelUnread = meta.story({
+	args: { channels: [leadResearcherChannel] },
+	play: async ({ canvas }) => {
+		const channel = canvas.getByRole("link", { name: leadResearcher.name });
+		await expect(channel).toHaveAttribute(
+			"href",
+			expect.stringMatching(
+				new RegExp(`/pods/revenue/threads/${leadResearcherChannel.conversation.id}$`),
+			),
+		);
+		await expect(channel.closest("li")).toHaveTextContent("2 unread messages");
 	},
 });
 
@@ -373,34 +385,33 @@ export const OpenDoneThread = meta.story({
 });
 
 /**
- * A Personal pod has no channels. Each bot opens on its Routines and its
- * conversation, which goes by the bot's name.
+ * A Personal pod has no pod channels. Each bot opens its own channel, with
+ * its Routines under it.
  */
 export const PersonalPod = meta.story({
 	args: {
 		pod: personal,
 		chats: undefined,
 		bots: [chief],
-		rows: [
+		rows: [],
+		channels: [
 			{
 				agent: chief,
-				conversation: storyConversationFor(chief),
+				conversation: storyChannelFor(chief),
 				unreadMessages: 0,
 				needsApproval: false,
 				mentionsYou: false,
-				lastMessage: null,
-				waitingOn: null,
 			},
 		],
-		selected: { kind: "conversation", conversationId: storyConversationFor(chief).id },
+		selected: { kind: "conversation", conversationId: storyChannelFor(chief).id },
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.queryByRole("heading", { name: "Channels" })).toBeNull();
-		await expect(canvas.getByRole("link", { name: /^Routines/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Chief" })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
+		await expect(canvas.getByRole("link", { name: /^Routines/ })).toBeVisible();
 	},
 });
 

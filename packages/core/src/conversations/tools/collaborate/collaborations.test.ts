@@ -154,7 +154,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		host = hostRow;
 		helper = helperRow;
 		checker = checkerRow;
-		const opened = await chatsAs(memberId).open({
+		const opened = await chatsAs(memberId).openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: host.id,
@@ -166,7 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			content: "Please look into the release",
 		});
 		rootThreadId = opened.id;
-		const helperChat = await chatsAs(memberId).open({
+		const helperChat = await chatsAs(memberId).openBotChannel({
 			workspace: workspaceId,
 			podId,
 			hostAgentId: helper.id,

@@ -97,7 +97,7 @@ export async function prepareRunnable(
  * something in a chat, so the host's turn is asked for in the chat's thread.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "open" | "post">,
+	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "openBotChannel" | "post">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
@@ -165,7 +165,11 @@ export async function aChatAwaitingReply(
 	);
 	if (!host || !connected) throw new Error("fixture");
 	const chats = chatsAs(memberId);
-	const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: host.id });
+	const opened = await chats.openBotChannel({
+		workspace: workspaceId,
+		podId,
+		hostAgentId: host.id,
+	});
 	await chats.post({
 		conversationId: opened.id,
 		messageId: crypto.randomUUID(),

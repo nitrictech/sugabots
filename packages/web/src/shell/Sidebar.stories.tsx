@@ -5,7 +5,7 @@ import { useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
+import { storyChannelFor, storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
 import { SidebarView } from "./Sidebar.tsx";
 import {
@@ -212,9 +212,9 @@ export const FoldingSections = meta.story({
 });
 
 /**
- * Personal open: each of its bots folds open, as a shared pod's do, on its
- * Routines and the one conversation it keeps with you, bold while something
- * there is new.
+ * Personal open: each of its bots opens its channel with you, and shows its
+ * Routines and threads under it while it is open, as a shared pod's do, bold
+ * while something there is new.
  */
 export const PersonalPod = meta.story({
 	args: {
@@ -230,8 +230,19 @@ export const PersonalPod = meta.story({
 								.map((row) => ({ ...row, unreadMessages: row.agent?.id === growthDesk.id ? 2 : 0 }))
 						: []
 				}
+				channels={
+					pod.id === personal.id
+						? [growthDesk, leadResearcher].map((agent) => ({
+								agent,
+								conversation: storyChannelFor(agent),
+								unreadMessages: 0,
+								needsApproval: false,
+								mentionsYou: false,
+							}))
+						: []
+				}
 				status="ready"
-				selected={{ kind: "conversation", conversationId: storyConversationFor(leadResearcher).id }}
+				selected={{ kind: "conversation", conversationId: storyChannelFor(leadResearcher).id }}
 			/>
 		),
 	},
@@ -244,32 +255,26 @@ export const PersonalPod = meta.story({
 	},
 	play: async ({ canvas }) => {
 		const personalPod = canvas.getByRole("group", { name: "Personal" });
-		await expect(within(personalPod).getByRole("button", { name: /^Growth Desk/ })).toBeVisible();
+		await expect(within(personalPod).getByRole("link", { name: growthDesk.name })).toBeVisible();
+		// The bot's row comes first, before its conversation, which goes by its name too.
+		const [channel] = within(personalPod).getAllByRole("link", { name: leadResearcher.name });
+		await expect(channel).toHaveAttribute("aria-current", "page");
 		await expect(within(personalPod).getByRole("link", { name: /^Routines/ })).toBeVisible();
-		await expect(
-			within(personalPod).getByRole("link", { name: /^Lead Researcher/ }),
-		).toHaveAttribute("aria-current", "page");
 	},
 });
 
 /**
- * Every bot has Routines as its first row, whether it runs any yet or not,
- * which opens its Routines page, with a red dot while one failed its latest run.
+ * Every bot has Routines as its first row while it is open, whether it runs
+ * any yet or not, which opens its Routines page, with a red dot while one
+ * failed its latest run; folded, the bot shows the dot itself.
  */
 export const BotRoutines = meta.story({
 	beforeEach: () => {
 		localStorage.setItem(
-			`sugabots-open-bots:${revenue.id}`,
-			JSON.stringify([growthDesk.id, accountManager.id]),
-		);
-		localStorage.setItem(
 			"sugabots-folded",
 			JSON.stringify([engineering.id, design.id, personal.id]),
 		);
-		return () => {
-			localStorage.removeItem(`sugabots-open-bots:${revenue.id}`);
-			localStorage.removeItem("sugabots-folded");
-		};
+		return () => localStorage.removeItem("sugabots-folded");
 	},
 	args: {
 		conversationsOf: (pod) =>
@@ -292,7 +297,7 @@ export const BotRoutines = meta.story({
 						},
 					]}
 					status="ready"
-					selected={undefined}
+					selected={{ kind: "bot", handle: growthDesk.handle }}
 				/>
 			) : (
 				<ConversationListView pod={pod} bots={[]} rows={[]} status="ready" />
@@ -301,13 +306,12 @@ export const BotRoutines = meta.story({
 	play: async ({ canvas }) => {
 		const revenuePod = canvas.getByRole("group", { name: "Revenue" });
 		const routines = within(revenuePod).getAllByRole("link", { name: /^Routines/ });
-		await expect(routines).toHaveLength(2);
-		const [manager, desk] = routines;
-		await expect(manager).toHaveAttribute(
+		await expect(routines).toHaveLength(1);
+		const [desk] = routines;
+		await expect(desk).toHaveAttribute(
 			"href",
-			expect.stringMatching(new RegExp(`routines\\?bot=${accountManager.handle}$`)),
+			expect.stringMatching(new RegExp(`routines\\?bot=${growthDesk.handle}$`)),
 		);
-		await expect(manager).not.toHaveTextContent("Latest run failed");
 		await expect(desk).toHaveTextContent("Latest run failed");
 	},
 });

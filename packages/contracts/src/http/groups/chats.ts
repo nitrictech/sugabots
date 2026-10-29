@@ -4,6 +4,7 @@ import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../att
 import {
 	activityFeedSchema,
 	approvalInboxSchema,
+	botChannelSchema,
 	chatHistoryPageSchema,
 	chatListQuerySchema,
 	chatListSchema,
@@ -12,7 +13,7 @@ import {
 	conversationThreadSchema,
 	newChatSchema,
 	newThreadSchema,
-	openConversationSchema,
+	openBotChannelSchema,
 	podChatMarkersSchema,
 	podChatSchema,
 	routineFeedSchema,
@@ -46,11 +47,11 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: approvalInboxSchema,
 			error: refused,
 		}),
-		/** The bot's newest thread in the pod, opened on first use. */
-		HttpApiEndpoint.post("open", "/workspaces/:workspace/conversations", {
+		/** The bot's channel in the pod, opened on first use. */
+		HttpApiEndpoint.post("openBotChannel", "/workspaces/:workspace/bot-channels", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			payload: openConversationSchema,
-			success: conversationThreadSchema,
+			payload: openBotChannelSchema,
+			success: botChannelSchema,
 			error: refused,
 		}),
 		/** The routine's own thread, where its runs post, opened on first use. */

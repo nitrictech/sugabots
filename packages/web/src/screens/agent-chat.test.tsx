@@ -1,6 +1,6 @@
 import {
+	type BotChannel,
 	type ChatHistoryEntry,
-	type ConversationThread,
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	type Message,
 	type RoutineExecution,
@@ -36,19 +36,17 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const chat: ConversationThread = {
-	kind: "thread",
+const chat: BotChannel = {
+	kind: "bot_channel",
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
 	podId: linear.podId,
 	hostAgentId: linear.id,
-	title: `Conversation with ${linear.name}`,
-	startedInChatId: null,
-	doneAt: null,
+	title: linear.name,
 	createdAt: "2026-09-18T08:00:00.000Z",
 	updatedAt: "2026-09-18T09:30:00.000Z",
 };
-/** Where the conversation is, which its bot's address opens. */
+/** Where the bot's channel is, which its address opens. */
 const conversationPage = `/suga/pods/suga-team/threads/${chat.id}`;
 const collaborationId = "0199a3a0-0000-7000-8000-0000000000e3";
 const routineId = "0199a3a0-0000-7000-8000-0000000000e4";
@@ -265,18 +263,17 @@ function details(
 	};
 }
 
-/** The pod's conversation list, with Linear Handler's chat in it when `listed`. */
+/** The pod's conversation list, with Linear Handler's channel in it when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
 		chats: [],
 		routines: [],
-		threads: listed
+		threads: [],
+		channels: listed
 			? [
 					{
 						agent: linear,
 						conversation: chat,
-						lastMessage: null,
-						waitingOn: null,
 						unreadMessages: 0,
 						needsApproval: false,
 						mentionsYou: false,
@@ -288,7 +285,7 @@ function chatList({ listed }: { listed: boolean }) {
 
 function chatAnswers() {
 	client.api.chats.list.mockReturnValue(chatList({ listed: true }));
-	client.api.chats.open.mockReturnValue(Effect.succeed(chat));
+	client.api.chats.openBotChannel.mockReturnValue(Effect.succeed(chat));
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
 			items: [
@@ -353,9 +350,7 @@ function chatAnswers() {
 				});
 			}
 			default:
-				return Effect.succeed(
-					details(chat.id, "Chat", "conversation", [mainMessage, agentMessage]),
-				);
+				return Effect.succeed(details(chat.id, "Chat", "bot_channel", [mainMessage, agentMessage]));
 		}
 	});
 }
@@ -429,7 +424,7 @@ describe("ongoing agent Chat", () => {
 		});
 		// Both bots' faces, each a disc filling its 40-unit viewbox, in the head's own colour group.
 		expect(collaboration.querySelectorAll('svg > g[fill] > circle[r="20"]')).toHaveLength(2);
-		expect(client.api.chats.open).not.toHaveBeenCalled();
+		expect(client.api.chats.openBotChannel).not.toHaveBeenCalled();
 	});
 
 	it("asks for a chat page's pods, agents and list at once, each a single time, on its first load", async () => {
@@ -461,7 +456,7 @@ describe("ongoing agent Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		await screen.findByText(mainMessage.content);
-		expect(client.api.chats.open).toHaveBeenCalledWith({
+		expect(client.api.chats.openBotChannel).toHaveBeenCalledWith({
 			params: { workspace: linear.workspaceId },
 			payload: { podId: linear.podId, hostAgentId: linear.id },
 		});
@@ -514,7 +509,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("with other people in the thread, says the bot stays out only of a draft mentioning just people", async () => {
-		const shared = details(chat.id, "Chat", "conversation", [mainMessage]);
+		const shared = details(chat.id, "Chat", "bot_channel", [mainMessage]);
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
 		);
@@ -726,7 +721,7 @@ describe("ongoing agent Chat", () => {
 			parts: [{ type: "text", text: "Checkout timeouts are tracked." }],
 		};
 		const threadWith = (reply: Message) =>
-			Effect.succeed(details(chat.id, "Chat", "conversation", [mainMessage, reply]));
+			Effect.succeed(details(chat.id, "Chat", "bot_channel", [mainMessage, reply]));
 		client.api.threads.get.mockReturnValue(threadWith(writing));
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
@@ -837,7 +832,7 @@ describe("ongoing agent Chat", () => {
 		const serverHas = (queuedSince: string | null) =>
 			client.api.threads.get.mockReturnValue(
 				Effect.succeed({
-					...details(chat.id, "Chat", "conversation", [mainMessage, writing, followUp]),
+					...details(chat.id, "Chat", "bot_channel", [mainMessage, writing, followUp]),
 					queuedSince,
 				}),
 			);
@@ -903,7 +898,7 @@ describe("ongoing agent Chat", () => {
 			}),
 		);
 		client.api.threads.get.mockReturnValue(
-			Effect.succeed(details(chat.id, "Chat", "conversation", [mainMessage, waiting])),
+			Effect.succeed(details(chat.id, "Chat", "bot_channel", [mainMessage, waiting])),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
@@ -1006,13 +1001,13 @@ describe("ongoing agent Chat", () => {
 	it("opens with whom the chat is with, when there is nothing older", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		client.api.threads.get.mockReturnValue(
-			Effect.succeed(details(chat.id, "Chat", "conversation", [])),
+			Effect.succeed(details(chat.id, "Chat", "bot_channel", [])),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		expect(await screen.findByRole("heading", { name: linear.name, level: 2 })).toBeDefined();
 		expect(
-			screen.getByText(`This is the start of your conversation with ${linear.name}.`, {
+			screen.getByText(`This is the start of ${linear.name}'s channel.`, {
 				exact: false,
 			}),
 		).toBeDefined();
@@ -1021,8 +1016,8 @@ describe("ongoing agent Chat", () => {
 	it("opens Details from the bot's name, and leads back to the pod's list", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-		// The header names the thread by its title, here the one its details give it.
-		const name = await screen.findByRole("button", { name: "Chat" });
+		// A channel goes by its bot's name.
+		const name = await screen.findByRole("button", { name: linear.name });
 		expect(screen.getByRole("link", { name: "Back to Suga-Team" }).getAttribute("href")).toBe(
 			"/suga/pods/suga-team",
 		);

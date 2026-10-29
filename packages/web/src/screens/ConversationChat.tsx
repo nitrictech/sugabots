@@ -165,7 +165,10 @@ export function ConversationChat({
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
 	const details = mainThread.data;
-	const agent = conversation.kind === "botThread" ? conversation.agent : null;
+	const agent =
+		conversation.kind === "botThread" || conversation.kind === "botChannel"
+			? conversation.agent
+			: null;
 	const isPodChat = conversation.kind === "podChat";
 	const host = agent
 		? details?.participants.find(
@@ -358,12 +361,13 @@ export function ConversationChat({
 	)?.conversation;
 	// An archived chat is not listed, so it goes by the name it was archived with.
 	const podChatName = listedChat?.title ?? title ?? "";
-	// A conversation in a Personal pod is the person's own with their bot: it goes by
-	// the bot's name, and is kept going rather than marked done.
-	const direct = pod.kind === "personal" && details?.thread.type === "conversation";
+	// A bot's channel goes by the bot's name, and is kept going rather than marked done;
+	// in a Personal pod it is the person's own with their bot.
+	const ongoing = conversation.kind === "botChannel";
+	const direct = ongoing && pod.kind === "personal";
 	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
-		details?.thread.type === "conversation" && !direct
+		details?.thread.type === "conversation" && !ongoing
 			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
 			: undefined;
 	const headerPlace: HeaderPlace =
@@ -378,11 +382,11 @@ export function ConversationChat({
 	const header =
 		conversation.kind === "botThread" && details?.routine ? (
 			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} />
-		) : conversation.kind === "botThread" ? (
+		) : conversation.kind === "botThread" || conversation.kind === "botChannel" ? (
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
-				title={direct ? undefined : title}
+				title={ongoing ? undefined : title}
 				done={done}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
@@ -520,7 +524,18 @@ export function ConversationChat({
 								) : details.thread.type === "routine_feed" ? (
 									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
-									agent && <ChatIntro agent={agent} direct={direct} />
+									agent && (
+										<ChatIntro
+											agent={agent}
+											place={
+												direct
+													? "personal"
+													: conversation.kind === "botChannel"
+														? "channel"
+														: "thread"
+											}
+										/>
+									)
 								))}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
@@ -1071,10 +1086,11 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 }
 
 /**
- * The top of a chat, once there is nothing older to load: whom it is with,
- * and what they do, or, `direct` in a Personal pod, that it is the person's own.
+ * The top of a chat, once there is nothing older to load: whom it is with;
+ * in a thread, what they do; in a Personal pod, that it is the person's own;
+ * or, in a bot's channel, that it is the channel's start.
  */
-function ChatIntro({ agent, direct }: { agent: Agent; direct: boolean }) {
+function ChatIntro({ agent, place }: { agent: Agent; place: "personal" | "channel" | "thread" }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
@@ -1082,8 +1098,10 @@ function ChatIntro({ agent, direct }: { agent: Agent; direct: boolean }) {
 				{agent.name}
 			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
-				{direct ? (
+				{place === "personal" ? (
 					"Your own bot. It works for you only and nobody else in the workspace can see this conversation."
+				) : place === "channel" ? (
+					`This is the start of ${agent.name}'s channel.`
 				) : (
 					<>
 						This is the start of your conversation with {agent.name}.

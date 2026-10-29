@@ -9,7 +9,7 @@ import {
 	type SystemAgentKey,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
@@ -19,7 +19,6 @@ import {
 	collaboration,
 	message,
 	messageReaction,
-	pod,
 	routineExecution,
 	thread,
 	threadParticipant,
@@ -27,7 +26,6 @@ import {
 } from "../../database/schema.ts";
 import { Ids } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
@@ -56,12 +54,10 @@ import {
  */
 export interface Interface {
 	/**
-	 * The newest thread with the pod's crew agent `hostAgentId`, whether or not
-	 * it was started from one of the pod's chats, created on first use. The
-	 * agent is in a created one, and so is `initiatorUserId` when a person
-	 * opened it.
+	 * The channel of the pod's crew agent `hostAgentId`, created on first use
+	 * with the agent in it.
 	 */
-	readonly openConversation: (placement: {
+	readonly openBotChannel: (placement: {
 		workspaceId: string;
 		podId: string;
 		hostAgentId: string;
@@ -198,7 +194,11 @@ export interface Interface {
 		systemAgentKey: SystemAgentKey;
 		title: string;
 	}) => Effect.Effect<string>;
-	readonly retitle: (threadId: string, title: string) => Effect.Effect<void>;
+	/**
+	 * Calls the thread `title`, unless it is a bot's channel, which goes by its
+	 * bot's name. True when the thread took the title.
+	 */
+	readonly retitle: (threadId: string, title: string) => Effect.Effect<boolean>;
 	/** Retitles the thread the system agent `systemAgentKey` works in under `servedThreadId`. */
 	readonly retitleSystemAgentThread: (input: {
 		servedThreadId: string;
@@ -223,19 +223,6 @@ export interface Interface {
 	) => Effect.Effect<MessageReaction[], MessageNotFinished | TooManyReactionEmoji>;
 	/** Takes the person's reaction back, announcing it as `addReaction` does, if it was there. */
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
-}
-
-/** What a conversation is called until its first summary gives it a title of its own. */
-const conversationTitle = (botName: string) => `Conversation with ${botName}`;
-
-/**
- * A bot's conversation as it is opened: its onboarding, while the bot still
- * has to interview somebody about what it's for, and otherwise a conversation.
- */
-function firstConversationTitle(host: { name: string; prompt: string; podName: string }): string {
-	return host.prompt === INTERVIEW_PROMPT
-		? `Onboarding ${host.name} to ${host.podName}`
-		: conversationTitle(host.name);
 }
 
 /** One person's emoji on a message in a thread. */
@@ -341,42 +328,20 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		openConversation: (placement) =>
+		openBotChannel: (placement) =>
 			operation(
-				"openConversation",
+				"openBotChannel",
 				transaction(
 					Effect.gen(function* () {
-						// Two first messages to a bot at once would otherwise open two conversations.
-						yield* query((db) =>
-							db.execute(
-								sql`select pg_advisory_xact_lock(hashtextextended(${`conversation:${placement.podId}:${placement.hostAgentId}`}, 0))`,
-							),
-						);
-						const [existing] = yield* query((db) =>
-							db
-								.select()
-								.from(thread)
-								.where(
-									and(
-										eq(thread.type, "conversation"),
-										eq(thread.podId, placement.podId),
-										eq(thread.hostAgentId, placement.hostAgentId),
-									),
-								)
-								.orderBy(desc(thread.createdAt), desc(thread.id))
-								.limit(1),
-						);
-						if (existing) return existing;
 						const [host] = yield* query((db) =>
 							db
-								.select({ name: agent.name, prompt: agent.prompt, podName: pod.name })
+								.select({ name: agent.name })
 								.from(agent)
-								.innerJoin(pod, eq(pod.id, placement.podId))
 								.where(eq(agent.id, placement.hostAgentId))
 								.limit(1),
 						);
 						const id = yield* ids.next;
-						const created = yield* query((db) =>
+						const [created] = yield* query((db) =>
 							db
 								.insert(thread)
 								.values({
@@ -385,23 +350,39 @@ export const make = Effect.gen(function* () {
 									podId: placement.podId,
 									hostAgentId: placement.hostAgentId,
 									conversationId: id,
-									type: "conversation",
-									title: host ? firstConversationTitle(host) : conversationTitle("a bot"),
+									type: "bot_channel",
+									title: host?.name ?? "Bot",
 									initiatorUserId: placement.initiatorUserId,
 								})
+								.onConflictDoNothing({
+									target: [thread.podId, thread.hostAgentId],
+									where: sql`${thread.type} = 'bot_channel'`,
+								})
 								.returning(),
-						).pipe(Effect.flatMap(writtenRow("thread")));
-						yield* query((db) =>
-							db
-								.insert(threadParticipant)
-								.values([
-									...(placement.initiatorUserId
-										? [{ threadId: created.id, userId: placement.initiatorUserId }]
-										: []),
-									{ threadId: created.id, agentId: placement.hostAgentId },
-								]),
 						);
-						return created;
+						if (created) {
+							yield* query((db) =>
+								db
+									.insert(threadParticipant)
+									.values({ threadId: created.id, agentId: placement.hostAgentId }),
+							);
+							return created;
+						}
+						const [channel] = yield* query((db) =>
+							db
+								.select()
+								.from(thread)
+								.where(
+									and(
+										eq(thread.type, "bot_channel"),
+										eq(thread.podId, placement.podId),
+										eq(thread.hostAgentId, placement.hostAgentId),
+									),
+								)
+								.limit(1),
+						);
+						if (!channel) return yield* Effect.die(new Error("The bot's channel was not opened"));
+						return channel;
 					}),
 				),
 			),
@@ -927,9 +908,13 @@ export const make = Effect.gen(function* () {
 				"retitle",
 				Effect.flatMap(DateTime.nowAsDate, (now) =>
 					query((db) =>
-						db.update(thread).set({ title, updatedAt: now }).where(eq(thread.id, threadId)),
+						db
+							.update(thread)
+							.set({ title, updatedAt: now })
+							.where(and(eq(thread.id, threadId), ne(thread.type, "bot_channel")))
+							.returning({ id: thread.id }),
 					),
-				).pipe(Effect.asVoid),
+				).pipe(Effect.map((retitled) => retitled.length > 0)),
 			),
 
 		retitleSystemAgentThread: (input) =>

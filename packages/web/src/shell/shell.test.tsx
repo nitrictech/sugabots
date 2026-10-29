@@ -19,9 +19,9 @@ import {
 	agents,
 	apiAnswers,
 	builtInAgents,
+	channelWith,
 	compaction,
 	controlledEventStream,
-	conversationWith,
 	jye,
 	linear,
 	MODELS,
@@ -33,6 +33,7 @@ import {
 	pods,
 	sam,
 	TestApp,
+	threadWith,
 	triager,
 	VIEWER_IN_POD,
 	workspace,
@@ -42,8 +43,8 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const linearPage = `/suga/pods/suga-team/agents/${linear.handle}`;
-/** Where `linearPage` lands: the bot's conversation, at its own address. */
-const linearConversationPage = `/suga/pods/suga-team/threads/${conversationWith(linear).id}`;
+/** Where `linearPage` lands: the bot's channel, at its own address. */
+const linearConversationPage = `/suga/pods/suga-team/threads/${channelWith(linear).id}`;
 
 beforeEach(() => {
 	apiAnswers();
@@ -478,67 +479,61 @@ describe("the sidebar", () => {
 });
 
 describe("the pod's conversations", () => {
-	it("lists a pod's chat, then its bots, with the open thread's bot open on it", async () => {
+	it("lists a pod's chat, then its bots, each opening its channel with its threads folded under it", async () => {
+		const channelOf = (agent: typeof linear) => ({
+			agent,
+			conversation: channelWith(agent),
+			unreadMessages: 0,
+			needsApproval: false,
+			mentionsYou: false,
+		});
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
 				routines: [],
+				channels: [channelOf(linear), channelOf(triager)],
 				threads: [
 					{
 						agent: linear,
-						conversation: conversationWith(linear),
+						conversation: threadWith(linear),
 						lastMessage: {
 							preview: "File the timeout as a bug",
 							authorUserId: sam.id,
 							at: new Date().toISOString(),
 						},
 					},
-					{ agent: triager, conversation: conversationWith(triager), lastMessage: null },
 				],
 			}),
 		);
 		mount(linearPage);
 
 		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
-		const thread = await within(sidebar).findByRole("link", {
-			name: `Conversation with ${linear.name}`,
-		});
-		// Open on the bot while its chat is found, then on the chat once it has its address.
-		await waitFor(() => expect(thread.getAttribute("aria-current")).toBe("page"));
+		const channel = await within(sidebar).findByRole("link", { name: linear.name });
+		// Open on the bot while its channel is found, then on the channel once it has its address.
+		await waitFor(() => expect(channel.getAttribute("aria-current")).toBe("page"));
 		expect(within(sidebar).getByRole("link", { name: "General" })).toBeDefined();
-		expect(
-			within(sidebar).getByRole("button", { name: linear.name }).getAttribute("aria-expanded"),
-		).toBe("true");
-		expect(
-			within(sidebar).getByRole("button", { name: triager.name }).getAttribute("aria-expanded"),
-		).toBe("false");
+		// The open channel's bot shows its threads; the others keep theirs folded away.
+		expect(within(sidebar).getByRole("link", { name: threadWith(linear).title })).toBeDefined();
+		expect(within(sidebar).getAllByRole("link", { name: "Routines" })).toHaveLength(1);
 		expect(client.api.chats.list).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 			query: { pod: pods[0]?.slug },
 		});
 	});
 
-	it("keeps a bot open after the page is reloaded", async () => {
+	it("keeps a bot's threads folded away while nothing of the bot's is open", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
 				routines: [],
-				threads: [{ agent: linear, conversation: conversationWith(linear), lastMessage: null }],
+				threads: [{ agent: linear, conversation: threadWith(linear), lastMessage: null }],
 			}),
 		);
 		mount("/suga/pods/suga-team");
+
 		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
-		fireEvent.click(await within(sidebar).findByRole("button", { name: linear.name }));
-		expect(
-			within(sidebar).getByRole("link", { name: `Conversation with ${linear.name}` }),
-		).toBeDefined();
-
-		cleanup();
-		mount("/suga/pods/suga-team");
-
-		const reloaded = await screen.findByRole("group", { name: "Suga-Team" });
-		const bot = await within(reloaded).findByRole("button", { name: linear.name });
-		expect(bot.getAttribute("aria-expanded")).toBe("true");
+		expect(await within(sidebar).findByRole("link", { name: linear.name })).toBeDefined();
+		expect(within(sidebar).queryByRole("link", { name: threadWith(linear).title })).toBeNull();
 	});
 
 	it("loads a thread while the pointer is on its row", async () => {
@@ -558,12 +553,21 @@ describe("the pod's conversations", () => {
 			Effect.succeed({
 				chats: [],
 				routines: [],
+				channels: [
+					{
+						agent: linear,
+						conversation: channelWith(linear),
+						unreadMessages: 0,
+						needsApproval: false,
+						mentionsYou: false,
+					},
+				],
 				threads: [{ agent: linear, conversation: linearChat, ...unread }],
 			}),
 		);
-		mount("/suga/pods/suga-team");
+		// The bot's channel open, so its threads show under it.
+		mount(linearPage);
 		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
-		fireEvent.click(await within(sidebar).findByRole("button", { name: linear.name }));
 
 		fireEvent.mouseEnter(await within(sidebar).findByRole("link", { name: linearChat.title }));
 
@@ -575,11 +579,13 @@ describe("the pod's conversations", () => {
 		expect(client.api.threads.get).toHaveBeenCalledWith(
 			expect.objectContaining({ params: { threadId: linearChat.id } }),
 		);
-		expect(client.api.chats.open).not.toHaveBeenCalled();
+		expect(client.api.chats.openBotChannel).not.toHaveBeenCalled();
 	});
 
 	it("offers a pod's first bot while it has none", async () => {
-		client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [], threads: [], routines: [] }));
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({ chats: [], channels: [], threads: [], routines: [] }),
+		);
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.filter((agent) => agent.podId !== pods[1]?.id)),
 		);
@@ -2142,7 +2148,9 @@ describe("pod settings", () => {
 	it("lists only crew in a pod, with nothing to say about built-in agents", async () => {
 		mount(podPage);
 
-		expect(await screen.findByRole("link", { name: linear.name })).toBeDefined();
+		// The sidebar names each bot too, by a link to its channel.
+		const settings = await screen.findByRole("main");
+		expect(await within(settings).findByRole("link", { name: linear.name })).toBeDefined();
 		expect(screen.queryByText("User agents")).toBeNull();
 		expect(screen.queryByText("System agents")).toBeNull();
 		expect(screen.queryByRole("link", { name: compaction.name })).toBeNull();

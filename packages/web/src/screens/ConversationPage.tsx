@@ -32,7 +32,7 @@ export function ConversationPage({ away, ...chat }: ConversationPageProps) {
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"
 			style={
-				chat.conversation.kind === "botThread"
+				chat.conversation.kind === "botThread" || chat.conversation.kind === "botChannel"
 					? botColorVariables(chat.conversation.agent.color)
 					: undefined
 			}
