@@ -129,7 +129,7 @@ export function SettingsGroup({
 			)}
 			<div className={cn("overflow-hidden rounded-panel bg-list", className)}>{children}</div>
 			{note && (
-				<p className="m-0 px-1 pt-2 text-sm text-subtle-foreground leading-normal">{note}</p>
+				<div className="px-1 pt-2 text-sm text-subtle-foreground leading-normal">{note}</div>
 			)}
 		</section>
 	);
