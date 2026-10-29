@@ -19,6 +19,7 @@ import { Artifacts } from "../../artifacts/artifacts.ts";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
@@ -93,6 +94,7 @@ type SegmentServices =
 	| AgentAdministration.Service
 	| ThreadFiles.Service
 	| BotRoutines.Service
+	| Installation.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -395,6 +397,7 @@ const streamReply = (
 			const agents = yield* AgentAdministration.Service;
 			const files = yield* ThreadFiles.Service;
 			const routines = yield* BotRoutines.Service;
+			const installation = yield* Installation.Service;
 			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
@@ -487,6 +490,7 @@ const streamReply = (
 				connections: connections.tools,
 				files,
 				agents,
+				webAppUrl: installation.webAppUrl,
 				routines,
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),

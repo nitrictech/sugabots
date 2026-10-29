@@ -287,6 +287,7 @@ function todayInstruction(now: Date, context: TurnContext): string {
 	return [
 		`Current time: ${currentDate.format(now)}, ${now.toISOString().slice(11, 16)} UTC.`,
 		`In ${spoken} (${timeZone}), it is ${workspaceTime(now, timeZone)}.`,
+		"Work out dates and durations from this yourself, such as how many weeks are left until a date someone gives you, rather than asking them.",
 		routinesOn
 			? `Routines you set up run in ${spoken}. Say their times plainly, naming the zone once when you confirm a schedule ("8am ${spoken}"). Don't ask the person for their timezone, explain it, or call it the workspace's unless they bring it up.`
 			: undefined,
@@ -348,7 +349,7 @@ const CHECK_PRESENT_DAY_FACTS =
 function whyYou(context: TurnContext): string {
 	switch (context.reason) {
 		case "interview":
-			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now: introduce yourself briefly and ask them to describe what they want you to be for. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
+			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now with your opening. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
 		case "mention":
 			return "It is your turn because a person mentioned you.";
 		case "collaboration":
