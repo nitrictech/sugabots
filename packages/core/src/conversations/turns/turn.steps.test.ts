@@ -17,6 +17,7 @@ import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { ASK_FORM_TOOL } from "../tools/ask-form/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -348,6 +349,7 @@ describe("runSegment", () => {
 		);
 
 		expect(Object.keys(received?.tools ?? {}).filter((key) => !ARTIFACT_TOOLS.has(key))).toEqual([
+			ASK_FORM_TOOL,
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
@@ -546,6 +548,84 @@ describe("runSegment", () => {
 			}
 		},
 	);
+
+	describe("a form", () => {
+		const form = {
+			message: "Which colour?",
+			requestedSchema: {
+				type: "object",
+				properties: { colour: { type: "string", enum: ["red", "blue"] } },
+				required: ["colour"],
+			},
+		};
+		const someone = "0199a3a0-0000-7000-8000-0000000000f1";
+
+		/** Runs a segment answering `askedBy` and calls `ask_form` with `input`, as the model would. */
+		async function askForm(askedBy: string | null, input: unknown) {
+			const { execution, turns } = fakes();
+			let approval: unknown;
+			let result: unknown;
+			const model = Models.fromStream((request) =>
+				Effect.sync(() =>
+					streamed(
+						(async function* () {
+							const approvals = request.toolApproval as
+								| Record<string, (input: unknown) => unknown>
+								| undefined;
+							approval = approvals?.[ASK_FORM_TOOL]?.(input);
+							if (approval === "not-applicable") {
+								result = await request.tools?.[ASK_FORM_TOOL]?.execute?.(input, {
+									toolCallId: "sdk-form",
+									messages: [],
+								} as never);
+							}
+							yield "Done";
+						})(),
+					),
+				),
+			);
+			vi.mocked(execution.prepare).mockReturnValueOnce(
+				Effect.succeed({ ...prepared, context: { ...prepared.context, askedBy } }),
+			);
+			await runWithServices(
+				segmentWith({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+				}),
+			);
+			return { approval, result };
+		}
+
+		it("waits for someone to answer a form the person the turn answers can be shown", async () => {
+			expect(await askForm(someone, form)).toEqual({
+				approval: "user-approval",
+				result: undefined,
+			});
+		});
+
+		it("tells the bot at once when nobody is there to answer, as for a routine", async () => {
+			expect(await askForm(null, form)).toEqual({
+				approval: "not-applicable",
+				result: { status: "failed", error: expect.stringContaining("Nobody is waiting") },
+			});
+		});
+
+		it("tells the bot what is wrong with a form it cannot show", async () => {
+			const broken = {
+				...form,
+				requestedSchema: { ...form.requestedSchema, required: ["colour", "size"] },
+			};
+
+			expect(await askForm(someone, broken)).toEqual({
+				approval: "not-applicable",
+				result: { status: "failed", error: expect.stringContaining('"size" is required') },
+			});
+		});
+	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
 		const { execution, turns } = fakes();

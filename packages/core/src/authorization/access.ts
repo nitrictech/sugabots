@@ -279,7 +279,8 @@ export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")
  * Whether `standing` may decide a tool call's approval that `deciders` decide.
  * For `pod`: `approval.decide`, and `approval.routine.decide` as well for one
  * raised while a routine runs. For `sandbox-managers`: deciding what the
- * pod's sandbox may reach and has installed, wherever it was raised.
+ * pod's sandbox may reach and has installed, wherever it was raised. For
+ * `thread`: reaching the pod, which is taking part in its threads.
  */
 export function mayDecideApprovals(
 	standing: Pick<PodStanding, "may">,
@@ -287,6 +288,7 @@ export function mayDecideApprovals(
 	deciders: ToolApprovalDeciders,
 ): boolean {
 	if (deciders === "sandbox-managers") return standing.may("sandbox.manage");
+	if (deciders === "thread") return standing.may("pod.read");
 	const needed: readonly PodPermission[] = inRoutine
 		? ["approval.decide", "approval.routine.decide"]
 		: ["approval.decide"];

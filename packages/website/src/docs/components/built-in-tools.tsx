@@ -4,6 +4,7 @@ import {
 	CalendarClockIcon,
 	FilePenIcon,
 	FileTextIcon,
+	FormIcon,
 	GlobeIcon,
 	LibraryIcon,
 	type LucideIcon,
@@ -20,6 +21,7 @@ const toolIcons: Record<BuiltInToolKey, LucideIcon> = {
 	artifact_read: FileTextIcon,
 	artifact_write: FilePenIcon,
 	artifact_edit: PencilLineIcon,
+	ask_form: FormIcon,
 };
 
 /** The tools every agent comes with, from the product's own catalog. */

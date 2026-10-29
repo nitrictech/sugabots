@@ -1,4 +1,4 @@
-import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { formRequestSchema, streamEvent, threadChannel } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
@@ -13,6 +13,7 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	Schema,
 	Semaphore,
 } from "effect";
 import { Artifacts } from "../../artifacts/artifacts.ts";
@@ -28,6 +29,7 @@ import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { ASK_FORM_TOOL, whyNotShown } from "../tools/ask-form/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -448,10 +450,15 @@ const streamReply = (
 				}),
 				(opened) => Effect.promise(() => opened.close()),
 			);
+			const asksForms = !prepared.context.agent.disabledTools.includes(ASK_FORM_TOOL);
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				if ("builtIn" in binding) {
-					if (!sandbox.usable || !sandbox.requests[binding.tool]) {
+					const stillOffered =
+						binding.tool === ASK_FORM_TOOL
+							? asksForms
+							: sandbox.usable && sandbox.requests[binding.tool] !== undefined;
+					if (!stillOffered) {
 						return yield* new ApprovedToolChanged({ tool: binding.tool });
 					}
 					continue;
@@ -469,6 +476,17 @@ const streamReply = (
 			}
 			const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
 				...callToolApproval(connections.tools),
+				// A form that cannot be shown runs at once, to say why.
+				...(asksForms && {
+					[ASK_FORM_TOOL]: (input: unknown) =>
+						Option.match(decodeForm(input), {
+							onNone: () => "not-applicable" as const,
+							onSome: (form) =>
+								whyNotShown(prepared.context.askedBy, form) === undefined
+									? ("user-approval" as const)
+									: ("not-applicable" as const),
+						}),
+				}),
 				// A request refused outright runs at once, to be recorded as refused.
 				...Object.fromEntries(
 					Object.entries(sandbox.requests).map(([key, request]) => [
@@ -521,7 +539,7 @@ const streamReply = (
 				now,
 				builtInTools: [
 					...builtIn.usable,
-					...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key)),
+					...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key) || key === ASK_FORM_TOOL),
 				],
 				toolCatalog: toolCatalogNote({
 					catalog,
@@ -591,26 +609,38 @@ const streamReply = (
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
 					const target = findApprovalTarget(connections.tools, request.toolCall);
+					const form =
+						request.toolCall.toolName === ASK_FORM_TOOL
+							? Option.getOrUndefined(decodeForm(request.toolCall.input))
+							: undefined;
 					const asked:
 						| Pick<
 								ToolCallRepository.PendingToolApproval,
-								"tool" | "input" | "binding" | "mutating"
+								"tool" | "input" | "binding" | "mutating" | "form"
 						  >
-						| undefined = sandbox.requests[request.toolCall.toolName]
+						| undefined = form
 						? {
-								tool: request.toolCall.toolName,
+								tool: ASK_FORM_TOOL,
 								input: request.toolCall.input,
 								binding: { kind: "built-in" },
-								mutating: true,
+								mutating: false,
+								form,
 							}
-						: target
+						: sandbox.requests[request.toolCall.toolName]
 							? {
-									tool: target.key,
-									input: target.input,
-									binding: bindingOf(target.offered),
-									mutating: target.offered.mutating,
+									tool: request.toolCall.toolName,
+									input: request.toolCall.input,
+									binding: { kind: "built-in" },
+									mutating: true,
 								}
-							: undefined;
+							: target
+								? {
+										tool: target.key,
+										input: target.input,
+										binding: bindingOf(target.offered),
+										mutating: target.offered.mutating,
+									}
+								: undefined;
 					if (!asked) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
@@ -686,6 +716,9 @@ const streamReply = (
 			);
 		}),
 	);
+
+/** The form a call to `ask_form` asks for, if its input is one. */
+const decodeForm = Schema.decodeUnknownOption(formRequestSchema);
 
 /** Saves the reply so far, unless it is what was last saved. */
 const saveReplySoFar = (

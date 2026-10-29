@@ -1,3 +1,4 @@
+import type { FormAnswer, FormRequest } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
@@ -7,6 +8,7 @@ import { ResourceHidden } from "../../../authorization/access.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
 	connection,
+	event,
 	podMember,
 	toolCall,
 	turn,
@@ -25,8 +27,14 @@ import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../thread-view.ts";
+import { ASK_FORM_TOOL } from "../../tools/ask-form/tool.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { ToolApprovalConflict, ToolApprovalForbidden } from "../controls.ts";
+import {
+	FormAnswerInvalid,
+	ToolApprovalConflict,
+	ToolApprovalForbidden,
+	ToolApprovalNotFound,
+} from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
 import { type TurnCheckpoint, TurnRepository } from "../repository.ts";
 import { TurnSignals } from "../signals.ts";
@@ -555,6 +563,170 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				}),
 			);
 			expect(segment).toHaveBeenCalledTimes(1);
+		});
+
+		describe("a form", () => {
+			const request: FormRequest = {
+				message: "Which posts should go out?",
+				requestedSchema: {
+					type: "object",
+					properties: {
+						post_1_keep: { type: "boolean", default: true },
+						post_1_text: { type: "string", default: "Launch day!", maxLength: 280 },
+						audience: { type: "string", enum: ["everyone", "followers"] },
+					},
+					required: ["post_1_text"],
+				},
+			};
+			const formCall = () =>
+				pendingCall({
+					sdkToolCallId: "sdk-form",
+					tool: ASK_FORM_TOOL,
+					input: request,
+					binding: { kind: "built-in" },
+					mutating: false,
+					form: request,
+				});
+			const answered: FormAnswer = {
+				action: "accept",
+				content: { post_1_keep: true, post_1_text: "Launch day! 🚀", audience: "followers" },
+			};
+			const answeringAs = async (userId: string, signals: TurnSignals.Interface) =>
+				onPostgresAs(userId)(
+					Context.get(await conversationsForTests(bus, signals), Turns.Controls),
+				);
+			const shownForm = async () => {
+				const details = await threadsAs(memberId).get(threadId);
+				const reply = details?.messages.find(
+					(message) => message.id === prepared.responseMessage.id,
+				);
+				const part = reply?.parts.find((candidate) => candidate.type === "tool_call");
+				return part?.type === "tool_call" ? part.form : undefined;
+			};
+
+			it("shows the thread its fields in the order the agent wrote them", async () => {
+				await park(formCall());
+
+				const form = await shownForm();
+
+				expect(Object.keys(form?.request.requestedSchema.properties ?? {})).toEqual([
+					"post_1_keep",
+					"post_1_text",
+					"audience",
+				]);
+				expect(form?.response).toBeNull();
+			});
+
+			it("records an answer, resumes the workflow, and gives the call the answer when it runs", async () => {
+				const pending = formCall();
+				const signals = await parkInWorkflow(pending);
+
+				await (await answeringAs(memberId, signals)).answerForm({
+					podId,
+					toolCallId: pending.id,
+					answer: answered,
+				});
+
+				await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
+				expect(
+					await calls.formAnswer({ turnId: prepared.turnId, sdkToolCallId: "sdk-form" }),
+				).toEqual({ answer: answered, answeredByName: expect.any(String) });
+				expect((await shownForm())?.response).toMatchObject({ answer: answered });
+			});
+
+			it("keeps the fields in order for a watcher catching up from the stored events", async () => {
+				const pending = formCall();
+				const signals = await parkInWorkflow(pending);
+				delivered = [];
+
+				await (await answeringAs(memberId, signals)).answerForm({
+					podId,
+					toolCallId: pending.id,
+					answer: answered,
+				});
+
+				const told = delivered.find(({ event }) => event.type === "tool_call.updated");
+				if (!told) throw new Error("the answer was not told");
+				// Read back as a watcher who reconnects is, from `jsonb`, which reorders keys.
+				const [stored] = await onDatabase((db) =>
+					db.select({ payload: event.payload }).from(event).where(eq(event.seq, told.seq)),
+				);
+				expect(stored?.payload).toMatchObject({
+					toolCall: {
+						form: {
+							fieldOrder: ["post_1_keep", "post_1_text", "audience"],
+							response: { answer: answered },
+						},
+					},
+				});
+			});
+
+			it("lets anyone who sees the thread answer, though they may not decide approvals", async () => {
+				const pending = formCall();
+				const signals = await parkInWorkflow(pending);
+				const [viewer] = await onDatabase((db) =>
+					db
+						.insert(user)
+						.values({ name: "Lee", email: `viewer-${crypto.randomUUID()}@example.com` })
+						.returning(),
+				);
+				if (!viewer) throw new Error("fixture");
+				await onDatabase((db) =>
+					db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
+				);
+				await onDatabase((db) =>
+					db.insert(podMember).values({ workspaceId, podId, userId: viewer.id }),
+				);
+
+				await (await answeringAs(viewer.id, signals)).answerForm({
+					podId,
+					toolCallId: pending.id,
+					answer: { action: "decline" },
+				});
+
+				expect((await shownForm())?.response).toMatchObject({
+					answer: { action: "decline" },
+					answeredByName: "Lee",
+				});
+			});
+
+			it("keeps the first answer and tells a second person the form is answered", async () => {
+				const pending = formCall();
+				const answering = await answeringAs(memberId, await parkInWorkflow(pending));
+				const answer = (given: FormAnswer) =>
+					answering.answerForm({ podId, toolCallId: pending.id, answer: given });
+
+				await answer(answered);
+
+				await expect(answer({ action: "decline" })).rejects.toBeInstanceOf(ToolApprovalConflict);
+				expect((await shownForm())?.response?.answer).toEqual(answered);
+			});
+
+			it("refuses answers the form does not take, and still waits for one", async () => {
+				const pending = formCall();
+				const answering = await answeringAs(memberId, await parkInWorkflow(pending));
+
+				await expect(
+					answering.answerForm({
+						podId,
+						toolCallId: pending.id,
+						answer: { action: "accept", content: { audience: "nobody" } },
+					}),
+				).rejects.toBeInstanceOf(FormAnswerInvalid);
+				const [waiting] = await onDatabase((db) =>
+					db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+				);
+				expect(waiting).toMatchObject({ approvalStatus: "pending" });
+			});
+
+			it("cannot be allowed or denied in place of an answer", async () => {
+				const pending = formCall();
+				const deciding = await answeringAs(memberId, await parkInWorkflow(pending));
+
+				await expect(
+					deciding.decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
+				).rejects.toBeInstanceOf(ToolApprovalNotFound);
+			});
 		});
 
 		it("sends a cancel to the workflow, which records it and ends", async () => {

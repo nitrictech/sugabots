@@ -271,7 +271,8 @@ export function toolLineText(
 					.map((call) => appOf(call, looks.get(splitToolKey(call.tool).handle))),
 			),
 		]);
-	const denied = (call: ToolCallPart) => call.approval?.status === "denied";
+	// A form's approval is only ever denied by its turn ending unanswered, which its failure says.
+	const denied = (call: ToolCallPart) => call.approval?.status === "denied" && !call.form;
 	const waiting = awaitsApproval;
 	// An allowed call is as good as running: its turn starts it a moment later.
 	const running = (call: ToolCallPart) =>
@@ -281,13 +282,16 @@ export function toolLineText(
 		(call.status === "completed" || call.status === "failed") && !denied(call);
 
 	const used = apps(finished);
-	const tail = calls.some(waiting)
-		? `waiting on ${apps(waiting)} approval`
-		: calls.some(running)
-			? `using ${apps(running)}`
-			: calls.some(denied)
-				? `${apps(denied)} denied`
-				: undefined;
+	const asking = (call: ToolCallPart) => waiting(call) && Boolean(call.form);
+	const tail = calls.some(asking)
+		? "waiting for an answer"
+		: calls.some(waiting)
+			? `waiting on ${apps(waiting)} approval`
+			: calls.some(running)
+				? `using ${apps(running)}`
+				: calls.some(denied)
+					? `${apps(denied)} denied`
+					: undefined;
 
 	if (!tail) {
 		const totalMs = calls.filter(finished).reduce((sum, call) => sum + durationOf(call), 0);
@@ -314,6 +318,15 @@ function capitalised(text: string): string {
 function noteOf(call: ToolCallPart): { text: string; failed: boolean } | undefined {
 	const failed = (text: string) => ({ text, failed: true });
 	const said = (text: string) => ({ text, failed: false });
+	if (call.form) {
+		const { response } = call.form;
+		const by = response?.answeredByName ? ` by ${response.answeredByName}` : "";
+		if (response)
+			return said(`${response.answer.action === "accept" ? "Answered" : "Declined"}${by}`);
+		return call.status === "failed"
+			? failed(call.error ?? "Failed")
+			: said("Waiting for an answer");
+	}
 	if (call.approval?.status === "denied") {
 		return failed(
 			call.approval.decidedByName ? `Denied by ${call.approval.decidedByName}` : "Denied",

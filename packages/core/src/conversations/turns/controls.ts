@@ -1,3 +1,4 @@
+import { formContentProblems } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -5,10 +6,11 @@ import { mayDecideApprovals, ResourceHidden } from "../../authorization/access.t
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
-import { thread, toolCall, turn } from "../../database/schema.ts";
+import { thread, toolCall, toolCallForm, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
+import { ASK_FORM_TOOL } from "../tools/ask-form/tool.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -18,9 +20,10 @@ import type { Turns } from "./turns.ts";
 import { WorkAdmission } from "./work-admission.ts";
 
 /**
- * `Turns.Controls`: people cancelling a turn and deciding the tool calls it
- * parked for approval. The turn reading their decisions and running what they
- * allowed is `ApprovedToolCalls`.
+ * `Turns.Controls`: people cancelling a turn, deciding the tool calls it
+ * parked for approval, and answering the forms it asked them to fill in. The
+ * turn reading their decisions and running what they allowed is
+ * `ApprovedToolCalls`.
  */
 export const makeControls = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Turns.ControlsInterface>("Turns.Controls");
@@ -90,7 +93,12 @@ export const makeControls = Effect.gen(function* () {
 								// The call alone: the turn is locked by whoever transitions it.
 								.for("update", { of: toolCall }),
 						);
-						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
+						// A form is decided by answering it, which allowing it would skip.
+						if (
+							!candidate?.call.approvalId ||
+							candidate.call.tool === ASK_FORM_TOOL ||
+							!awaitsDecisions(candidate.turn)
+						) {
 							return yield* new ToolApprovalNotFound();
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
@@ -115,6 +123,68 @@ export const makeControls = Effect.gen(function* () {
 					}),
 				),
 			),
+		answerForm: (input) =>
+			operation(
+				"answerForm",
+				transaction(
+					Effect.gen(function* () {
+						const { actor, pod } = yield* authorization.pod(input.podId, "pod.read");
+						if (!isUuid(input.toolCallId)) return yield* new ToolApprovalNotFound();
+						const [candidate] = yield* query((db) =>
+							db
+								.select({
+									call: toolCall,
+									request: toolCallForm.request,
+									threadId: thread.id,
+									owner: turn.owner,
+									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
+								})
+								.from(toolCall)
+								.innerJoin(toolCallForm, eq(toolCallForm.toolCallId, toolCall.id))
+								.innerJoin(turn, eq(turn.id, toolCall.turnId))
+								.innerJoin(thread, eq(thread.id, toolCall.threadId))
+								.where(
+									and(
+										eq(toolCall.id, input.toolCallId),
+										eq(thread.workspaceId, pod.workspaceId),
+										eq(thread.podId, pod.id),
+									),
+								)
+								.limit(1)
+								// The call alone: the turn is locked by whoever transitions it.
+								.for("update", { of: toolCall }),
+						);
+						if (!candidate?.call.approvalId || !candidate.owner) {
+							return yield* new ToolApprovalNotFound();
+						}
+						// Anyone taking part in the thread may answer, so seeing it is enough.
+						yield* visibility.thread(candidate.threadId);
+						if (!awaitsDecisions(candidate.turn)) return yield* new ToolApprovalNotFound();
+						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
+						if (
+							input.answer.action === "accept" &&
+							Object.keys(formContentProblems(candidate.request, input.answer.content)).length > 0
+						) {
+							return yield* new FormAnswerInvalid();
+						}
+						const approvalId = candidate.call.approvalId;
+						const userId = actor.userId;
+						// Recorded and sent in one transaction, as a decision is.
+						const recorded = yield* toolCalls.recordFormAnswer({
+							threadId: candidate.threadId,
+							approvalId,
+							answer: input.answer,
+							userId,
+						});
+						if (!recorded) return yield* new ToolApprovalConflict();
+						return yield* signals.decide({
+							owner: candidate.owner,
+							approvalId,
+							decision: { decision: "allow_once", userId },
+						});
+					}),
+				),
+			),
 	} satisfies Turns.ControlsInterface;
 });
 
@@ -132,6 +202,12 @@ export class ToolApprovalConflict
 {
 	get userMessage() {
 		return userText`That tool approval has already been decided`;
+	}
+}
+/** Answers that the form refuses; people are shown which before they send. */
+export class FormAnswerInvalid extends Data.TaggedError("FormAnswerInvalid") implements UserFacing {
+	get userMessage() {
+		return userText`Some answers don't fit the form. Check them and send it again.`;
 	}
 }
 export class ToolApprovalForbidden

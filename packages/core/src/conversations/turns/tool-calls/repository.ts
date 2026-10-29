@@ -1,7 +1,7 @@
 export * as ToolCallRepository from "./repository.ts";
 
 import { isDeepStrictEqual } from "node:util";
-import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
+import type { FormAnswer, FormRequest, JsonValue, ToolCallPart } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
@@ -18,12 +18,15 @@ import {
 	type ToolCallRow,
 	thread,
 	toolCall,
+	toolCallForm,
+	toolCallFormResponse,
 	turn,
 	user,
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
-import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { loadStoredForm, toToolCallPart } from "../../threads/tool-calls.ts";
+import { ASK_FORM_TOOL, type FormAnswers } from "../../tools/ask-form/tool.ts";
 import { withImagesCounted } from "../../tools/images.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
@@ -82,6 +85,20 @@ export interface Interface {
 		approvalId: string;
 		decision: ApprovalDecision;
 	}) => Effect.Effect<boolean>;
+	/**
+	 * Records someone's answer to a form an agent asked for: keeps it for the
+	 * call to read, and allows the call, which is how the turn waiting on it
+	 * resumes. `false`, changing nothing, once the form is answered: the
+	 * first answer stands.
+	 */
+	readonly recordFormAnswer: (input: {
+		threadId: string;
+		approvalId: string;
+		answer: FormAnswer;
+		userId: string;
+	}) => Effect.Effect<boolean>;
+	/** The answer a form call was given, for the call to return. `undefined` until someone answers. */
+	readonly formAnswer: FormAnswers["formAnswer"];
 	/**
 	 * Starts an allowed call, if it is exactly the call that was approved, its
 	 * turn may still run tools, its connection is configured as it was when
@@ -151,6 +168,34 @@ export const make = Effect.gen(function* () {
 		).pipe(Effect.flatMap(writtenRow("tool_call")));
 	});
 
+	/** Tells the thread, and the lists, that `decided` was decided by `userId`. */
+	const emitDecided = Effect.fn("ToolCallRepository.emitDecided")(function* (
+		decided: ToolCallRow,
+		userId: string,
+	) {
+		// The decider is left-joined, as they may have left since deciding.
+		const [placed] = yield* query((db) =>
+			db
+				.select({
+					workspaceId: thread.workspaceId,
+					podId: thread.podId,
+					deciderName: user.name,
+				})
+				.from(thread)
+				.leftJoin(user, eq(user.id, userId))
+				.where(eq(thread.id, decided.threadId))
+				.limit(1),
+		);
+		if (!placed) return yield* Effect.die(new Error("A decided call's thread is missing"));
+		yield* emit([
+			ConversationEvent.ToolCallDecided({
+				...(yield* toolCallChange(decided, placed.deciderName)),
+				workspaceId: placed.workspaceId,
+				podId: placed.podId,
+			}),
+		]);
+	});
+
 	return Service.of({
 		open: (input) =>
 			operation(
@@ -173,8 +218,9 @@ export const make = Effect.gen(function* () {
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("tool_call")));
-						yield* emit([ConversationEvent.ToolCallStarted(toolCallChange(row))]);
-						return toToolCallPart(row);
+						const change = yield* toolCallChange(row);
+						yield* emit([ConversationEvent.ToolCallStarted(change)]);
+						return change.toolCall;
 					}),
 				),
 			),
@@ -196,8 +242,9 @@ export const make = Effect.gen(function* () {
 							}),
 						);
 						if (!closed) return undefined;
-						yield* emit([ConversationEvent.ToolCallFinished(toolCallChange(closed))]);
-						return toToolCallPart(closed);
+						const change = yield* toolCallChange(closed);
+						yield* emit([ConversationEvent.ToolCallFinished(change)]);
+						return change.toolCall;
 					}),
 				),
 			),
@@ -232,14 +279,19 @@ export const make = Effect.gen(function* () {
 								)
 								.returning(),
 						);
+						const forms = approvals.flatMap((approval) =>
+							approval.form ? [{ toolCallId: approval.id, request: approval.form }] : [],
+						);
+						if (forms.length > 0) {
+							yield* query((db) => db.insert(toolCallForm).values(forms));
+						}
 						// In the order the reply asked for them, which is how the thread lists them.
 						const byId = new Map(rows.map((row) => [row.id, row]));
-						yield* emit(
-							approvals.flatMap((approval) => {
-								const row = byId.get(approval.id);
-								return row ? [ConversationEvent.ToolCallStarted(toolCallChange(row))] : [];
-							}),
+						const changes = yield* Effect.forEach(
+							approvals.flatMap((approval) => byId.get(approval.id) ?? []),
+							(row) => toolCallChange(row),
 						);
+						yield* emit(changes.map((change) => ConversationEvent.ToolCallStarted(change)));
 					}),
 				),
 			),
@@ -255,29 +307,57 @@ export const make = Effect.gen(function* () {
 						if (!row) return false;
 						const decided = yield* apply(row, ToolCallEvent.Decide({ decision: input.decision }));
 						if (!decided) return false;
-						// The decider is left-joined, as they may have left since deciding.
-						const [placed] = yield* query((db) =>
-							db
-								.select({
-									workspaceId: thread.workspaceId,
-									podId: thread.podId,
-									deciderName: user.name,
-								})
-								.from(thread)
-								.leftJoin(user, eq(user.id, input.decision.userId))
-								.where(eq(thread.id, decided.threadId))
-								.limit(1),
-						);
-						if (!placed) return yield* Effect.die(new Error("A decided call's thread is missing"));
-						yield* emit([
-							ConversationEvent.ToolCallDecided({
-								...toolCallChange(decided, placed.deciderName),
-								workspaceId: placed.workspaceId,
-								podId: placed.podId,
-							}),
-						]);
+						yield* emitDecided(decided, input.decision.userId);
 						return true;
 					}),
+				),
+			),
+
+		recordFormAnswer: (input) =>
+			operation(
+				"recordFormAnswer",
+				transaction(
+					Effect.gen(function* () {
+						const row = yield* lockedCall(
+							and(eq(toolCall.threadId, input.threadId), eq(toolCall.approvalId, input.approvalId)),
+						);
+						if (!row) return false;
+						const decision = { decision: "allow_once" as const, userId: input.userId };
+						const decided = yield* apply(row, ToolCallEvent.Decide({ decision }));
+						if (!decided) return false;
+						// The call is locked and was undecided until now, so it has no answer yet.
+						yield* query((db) =>
+							db.insert(toolCallFormResponse).values({
+								toolCallId: row.id,
+								responderId: input.userId,
+								answer: input.answer,
+							}),
+						);
+						yield* emitDecided(decided, input.userId);
+						return true;
+					}),
+				),
+			),
+
+		formAnswer: (call) =>
+			operation(
+				"formAnswer",
+				Effect.map(
+					query((db) =>
+						db
+							.select({ answer: toolCallFormResponse.answer, answeredByName: user.name })
+							.from(toolCall)
+							.innerJoin(toolCallFormResponse, eq(toolCallFormResponse.toolCallId, toolCall.id))
+							.leftJoin(user, eq(user.id, toolCallFormResponse.responderId))
+							.where(
+								and(
+									eq(toolCall.turnId, call.turnId),
+									eq(toolCall.sdkToolCallId, call.sdkToolCallId),
+								),
+							)
+							.limit(1),
+					),
+					([answered]) => answered,
 				),
 			),
 
@@ -345,7 +425,7 @@ export const make = Effect.gen(function* () {
 						}
 						const running = yield* apply(row, ToolCallEvent.BeginExecution());
 						if (!running) return refusedExecution("The call is not approved for execution");
-						yield* emit([ConversationEvent.ToolCallExecuting(toolCallChange(running))]);
+						yield* emit([ConversationEvent.ToolCallExecuting(yield* toolCallChange(running))]);
 						return { _tag: "Running", call: running };
 					}),
 				),
@@ -373,11 +453,11 @@ export const make = Effect.gen(function* () {
 						const abandoned = yield* Effect.forEach(unfinished, (row) =>
 							apply(row, ToolCallEvent.Abandon({ userMessage })),
 						);
-						yield* emit(
-							abandoned.flatMap((row) =>
-								row ? [ConversationEvent.ToolCallFinished(toolCallChange(row))] : [],
-							),
+						const changes = yield* Effect.forEach(
+							abandoned.flatMap((row) => row ?? []),
+							(row) => toolCallChange(row),
 						);
+						yield* emit(changes.map((change) => ConversationEvent.ToolCallFinished(change)));
 					}),
 				),
 			),
@@ -446,6 +526,8 @@ export interface PendingToolApproval {
 	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
 	mutating: boolean;
 	atOffset: number;
+	/** The form the call asks people to fill in, for a call to `ask_form`, which answering it decides. */
+	form?: FormRequest;
 }
 
 /** A started call, or why it may not start; `reason` is for the logs. */
@@ -528,11 +610,15 @@ function bindingColumns(binding: ApprovalBinding) {
 		: { connectionId: null, connectionRevision: null, remoteToolName: null };
 }
 
-/** The call as an event carries it once it has changed. */
-function toolCallChange(row: ToolCallRow, decidedByName: string | null = null): ToolCallChange {
+/** The call as an event carries it once it has changed, with the form it asked people to fill in. */
+const toolCallChange = Effect.fn("ToolCallRepository.toolCallChange")(function* (
+	row: ToolCallRow,
+	decidedByName: string | null = null,
+) {
+	const form = row.tool === ASK_FORM_TOOL ? yield* query((db) => loadStoredForm(db, row.id)) : null;
 	return {
 		threadId: row.threadId,
 		messageId: row.messageId,
-		toolCall: toToolCallPart(row, decidedByName),
-	};
-}
+		toolCall: toToolCallPart(row, decidedByName, form),
+	} satisfies ToolCallChange;
+});

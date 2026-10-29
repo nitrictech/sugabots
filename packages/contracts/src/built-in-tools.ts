@@ -16,6 +16,7 @@ export const builtInToolKeySchema = Schema.Literals([
 	"artifact_read",
 	"artifact_write",
 	"artifact_edit",
+	"ask_form",
 ]);
 export type BuiltInToolKey = typeof builtInToolKeySchema.Type;
 
@@ -69,6 +70,13 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 		key: "artifact_edit",
 		name: "Edit artifacts",
 		description: "Changes part of a document or HTML page, as a new version.",
+		usesWeb: false,
+	},
+	{
+		key: "ask_form",
+		name: "Ask with a form",
+		description:
+			"Asks the people in a conversation to fill in a form, and waits for their answer before it carries on.",
 		usesWeb: false,
 	},
 ];

@@ -11,6 +11,7 @@ import type { BotRoutines } from "../routines/bot-routines.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { artifactTools, MUTATING_ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { ASK_FORM_TOOL, askFormTool, whyNotShown } from "../tools/ask-form/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
@@ -59,7 +60,7 @@ export interface ToolDependencies {
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	artifacts: Artifacts.AuthoringInterface;
 	/** Where a built-in tool's calls are written down. */
-	calls: Pick<ToolCallRepository.Interface, "open" | "close" | "completedOutputs">;
+	calls: Pick<ToolCallRepository.Interface, "open" | "close" | "completedOutputs" | "formAnswer">;
 	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
@@ -214,6 +215,26 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	for (const [key, tool] of Object.entries(artifacts)) {
 		if (prepared.context.agent.disabledTools.includes(key)) continue;
 		tools[key] = recorded(key, tool, { ...recording, mutating: MUTATING_ARTIFACT_TOOLS.has(key) });
+	}
+	if (!prepared.context.agent.disabledTools.includes(ASK_FORM_TOOL)) {
+		const askedBy = prepared.context.askedBy;
+		const askForm = askFormTool({
+			turnId: prepared.turnId,
+			askedBy,
+			forms: deps.calls,
+			run: deps.run,
+		});
+		const asked = recorded(ASK_FORM_TOOL, askForm, {
+			...recording,
+			approval: { approvals: deps.approvals, binding: { kind: "built-in" } },
+		});
+		// A form nobody can be asked was never put to anyone, so it has no approval to run under.
+		const notShown = recorded(ASK_FORM_TOOL, askForm, recording);
+		tools[ASK_FORM_TOOL] = {
+			...asked,
+			execute: (input, options) =>
+				(whyNotShown(askedBy, input) ? notShown : asked).execute?.(input, options),
+		};
 	}
 	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
 	const catalog = buildCatalog(deps.connections, builtInFound);

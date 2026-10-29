@@ -16,7 +16,7 @@ import { agent, message, user } from "../../database/schema.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
 import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
-import { toToolCallPart } from "./tool-calls.ts";
+import { type StoredForm, toToolCallPart } from "./tool-calls.ts";
 
 /**
  * Turning joined rows into the API's people-and-agents shapes.
@@ -209,7 +209,18 @@ export const messageRelations = {
 	authorAgent: agentColumns,
 	toolCalls: {
 		orderBy: { startedAt: "asc", id: "asc" },
-		with: { decidedBy: { columns: { name: true } } },
+		with: {
+			decidedBy: { columns: { name: true } },
+			form: {
+				columns: { request: true },
+				with: {
+					response: {
+						columns: { answer: true, createdAt: true },
+						with: { responder: { columns: { name: true } } },
+					},
+				},
+			},
+		},
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
 	files: { columns: fileColumns, orderBy: { position: "asc" } },
@@ -226,7 +237,9 @@ type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | 
 export interface MessageWithRelations extends schema.MessageRow {
 	authorUser: PersonIdentity | null;
 	authorAgent: AgentIdentity | null;
-	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
+	toolCalls: Array<
+		schema.ToolCallRow & { decidedBy: { name: string } | null; form: StoredForm | null }
+	>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	files: AttachedFileRow[];
 	routineExecution: Pick<
@@ -247,7 +260,9 @@ export function messageFromRelations(
 		stored,
 		authorRow(stored.authorUser, stored.authorAgent),
 		{
-			toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
+			toolCalls: stored.toolCalls.map((call) =>
+				toToolCallPart(call, call.decidedBy?.name, call.form),
+			),
 			collaborations: stored.collaborations.map((made) =>
 				toCollaborationPart(made, made.collaborator.name),
 			),
