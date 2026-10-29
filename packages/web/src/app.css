@@ -404,13 +404,10 @@
 	}
 }
 
-/*
- * A link in a bot's message is its own words, underlined; the accent would not
- * read on the tint. Streamdown draws a link as a button that asks before leaving.
- */
+/* A link in a bot's message wears the bot's accent, so it reads as a link against the words around it. */
 .message-markdown a,
 .message-markdown [data-streamdown="link"] {
-	color: inherit;
+	color: var(--bot-mono, currentColor);
 	text-decoration: underline;
 	text-underline-offset: 2px;
 }
