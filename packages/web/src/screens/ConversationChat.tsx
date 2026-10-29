@@ -161,6 +161,7 @@ export function ConversationChat({
 	const previousThreadId = useRef<string | undefined>(undefined);
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
+	const lastScrollTop = useRef(Number.NEGATIVE_INFINITY);
 	// Where the log was last scrolled to. `followingLatest` is the intent to stay
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
@@ -519,7 +520,9 @@ export function ConversationChat({
 							const atFoot =
 								element.scrollHeight - element.scrollTop - element.clientHeight <
 								LATEST_IN_VIEW_TOLERANCE_PX;
-							followingLatest.current = atFoot;
+							if (atFoot) followingLatest.current = true;
+							else if (element.scrollTop < lastScrollTop.current) followingLatest.current = false;
+							lastScrollTop.current = element.scrollTop;
 							setLatestInView(atFoot);
 						}}
 						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
