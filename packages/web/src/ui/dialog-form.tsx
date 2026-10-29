@@ -87,7 +87,8 @@ export function DialogFormHeader({
 }) {
 	return (
 		<header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-[18px] pt-4 pb-3">
-			<span className="justify-self-start">
+			{/* `flex`: an inline span would set Back on a line of text, taller than the title, so the header would grow with it. */}
+			<span className="flex justify-self-start">
 				{onBack && (
 					<button
 						type="button"

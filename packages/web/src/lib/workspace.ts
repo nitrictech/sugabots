@@ -112,6 +112,37 @@ export function useUpdateWorkspace(workspaceId: string | undefined) {
 	});
 }
 
+/** The workspace's time zone, and how many routines' schedules would move with it. */
+export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
+	return useQuery({
+		queryKey: ["workspaces", workspaceId, "time-zone"],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.workspaces.timeZone({ params: { workspace: workspaceId } }), {
+				signal,
+			}),
+		enabled,
+	});
+}
+
+/** Moves the workspace, and the routine schedules in its old zone, to another time zone. */
+export function useChangeWorkspaceTimeZone(workspaceId: string) {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: (timeZone: TimeZone) =>
+			Effect.runPromise(
+				client.api.workspaces.changeTimeZone({
+					params: { workspace: workspaceId },
+					payload: { timeZone },
+				}),
+			),
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["workspaces"] }),
+				queries.invalidateQueries({ queryKey: ["routines"] }),
+			]),
+	});
+}
+
 export function useInviteWorkspaceMember(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
@@ -297,6 +328,7 @@ export function useWorkspaceRole(): WorkspaceRole | undefined {
 
 const NOTHING_YET: WorkspacePermissions = {
 	createPods: false,
+	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,
 	configureBuiltInAgents: false,

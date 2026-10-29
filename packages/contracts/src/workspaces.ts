@@ -107,6 +107,8 @@ export function workspaceRoleDescription(role: WorkspaceRole): string {
  */
 export const workspacePermissionsSchema = Schema.Struct({
 	createPods: Schema.Boolean,
+	/** Rename the workspace, change its address, and move it to another time zone. */
+	updateWorkspace: Schema.Boolean,
 	/** Configure the model and search providers the workspace runs on. */
 	manageProviders: Schema.Boolean,
 	/** Invite, remove and set the access of the people in the workspace. */

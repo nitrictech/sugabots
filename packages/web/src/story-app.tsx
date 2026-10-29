@@ -118,6 +118,7 @@ const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key
 
 const NO_PERMISSIONS: WorkspacePermissions = {
 	createPods: false,
+	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,
 	configureBuiltInAgents: false,
@@ -131,6 +132,7 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	owner: {
 		createPods: true,
+		updateWorkspace: true,
 		manageProviders: true,
 		manageMembers: true,
 		configureBuiltInAgents: true,
@@ -141,6 +143,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	},
 	admin: {
 		createPods: true,
+		updateWorkspace: true,
 		manageProviders: true,
 		manageMembers: true,
 		configureBuiltInAgents: true,

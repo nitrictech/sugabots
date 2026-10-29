@@ -1,15 +1,17 @@
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** `Membership` decides who may do what; these map its refusals to HTTP. */
+/** `Membership` and `WorkspaceTimeZone` decide who may do what; these map their refusals to HTTP. */
 export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (handlers) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
+		const timeZones = yield* WorkspaceTimeZone.Service;
 		return handlers
 			.handle("list", () => asSessionUser(membership.workspaces))
 			.handle("create", ({ payload }) =>
@@ -29,6 +31,14 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 						asSessionUser,
 						asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
 					),
+			)
+			.handle("timeZone", ({ params }) =>
+				timeZones.get({ workspace: params.workspace }).pipe(asSessionUser, asHttpError(refusals)),
+			)
+			.handle("changeTimeZone", ({ params, payload }) =>
+				timeZones
+					.change({ workspace: params.workspace, timeZone: payload.timeZone })
+					.pipe(asSessionUser, asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
 			)
 			.handle("delete", ({ params }) =>
 				membership

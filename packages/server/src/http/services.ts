@@ -23,6 +23,7 @@ import type { AgentAdministration } from "@sugabots/core/workspaces/agents/agent
 import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import type { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import type { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import type { ChannelAccess } from "../routes/events/access.ts";
 
 /**
@@ -42,6 +43,7 @@ export type HttpServices =
 	| Accounts.Service
 	| Membership.Service
 	| Onboarding.Service
+	| WorkspaceTimeZone.Service
 	| PodAdministration.Service
 	| AgentAdministration.Service
 	| ModelProviderSetup.Service

@@ -720,7 +720,7 @@ function requireSlugUnlikeUuid(slug: string) {
 	return isUuid(slug) ? Effect.fail(new SlugShapedLikeUuid()) : Effect.void;
 }
 
-function requireTimeZoneKnownToPostgres(timeZone: string) {
+export function requireTimeZoneKnownToPostgres(timeZone: string) {
 	return query((db) =>
 		db
 			.select({ name: sql<string>`name` })
