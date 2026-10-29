@@ -29,6 +29,7 @@ import {
 	pendingAnswer,
 	sam,
 	TestApp,
+	threadWith,
 	triager,
 	workspace,
 } from "@/test-api.tsx";
@@ -506,6 +507,26 @@ describe("ongoing agent Chat", () => {
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
+	});
+
+	it("starts a thread from the bot's message in its channel, and opens it", async () => {
+		const started = threadWith(linear);
+		client.api.chats.threadFrom.mockReturnValue(Effect.succeed(started));
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByText(agentMessage.content);
+		const said = screen
+			.getAllByRole("article", { name: new RegExp(`^${linear.name},`) })
+			.find((article) => article.dataset.messageId === agentMessage.id);
+		if (!said) throw new Error("The bot's message is not shown");
+
+		fireEvent.click(within(said).getByRole("button", { name: "Start a thread" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/threads/${started.id}`),
+		);
+		expect(client.api.chats.threadFrom).toHaveBeenCalledWith({
+			params: { messageId: agentMessage.id },
+		});
 	});
 
 	it("with other people in the thread, says the bot stays out only of a draft mentioning just people", async () => {

@@ -313,12 +313,12 @@ export function ConversationChat({
 		if (started.outcome === "refused") setStartError(THREAD_NOT_STARTED);
 	}
 
-	/** Opens a thread started from the pod's chat in its own place. */
+	/** Opens a thread started from a message here in its own place. */
 	function openPodThread(threadId: string) {
 		void navigate(conversationLink({ pod, conversationId: threadId }));
 	}
 
-	/** Starts a thread between people from `message`, or opens the one it has. */
+	/** Starts a thread from `message`, with this channel's bot if it is one, or opens the one it has. */
 	async function threadFromMessage(message: Message) {
 		try {
 			const thread = await threadFrom.mutateAsync(message.id);
@@ -562,7 +562,11 @@ export function ConversationChat({
 											threadActivityAt={threadActivityAt}
 											authorLinkOf={authorLinkOf}
 											onReply={replyTo}
-											onStartThread={isPodChat ? threadFromMessage : undefined}
+											onStartThread={
+												isPodChat || conversation.kind === "botChannel"
+													? threadFromMessage
+													: undefined
+											}
 											inRoutineThread={routineFeed}
 											threadLinesOf={(message) =>
 												startedThreads

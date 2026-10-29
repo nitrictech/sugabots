@@ -132,9 +132,9 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Starts a thread between people from the message `messageId` in a pod's
-	 * chat, titled from it and linked from the chat. A message has one such
-	 * thread: asking again returns it.
+	 * Starts a thread from the message `messageId`, titled from it and linked
+	 * from where it was said: between people in a pod's chat, or with the bot
+	 * in its channel. A message has one such thread: asking again returns it.
 	 */
 	readonly threadFrom: (
 		messageId: string,
@@ -389,7 +389,7 @@ export const make = Effect.gen(function* () {
 							replyTo: input.replyTo,
 						});
 						const started = yield* threads.openThread({
-							podChat,
+							parent: podChat,
 							originMessageId: posted.message.id,
 							hostAgentId: hostAgentId ?? null,
 							title: threadTitleFrom(input.content),
@@ -422,15 +422,15 @@ export const make = Effect.gen(function* () {
 								)
 							: [];
 						if (!origin) return yield* new ResourceHidden({ resource: "message" });
-						const podChat = yield* visibility.conversation(origin.threadId);
-						if (podChat.type !== "pod_chat") {
+						const parent = yield* visibility.conversation(origin.threadId);
+						if (parent.type !== "pod_chat" && parent.type !== "bot_channel") {
 							return yield* new ResourceHidden({ resource: "message" });
 						}
 						const { userId } = yield* CurrentActor.Service;
 						const started = yield* threads.openThread({
-							podChat,
+							parent,
 							originMessageId: messageId,
-							hostAgentId: null,
+							hostAgentId: parent.type === "bot_channel" ? parent.hostAgentId : null,
 							title: threadTitleFrom(origin.content),
 							initiatorUserId: userId,
 						});

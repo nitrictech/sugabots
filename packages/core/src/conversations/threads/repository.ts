@@ -64,13 +64,13 @@ export interface Interface {
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/**
-	 * The thread hanging off the message `originMessageId` in the pod's chat
-	 * `podChat`, opened and announced when it has none: with the bot
-	 * `hostAgentId`, or between people when it is null, and `initiatorUserId`.
+	 * The thread hanging off the message `originMessageId` in `parent`, a pod's
+	 * chat or a bot's channel, opened and announced when it has none: with the
+	 * bot `hostAgentId`, or between people when it is null, and `initiatorUserId`.
 	 * A message has one thread, so `opened` is false when it already had it.
 	 */
 	readonly openThread: (input: {
-		podChat: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">;
+		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">;
 		originMessageId: string;
 		hostAgentId: string | null;
 		title: string;
@@ -412,11 +412,11 @@ export const make = Effect.gen(function* () {
 								.insert(thread)
 								.values({
 									id,
-									workspaceId: input.podChat.workspaceId,
-									podId: input.podChat.podId,
+									workspaceId: input.parent.workspaceId,
+									podId: input.parent.podId,
 									hostAgentId: input.hostAgentId,
 									conversationId: id,
-									parentThreadId: input.podChat.id,
+									parentThreadId: input.parent.id,
 									type: "conversation",
 									title: input.title,
 									initiatorUserId: input.initiatorUserId,
@@ -438,7 +438,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.ThreadOpened({
 								workspaceId: created.workspaceId,
 								podId: created.podId,
-								podChatId: input.podChat.id,
+								parentThreadId: input.parent.id,
 								threadId: created.id,
 							}),
 						]);

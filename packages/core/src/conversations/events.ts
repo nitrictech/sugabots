@@ -161,11 +161,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly readThrough: Date;
 		readonly readAt: Date;
 	};
-	/** Somebody started a thread from the pod's chat `podChatId`, which links to it. */
+	/** Somebody started a thread from a message in `parentThreadId`, a pod's chat or a bot's channel, which links to it. */
 	ThreadOpened: {
 		readonly workspaceId: string;
 		readonly podId: string;
-		readonly podChatId: string;
+		readonly parentThreadId: string;
 		readonly threadId: string;
 	};
 	/** Somebody started, renamed or archived the pod's chat `threadId`. */
