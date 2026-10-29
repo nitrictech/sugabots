@@ -7,7 +7,7 @@ import { openaiClient, recognizeOpenAIFailure } from "./openai-compatible.ts";
  * with ones hidden from Codex's own picker among them. It offers each only to
  * clients at least as new as the model, so discovery says it is a recent Codex.
  */
-const CODEX_CLIENT_VERSION = "0.157.0";
+const CODEX_CLIENT_VERSION = "0.166.0";
 
 export const chatgpt: ProviderDialect = {
 	name: "ChatGPT",
