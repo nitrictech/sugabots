@@ -304,7 +304,11 @@ export function DesktopScreen({
 		// A hidden page's connection may be closed, and only reported closed once the page is shown.
 		let hiddenWhileConnected = document.hidden;
 		let droppedWhileHidden = false;
-		const reconnect = () => setAttempt((count) => count + 1);
+		const unusedTooLong = () =>
+			!agentUsingNow.current && Date.now() - lastUsedAt.current >= IDLE_TIMEOUT_MINUTES * 60_000;
+		// Waking the sandbox after a long absence is left to the Reconnect button.
+		const reconnect = () =>
+			unusedTooLong() ? setStanding("idle") : setAttempt((count) => count + 1);
 		const reconnectWhenShown = () => {
 			if (document.hidden) {
 				hiddenWhileConnected = true;
@@ -315,7 +319,7 @@ export function DesktopScreen({
 		document.addEventListener("visibilitychange", reconnectWhenShown);
 		const idleCheck = setInterval(() => {
 			if (agentUsingNow.current) used();
-			if (!viewer || Date.now() - lastUsedAt.current < IDLE_TIMEOUT_MINUTES * 60_000) return;
+			if (!viewer || !unusedTooLong()) return;
 			const idleViewer = viewer;
 			viewer = undefined;
 			setStanding("idle");
@@ -348,7 +352,9 @@ export function DesktopScreen({
 			element.removeEventListener("keydown", keepPasteShortcut, { capture: true });
 			document.removeEventListener("paste", pasteIntoDesktop);
 			document.removeEventListener("visibilitychange", reconnectWhenShown);
-			viewer?.disconnect();
+			const closing = viewer;
+			viewer = undefined;
+			closing?.disconnect();
 			connected.current = undefined;
 		};
 	}, [threadId, agentId, attempt]);
