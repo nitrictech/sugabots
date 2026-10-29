@@ -13,192 +13,89 @@ Sugabots is a self-hosted workspace where people and AI agents work together.
 Create agents, organise them into shared pods, and run conversations that can use
 built-in tools and MCP connections.
 
-The application consists of a React web app, a Hono API, and PostgreSQL. Your
-accounts, conversations, configuration, and encrypted provider credentials stay
-in your database. Model requests go only to the providers you configure, which
-can be hosted services such as Anthropic and OpenAI or an OpenAI- or
-Anthropic-compatible model server on your own network.
+<p align="center">
+  <img alt="A Sugabots thread where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/one-thread-mac.webp" width="800">
+</p>
 
-## Set up Sugabots
+Everything stays in your own database. Bots use the model providers you choose,
+whether that's Anthropic, OpenAI or a model server on your own network.
 
-This guide runs PostgreSQL in Docker and the web app and API directly on your
-machine. It is the simplest supported way to try or operate Sugabots on one
-computer.
+## Try it in one command
 
-### 1. Install the prerequisites
-
-You need:
-
-- [Node.js](https://nodejs.org/) 26 or newer; `.nvmrc` contains the expected version
-- [Bun](https://bun.sh/) 1.4.2 or newer
-- [Docker](https://docs.docker.com/get-docker/) with Docker Compose
-
-Check that they are available:
+With [Docker](https://docs.docker.com/get-docker/) and Docker Compose installed,
+run this on macOS or Linux:
 
 ```sh
-node --version
-bun --version
-docker compose version
+curl -fsSL https://sugabots.ai/install.sh | sh
 ```
 
-### 2. Install dependencies
+Or on Windows, in PowerShell:
 
-```sh
-nvm use # Optional
-bun install
+```powershell
+irm https://sugabots.ai/install.ps1 | iex
 ```
 
-### 3. Configure the installation
+It sets Sugabots up in a new `sugabots` folder and starts it. Then open <http://localhost:3000> and create your account. You can read more details in the
+[Quickstart](https://sugabots.ai/docs/quickstart) guide.
 
-Create your local environment file:
+## Host it for your team
 
-```sh
-cp .env.example .env
-```
+To use Sugabots with other people, run it somewhere they can reach.
+[Deploy with Docker](https://sugabots.ai/docs/deploy-with-docker) walks through
+a server of your own or a hosting platform.
 
-Open `.env` and replace both development keys before storing any provider
-credentials:
+## Features
 
-```dotenv
-BETTER_AUTH_SECRET=<output of openssl rand -base64 32>
-CREDENTIALS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
-```
+### Shared pods
 
-Generate each value separately:
+A pod is a shared space for a group of people and their bots. Everyone in it
+sees the same chats, results and approvals, so nobody has to forward an answer
+or explain what a bot already did.
 
-```sh
-openssl rand -base64 32
-```
+### Bots that work together
 
-The remaining defaults are ready for a localhost installation. Keep `.env`
-private and backed up. Losing `CREDENTIALS_ENCRYPTION_KEY` makes saved
-credentials unreadable; changing `BETTER_AUTH_SECRET` signs everyone
-out.
+When a bot needs help, it asks another bot in its pod. The exchange shows up as
+a thread under its message, so you can see exactly who said what.
 
-### 4. Start PostgreSQL
+### A different model for every bot
 
-```sh
-docker compose up -d
-docker compose ps
-```
+Connect Anthropic, OpenAI, any OpenAI- or Anthropic-compatible service, or a
+model running on your own machine. Give each bot the model that suits its job: a
+clever one for research, a cheap one for sorting the inbox, a local one for
+private notes.
 
-Wait for `postgres` to report `healthy`, then create the database schema:
+### Your apps and APIs, with approvals
 
-```sh
-bun run db:migrate
-```
+Connect Linear, Notion, Stripe, Sentry, Jira, any MCP server or a plain HTTP
+API once, and let your bots use it to do work. Choose which tools run straight
+away and which wait for someone to say yes.
 
-PostgreSQL stores its data in the `sugabots_postgres_data` Docker volume, so
-restarting or recreating the container does not remove your data. If you want to
-reset your data, just delete the volume.
+### Routines
 
-### 5. Start Sugabots
+Give a bot a job to do on a schedule, or whenever a webhook or a GitHub event
+calls it. It posts what it did in its chat, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
 
-```sh
-bun run dev
-```
+### Sandboxes
 
-Keep this terminal open. It runs the API and web app together and reloads them
-when source files change. On its first run, Portless creates a local certificate
-authority, adds it to your system trust store, and may ask for administrator
-access to start its HTTPS proxy.
+Bots can runs code, use software or browse the web in their own isolated environment.
 
-Open <https://sugabots.localhost>, create an account, and follow the onboarding
-flow. Development email is printed in the terminal, including the verification
-link.
+### And more
 
-The local services are:
-
-| Service          | Address                                     |
-| ---------------- | ------------------------------------------- |
-| Web app          | <https://sugabots.localhost>                |
-| API              | <https://sugabots.localhost/api>            |
-| API health check | <https://sugabots.localhost/api/health>     |
-| PostgreSQL       | `localhost:5436`                            |
-
-The API answers under `/api` of the address the web app is served from. In
-development Vite serves the app and proxies `/api` to the API process; in a
-deployment the API serves the built app itself. Either way the browser sees
-one origin and nothing about the installation's address is built into the
-app. Hosting the web app on an origin of its own is still supported: see
-`WEB_APP_URL` and `VITE_API_URL` in `.env.example`.
-
-Portless gives the app stable local names, HTTPS, and HTTP/2. Use these commands
-to inspect or troubleshoot it:
-
-```sh
-bunx portless list
-bunx portless doctor
-```
-
-## Run it again
-
-After the first setup:
-
-```sh
-docker compose up -d
-bun run db:migrate
-bun run dev
-```
-
-Press `Ctrl-C` to stop the web app and API. Stop PostgreSQL separately with:
-
-```sh
-docker compose stop
-```
-
-## Update an installation
-
-Stop `bun run dev`, then run:
-
-```sh
-git pull --ff-only
-bun install
-docker compose up -d
-bun run db:migrate
-bun run dev
-```
-
-Back up your PostgreSQL volume and `.env` before updating an installation that
-contains data you care about.
-
-## Reset everything
-
-The following removes the database volume and all Sugabots data:
-
-```sh
-docker compose down -v
-docker compose up -d
-bun run db:migrate
-```
-
-Do not run `docker compose down -v` unless you intend to delete every account,
-workspace, conversation, and saved credential.
-
-## Deploy with Docker
-
-One image runs the whole application: the API, serving the built web app at
-every path outside `/api`. Any platform that builds a `Dockerfile` from a
-repository can run it, such as [Suga](https://suga.app),
-[Railway](https://railway.com) or [Render](https://render.com); point the
-service at the repository root and give it a PostgreSQL 18 database. To run
-the released image instead, the
-[Sugabots template](https://dashboard.suga.app/new/template?id=sugabots) on
-Suga creates the service and its database.
-
-```sh
-docker build -t sugabots .
-```
-
-The container takes the variables `.env.example` describes. `PUBLIC_URL`
-is the installation's public address, the one in the browser's address bar.
-On start it applies pending database migrations, then listens on `$PORT`; set
-`SUGABOTS_SKIP_MIGRATIONS=true` to skip that, for example when a deploy step
-migrates or several instances share a database.
-
-To host the web app on an origin of its own instead, set its address in
-`WEB_APP_URL` and build the web app with `VITE_API_URL`; the image still
-serves its own copy at its own address.
+- **GitHub**: bots read a pod's repositories, push branches, and open pull
+  requests once someone allows it.
+- **Artifacts**: files and outputs bots make are saved for the team to open and
+  review.
+- **Usage and costs**: see what every bot, model and team costs, day by day.
+- **Web search**: bots search the web and read pages, through Exa, Brave Search,
+  Tavily or your own SearXNG server.
+- **Roles**: owners, admins, members and viewers, with pods deciding who sees
+  what.
+- **Personal pod**: everyone gets a private pod and assistant that nobody else
+  can see into, admins included.
+- **Bots set their own schedules**: ask a bot to "check in with me every morning
+  at 9" and it sets up the routine.
+- **Signed webhooks**: routines check calls from GitHub, Stripe, Slack and Linear,
+  or any sender using HMAC, bearer, API key or basic auth.
 
 ## Community and support
 

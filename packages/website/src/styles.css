@@ -7,6 +7,9 @@
 @source "../../avatars/src";
 @source "../../provider-logos/src";
 
+/* A window wide and tall enough for the landing page's workspace section to pin while scrolling steps through it; kept in step with `PINNING_QUERY` in workspace-section.tsx. */
+@custom-variant pinned (@media (width >= 64rem) and (height >= 44rem));
+
 @theme inline {
 	--font-sans: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
 	--font-heading: var(--font-sans);
@@ -43,9 +46,52 @@
 	--radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * The landing page's palette: the app's dark UI, in every colour scheme. The
+ * docs use the themed tokens below instead.
+ */
+@theme {
+	--color-landing-page: #0a0a0a;
+	--color-landing-card: #0f0f11;
+	--color-landing-raised: #111113;
+	--color-landing-bubble: #111113;
+	--color-landing-chip: #17171a;
+	--color-landing-button: #1f1f23;
+
+	--color-landing-line: #1c1c1f;
+	--color-landing-frame: #1f1f23;
+	--color-landing-control: #26262a;
+	--color-landing-rule: #3f3f46;
+	--color-landing-control-hover: #52525b;
+
+	--color-landing-text: #ededed;
+	--color-landing-message: #ededed;
+	--color-landing-button-text: #ededed;
+	--color-landing-secondary: #c4c4ca;
+	--color-landing-muted: #a1a1aa;
+	--color-landing-faint: #808089;
+	/* The app's own link colour, for the demos' in-app lines. */
+	--color-landing-app-link: #ededed;
+
+	/* The site has no hue of its own, as the app has none: focus rings and highlights are grey. */
+	--color-landing-accent: #a1a1aa;
+	/* The app's primary button, the strongest ink, in the demos of the app. */
+	--color-landing-pill: #ededed;
+	--color-landing-pill-hover: #d4d4d8;
+	/* The logo's four dots, in order. */
+	--color-landing-logo-green: #22c55e;
+	--color-landing-logo-blue: #38bdf8;
+	--color-landing-logo-red: #f43f5e;
+	--color-landing-logo-orange: #f97316;
+
+	--ease-landing: cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
 :root {
 	color-scheme: light;
 	--radius: 0.625rem;
+	/* The site header's height, which the docs' sticky sidebars sit under. */
+	--site-header-height: 76px;
 
 	--background: var(--color-white);
 	--foreground: var(--color-zinc-900);
@@ -107,6 +153,12 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+	/* So scrolling past either end of the dark landing page shows dark, not the light theme. */
+	html:has([data-landing]),
+	html:has([data-landing]) body {
+		color-scheme: dark;
+		background-color: var(--color-landing-page);
+	}
 	/* Tailwind v4 resets buttons to the default cursor. */
 	button:not(:disabled),
 	[role="button"]:not(:disabled) {
@@ -159,4 +211,19 @@
 
 .docs-steps > ol > li > p:first-child {
 	@apply mt-1 text-lg font-bold text-foreground;
+}
+
+/*
+ * Only the visitor's system's capture shows, by the mark the page's head sets:
+ * macOS until it has set one.
+ */
+[data-for-os="windows"],
+[data-for-os="linux"],
+html[data-os="windows"] [data-for-os="mac"],
+html[data-os="linux"] [data-for-os="mac"] {
+	display: none;
+}
+html[data-os="windows"] [data-for-os="windows"],
+html[data-os="linux"] [data-for-os="linux"] {
+	display: contents;
 }

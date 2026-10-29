@@ -1,51 +1,39 @@
-import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { cn } from "cn";
 import { trackCallToActionClick } from "@/analytics";
-import { accentText } from "@/components/accent";
-import { Emphasis } from "@/components/emphasis";
-import { Reveal, RevealItem, riseIn } from "@/components/reveal";
-import { buttonVariants } from "@/components/ui/button";
+import { callToAction } from "@/landing/call-to-action";
+import { DemoVideo } from "@/landing/demo-video";
+import { pageTop, siteColumn } from "@/layout";
 import { siteLinks } from "@/site-links";
 import { siteMeta } from "@/site-meta";
 
 export function Hero() {
 	return (
-		<section className="pt-12 pb-10">
-			<Reveal delay={0.2} className="flex flex-col gap-5">
-				<motion.h1
-					variants={riseIn}
-					className="text-5xl leading-13 font-black tracking-tight text-balance sm:text-6xl sm:leading-16"
-				>
-					<span className={accentText({ tone: "emerald" })}>{siteMeta.headline.accent}</span>{" "}
-					{siteMeta.headline.rest}.
-				</motion.h1>
-				<motion.p
-					variants={riseIn}
-					className="max-w-2xl text-muted-foreground text-pretty sm:text-lg"
-				>
-					Sugabots is a place where <Emphasis>people</Emphasis> and <Emphasis>agents</Emphasis> can
-					work together. Give each group its own agents, on the models you choose. It's also{" "}
-					<Emphasis>open-source</Emphasis>.
-				</motion.p>
-				<RevealItem className="flex flex-wrap items-center gap-3">
+		<section id="top" className={cn(siteColumn, pageTop, "flex flex-col gap-16 sm:gap-24")}>
+			<div className="flex flex-col items-start gap-7">
+				<h1 className="max-w-[820px] text-[clamp(40px,6vw,72px)]/[1.02] font-bold tracking-[-0.035em] text-balance">
+					{siteMeta.headline}.
+				</h1>
+				<p className="max-w-[560px] text-[clamp(17px,1.6vw,20px)]/[1.5] text-pretty text-landing-muted">
+					{siteMeta.description}
+				</p>
+				<div className="mt-1 flex flex-wrap gap-3">
 					<a
-						href={siteLinks.getStarted}
-						onClick={() => trackCallToActionClick("get_started", "hero")}
-						className={buttonVariants({ size: "lg" })}
+						href={siteLinks.selfHost}
+						onClick={() => trackCallToActionClick("self_host", "hero")}
+						className={callToAction()}
 					>
-						Start a pod
-						<ArrowRightIcon data-icon="inline-end" />
+						Self-host it
 					</a>
 					<a
-						href={siteLinks.github}
-						onClick={() => trackCallToActionClick("github", "hero")}
-						className={buttonVariants({ variant: "outline", size: "lg" })}
+						href={siteLinks.waitlist}
+						onClick={() => trackCallToActionClick("waitlist", "hero")}
+						className={callToAction({ variant: "secondary" })}
 					>
-						View on GitHub
-						<ArrowUpRightIcon data-icon="inline-end" />
+						Join the waitlist
 					</a>
-				</RevealItem>
-			</Reveal>
+				</div>
+			</div>
+			<DemoVideo />
 		</section>
 	);
 }

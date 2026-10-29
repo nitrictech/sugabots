@@ -49,7 +49,7 @@ export function siteMarkdown() {
 	return [
 		"# Sugabots",
 		`> ${siteMeta.description}`,
-		"Sugabots is an open-source, self-hosted workspace where people and AI agents work together. People and their bots share spaces called pods: everyone in a pod sees the same conversations, bots can ask each other for help, and a bot waits for a person's approval before it changes anything through a tool.",
+		"Sugabots is an open-source, self-hosted workspace where people and AI agents work together. People and their bots share a space as a team: everyone in it sees the same conversations, bots can ask each other for help, and a bot waits for a person's approval before it changes anything through a tool.",
 		WHEN_TO_USE,
 		"## Docs",
 		docLinks(),

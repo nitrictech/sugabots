@@ -79,12 +79,25 @@ const image = (
 					letterSpacing: -2,
 				}}
 			>
-				<span style={{ color: hex(colors.emerald[400]) }}>{siteMeta.headline.accent}</span>
-				{`${siteMeta.headline.rest}.`.split(" ").map((word) => (
+				{`${siteMeta.headline}.`.split(" ").map((word) => (
 					<span key={word}>{word}</span>
 				))}
 			</div>
-			<span style={{ fontSize: 34, color: hex(colors.zinc[400]) }}>{siteMeta.description}</span>
+			{/* A span per word here too, so satori doesn't break "self-hosted" at its hyphen. */}
+			<div
+				style={{
+					display: "flex",
+					flexWrap: "wrap",
+					columnGap: 9,
+					fontSize: 34,
+					color: hex(colors.zinc[400]),
+				}}
+			>
+				{/* Keyed by where each word starts, since a word like "and" can come up twice. */}
+				{[...siteMeta.description.matchAll(/\S+/g)].map((word) => (
+					<span key={word.index}>{word[0]}</span>
+				))}
+			</div>
 		</div>
 	</div>
 );
