@@ -638,24 +638,26 @@ function BotItem({
 						<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
 					</span>
 				)}
-				<span
-					className={cn(
-						"size-[22px] shrink-0 place-items-center",
-						attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
-					)}
-				>
-					<IconButton
-						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
-						size="sm"
-						render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+				{pod.kind === "shared" && (
+					<span
 						className={cn(
-							"size-[22px]",
-							!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
+							"size-[22px] shrink-0 place-items-center",
+							attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
 						)}
 					>
-						<Plus strokeWidth={2.2} />
-					</IconButton>
-				</span>
+						<IconButton
+							label={agent ? `New thread with ${agent.name}` : "New thread with people"}
+							size="sm"
+							render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+							className={cn(
+								"size-[22px]",
+								!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
+							)}
+						>
+							<Plus strokeWidth={2.2} />
+						</IconButton>
+					</span>
+				)}
 			</div>
 			{open && (group.threads.length > 0 || routines) && (
 				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
