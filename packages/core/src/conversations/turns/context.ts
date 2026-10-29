@@ -53,6 +53,7 @@ export function modelPrompt(
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
+		"Skip openers (\"I'll…\", \"Let me…\", \"You're right\", \"Great question!\", \"I apologize\") and sign-offs (\"Let me know if you need anything else\"). Don't recap what they watched. If they push back, check first: concede in one line and fix it if you were wrong, or say what you still think if you weren't.",
 		context.thread.type === "collaboration"
 			? "Another agent opened this thread to ask you for help. Its first message is their brief; your reply is returned to them when your turn ends, so make it stand alone."
 			: undefined,
