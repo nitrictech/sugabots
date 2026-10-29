@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { Maximize2Icon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, XIcon } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { type Screenshot, screenshots } from "@/landing/media";
@@ -10,7 +10,11 @@ const ADVANCE_MILLISECONDS = 5000;
 const SLIDE_WIDTH = "min(76vw, 1040px)";
 /** How many slides either side of the current one are drawn: the peeking one, and one beyond it to slide in. */
 const DRAWN_EACH_SIDE = 2;
-const SLIDE_GAP = "24px";
+const SLIDE_GAP_PX = 24;
+/** How far the pointer moves before a press becomes a drag rather than a click. */
+const DRAG_START_PX = 6;
+/** How much of a slide's width a drag must cover to move on to the next one. */
+const DRAG_ADVANCE_SHARE = 0.15;
 
 /** The slide at `position`, counting round the screenshots in either direction. */
 function screenshotAt(position: number): number {
@@ -32,8 +36,14 @@ export function ScreenshotCarousel() {
 	const current = screenshotAt(position);
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
-	const [enlarged, setEnlarged] = useState<Screenshot>();
-	const paused = hovered || focused || enlarged !== undefined || reduceMotion;
+	// The enlarged screenshot is always the current one, so moving through it moves the carousel too.
+	const [enlarged, setEnlarged] = useState(false);
+	// How far the slides are dragged from where they rest, in pixels, while they're dragged.
+	const [draggedPx, setDraggedPx] = useState<number>();
+	const press = useRef<{ startX: number; dragging: boolean }>(undefined);
+	// A drag ends with a click on whatever it was released over, which must not select or enlarge it.
+	const draggedJustNow = useRef(false);
+	const paused = hovered || focused || enlarged || draggedPx !== undefined || reduceMotion;
 
 	useEffect(() => {
 		if (paused) return;
@@ -45,6 +55,15 @@ export function ScreenshotCarousel() {
 	const show = (index: number) => {
 		const ahead = screenshotAt(index - current);
 		setPosition(position + (ahead <= screenshots.length / 2 ? ahead : ahead - screenshots.length));
+	};
+	/** Moves by as many slides as the drag covered, at least one once it covers a little of one, and lets go. */
+	const endDrag = (slideWidthPx: number) => {
+		const dragged = draggedPx ?? 0;
+		press.current = undefined;
+		setDraggedPx(undefined);
+		if (Math.abs(dragged) < slideWidthPx * DRAG_ADVANCE_SHARE) return;
+		const slides = Math.max(1, Math.round(Math.abs(dragged) / (slideWidthPx + SLIDE_GAP_PX)));
+		setPosition((moved) => moved - Math.sign(dragged) * slides);
 	};
 	const drawn = Array.from(
 		{ length: DRAWN_EACH_SIDE * 2 + 1 },
@@ -64,7 +83,36 @@ export function ScreenshotCarousel() {
 			<div
 				onPointerEnter={() => setHovered(true)}
 				onPointerLeave={() => setHovered(false)}
-				className="relative mx-auto aspect-16/10"
+				onPointerDown={(event) => {
+					if (event.button !== 0) return;
+					draggedJustNow.current = false;
+					press.current = { startX: event.clientX, dragging: false };
+				}}
+				onPointerMove={(event) => {
+					if (!press.current) return;
+					const movedPx = event.clientX - press.current.startX;
+					if (!press.current.dragging) {
+						if (Math.abs(movedPx) < DRAG_START_PX) return;
+						press.current.dragging = true;
+						event.currentTarget.setPointerCapture(event.pointerId);
+					}
+					setDraggedPx(movedPx);
+				}}
+				onPointerUp={(event) => {
+					if (press.current?.dragging) draggedJustNow.current = true;
+					endDrag(event.currentTarget.offsetWidth);
+				}}
+				onPointerCancel={(event) => endDrag(event.currentTarget.offsetWidth)}
+				onClickCapture={(event) => {
+					if (!draggedJustNow.current) return;
+					draggedJustNow.current = false;
+					event.stopPropagation();
+				}}
+				// Sideways is the carousel's; up and down still scroll the page on a touch screen.
+				className={cn(
+					"relative mx-auto aspect-16/10 touch-pan-y select-none",
+					draggedPx !== undefined && "cursor-grabbing",
+				)}
 				style={{ width: SLIDE_WIDTH }}
 			>
 				{drawn.map((slidePosition) => {
@@ -77,34 +125,15 @@ export function ScreenshotCarousel() {
 							screenshot={screenshot}
 							label={`${index + 1} of ${screenshots.length}`}
 							offset={slidePosition - position}
+							draggedPx={draggedPx}
 							onSelect={() => setPosition(slidePosition)}
-							onEnlarge={() => setEnlarged(screenshot)}
+							onEnlarge={() => setEnlarged(true)}
 						/>
 					);
 				})}
 			</div>
 			<div className="flex flex-col items-center gap-1.5 px-8 text-center">
-				{/*
-				 * Every caption sits in the same cell, the current one shown, so the cell is
-				 * always as tall as the longest: a two-line description never moves the page.
-				 */}
-				<div className="grid max-w-[560px]">
-					{screenshots.map((screenshot, index) => (
-						<div
-							key={screenshot.title}
-							aria-hidden={index !== current}
-							className={cn(
-								"col-start-1 row-start-1 flex flex-col items-center gap-1.5",
-								index === current ? "visible" : "invisible",
-							)}
-						>
-							<span className="text-lg font-semibold text-landing-text">{screenshot.title}</span>
-							<span className="text-[15.5px]/[1.5] text-pretty text-landing-muted">
-								{screenshot.description}
-							</span>
-						</div>
-					))}
-				</div>
+				<Captions current={current} />
 				<div className="mt-3.5 flex gap-2">
 					{screenshots.map((screenshot, index) => (
 						<button
@@ -126,11 +155,12 @@ export function ScreenshotCarousel() {
 					))}
 				</div>
 			</div>
-			{enlarged?.image && (
+			{enlarged && (
 				<EnlargedScreenshot
-					screenshot={enlarged}
-					image={enlarged.image}
-					onClose={() => setEnlarged(undefined)}
+					current={current}
+					onPrevious={() => setPosition((moved) => moved - 1)}
+					onNext={() => setPosition((moved) => moved + 1)}
+					onClose={() => setEnlarged(false)}
 				/>
 			)}
 		</section>
@@ -142,6 +172,8 @@ interface SlideProps {
 	label: string;
 	/** Slides from the current one: negative to its left, positive to its right. */
 	offset: number;
+	/** How far the slides are dragged, while they are: they follow the pointer rather than easing. */
+	draggedPx: number | undefined;
 	onSelect: () => void;
 	/** Shows the screenshot at full size, where its text can be read. */
 	onEnlarge: () => void;
@@ -152,7 +184,7 @@ interface SlideProps {
  * can be clicked to bring them in, and keyboard users move with the dots, so
  * only the current one takes focus.
  */
-function Slide({ screenshot, label, offset, onSelect, onEnlarge }: SlideProps) {
+function Slide({ screenshot, label, offset, draggedPx, onSelect, onEnlarge }: SlideProps) {
 	const isCurrent = offset === 0;
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: the carousel pattern labels each slide as a group, and a fieldset is for form controls.
@@ -165,8 +197,11 @@ function Slide({ screenshot, label, offset, onSelect, onEnlarge }: SlideProps) {
 			className={cn(
 				"absolute inset-0 transition-[opacity,transform] duration-380 ease-landing motion-reduce:transition-none",
 				isCurrent ? "opacity-100" : "cursor-pointer opacity-50",
+				draggedPx !== undefined && "transition-none",
 			)}
-			style={{ transform: `translateX(calc(${offset} * (100% + ${SLIDE_GAP})))` }}
+			style={{
+				transform: `translateX(calc(${offset} * (100% + ${SLIDE_GAP_PX}px) + ${draggedPx ?? 0}px))`,
+			}}
 		>
 			<div className="relative size-full overflow-hidden rounded-[20px] border border-landing-frame bg-landing-card">
 				{screenshot.image ? (
@@ -188,6 +223,7 @@ function Slide({ screenshot, label, offset, onSelect, onEnlarge }: SlideProps) {
 									width={2240}
 									height={1400}
 									loading="lazy"
+									draggable={false}
 									className="size-full object-cover object-top"
 								/>
 							)}
@@ -207,49 +243,116 @@ function Slide({ screenshot, label, offset, onSelect, onEnlarge }: SlideProps) {
 }
 
 /**
- * A screenshot over the page at the size of the window, for reading. Escape,
- * the close button or a click outside the picture closes it.
+ * A screenshot over the page at the size of the window, for reading, with its
+ * caption under it. The arrows beside it, or the arrow keys, go round to the
+ * screenshots either side. Escape, the close button or a click outside the
+ * picture closes it.
  */
 function EnlargedScreenshot({
-	screenshot,
-	image,
+	current,
+	onPrevious,
+	onNext,
 	onClose,
 }: {
-	screenshot: Screenshot;
-	image: string;
+	/** Which of the screenshots is enlarged. */
+	current: number;
+	onPrevious: () => void;
+	onNext: () => void;
 	onClose: () => void;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	useEffect(() => {
 		dialog.current?.showModal();
 	}, []);
+	const screenshot = screenshots[current] ?? screenshots[0];
 	return (
-		// biome-ignore lint/a11y/useKeyWithClickEvents: the click is on the backdrop; from the keyboard, Escape and the close button do the same.
 		<dialog
 			ref={dialog}
-			aria-label={screenshot.title}
+			aria-label={`${current + 1} of ${screenshots.length}: ${screenshot.title}`}
 			onClose={onClose}
-			// A click on the backdrop lands on the dialog itself; one on the picture doesn't.
+			onKeyDown={(event) => {
+				if (event.key === "ArrowLeft") onPrevious();
+				if (event.key === "ArrowRight") onNext();
+			}}
+			// A click on the backdrop lands on the dialog itself; one on the picture or its caption doesn't.
 			onClick={(event) => {
 				if (event.target === event.currentTarget) event.currentTarget.close();
 			}}
 			className="m-auto max-h-none max-w-none overflow-visible bg-transparent p-0 backdrop:bg-landing-page/88 backdrop:backdrop-blur-sm"
 		>
-			<img
-				src={captureFor(image, visitorOs())}
-				alt={`${screenshot.title}: ${screenshot.description}`}
-				width={2240}
-				height={1400}
-				className="block h-auto max-h-[92vh] w-auto max-w-[96vw] rounded-xl"
-			/>
+			<figure className="m-0 flex flex-col items-center gap-4">
+				{screenshot.image ? (
+					<img
+						src={captureFor(screenshot.image, visitorOs())}
+						alt={`${screenshot.title}: ${screenshot.description}`}
+						width={2240}
+						height={1400}
+						className="block h-auto max-h-[calc(92vh-5.5rem)] w-auto max-w-[min(96vw,calc(100vw-9rem))] rounded-xl"
+					/>
+				) : (
+					<span className="grid aspect-16/10 w-[min(80vw,1040px)] place-items-center rounded-xl border border-landing-frame bg-landing-card p-6 text-center text-sm text-landing-faint">
+						Screenshot: {screenshot.shows}
+					</span>
+				)}
+				<figcaption className="px-4 text-center">
+					<Captions current={current} />
+				</figcaption>
+			</figure>
+			<button
+				type="button"
+				aria-label="Previous screenshot"
+				onClick={onPrevious}
+				className={cn(lightboxButton, "fixed top-1/2 left-4 -translate-y-1/2")}
+			>
+				<ChevronLeftIcon className="size-5" />
+			</button>
+			<button
+				type="button"
+				aria-label="Next screenshot"
+				onClick={onNext}
+				className={cn(lightboxButton, "fixed top-1/2 right-4 -translate-y-1/2")}
+			>
+				<ChevronRightIcon className="size-5" />
+			</button>
 			<button
 				type="button"
 				aria-label="Close"
 				onClick={() => dialog.current?.close()}
-				className="fixed top-4 right-4 grid size-10 cursor-pointer place-items-center rounded-full border border-white/14 bg-landing-page/72 text-landing-text outline-none backdrop-blur-sm hover:bg-landing-button focus-visible:ring-2 focus-visible:ring-landing-accent"
+				className={cn(lightboxButton, "fixed top-4 right-4")}
 			>
 				<XIcon className="size-5" />
 			</button>
 		</dialog>
+	);
+}
+
+/** A round button over the enlarged screenshot: close, previous and next. */
+const lightboxButton =
+	"grid size-10 cursor-pointer place-items-center rounded-full border border-white/14 bg-landing-page/72 text-landing-text outline-none backdrop-blur-sm hover:bg-landing-button focus-visible:ring-2 focus-visible:ring-landing-accent";
+
+/**
+ * The screenshots' titles and descriptions, the current one shown. Every
+ * caption sits in the same cell, so the cell is always as tall as the
+ * longest: a two-line description never moves what is around it.
+ */
+function Captions({ current }: { current: number }) {
+	return (
+		<div className="grid max-w-[560px]">
+			{screenshots.map((screenshot, index) => (
+				<div
+					key={screenshot.title}
+					aria-hidden={index !== current}
+					className={cn(
+						"col-start-1 row-start-1 flex flex-col items-center gap-1.5",
+						index === current ? "visible" : "invisible",
+					)}
+				>
+					<span className="text-lg font-semibold text-landing-text">{screenshot.title}</span>
+					<span className="text-[15.5px]/[1.5] text-pretty text-landing-muted">
+						{screenshot.description}
+					</span>
+				</div>
+			))}
+		</div>
 	);
 }
