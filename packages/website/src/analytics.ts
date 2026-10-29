@@ -29,7 +29,13 @@ export function startAnalytics() {
 export type CallToAction = "self_host" | "waitlist" | "docs" | "github" | "discord";
 
 /** Where on the site a call to action sits. */
-export type CallToActionPlacement = "header" | "hero" | "plans" | "footer" | "docs_header";
+export type CallToActionPlacement =
+	| "header"
+	| "hero"
+	| "plans"
+	| "footer"
+	| "docs_header"
+	| "not_found_header";
 
 /** Counts a click on a call to action, when analytics is running. */
 export function trackCallToActionClick(cta: CallToAction, placement: CallToActionPlacement) {

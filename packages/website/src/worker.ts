@@ -5,6 +5,7 @@
  */
 
 import { MARKDOWN_CONTENT_TYPE, markdownPath, markdownResponse } from "./markdown.ts";
+import { NOT_FOUND_PAGE_PATH } from "./not-found.ts";
 import { DISCORD_PATH } from "./site-links.ts";
 import { fileUrl } from "./site-meta.ts";
 
@@ -33,6 +34,7 @@ export default {
 		}
 		// Files such as images, scripts and `llms.txt` are served as they are.
 		if (!isPagePath(pathname)) return env.ASSETS.fetch(request);
+		if (pathname === NOT_FOUND_PAGE_PATH) return notFoundPage(request, env);
 		if (!prefersMarkdown(request.headers.get("Accept") ?? "")) {
 			return varyOnAccept(await env.ASSETS.fetch(request));
 		}
@@ -53,6 +55,19 @@ export default {
 		return varyOnAccept(page);
 	},
 };
+
+/**
+ * The address `404.html` is served at, which has no page of its own: a 404, with
+ * the not-found page for a browser and the Markdown 404 to a request that asks for Markdown.
+ */
+async function notFoundPage(request: Request, env: Env) {
+	if (prefersMarkdown(request.headers.get("Accept") ?? "")) {
+		return varyOnAccept(markdownResponse(NOT_FOUND_MARKDOWN, 404));
+	}
+	// Without the request's conditional headers, so the page comes back whole rather than as a 304.
+	const page = await env.ASSETS.fetch(new Request(request.url, { method: request.method }));
+	return varyOnAccept(new Response(page.body, { status: 404, headers: page.headers }));
+}
 
 /** Pages have no file extension in their last segment: `/docs/quickstart`, not `/og.png`. */
 function isPagePath(pathname: string) {

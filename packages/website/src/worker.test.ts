@@ -9,6 +9,7 @@ const files: Record<string, { body: string; type: string }> = {
 	"/docs/quickstart": { body: "<h1>Quickstart</h1>", type: "text/html" },
 	"/docs/quickstart.md": { body: "# Quickstart", type: "text/markdown" },
 	"/changelog": { body: "<h1>Changelog</h1>", type: "text/html" },
+	"/404": { body: "<h1>Page not found</h1>", type: "text/html" },
 	"/og.png": { body: "PNG", type: "image/png" },
 };
 
@@ -123,6 +124,39 @@ describe("a missing page", () => {
 		expect(response.headers.get("Cache-Control")).toBe("no-cache");
 		expect(varyTokens(response)).toEqual(new Set(["accept"]));
 		expect(await response.text()).toBe("<h1>Not found</h1>");
+	});
+});
+
+describe("the not-found page's own address", () => {
+	it("is the not-found page with a 404, for a browser", async () => {
+		const { response, body } = await get("/404", BROWSER_ACCEPT);
+		expect(response.status).toBe(404);
+		expect(response.headers.get("Content-Type")).toBe("text/html");
+		expect(varyTokens(response)).toEqual(new Set(["accept"]));
+		expect(body).toBe("<h1>Page not found</h1>");
+	});
+
+	it("is the Markdown 404, for a request that asks for Markdown", async () => {
+		const { response, body } = await get("/404", "text/markdown");
+		expect(response.status).toBe(404);
+		expect(response.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
+		expect(body).toContain("/llms.txt");
+	});
+
+	it("is the whole page, even to a request that has a cached copy", async () => {
+		const assets: Env["ASSETS"] = {
+			async fetch(request) {
+				if (request.headers.has("If-None-Match")) return new Response(null, { status: 304 });
+				return env.ASSETS.fetch(request);
+			},
+		};
+		const request = new Request(`${SITE}/404`, {
+			headers: { Accept: BROWSER_ACCEPT, "If-None-Match": '"not-found"' },
+		});
+		const response = await worker.fetch(request, { ASSETS: assets });
+
+		expect(response.status).toBe(404);
+		expect(await response.text()).toBe("<h1>Page not found</h1>");
 	});
 });
 

@@ -9,8 +9,11 @@
 		"directory": "./dist/client",
 		"binding": "ASSETS",
 		// Only pages and redirects need the Worker. A path with a dot is a file, such as a script, an
-		// image or llms.txt, and is served straight from the assets; a missing one gets a plain 404.
-		"run_worker_first": ["/*", "!/*.*"]
+		// image or llms.txt, and is served straight from the assets.
+		"run_worker_first": ["/*", "!/*.*"],
+		// An address with no file gets the prerendered 404.html, with a 404 status, whether it was
+		// asked for directly or through the Worker's `ASSETS` binding.
+		"not_found_handling": "404-page"
 	},
 	// `wrangler preview` (preview builds) requires this block; the settings above apply to previews too.
 	"previews": {}

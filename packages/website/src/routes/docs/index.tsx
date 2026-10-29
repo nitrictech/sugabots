@@ -11,7 +11,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { buttonVariants } from "@/components/ui/button";
 import { type DocGroup, docGroups } from "@/docs/nav";
 import { docPages, findDocPage } from "@/docs/pages";
-import { pageTop, siteColumn } from "@/layout";
+import { pageHeading, pageIntro, pageTop, siteColumn } from "@/layout";
 import { docsMeta } from "@/site-meta";
 
 export const Route = createFileRoute("/docs/")({
@@ -80,16 +80,10 @@ function DocsHome() {
 				<section className={cn(pageTop, "pb-14")}>
 					<Reveal delay={0.1} className="flex flex-col gap-5">
 						<BotCrowd />
-						<motion.h1
-							variants={riseIn}
-							className="text-5xl leading-13 font-black tracking-tight text-balance sm:text-6xl sm:leading-16"
-						>
+						<motion.h1 variants={riseIn} className={pageHeading}>
 							<span className={accentText({ tone: "emerald" })}>Learn</span> Sugabots.
 						</motion.h1>
-						<motion.p
-							variants={riseIn}
-							className="max-w-2xl text-muted-foreground text-pretty sm:text-lg"
-						>
+						<motion.p variants={riseIn} className={pageIntro}>
 							Everything you need to set up a workspace, fill it with <Emphasis>people</Emphasis>{" "}
 							and <Emphasis>agents</Emphasis>, and keep it running.
 						</motion.p>
