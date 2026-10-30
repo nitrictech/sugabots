@@ -169,6 +169,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				sandboxTools.forTurn({
 					pod: { workspaceId, podId: shared.id },
 					usesSandbox: true,
+					naturalBrowsing: false,
 					turnId: "turn-1",
 					threadId,
 					agentId,

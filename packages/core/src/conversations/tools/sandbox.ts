@@ -119,8 +119,9 @@ export const make = Effect.gen(function* () {
 			: {},
 	});
 	return Service.of({
-		forTurn: ({ pod, turnId, threadId, agentId, color, acceptsImages, usesSandbox, attach }) =>
+		forTurn: (turn) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
+				const { pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach } = turn;
 				const place = placeOf({ threadId, agentId });
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
 				if (!provider) {
@@ -132,7 +133,7 @@ export const make = Effect.gen(function* () {
 							acceptsImages,
 							attach,
 							openSandbox: NEVER_OPENED,
-							browser: browserSession(NEVER_OPENED, place, { threadId, agentId, color }),
+							browser: browserSession(NEVER_OPENED, place, turn),
 							run: NEVER_RUN,
 							blocked: [],
 							allowlisted: true,
@@ -172,7 +173,7 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
-				const browser = browserSession(openSandbox, place, { threadId, agentId, color });
+				const browser = browserSession(openSandbox, place, turn);
 				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
 				const run = <A, E>(effect: Effect.Effect<A, E>) =>
 					runPromiseExit(effect).then((exit) => {
@@ -249,6 +250,8 @@ export interface Turn {
 	readonly agentId: string;
 	/** The agent's colour, which its desktop is drawn in. */
 	readonly color: AgentColor;
+	/** Whether the agent browses so people watching its desktop can follow. */
+	readonly naturalBrowsing: boolean;
 	/** Whether the agent's model takes images, which results then may carry. */
 	readonly acceptsImages: boolean;
 	/**

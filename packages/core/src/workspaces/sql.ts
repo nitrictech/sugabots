@@ -371,6 +371,8 @@ export const agent = pgTable(
 		// Whether it may use its pod's sandbox. Off until an admin turns it on:
 		// running commands is a bigger step than the other built-in tools.
 		usesSandbox: boolean("uses_sandbox").notNull().default(false),
+		// Whether it browses so people watching can follow, which is slower.
+		naturalBrowsing: boolean("natural_browsing").notNull().default(false),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),

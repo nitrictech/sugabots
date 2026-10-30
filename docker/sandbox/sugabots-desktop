@@ -8,7 +8,6 @@
 #                                                  the desktop for `name`, without a browser
 #   sugabots-desktop session name profile output [--accent #RRGGBB] [--folder dir]
 #                                                  the desktop for `name`, with its browser
-#   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
 # `desktop` is what Sugabots runs when a person opens an agent's desktop, and
@@ -30,12 +29,9 @@
 # folder it runs in.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
-# people watching see what the agent does, in Chromium's own sandbox where the
-# sandbox it runs in allows user namespaces, with its profile under `profile`
-# and its downloads and screenshots in `output`. It lives until the desktop
-# stops, across the MCP sessions that drive it, and the dock's Browser starts
-# it if the agent hasn't. Programs that stopped, as they do when a paused
-# sandbox comes back, start again on the same display.
+# people watching see what the agent does, with its profile under `profile`
+# and its downloads and screenshots in `output`. Programs that stopped, as
+# they do when a paused sandbox comes back, start again on the same display.
 #
 # Display N is served to VNC viewers over a WebSocket on port 5900+N, which
 # `watch` reports too. It takes two passwords, made when the desktop starts:
@@ -109,6 +105,12 @@ desktop() {
 	# The session starts the window manager, settings daemon, dock and
 	# wallpaper, and starts any of them again that stops.
 	xfce4-session >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# Agents drive the browser through Playwright, which never moves the X
+	# pointer, so it would sit wherever it was left, drawn into the picture
+	# viewers see. Hidden until a person's mouse moves it, and again once
+	# it's been still for a few seconds.
+	unclutter --start-hidden >>"$log" 2>&1 &
 	echo $! >>"$pids"
 }
 
@@ -364,15 +366,6 @@ session() {
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
 }
 
-viewer() {
-	local file="$state/sessions/${1:?name}"
-	[ -f "$file" ] || exit 3
-	local n
-	n="$(cat "$file")"
-	running "$n" desktop || exit 3
-	echo $((5900 + n))
-}
-
 # Thunar on display N, at its thread's folder, with the places beside it: This
 # Thread, Downloads, This Agent, Workspace, and its own File System. They are
 # bookmarks, which GTK reads from the home, and the agent's home is shared by
@@ -439,10 +432,9 @@ start)
 stop) stop "${2:-}" ;;
 desktop) desktop_only "${@:2}" ;;
 session) session "${@:2}" ;;
-viewer) viewer "${2:-}" ;;
 open) open "${2:-}" ;;
 *)
-	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] [--folder dir] | session name profile output [--accent #RRGGBB] [--folder dir] | viewer name | open browser|terminal|files" >&2
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] [--folder dir] | session name profile output [--accent #RRGGBB] [--folder dir] | open browser|terminal|files" >&2
 	exit 2
 	;;
 esac

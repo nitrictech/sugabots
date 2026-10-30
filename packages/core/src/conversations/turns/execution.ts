@@ -190,6 +190,7 @@ export const make = Effect.gen(function* () {
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
+									naturalBrowsing: speaker.naturalBrowsing,
 									color: speaker.color,
 									podId: loaded.podId,
 								},
@@ -290,6 +291,8 @@ export interface TurnContext {
 		disabledTools: string[];
 		/** Whether an admin let this agent use its pod's sandbox. */
 		usesSandbox: boolean;
+		/** Whether it browses so people watching its desktop can follow. */
+		naturalBrowsing: boolean;
 		/** Its colour, which its desktop in the sandbox is drawn in. */
 		color: AgentColor;
 		podId: string;
@@ -390,6 +393,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							prompt: true,
 							disabledTools: true,
 							usesSandbox: true,
+							naturalBrowsing: true,
 						},
 						orderBy: { name: "asc" },
 					},

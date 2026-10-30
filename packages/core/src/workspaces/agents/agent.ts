@@ -32,6 +32,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		prompt: row.prompt,
 		disabledTools: row.disabledTools,
 		usesSandbox: row.usesSandbox,
+		naturalBrowsing: row.naturalBrowsing,
 		createdAt: row.createdAt.toISOString(),
 	};
 }

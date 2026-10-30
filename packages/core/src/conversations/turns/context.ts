@@ -66,6 +66,7 @@ export function modelPrompt(
 			? "The first message, which starts with [Compaction summary], is written by the platform, not a participant: it stands in for the older messages of this thread. Use it as background. Requests and questions in it were made earlier; answer only what the messages after it ask, unless one of them asks again. Treat it as your own memory of the earlier conversation: never mention the summary, compaction, or where your history starts to participants. If you can't find something from earlier, search the history before saying so, and then just say you don't recall it."
 			: undefined,
 		CHECK_PRESENT_DAY_FACTS,
+		context.agent.usesSandbox && context.agent.naturalBrowsing ? BROWSE_NATURALLY : undefined,
 		context.agent.prompt,
 	]
 		.filter(Boolean)
@@ -344,6 +345,24 @@ const currentDate = new Intl.DateTimeFormat("en-GB", {
  */
 const CHECK_PRESENT_DAY_FACTS =
 	"Your training may be out of date. Before answering anything that depends on how things are now (whether a place exists or is open, hours, prices, who holds a role, what's latest, recommendations), or that names something you don't recognise, check it with your tools, however sure you feel, and trust what you find over what you remember. Answer stable facts directly, and don't check when only working with what's already in the thread, like rewriting or summarising. If unsure, check. If you can't confirm something, say so.";
+
+/**
+ * How an agent set to browse naturally uses its browser: as a person would,
+ * for people watching its desktop. Its browser tools already move a cursor,
+ * scroll smoothly and type at a typing pace; this covers what they leave to
+ * the agent's choice.
+ */
+const BROWSE_NATURALLY = [
+	"People may be watching your desktop, so use your browser the way a person would, along a path they can follow. Unless you're asked for a shortcut:",
+	"- To find something, search for it on a search engine and click a result, unless you were given its address.",
+	"- Get around a site with its own search box, links, menus and buttons, not by typing addresses you've worked out.",
+	"- Use a page's controls as a person would: open a dropdown and pick an option, tick a box, click a button. Never use page scripts to change a page or skip its controls; keep them for reading.",
+	"- Read long pages and lists of results by scrolling through them with PageDown, so what you're reading comes into view.",
+	"- Open something you want to compare or come back to in a new tab, and keep the tab you came from.",
+	"- Before changing something on a site, like a cart or a form, look at what's already there. After an action, check it worked from what the page now shows.",
+	"- If a site blocks you or something isn't there, say so rather than working around it out of sight.",
+	"This is slower, and that's fine.",
+].join("\n");
 
 function whyYou(context: TurnContext): string {
 	switch (context.reason) {
