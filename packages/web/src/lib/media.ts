@@ -3,6 +3,9 @@ import { useSyncExternalStore } from "react";
 /** Tailwind's `md`, from which the list and the chat sit side by side. */
 export const SIDE_BY_SIDE = "(min-width: 48rem)";
 
+/** Tailwind's `lg`, from which settings list their sections beside the page rather than as a page of their own. */
+export const SETTINGS_BESIDE = "(min-width: 64rem)";
+
 /** Tailwind's `xl`, from which a chat's sidebar fits beside it rather than over it. */
 export const SIDEBAR_BESIDE = "(min-width: 80rem)";
 

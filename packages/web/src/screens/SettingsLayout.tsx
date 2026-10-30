@@ -47,6 +47,7 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
 	type BackTarget,
 	CompactBackBar,
+	SETTINGS_CARD,
 	SettingsGroup,
 	SettingsRow,
 	SettingsValue,
@@ -480,8 +481,9 @@ function NewPodButton() {
 }
 
 /**
- * Settings on a phone or tablet: one list, as a phone's own settings are, with
- * you at the top and every section a row that opens it full screen.
+ * Settings on a tablet: one list, as a phone's own settings are, with you at
+ * the top and every section a row that opens it full screen. The sidebar
+ * beside it is the way out, so it has no Done.
  */
 function CompactSettingsList() {
 	return (
@@ -489,18 +491,9 @@ function CompactSettingsList() {
 			aria-label="Settings sections"
 			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-[620px] *:shrink-0 md:px-8 md:pt-9 lg:hidden"
 		>
-			<div className="flex items-center">
-				<h1 className="m-0 flex-1 font-semibold text-[28px] text-foreground tracking-[-0.025em]">
-					Settings
-				</h1>
-				<Link
-					from="/$workspace"
-					to="./agents"
-					className="focus-ring rounded-md font-semibold text-[15px] text-link"
-				>
-					Done
-				</Link>
-			</div>
+			<h1 className="m-0 font-semibold text-[28px] text-foreground tracking-[-0.025em]">
+				Settings
+			</h1>
 			<SettingsListGroups />
 		</nav>
 	);
@@ -515,47 +508,36 @@ function CompactSettingsList() {
 export function SettingsListGroups({
 	linkState,
 	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
-	you,
 }: {
 	linkState?: (state: HistoryState) => HistoryState;
 	podLink?: (pod: Pod) => ReactElement;
-	you?: ReactNode;
 }) {
 	const { sections, counts } = useWorkspaceSections();
 	const { shared, personal } = useListedPods();
-	const session = useSession();
+	const { user } = useSession();
 	return (
 		<>
-			{you}
-			{!you && session.user && (
-				<SettingsGroup>
-					<SettingsRow
-						icon={<PersonAvatar person={session.user} size={36} />}
-						label={session.user.name}
-						sub={session.user.email}
-						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "profile" }}
-								state={linkState}
-							/>
-						}
-					/>
-					<SettingsRow
-						label="Notifications"
-						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "notifications" }}
-								state={linkState}
-							/>
-						}
-					/>
-				</SettingsGroup>
+			{/* You first, on a card that opens your profile, which leads on to your Notifications. */}
+			{user && (
+				<Link
+					from="/$workspace"
+					to="./settings/$section"
+					params={{ section: "profile" }}
+					state={linkState}
+					className={cn(
+						SETTINGS_CARD,
+						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
+					)}
+				>
+					<PersonAvatar person={user} size={64} />
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<span className="truncate font-semibold text-[20px] text-foreground">{user.name}</span>
+						<span className="truncate text-[14px] text-subtle-foreground">
+							Profile and notifications
+						</span>
+					</span>
+					<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
+				</Link>
 			)}
 			<SettingsGroup label="Workspace" headingLevel={2}>
 				{sections.map((section) => (

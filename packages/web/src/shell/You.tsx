@@ -1,20 +1,18 @@
 import type { Pod } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { Link } from "@tanstack/react-router";
-import { cn } from "cn";
-import { ArrowUpRight, ChevronRight, Plus } from "lucide-react";
+import { ArrowUpRight, Plus } from "lucide-react";
 import { podSettingsPageLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
-import { useSession, useSignOut } from "@/lib/session.ts";
+import { useSignOut } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace, useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { podSettingsPagesOf } from "@/lib/workspace-settings.ts";
 import { SettingsListGroups, usePodCounts } from "@/screens/SettingsLayout.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
 import { PodInitial } from "@/shell/SidebarPod.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
 import { BACK_BUTTON, BackChevron, usePhoneBack } from "@/ui/back-button.tsx";
-import { SETTINGS_CARD, SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 
 /**
  * Settings, as a phone's last tab, You: you first, on a card that opens your
@@ -24,7 +22,6 @@ import { SETTINGS_CARD, SettingsGroup, SettingsRow, SettingsValue } from "@/ui/s
  */
 export function You() {
 	const signOut = useSignOut();
-	const { user } = useSession();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
 	const settingsBack = useBackToHere("Settings");
@@ -43,31 +40,6 @@ export function You() {
 					podLink={(pod) => (
 						<Link from="/$workspace" to="./you/pods/$pod" params={{ pod: pod.slug }} />
 					)}
-					you={
-						user && (
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "profile" }}
-								state={settingsBack}
-								className={cn(
-									SETTINGS_CARD,
-									"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
-								)}
-							>
-								<PersonAvatar person={user} size={64} />
-								<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-									<span className="truncate font-semibold text-[20px] text-foreground">
-										{user.name}
-									</span>
-									<span className="truncate text-[14px] text-subtle-foreground">
-										Profile and notifications
-									</span>
-								</span>
-								<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
-							</Link>
-						)
-					}
 				/>
 				<SettingsGroup label={others.length > 0 ? "Other workspaces" : undefined} headingLevel={2}>
 					{others.map((other) => (

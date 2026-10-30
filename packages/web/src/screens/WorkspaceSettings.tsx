@@ -9,7 +9,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
@@ -274,7 +274,7 @@ function ProfileSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
 	const backToProfile = useBackToHere("You");
 	const user = session.user;
 	if (!user) return null;
@@ -298,8 +298,8 @@ function ProfileSettings() {
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
 			</SettingsGroup>
-			{/* A phone opens your settings from here alone, without the list beside them that has it. */}
-			{phone && (
+			{/* Below a laptop's width your profile is opened from a card, with no list beside it that has Notifications. */}
+			{openedFromCard && (
 				<SettingsGroup>
 					<SettingsRow
 						label="Notifications"

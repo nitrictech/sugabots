@@ -118,7 +118,11 @@ export const TabletList = meta.story({
 			{ name: "Settings sections" },
 			{ timeout: 10_000 },
 		);
-		await expect(within(list).getByRole("link", { name: "Done" })).toBeInTheDocument();
+		// The sidebar beside it is the way out, so there is no Done.
+		await expect(within(list).queryByRole("link", { name: "Done" })).toBeNull();
+		await expect(
+			within(list).getByRole("link", { name: /Profile and notifications/ }),
+		).toHaveAttribute("href", expect.stringMatching(/\/settings\/profile$/));
 		await expect(within(list).getByRole("link", { name: /General/ })).toBeInTheDocument();
 	},
 });

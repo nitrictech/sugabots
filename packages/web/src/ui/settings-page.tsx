@@ -208,13 +208,13 @@ export function SettingsGroup({
 				</div>
 			)}
 			{description && (
-				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-md:text-[13px]">
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-[13px]">
 					{description}
 				</p>
 			)}
 			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-md:text-[13px]">
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-[13px]">
 					{note}
 				</div>
 			)}
@@ -270,9 +270,9 @@ export function SettingsRow({
 				<>
 					{icon}
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-						<span className="truncate text-[13px] text-foreground max-md:text-[16px]">{label}</span>
+						<span className="truncate text-[13px] text-foreground max-lg:text-[16px]">{label}</span>
 						{sub && (
-							<span className="text-pretty text-subtle-foreground text-xs max-md:text-[13px]">
+							<span className="text-pretty text-subtle-foreground text-xs max-lg:text-[13px]">
 								{sub}
 							</span>
 						)}
@@ -466,7 +466,7 @@ export function SettingsFieldLabel({
 	children: ReactNode;
 }) {
 	const className =
-		"min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground max-md:text-[16px]";
+		"min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground max-lg:text-[16px]";
 	return htmlFor ? (
 		<label htmlFor={htmlFor} className={className}>
 			{children}
@@ -479,7 +479,7 @@ export function SettingsFieldLabel({
 /** The value at a row's end, in the muted colour. */
 export function SettingsValue({ children }: { children: ReactNode }) {
 	return (
-		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground max-md:text-[15px]">
+		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground max-lg:text-[15px]">
 			{children}
 		</span>
 	);
@@ -629,8 +629,8 @@ export function SettingsDanger({
 			)}
 		>
 			<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5 leading-[1.4]">
-				<span className="text-[13px] text-foreground max-md:text-[16px]">{label}</span>
-				<span className="text-pretty text-subtle-foreground text-xs max-md:text-[13px]">
+				<span className="text-[13px] text-foreground max-lg:text-[16px]">{label}</span>
+				<span className="text-pretty text-subtle-foreground text-xs max-lg:text-[13px]">
 					{disabledReason ?? description}
 				</span>
 			</div>
