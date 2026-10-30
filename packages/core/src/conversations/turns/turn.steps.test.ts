@@ -87,6 +87,7 @@ const prepared: PreparedTurn = {
 			id: run.request.threadId,
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
+			type: "conversation",
 			parentThreadId: null,
 		},
 		agent: {

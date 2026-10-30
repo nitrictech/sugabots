@@ -277,16 +277,19 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
 		{ ...recording, mutating: true },
 	);
-	tools[MARK_DONE_TOOL] = recorded(
-		MARK_DONE_TOOL,
-		markDoneTool({
-			bot: threadsBot,
-			threadId: prepared.context.thread.id,
-			threads: deps.threads,
-			run: deps.run,
-		}),
-		{ ...recording, mutating: true },
-	);
+	// Only a thread is ever done; a channel, a pod's chat or a routine's thread is not.
+	if (prepared.context.thread.type === "conversation") {
+		tools[MARK_DONE_TOOL] = recorded(
+			MARK_DONE_TOOL,
+			markDoneTool({
+				bot: threadsBot,
+				threadId: prepared.context.thread.id,
+				threads: deps.threads,
+				run: deps.run,
+			}),
+			{ ...recording, mutating: true },
+		);
+	}
 	tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
 		SAVE_INSTRUCTIONS_TOOL,
 		saveInstructionsTool({

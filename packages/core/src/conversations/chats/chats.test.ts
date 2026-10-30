@@ -444,7 +444,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(prepared.context.askedBy).toBe(userId);
 		});
 
-		it("marks the thread it is in done for the person who asked, but never a pod's chat", async () => {
+		it("marks the thread it is in done for the person who asked, but never a channel or a pod's chat", async () => {
 			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 			const { conversation: opened } = await chats.startThread({
 				conversationId: podChat.id,
@@ -463,9 +463,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await botThreads().markDone(bot, opened.id);
 
 			expect(await doneAt(opened.id)).toBeInstanceOf(Date);
-			await expect(botThreads().markDone(bot, podChat.id)).rejects.toMatchObject({
-				_tag: "NotAThread",
+			const channel = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
 			});
+			for (const notAThread of [podChat.id, channel.id]) {
+				await expect(botThreads().markDone(bot, notAThread)).rejects.toMatchObject({
+					_tag: "NotAThread",
+				});
+			}
 			await expect(
 				botThreads().markDone({ ...bot, askedBy: null }, opened.id),
 			).rejects.toMatchObject({ _tag: "NobodyAsked" });
