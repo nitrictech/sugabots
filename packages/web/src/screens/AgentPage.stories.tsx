@@ -233,6 +233,7 @@ export const PodChatStartsAThread = meta.story({
 							},
 							replies: 3,
 							lastReplyAt: "2026-09-18T06:20:00.000Z",
+							working: false,
 							createdAt: "2026-09-18T06:14:00.000Z",
 						},
 					],
@@ -267,6 +268,47 @@ export const PodChatStartsAThread = meta.story({
 		await expect(
 			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
 		).toBeInTheDocument();
+	},
+});
+
+const botGreeting: Message = {
+	...said("24", "bot", "Hey! What would you like to talk about?", "2026-09-18T06:14:00.000Z"),
+	threadId: storyPodChatFor(revenue).id,
+};
+
+/**
+ * A thread opened from a bot's own message, which asks the bot nothing: its
+ * line shows the bot's face once, and no dots while nobody has written in it.
+ */
+export const PodChatThreadFromABotsMessage = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...appHandlers({
+				podChatMessages: { [revenue.id]: [...podChat, botGreeting] },
+				podChatThreads: {
+					[revenue.id]: [
+						{
+							kind: "thread",
+							id: "0199a3a0-0000-7000-8000-00000000c992",
+							threadId: "0199a3a0-0000-7000-8000-00000000c992",
+							originMessageId: botGreeting.id,
+							title: "Hey!",
+							agent: botGreeting.author.kind === "agent" ? botGreeting.author : null,
+							replies: 0,
+							lastReplyAt: null,
+							working: false,
+							createdAt: "2026-09-18T06:15:00.000Z",
+						},
+					],
+				},
+			}),
+		);
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
+		const thread = await within(log).findByRole("button", { name: /^Open thread: Hey!/ });
+		await expect(thread).not.toHaveAccessibleName(/Working/);
 	},
 });
 

@@ -996,7 +996,7 @@ function PausedLine({ at }: { at: string }) {
  * A thread started from a message in the pod's chat, hanging off that
  * message, drawn as a collaboration is: the faces of who started it and its
  * bot, how many replies it has, its name, and when it last moved; or, before
- * any reply, its name with dots while its bot has yet to answer.
+ * any reply, its name. Dots follow while its bot is answering.
  */
 function ThreadLine({
 	item,
@@ -1007,8 +1007,11 @@ function ThreadLine({
 	startedBy: Message["author"] | undefined;
 	onOpen: () => void;
 }) {
+	// A thread opened from its own bot's message would otherwise show that bot twice.
 	const faces = [
-		...(startedBy && startedBy.kind !== "routine_trigger" ? [startedBy] : []),
+		...(startedBy && startedBy.kind !== "routine_trigger" && startedBy.id !== item.agent?.id
+			? [startedBy]
+			: []),
 		...(item.agent ? [item.agent] : []),
 	];
 	const replied = item.replies > 0;
@@ -1019,7 +1022,7 @@ function ThreadLine({
 			detail={replied ? item.title : undefined}
 			description={`Open thread: ${item.title}`}
 			lastActivityAt={item.lastReplyAt ?? undefined}
-			status={!replied && item.agent ? "working" : undefined}
+			status={item.working ? "working" : undefined}
 			onOpen={onOpen}
 		/>
 	);
