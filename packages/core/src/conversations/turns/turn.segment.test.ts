@@ -6,7 +6,15 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { agent, message, toolCall, turn, workspaceMember } from "../../database/schema.ts";
+import {
+	agent,
+	message,
+	pod,
+	toolCall,
+	turn,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
@@ -362,7 +370,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			return row;
 		};
 
-		const savingTheDraft = () =>
+		const savingInstructions = () =>
 			Models.fromStream((input) =>
 				Effect.sync(() =>
 					streamed(
@@ -380,14 +388,25 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				),
 			);
 
-		it("saves the instructions the person it answers agreed to", async () => {
-			await segmentWith(savingTheDraft());
+		it("saves its instructions as the person it answers, and links to them", async () => {
+			await segmentWith(savingInstructions());
 
 			expect(await storedAgent()).toEqual({
 				prompt: "You triage support tickets.",
 				description: "Sorts support tickets by urgency.",
 			});
-			expect(await storedReply()).toMatchObject({ content: 'Saved: {"saved":true}.' });
+			const [place] = await onDatabase((db) =>
+				db
+					.select({ workspace: workspace.slug, pod: pod.slug, handle: agent.handle })
+					.from(agent)
+					.innerJoin(pod, eq(pod.id, agent.podId))
+					.innerJoin(workspace, eq(workspace.id, agent.workspaceId))
+					.where(eq(agent.id, hostId)),
+			);
+			const settingsUrl = `http://sugabots.test/${place?.workspace}/settings/pods/${place?.pod}/agents/${place?.handle}`;
+			expect(await storedReply()).toMatchObject({
+				content: `Saved: ${JSON.stringify({ saved: true, settingsUrl })}.`,
+			});
 		});
 
 		it("refuses a person who may not edit the bot", async () => {
@@ -398,11 +417,27 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 					.where(eq(workspaceMember.workspaceId, prepared.context.thread.workspaceId)),
 			);
 
-			await segmentWith(savingTheDraft());
+			await segmentWith(savingInstructions());
 
 			expect(await storedAgent()).toMatchObject({ prompt: INTERVIEW_PROMPT });
 			expect(await storedReply()).toMatchObject({
 				content: expect.stringContaining('"refused"'),
+			});
+		});
+
+		it("saves new instructions straight away once the bot is set up", async () => {
+			await onDatabase((db) =>
+				db
+					.update(agent)
+					.set({ prompt: "You answer billing questions." })
+					.where(eq(agent.id, hostId)),
+			);
+
+			await segmentWith(savingInstructions());
+
+			expect(await storedAgent()).toEqual({
+				prompt: "You triage support tickets.",
+				description: "Sorts support tickets by urgency.",
 			});
 		});
 	});

@@ -7,55 +7,66 @@ import type { AgentAdministration } from "../../../workspaces/agents/agent-admin
 
 export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
 
-export type SaveInstructionsResult = { saved: true } | { refused: string };
+export type SaveInstructionsResult =
+	| {
+			saved: true;
+			/** The agent's settings page, where people read and change what was saved. */
+			settingsUrl: string;
+	  }
+	| { refused: string };
 
-const NOBODY_ASKED = "Only a person can agree to your instructions, so nothing was saved.";
+const NOBODY_ASKED =
+	"Your instructions are saved only in answer to a person, so nothing was saved.";
 
 const MAY_NOT_EDIT =
 	"The person you're answering may not change your settings, so nothing was saved. Someone who can edit you can save them.";
 
 /**
  * The `save_instructions` tool: an agent replaces its own instructions and
- * description, which its pod mates choose whom to ask by, with what the person
- * it is answering agreed to. It saves as that person, with their permission to
- * edit the agent, so it is offered on every turn and refused for anyone who
- * could not make the same change in settings.
+ * description, which its pod mates choose whom to ask by: when it sets itself
+ * up in its interview, or when someone asks it to change how it works. It
+ * saves as the person it is answering, with their permission to edit the
+ * agent, so it is offered on every turn and refused for anyone who could not
+ * make the same change in settings.
  */
 export function saveInstructionsTool({
 	agentId,
 	askedBy,
 	agents,
+	settingsUrl,
 	run,
 }: {
 	agentId: string;
 	/** The person whose message the turn answers, or none. */
 	askedBy: string | null;
 	agents: Pick<AgentAdministration.Interface, "update">;
+	/** The agent's settings page, which shows what it saved. */
+	settingsUrl: string;
 	run: RunEffect;
 }) {
 	return tool({
 		description:
-			"Replace your instructions and description with the ones the person you're answering agreed to. Call it only after they have seen the exact text and said it's right.",
+			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, when someone asks you to change how you work, or when their reply shows you set yourself up for the wrong kind of work: then set yourself up again for the work they meant, and do that work yourself. Not for remembering things about a person. Returns your settings page, where people read and change them.",
 		inputSchema: Schema.Struct({
 			instructions: Schema.String.check(
 				Schema.isMinLength(1),
 				Schema.isMaxLength(PROMPT_MAX_LENGTH),
 			).annotate({
-				description: "Your instructions in Markdown, exactly as agreed, addressed to yourself.",
+				description: "Your instructions in Markdown, addressed to yourself.",
 			}),
 			description: Schema.String.check(
 				Schema.isMinLength(1),
 				Schema.isMaxLength(DESCRIPTION_MAX_LENGTH),
 			).annotate({
 				description:
-					"One or two sentences, exactly as agreed, telling the other bots in your pod what to come to you for.",
+					"One or two sentences telling the other bots in your pod what to come to you for.",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ instructions, description }): Promise<SaveInstructionsResult> => {
 			if (!askedBy) return { refused: NOBODY_ASKED };
 			return run(
 				agents.update({ agentId, changes: { prompt: instructions, description } }).pipe(
-					Effect.as<SaveInstructionsResult>({ saved: true }),
+					Effect.as<SaveInstructionsResult>({ saved: true, settingsUrl }),
 					CurrentActor.provide(AuthenticatedUserId.vouchedFor(askedBy)),
 					Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>
 						Effect.succeed<SaveInstructionsResult>({ refused: MAY_NOT_EDIT }),

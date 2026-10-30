@@ -196,7 +196,9 @@ export const make = Effect.gen(function* () {
 								},
 								reason: request.reason,
 								podName: loaded.pod.name,
+								podSlug: loaded.pod.slug,
 								workspaceName: loaded.workspace.name,
+								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
 								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
 								crew: loaded.pod.agents
@@ -300,7 +302,10 @@ export interface TurnContext {
 	/** Why this agent has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
 	podName: string;
+	/** Where the pod and its workspace are in the web app's addresses. */
+	podSlug: string;
 	workspaceName: string;
+	workspaceSlug: string;
 	/** The workspace's timezone, which the schedules the agent sets up run in. */
 	workspaceTimeZone: string;
 	/**
@@ -375,9 +380,9 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			type: true,
 		},
 		with: {
-			workspace: { columns: { name: true, timeZone: true } },
+			workspace: { columns: { name: true, slug: true, timeZone: true } },
 			pod: {
-				columns: { name: true },
+				columns: { name: true, slug: true },
 				with: {
 					// Every agent placed in a pod is crew: system agents are placed in none.
 					agents: {

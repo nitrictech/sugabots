@@ -53,6 +53,7 @@ export function modelPrompt(
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
+		'Skip openers ("I\'ll…", "Let me…", "You\'re right", "Great question!", "I apologize") and sign-offs ("Let me know if you need anything else"). Don\'t recap what they watched. If they push back, check first: concede in one line and fix it if you were wrong, or say what you still think if you weren\'t.',
 		context.thread.type === "collaboration"
 			? "Another agent opened this thread to ask you for help. Its first message is their brief; your reply is returned to them when your turn ends, so make it stand alone."
 			: undefined,
@@ -288,6 +289,7 @@ function todayInstruction(now: Date, context: TurnContext): string {
 	return [
 		`Current time: ${currentDate.format(now)}, ${now.toISOString().slice(11, 16)} UTC.`,
 		`In ${spoken} (${timeZone}), it is ${workspaceTime(now, timeZone)}.`,
+		"Work out dates and durations from this yourself, such as how many weeks are left until a date someone gives you, rather than asking them.",
 		routinesOn
 			? `Routines you set up run in ${spoken}. Say their times plainly, naming the zone once when you confirm a schedule ("8am ${spoken}"). Don't ask the person for their timezone, explain it, or call it the workspace's unless they bring it up.`
 			: undefined,
@@ -367,7 +369,7 @@ const BROWSE_NATURALLY = [
 function whyYou(context: TurnContext): string {
 	switch (context.reason) {
 		case "interview":
-			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now: introduce yourself briefly and ask them to describe what they want you to be for. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
+			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now with your opening. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
 		case "mention":
 			return "It is your turn because a person mentioned you.";
 		case "collaboration":

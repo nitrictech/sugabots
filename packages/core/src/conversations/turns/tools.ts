@@ -73,6 +73,8 @@ export interface ToolDependencies {
 	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile" | "write">;
 	/** Where the agent's own instructions are saved, as the person it is answering. */
 	agents: Pick<AgentAdministration.Interface, "update">;
+	/** Where the web app is served, for links to its pages. */
+	webAppUrl: string;
 	/** The agent's own routines, read and changed for the person it is answering. */
 	routines: BotRoutines.Interface;
 	/** For a tool that watches for something else to happen. */
@@ -256,6 +258,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			agentId: prepared.context.agent.id,
 			askedBy: prepared.context.askedBy,
 			agents: deps.agents,
+			settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/agents/${prepared.context.agent.handle}`,
 			run: deps.run,
 		}),
 		{ ...recording, mutating: true },

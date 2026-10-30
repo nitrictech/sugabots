@@ -8,6 +8,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
@@ -102,7 +103,9 @@ const prepared: PreparedTurn = {
 		compaction: undefined,
 		startedFrom: undefined,
 		podName: "Release",
+		podSlug: "release",
 		workspaceName: "Suga",
+		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
 		askedBy: null,
 		crew: [],
@@ -761,6 +764,10 @@ function segmentWith(given: Given) {
 				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
 				unimplemented(Artifacts.Authoring, {}),
 				unimplemented(BotRoutines.Service, given.routines ?? {}),
+				Layer.succeed(
+					Installation.Service,
+					Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+				),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {
