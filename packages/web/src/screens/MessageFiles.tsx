@@ -5,7 +5,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 
 /**
@@ -144,19 +144,26 @@ function ImageViewer({ file, url, drawable }: { file: FilePart; url: string; dra
 		<DialogContent
 			initialFocus={picture}
 			showCloseButton={false}
-			className="inset-4 flex w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none"
+			// On a phone, the picture alone on black across the whole screen, as a phone's own photos open.
+			className="inset-4 flex w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
 		>
-			<div className="flex items-center gap-2 pl-1">
-				<DialogTitle className="min-w-0 flex-1">
-					<MiddleTruncated text={file.name} />
+			{/* On a phone, × at the left and Download at the right, the name between them. */}
+			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">
+				<DialogTitle className="min-w-0 flex-1 max-md:order-2 max-md:text-center max-md:text-[15px]">
+					<MiddleTruncated text={file.name} className="max-md:justify-center" />
 				</DialogTitle>
-				<DownloadButton file={file} url={url} variant="round" />
-				<CloseButton render={<DialogClose />} />
+				<DownloadButton
+					file={file}
+					url={url}
+					variant="round"
+					className={cn(FLOATING_ON_PHONE, "max-md:order-3")}
+				/>
+				<CloseButton render={<DialogClose />} className="max-md:order-1" />
 			</div>
 			<div
 				ref={picture}
 				tabIndex={-1}
-				className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none"
+				className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none max-md:mt-3 max-md:rounded-none max-md:bg-transparent"
 			>
 				{drawable ? (
 					<img src={url} alt={file.name} className="block max-h-full max-w-full object-contain" />

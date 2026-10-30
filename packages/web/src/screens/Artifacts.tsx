@@ -20,7 +20,7 @@ import { artifactLink, artifactsLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { Page } from "@/shell/Page.tsx";
-import { Stage, StageMark } from "@/shell/Stage.tsx";
+import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
 	DropdownMenu,
@@ -31,6 +31,7 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
+import { useCopy } from "@/ui/use-copy.ts";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
 
 type Loading = "loading" | "failed";
@@ -64,7 +65,7 @@ export function ArtifactsPage({
 					artifactId={selectedId}
 					version={version}
 					onVersionChange={(version) => void navigate(artifactLink(pod, selectedId, { version }))}
-					onClose={() => void navigate(artifactsLink(pod))}
+					onClose={(how) => void navigate({ ...artifactsLink(pod), ...how })}
 				/>
 			)}
 		</ArtifactListView>
@@ -91,7 +92,7 @@ export function ArtifactListView({
 	const pane = useRef<HTMLDivElement>(null);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
-			<Page title="Artifacts">
+			<Page title="Artifacts" place={{ kind: "pod", pod }}>
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
 					<div className="flex h-full pb-[10%]">
 						<EmptyState
@@ -137,12 +138,13 @@ export function ArtifactListView({
 				)}
 			</Page>
 			{children && (
+				// Not positioned on a phone, where this pane has no width: the artifact covers the page instead.
 				<div
 					ref={pane}
 					style={
 						width === undefined ? undefined : ({ "--pane-width": `${width}px` } as CSSProperties)
 					}
-					className="relative flex min-h-0 min-w-0 border-border border-l md:w-[clamp(360px,var(--pane-width,58%),calc(100%_-_320px))] md:shrink-0"
+					className="flex min-h-0 min-w-0 border-border md:relative md:w-[clamp(360px,var(--pane-width,58%),calc(100%_-_320px))] md:shrink-0 md:border-l"
 				>
 					<ResizeHandle
 						label="Resize the artifact"
@@ -212,7 +214,7 @@ export function ArtifactStage({
 	version: number | undefined;
 	/** `undefined` for the current version. */
 	onVersionChange: (version: number | undefined) => void;
-	onClose: () => void;
+	onClose: CloseStage;
 }) {
 	const shown = useArtifact(pod.id, artifactId, version);
 	const versions = useArtifactVersions(pod.id, artifactId);
@@ -271,12 +273,13 @@ export function ArtifactStageView({
 	versions: readonly ArtifactVersionSummary[];
 	now: Date;
 	onVersionChange: (version: number | undefined) => void;
-	onClose: () => void;
+	onClose: CloseStage;
 	/** Without it, there is no Delete. */
 	deletion?: Deletion;
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const router = useRouter();
+	const copying = useCopy("Copy link");
 	if (typeof artifact !== "object") {
 		return (
 			<Stage label="Artifact" icon={null} title="" onClose={onClose}>
@@ -293,7 +296,7 @@ export function ArtifactStageView({
 	function copyLink() {
 		if (typeof artifact !== "object") return;
 		const href = router.buildLocation(artifactLink(pod, artifact.id)).href;
-		void navigator.clipboard?.writeText(new URL(href, window.location.origin).href).catch(() => {});
+		void copying.copy(new URL(href, window.location.origin).href);
 	}
 	return (
 		<Stage
@@ -323,9 +326,10 @@ export function ArtifactStageView({
 							<Download aria-hidden />
 							Download
 						</DropdownMenuItem>
-						<DropdownMenuItem onClick={copyLink}>
-							<Link2 aria-hidden />
-							Copy link
+						{/* Left open, so it can say it copied. */}
+						<DropdownMenuItem closeOnClick={false} onClick={copyLink}>
+							{copying.copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
+							{copying.label}
 						</DropdownMenuItem>
 						{deletion && (
 							<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
@@ -378,6 +382,8 @@ function VersionPicker({
 				aria-label={`Version ${shown.number} of ${artifact.version}`}
 				className={cn(
 					"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-strong pr-2 pl-2.5 text-xs transition-colors hover:bg-row-hover",
+					// Round on glass on a phone, beside its ⋯.
+					"max-md:glass max-md:h-11 max-md:rounded-full max-md:border-0 max-md:pr-3 max-md:pl-3.5 max-md:text-sm max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong",
 					isCurrent ? "text-soft-foreground" : "text-foreground",
 				)}
 			>
@@ -456,8 +462,12 @@ function downloadArtifact(artifact: Artifact) {
 	link.href = url;
 	link.download = fileNameFor(artifact.title, extension);
 	link.click();
-	URL.revokeObjectURL(url);
+	// Safari reads the file after `click` returns, so it is let go of later, not at once.
+	setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_READ_MS);
 }
+
+/** Long enough for any browser to have read a downloaded file before it is let go of. */
+const DOWNLOAD_READ_MS = 60_000;
 
 /** `title` as a file name ending in `.extension`, without the characters file systems refuse. */
 function fileNameFor(title: string, extension: string): string {

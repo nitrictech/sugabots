@@ -108,9 +108,9 @@ export const AsAMember = meta.story({
 	},
 });
 
-/** On a phone: one list, you first, every section a row that opens it, and Done. */
-export const PhoneList = meta.story({
-	globals: PHONE,
+/** On a tablet: one list, you first, every section a row that opens it, and Done. */
+export const TabletList = meta.story({
+	globals: TABLET,
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
 		const list = await canvas.findByRole(
@@ -123,13 +123,24 @@ export const PhoneList = meta.story({
 	},
 });
 
-/** On a phone, a section opens full screen, with the way back to the list. */
+/** On a phone, settings are the You tab, which `/settings` opens. */
+export const PhoneList = meta.story({
+	globals: PHONE,
+	render: () => <StoryApp path={settings} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { level: 1, name: "You" }, { timeout: 10_000 }),
+		).toBeVisible();
+	},
+});
+
+/** On a phone, a section opens full screen, with the way back to You. */
 export const PhoneSection = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${settings}/members`} />,
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main", {}, { timeout: 10_000 });
-		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
+		await expect(await within(page).findByRole("link", { name: "You" })).toBeInTheDocument();
 		await expect(await within(page).findByRole("heading", { name: "Members" })).toBeInTheDocument();
 	},
 });

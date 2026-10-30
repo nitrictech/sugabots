@@ -84,9 +84,9 @@ describe("Approvals", () => {
 		});
 		expect(within(article).getByText(/Allowed by Mia Chen/)).toBeDefined();
 		expect(within(article).queryByRole("button", { name: /^Allow/ })).toBeNull();
-		expect(within(article).getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe(
-			"/suga/approvals",
-		);
+		expect(
+			within(article).getByRole("link", { name: "Back to Approvals" }).getAttribute("href"),
+		).toBe("/suga/approvals");
 	});
 
 	it("answers a request where it waits, and lists it under Resolved", async () => {

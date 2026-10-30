@@ -13,7 +13,7 @@ import { outcomeOf, RunStatus } from "@/screens/RoutineRun.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * A bot's routines down the left, the bot whose routine is chosen, each with
@@ -58,7 +58,10 @@ export function RoutinesPage({
 			// A link, so it says it is the page open rather than pressed.
 			aria-current={making ? "page" : undefined}
 			render={<Link {...newRoutineLink(pod, bot)} />}
-			className="aria-[current=page]:bg-chip aria-[current=page]:text-foreground"
+			className={cn(
+				"aria-[current=page]:bg-chip aria-[current=page]:text-foreground",
+				FLOATING_ON_PHONE,
+			)}
 		>
 			<Plus size={16} strokeWidth={1.75} />
 		</IconButton>
@@ -74,7 +77,7 @@ export function RoutinesPage({
 					chosen && "max-md:hidden",
 				)}
 			>
-				<PageHeader title={title} actions={newRoutine} />
+				<PageHeader title={title} place={{ kind: "pod", pod }} actions={newRoutine} />
 				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
 					{list.isError && (
 						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">

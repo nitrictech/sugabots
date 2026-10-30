@@ -23,7 +23,8 @@ import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
 import { Effect } from "effect";
-import { vi } from "vitest";
+import { onTestFinished, vi } from "vitest";
+import { SIDE_BY_SIDE } from "@/lib/media.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import type { Session } from "@/lib/session.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
@@ -631,6 +632,21 @@ export function controlledEventStream() {
 		},
 		close,
 	};
+}
+
+/**
+ * Lays the app out as a computer's screen does, list and chat side by side,
+ * for the rest of the test; without it a test sees a phone's layout.
+ */
+export function onWideScreen(): void {
+	const matchMedia = window.matchMedia;
+	vi.stubGlobal("matchMedia", (query: string) => ({
+		...matchMedia(query),
+		matches: query === SIDE_BY_SIDE,
+	}));
+	onTestFinished(() => {
+		vi.unstubAllGlobals();
+	});
 }
 
 export function mount(

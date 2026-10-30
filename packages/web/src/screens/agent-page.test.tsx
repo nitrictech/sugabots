@@ -11,6 +11,7 @@ import {
 	linear,
 	MODELS,
 	mount,
+	onWideScreen,
 	pendingAnswer,
 	pods,
 	serveConnections,
@@ -223,6 +224,7 @@ describe("a viewer", () => {
 
 describe("an admin", () => {
 	it("leads to its Routines page to set them up, saying how many it has", async () => {
+		onWideScreen();
 		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine, webhookRoutine]));
 		mount(page);
 

@@ -223,11 +223,11 @@ export const ClosedFromItsHeader = meta.story({
 	},
 });
 
-/** On a phone it covers the header too, so it has a Close that calls back to put it away. */
+/** On a phone it covers the chat's header too, so it has the round Back, which calls back to put it away. */
 export const CloseOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Back" }));
 		await expect(args.onClose).toHaveBeenCalled();
 	},
 });

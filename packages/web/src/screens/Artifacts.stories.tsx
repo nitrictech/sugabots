@@ -11,6 +11,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { appHandlers } from "@/story-app.tsx";
 import { ArtifactCards, ArtifactCardView, type WrittenArtifact } from "./ArtifactCards.tsx";
 import { ArtifactListView, ArtifactStageView } from "./Artifacts.tsx";
 import { PagesFromContentOrigin } from "./HtmlFrame.tsx";
@@ -82,11 +83,17 @@ const meta = preview.meta({
 	title: "Views/Artifacts",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
+	// The workspace's answers, for what is unread in Inbox beside a phone's Back.
+	beforeEach({ msw }) {
+		msw.use(...appHandlers());
+	},
 	decorators: [
 		(Story) => (
-			<div className="flex h-[640px] min-w-0">
-				<Story />
-			</div>
+			<QueryPreview>
+				<div className="flex h-[640px] min-w-0">
+					<Story />
+				</div>
+			</QueryPreview>
 		),
 	],
 });

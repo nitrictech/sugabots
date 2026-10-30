@@ -74,7 +74,7 @@ function DialogContent({
 				{children}
 				{showCloseButton && (
 					<CloseButton
-						className="absolute top-2.5 right-2.5"
+						className="absolute top-2.5 right-2.5 max-md:top-3.5 max-md:right-3.5"
 						render={<DialogPrimitive.Close data-slot="dialog-close" />}
 					/>
 				)}

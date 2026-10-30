@@ -1,6 +1,6 @@
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { apiAnswers, mount } from "@/test-api.tsx";
+import { apiAnswers, mount, onWideScreen } from "@/test-api.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 // As a tab opened before a deploy finds it: the chunk is gone, so the import fails.
@@ -20,6 +20,7 @@ afterEach(() => {
 });
 
 it("keeps the sidebar and offers a reload when a page's code fails to download", async () => {
+	onWideScreen();
 	mount("/suga/settings");
 
 	expect(await screen.findByText("This page could not load")).toBeDefined();

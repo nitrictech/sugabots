@@ -198,9 +198,10 @@ export function MentionEditor({
 	return (
 		<div className="relative min-w-0 flex-1">
 			{value === "" && (
+				// On a phone, as big as the field under it, which types at 16px there; see app.css.
 				<span
 					aria-hidden
-					className="pointer-events-none absolute inset-x-0 top-0 truncate py-[3px] text-[15px] text-subtle-foreground leading-[22px]"
+					className="pointer-events-none absolute inset-x-0 top-0 truncate py-[3px] text-[15px] text-subtle-foreground max-md:text-[16px] leading-[22px]"
 				>
 					{placeholder}
 				</span>

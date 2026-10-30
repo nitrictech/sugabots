@@ -339,7 +339,7 @@ function ReviewSheet({
 				<div
 					ref={top}
 					tabIndex={-1}
-					className="flex shrink-0 justify-end px-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] outline-none"
+					className="flex shrink-0 justify-end px-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] outline-none max-md:justify-start max-md:px-4"
 				>
 					<CloseButton render={<DialogClose />} />
 				</div>

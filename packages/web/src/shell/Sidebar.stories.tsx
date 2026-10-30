@@ -381,8 +381,3 @@ export const HelpMenu = meta.story({
 		).toBeVisible();
 	},
 });
-
-/** On a phone the sidebar is the page until something in it is opened. */
-export const Phone = meta.story({
-	globals: { viewport: { value: "mobile1" } },
-});

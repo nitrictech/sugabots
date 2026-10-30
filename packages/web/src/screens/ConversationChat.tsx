@@ -49,7 +49,7 @@ import {
 	useThreadStarter,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
-import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
+import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
 import { agentSettingsLink, conversationLink, routineThreadLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
@@ -72,11 +72,22 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { ChatHeader, type ChatPlace, type HeaderPlace, PeopleChatHeader } from "./ChatHeader.tsx";
+import {
+	type BackTo,
+	ChatHeader,
+	type ChatPlace,
+	type HeaderPlace,
+	PeopleChatHeader,
+} from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
-import { DetailsSidebar, PeopleDetails, type ThreadContents } from "./DetailsSidebar.tsx";
+import {
+	ChannelDetails,
+	DetailsSidebar,
+	PeopleDetails,
+	type ThreadContents,
+} from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
@@ -107,6 +118,9 @@ export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
 	| { kind: "desktop" };
 
+/** Opens `staged` large beside a chat, or closes it as a `Stage` asks, as `how` says; see `CloseStage`. */
+export type StagedChange = (staged: Staged | undefined, how?: { replace: boolean }) => void;
+
 export function ConversationChat({
 	conversation,
 	pod,
@@ -132,7 +146,7 @@ export function ConversationChat({
 	onThreadChange: (threadId: string | undefined) => void;
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
-	onStagedChange: (staged: Staged | undefined) => void;
+	onStagedChange: StagedChange;
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
@@ -267,6 +281,8 @@ export function ConversationChat({
 	});
 
 	useFollowContentGrowth(viewport, followingLatest);
+	// Hidden on a phone until it is at the latest, rather than showing its top for a moment first.
+	const settledAtLatest = useSettledAtLatest(viewport, followingLatest, !messages.isPending);
 	const attachViewport = useCallback((element: HTMLDivElement | null) => {
 		viewport.current = element;
 		if (!element) return;
@@ -384,9 +400,11 @@ export function ConversationChat({
 	}
 
 	const title = details?.thread.title;
-	const listedChat = useChatList(pod.slug).data?.chats.find(
-		(chat) => chat.conversation.id === conversationId,
-	)?.conversation;
+	const chats = useChatList(pod.slug).data?.chats;
+	const listedChat = chats?.find((chat) => chat.conversation.id === conversationId)?.conversation;
+	// The channel a thread between people was started from, which its header names it as in.
+	const startedIn = chats?.find((chat) => chat.conversation.id === details?.thread.parentThreadId)
+		?.conversation.title;
 	// An archived chat is not listed, so it goes by the name it was archived with.
 	const podChatName = listedChat?.title ?? title ?? "";
 	// A bot's channel goes by the bot's name, and is kept going rather than marked done;
@@ -398,18 +416,26 @@ export function ConversationChat({
 		details?.thread.type === "conversation" && !ongoing
 			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
 			: undefined;
+	// Back from a thread returns to where it lives: its bot's chat, or the channel it was started from.
+	const parentChannelId = details?.thread.parentThreadId;
+	const back: BackTo =
+		conversation.kind === "botThread" && !details?.routine
+			? { to: "bot", pod, agent: conversation.agent }
+			: startedIn !== undefined && parentChannelId
+				? { to: "channel", pod, conversationId: parentChannelId, name: `#${startedIn}` }
+				: { to: "pod", pod };
 	const headerPlace: HeaderPlace =
 		place.kind === "away"
 			? { back: place.back, trailing: place.trailing }
 			: {
-					back: { to: "pod", pod },
+					back,
 					details: staged
 						? undefined
 						: { open: place.detailsOpen, onChange: place.onDetailsChange },
 				};
 	const header =
 		conversation.kind === "botThread" && details?.routine ? (
-			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} />
+			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} mark="routine" />
 		) : conversation.kind === "botThread" || conversation.kind === "botChannel" ? (
 			<ChatHeader
 				{...headerPlace}
@@ -421,8 +447,7 @@ export function ConversationChat({
 			/>
 		) : conversation.kind === "podChat" ? (
 			<PeopleChatHeader
-				back={headerPlace.back}
-				trailing={headerPlace.trailing}
+				{...headerPlace}
 				title={podChatName}
 				menu={
 					listedChat &&
@@ -437,7 +462,12 @@ export function ConversationChat({
 				}
 			/>
 		) : (
-			<PeopleChatHeader {...headerPlace} title={title ?? ""} done={done} />
+			<PeopleChatHeader
+				{...headerPlace}
+				title={title ?? ""}
+				done={done}
+				within={startedIn === undefined ? pod.name : `#${startedIn}`}
+			/>
 		);
 	if (!details || (agent && !host))
 		return (
@@ -506,7 +536,14 @@ export function ConversationChat({
 						onResize={setChatWidth}
 					/>
 				)}
-				{header}
+				{/*
+				 * On a phone, the header's glass controls float over the messages,
+				 * which scroll on under them, so the chat has the whole height. Only
+				 * the controls take a tap; anywhere else reaches the message beneath.
+				 */}
+				<div className="max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto">
+					{header}
+				</div>
 				<FileDropTarget
 					onDropFiles={agent?.model === null ? undefined : attachments.attach}
 					className="flex min-h-0 flex-1 flex-col"
@@ -525,10 +562,15 @@ export function ConversationChat({
 							lastScrollTop.current = element.scrollTop;
 							setLatestInView(atFoot);
 						}}
-						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
+						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-[124px]"
 					>
 						{/* Anchored to the bottom, so a short chat sits just above the composer. */}
-						<div className="flex min-h-full w-full flex-col justify-end">
+						<div
+							className={cn(
+								"flex min-h-full w-full flex-col justify-end",
+								!settledAtLatest && "max-md:invisible",
+							)}
+						>
 							{messages.isError && (
 								<div className="px-5">
 									<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
@@ -559,10 +601,10 @@ export function ConversationChat({
 											agent={agent}
 											place={
 												direct
-													? "personal"
+													? { kind: "personal" }
 													: conversation.kind === "botChannel"
-														? "channel"
-														: "thread"
+														? { kind: "channel" }
+														: { kind: "thread", title }
 											}
 										/>
 									)
@@ -671,8 +713,12 @@ export function ConversationChat({
 								attachments={attachments}
 							/>
 						)}
-						{/* Always its height, so nothing moves as somebody starts or stops typing. */}
-						<div className="flex h-[26px] items-center">
+						{/*
+						 * Always its height, so nothing moves as somebody starts or stops typing.
+						 * On a phone, with the tabs straight under it, it takes room only while
+						 * there is something to say, and is a small gap above the tabs otherwise.
+						 */}
+						<div className="flex h-[26px] items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
 							{anyoneTyping(typers) ? (
 								<TypingIndicator typers={typers} className="px-1" />
 							) : (
@@ -689,7 +735,7 @@ export function ConversationChat({
 					artifactId={staged.artifactId}
 					version={staged.version}
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
-					onClose={() => onStagedChange(undefined)}
+					onClose={(how) => onStagedChange(undefined, how)}
 				/>
 			) : staged?.kind === "desktop" && agent ? (
 				<DesktopStage
@@ -713,8 +759,21 @@ export function ConversationChat({
 			) : (
 				place.kind === "own" &&
 				place.detailsOpen &&
-				!isPodChat &&
-				(details.routine && agent ? (
+				(isPodChat ? (
+					<ChannelDetails
+						name={podChatName}
+						people={details.members.length}
+						bots={details.crew.filter((member) => member.kind === "agent").length}
+						channel={
+							listedChat && pod.permissions.rename
+								? { pod, conversationId, name: podChatName, archivable: !listedChat.main }
+								: undefined
+						}
+						user={user}
+						contents={contents}
+						onClose={() => place.onDetailsChange(false)}
+					/>
+				) : details.routine && agent ? (
 					<RoutinePanel
 						agent={agent}
 						pod={pod}
@@ -1126,7 +1185,27 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
  * in a thread, what they do; in a Personal pod, that it is the person's own;
  * or, in a bot's channel, that it is the channel's start.
  */
-function ChatIntro({ agent, place }: { agent: Agent; place: "personal" | "channel" | "thread" }) {
+/**
+ * Where a bot's chat is: the person's own with it, its channel, or a thread
+ * with it, which starts under the thread's name once that is known.
+ */
+type IntroPlace = { kind: "personal" } | { kind: "channel" } | { kind: "thread"; title?: string };
+
+function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
+	// A thread is about something, so its name leads and the bot is beside it, smaller.
+	if (place.kind === "thread" && place.title) {
+		return (
+			<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
+				<h2 className="m-0 font-bold text-[24px] text-foreground leading-tight tracking-[-0.01em] [text-wrap:balance] max-md:text-[20px]">
+					{place.title}
+				</h2>
+				<p className="m-0 flex max-w-[560px] items-center gap-2 text-[14.5px] text-muted-foreground leading-[1.5]">
+					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
+					With {agent.name}
+				</p>
+			</div>
+		);
+	}
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
@@ -1134,9 +1213,9 @@ function ChatIntro({ agent, place }: { agent: Agent; place: "personal" | "channe
 				{agent.name}
 			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
-				{place === "personal" ? (
+				{place.kind === "personal" ? (
 					"Your own bot. It works for you only and nobody else in the workspace can see this conversation."
-				) : place === "channel" ? (
+				) : place.kind === "channel" ? (
 					`This is the start of ${agent.name}'s channel.`
 				) : (
 					<>

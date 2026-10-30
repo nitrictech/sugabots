@@ -32,8 +32,7 @@ export type SidebarView = "inbox" | "approvals" | "settings" | "artifacts" | "ro
  * The column down the left: Inbox and Approvals across every pod and the
  * workspace's Settings, then each
  * pod in turn, with its artifacts and routines, its chats and its bots, and
- * you and Help at the foot. On a phone it is the page until something in
- * it is opened.
+ * you and Help at the foot. A phone has `MobileTabBar` and `MobileHome` instead.
  */
 export function Sidebar() {
 	const { data: pods } = usePods();
@@ -70,7 +69,8 @@ export function Sidebar() {
 			settingsBack={place.inSettings ? undefined : backToChat}
 			notificationSettings={notificationSettings}
 			onSignOut={() => void signOut()}
-			className={place.coversPhone ? "max-md:hidden" : undefined}
+			// A phone has its tabs instead, and Home in place of the pods.
+			className="max-md:hidden"
 			conversationsOf={(pod) => (
 				<ConversationList
 					pod={pod}
@@ -88,8 +88,6 @@ interface SidebarPlace {
 	view: SidebarView | undefined;
 	selected: ListSelection | undefined;
 	inSettings: boolean;
-	/** Whether a page is open that takes a phone's whole screen, which is anywhere but a pod's own. */
-	coversPhone: boolean;
 }
 
 function useSidebarPlace(): SidebarPlace {
@@ -136,7 +134,6 @@ function useSidebarPlace(): SidebarPlace {
 								? { kind: "newThread", handle: startingWith }
 								: undefined,
 		inSettings,
-		coversPhone: !matchRoute({ to: "/$workspace/pods/$pod" }),
 	};
 }
 

@@ -63,9 +63,11 @@ import type { Staged } from "@/screens/ConversationChat.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
+import { MobileHome } from "@/shell/MobileHome.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
+import { You, YouPod } from "@/shell/You.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -982,9 +984,10 @@ const activityChatRoute = createRoute({
 							void navigate({ search: (previous) => ({ ...previous, thread }) })
 						}
 						staged={stagedOf(search)}
-						onStagedChange={(staged) =>
+						onStagedChange={(staged, how) =>
 							void navigate({
 								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+								...how,
 							})
 						}
 					/>
@@ -1015,6 +1018,32 @@ const approvalRoute = createRoute({
 	getParentRoute: () => approvalsRoute,
 	path: "/$call",
 	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
+});
+
+/** You on a phone, where the sidebar's foot has no room: your workspace, its pods, and signing out. */
+const youRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/you",
+	component: () => (
+		<Panes>
+			<You />
+		</Panes>
+	),
+});
+
+/** A pod's settings as a phone opens them from You: a page of its parts. */
+const youPodRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/you/pods/$pod",
+	component: () => {
+		const { data: pods, isPending } = usePods();
+		const pod = findPod(pods, youPodRoute.useParams().pod);
+		return (
+			<Panes>
+				{isPending ? null : pod ? <YouPod pod={pod} /> : <EmptyState title="No such pod here" />}
+			</Panes>
+		);
+	},
 });
 
 /** Where `/` and closing settings land: the first shared pod, or Personal for somebody in none. */
@@ -1052,7 +1081,7 @@ const podRoute = createRoute({
 	component: PodRoute,
 });
 
-/** A pod's page beside the sidebar. On a phone, the pod's own address shows the sidebar alone. */
+/** A pod's page beside the sidebar. On a phone, the pod's own address is Home. */
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const matchRoute = useMatchRoute();
@@ -1072,9 +1101,12 @@ function PodRoute() {
 		);
 	}
 	return (
-		<Panes className={atPod ? "max-md:hidden" : undefined}>
-			<Outlet />
-		</Panes>
+		<>
+			{atPod && <MobileHome pod={pod} className="md:hidden" />}
+			<Panes className={atPod ? "max-md:hidden" : undefined}>
+				<Outlet />
+			</Panes>
+		</>
 	);
 }
 
@@ -1293,8 +1325,11 @@ function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
 						void navigate({ search: (previous) => ({ ...previous, thread }) })
 					}
 					staged={stagedOf(search)}
-					onStagedChange={(staged) =>
-						void navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }) })
+					onStagedChange={(staged, how) =>
+						void navigate({
+							search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+							...how,
+						})
 					}
 				/>
 			)}
@@ -1437,9 +1472,10 @@ const conversationRoute = createRoute({
 							void navigate({ search: (previous) => ({ ...previous, thread }) })
 						}
 						staged={stagedOf(search)}
-						onStagedChange={(staged) =>
+						onStagedChange={(staged, how) =>
 							void navigate({
 								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+								...how,
 							})
 						}
 					/>
@@ -1561,6 +1597,8 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
+		youRoute,
+		youPodRoute,
 		podRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
@@ -1574,12 +1612,90 @@ const routeTree = rootRoute.addChildren([
 	]),
 ]);
 
+/**
+ * Which way a phone slides from one page to the next, as a view transition's
+ * type: `forward` into a page further in, as a channel opened from Home or a
+ * thread from its channel, and `back` out of one. Switching tabs, or a change
+ * that stays on its page, such as opening a thread's computer, does not slide.
+ */
+function phoneSlide({
+	fromLocation,
+	toLocation,
+	hrefChanged,
+}: {
+	fromLocation?: ParsedLocation;
+	toLocation: ParsedLocation;
+	hrefChanged: boolean;
+}): string[] | false {
+	if (!fromLocation || !hrefChanged || matchesMedia(SIDE_BY_SIDE)) return false;
+	const fromIndex = historyIndex(fromLocation);
+	const toIndex = historyIndex(toLocation);
+	// A page that sends on to its own address, as a bot's chat does, replaces itself in place.
+	if (toIndex === fromIndex) return false;
+	const from = locationDepth(fromLocation);
+	const to = locationDepth(toLocation);
+	if (to !== from) return [to > from ? "forward" : "back"];
+	// A tab for another tab.
+	if (to === 0) return false;
+	// Pages as deep as each other, as a bot's channel and a thread in it both are: a step
+	// through history tells which way, a page opened going forward and Back going back.
+	return [toIndex > fromIndex ? "forward" : "back"];
+}
+
+/** Where `location` is in the browser's history, counted from the app's first page. */
+function historyIndex(location: ParsedLocation): number {
+	return (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
+}
+
+/**
+ * A page's depth, and a step more while a thread is open over it: a thread
+ * opened from a chat, or a run or collaboration from Inbox, which the address
+ * names in its search rather than its path.
+ */
+function locationDepth(location: ParsedLocation): number {
+	const search = location.search as { thread?: unknown; threadPage?: unknown };
+	const threadOpen = search.thread !== undefined || search.threadPage !== undefined;
+	return pageDepth(location.pathname) + (threadOpen ? 1 : 0);
+}
+
+/**
+ * How far into the app a page is on a phone: a tab is 0; what it opens, 1; and
+ * so on. A bot's thread is a step past the bot's chat, though its address is
+ * no longer, so depth is told from what the address names, not its length.
+ */
+function pageDepth(pathname: string): number {
+	// The workspace's own part of the address is the same everywhere, so it counts for nothing.
+	const [section, ...rest] = pathname.split("/").filter(Boolean).slice(1);
+	switch (section) {
+		case "pods": {
+			// pods/$pod is Home; its chat, a bot's chat, Artifacts or Routines one in; what those open, two.
+			const [, place, item] = rest;
+			if (place === undefined) return 0;
+			if (place === "threads") return 2;
+			return item === undefined || place === "agents" ? 1 : 2;
+		}
+		case "activity":
+		case "approvals":
+			return rest.length === 0 ? 0 : 1;
+		case "you":
+			// you/pods/$pod is one in.
+			return rest.length === 0 ? 0 : 1;
+		case "settings":
+			// Opened from You, so one in at least, and a step more for each part of the address.
+			return 1 + rest.length;
+		default:
+			return 0;
+	}
+}
+
 export function createAppRouter(options?: { history?: RouterHistory }) {
 	return createRouter({
 		routeTree,
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
+		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
+		defaultViewTransition: { types: phoneSlide },
 		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,

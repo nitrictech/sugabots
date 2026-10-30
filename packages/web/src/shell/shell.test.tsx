@@ -27,6 +27,7 @@ import {
 	MODELS,
 	modelProviders,
 	mount,
+	onWideScreen,
 	open,
 	personalAssistant,
 	personalPod,
@@ -382,6 +383,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("lets the owner delete a workspace, then opens another", async () => {
+		onWideScreen();
 		apiAnswers({ role: "owner" });
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 		client.api.workspaces.delete.mockImplementation(() => {
@@ -401,6 +403,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("offers an admin no way to delete the workspace", async () => {
+		onWideScreen();
 		mount("/suga/settings");
 
 		await screen.findByRole("heading", { name: "General" });
@@ -480,6 +483,7 @@ describe("the sidebar", () => {
 
 describe("the pod's conversations", () => {
 	it("lists a pod's chat, then its bots, each opening its channel with its threads folded under it", async () => {
+		onWideScreen();
 		const channelOf = (agent: typeof linear) => ({
 			agent,
 			conversation: channelWith(agent),
@@ -522,6 +526,7 @@ describe("the pod's conversations", () => {
 	});
 
 	it("keeps a bot's threads folded away while nothing of the bot's is open", async () => {
+		onWideScreen();
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				chats: [],
@@ -651,6 +656,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("lists your settings first, then the workspace's sections and its pods", async () => {
+		onWideScreen();
 		const router = mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
@@ -674,6 +680,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("opens a pod onto its pages, and keeps the open pod's open", async () => {
+		onWideScreen();
 		const router = mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
@@ -706,6 +713,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("shows the workspace's time zone under General", async () => {
+		onWideScreen();
 		client.api.workspaces.list.mockReturnValue(
 			Effect.succeed([{ ...workspace, timeZone: "Australia/Sydney" }]),
 		);
@@ -716,6 +724,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("leaves the roster uncounted while you are the only person in it", async () => {
+		onWideScreen();
 		client.api.workspaces.members.mockReturnValue(
 			Effect.succeed([
 				{
@@ -737,6 +746,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("withholds the administrative sections from a member", async () => {
+		onWideScreen();
 		apiAnswers({ role: "member" });
 		mount("/suga/settings");
 
@@ -793,6 +803,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("starts over when a section is picked from the navigation", async () => {
+		onWideScreen();
 		const router = mount("/suga/settings/pods/suga-team/bots");
 		await openLinearFromItsPod();
 
@@ -805,6 +816,7 @@ describe("the settings navigation", () => {
 	});
 
 	it("starts over when a new pod opens", async () => {
+		onWideScreen();
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 		mount("/suga/settings/pods/suga-team/bots");
@@ -862,6 +874,7 @@ describe("routes", () => {
 	});
 
 	it("returns a signed-in visit to the login page to where it was going, search and all", async () => {
+		onWideScreen();
 		const destination = `/suga/settings/pods/suga-team/agents/${linear.handle}?tab=routines`;
 		const router = mount(`/login?returnTo=${encodeURIComponent(destination)}`);
 
@@ -1267,6 +1280,7 @@ describe("creating a pod", () => {
 	 */
 
 	it("offers a member nothing", async () => {
+		onWideScreen();
 		apiAnswers({ role: "member" });
 		mount("/suga/settings");
 
@@ -1284,6 +1298,7 @@ describe("creating a pod", () => {
 	}
 
 	it("waits for a name before it can make a pod", async () => {
+		onWideScreen();
 		mount("/suga/settings");
 		await openNewPod();
 
@@ -1295,6 +1310,7 @@ describe("creating a pod", () => {
 	});
 
 	it("creates one in a colour no other pod has, and opens it", async () => {
+		onWideScreen();
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
@@ -1320,6 +1336,7 @@ describe("creating a pod", () => {
 	});
 
 	it("says so when the address is already taken, and keeps the form open", async () => {
+		onWideScreen();
 		client.api.pods.create.mockReturnValue(
 			Effect.fail(new Conflict({ message: userText`already exists` })),
 		);
@@ -1406,6 +1423,7 @@ describe("creating an agent", () => {
 	});
 
 	it("creates a bot in the look and colour chosen, in its pod, and opens its settings", async () => {
+		onWideScreen();
 		const made = {
 			...linear,
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
@@ -1448,6 +1466,29 @@ describe("creating an agent", () => {
 		);
 		expect(screen.queryByRole("dialog", { name: "New bot" })).toBeNull();
 		expect((await screen.findAllByText(made.name)).length).toBeGreaterThan(0);
+	});
+
+	it("on a phone, chooses the look on a page of its own, from the bot's face", async () => {
+		client.api.agents.create.mockReturnValue(Effect.succeed({ ...linear, name: "Scout" }));
+		mount(`/suga/settings/pods/${pods[0]?.slug}/bots`);
+		(await screen.findByRole("button", { name: "New bot" })).click();
+
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Scout" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Change the look" }));
+		// The look's page has Back where the page had Close, and no Create.
+		expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
+		fireEvent.click(within(dialog).getByRole("radio", { name: "orange" }));
+		fireEvent.click(within(dialog).getByRole("button", { name: "Back" }));
+		within(dialog).getByRole("button", { name: "Create" }).click();
+
+		await waitFor(() =>
+			expect(client.api.agents.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({ name: "Scout", color: "orange" }),
+				}),
+			),
+		);
 	});
 
 	it("keeps a duplicate-name error in the creation form", async () => {
@@ -2024,6 +2065,7 @@ describe("workspace settings", () => {
 	});
 
 	it("lets somebody with no workspace start their first one, in their own time zone", async () => {
+		onWideScreen();
 		const browserOptions = new Intl.DateTimeFormat().resolvedOptions();
 		const browser = vi
 			.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
@@ -2054,6 +2096,7 @@ describe("workspace settings", () => {
 	});
 
 	it("keeps a rejected workspace name and creation form open", async () => {
+		onWideScreen();
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.workspaces.create.mockReturnValue(Effect.die(new Error("Offline")));
 		mount("/suga/settings");
@@ -2069,47 +2112,55 @@ describe("workspace settings", () => {
 });
 
 describe("settings on a phone", () => {
-	it("lists every section, you first, with a way out", async () => {
+	it("opens You, which lists you first, then the workspace's sections", async () => {
 		mount("/suga/settings");
 
-		const list = await screen.findByRole("navigation", { name: "Settings sections" });
-		expect(within(list).getByRole("link", { name: /Done/ }).getAttribute("href")).toBe(
-			"/suga/agents",
+		// The sidebar is drawn too, if hidden on a phone, so these look inside You.
+		const you = await screen.findByRole("region", { name: "You" });
+		expect(
+			(await within(you).findByRole("link", { name: new RegExp(sam.name) })).getAttribute("href"),
+		).toBe("/suga/settings/profile");
+		expect(within(you).getByRole("link", { name: "Notifications" }).getAttribute("href")).toBe(
+			"/suga/settings/notifications",
+		);
+		expect(within(you).getByRole("link", { name: "General" }).getAttribute("href")).toBe(
+			"/suga/settings/general",
 		);
 		expect(
-			within(list)
-				.getByRole("link", { name: new RegExp(sam.name) })
+			within(you)
+				.getByRole("link", { name: /^People/ })
 				.getAttribute("href"),
-		).toBe("/suga/settings/profile");
-		expect((await within(list).findByRole("link", { name: /General/ })).getAttribute("href")).toBe(
-			"/suga/settings/general",
+		).toBe("/suga/settings/members");
+	});
+
+	it("opens a pod on a page of its parts, each a page of its own", async () => {
+		mount("/suga/you");
+
+		const you = await screen.findByRole("region", { name: "You" });
+		fireEvent.click(await within(you).findByRole("link", { name: pods[0]?.name }));
+		const pod = await screen.findByRole("region", { name: pods[0]?.name });
+		expect(within(pod).getByRole("link", { name: "Back to You" }).getAttribute("href")).toBe(
+			"/suga/you",
+		);
+		expect(within(pod).getByRole("link", { name: /^Bots/ }).getAttribute("href")).toBe(
+			`/suga/settings/pods/${pods[0]?.slug}/bots`,
 		);
 	});
 
-	it("opens General by name, with the way back to the list", async () => {
+	it("opens General by name, with the way back to You", async () => {
 		mount("/suga/settings/general");
 
 		expect(await screen.findByText("Time zone")).toBeDefined();
 		const page = screen.getByRole("main");
-		expect(within(page).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
-			"/suga/settings",
-		);
+		expect(within(page).getByRole("link", { name: "You" }).getAttribute("href")).toBe("/suga/you");
 	});
 
-	it("lists each pod among the sections, and leads from it back to the list", async () => {
-		mount("/suga/settings");
-
-		const list = await screen.findByRole("navigation", { name: "Settings sections" });
-		const pod = await within(list).findByRole("link", { name: new RegExp(`${pods[0]?.name}`) });
-		expect(pod.getAttribute("href")).toBe(`/suga/settings/pods/${pods[0]?.slug}`);
-		cleanup();
-
-		mount(`/suga/settings/pods/${pods[0]?.slug}`);
+	it("leads from one of a pod's pages back to the pod's page in You", async () => {
+		mount(`/suga/settings/pods/${pods[0]?.slug}/people`);
 
 		const page = await screen.findByRole("main");
-		expect((await within(page).findByRole("link", { name: "Settings" })).getAttribute("href")).toBe(
-			"/suga/settings",
-		);
+		const back = await within(page).findByRole("link", { name: pods[0]?.name });
+		expect(back.getAttribute("href")).toBe(`/suga/you/pods/${pods[0]?.slug}`);
 	});
 
 	it("leads from a bot back to its pod's Bots", async () => {
@@ -2125,6 +2176,7 @@ describe("settings on a phone", () => {
 describe("the theme", () => {
 	// Chosen under your profile, since it is yours rather than the workspace's.
 	it("is dark until something is chosen", async () => {
+		onWideScreen();
 		mount("/suga/settings/profile");
 
 		const theme = await screen.findByRole("group", { name: "Theme" });
@@ -2135,6 +2187,7 @@ describe("the theme", () => {
 	});
 
 	it("is chosen in settings, and remembered", async () => {
+		onWideScreen();
 		mount("/suga/settings/profile");
 
 		fireEvent.click(await screen.findByRole("radio", { name: "Light" }));
@@ -2144,6 +2197,7 @@ describe("the theme", () => {
 	});
 
 	it("stores nothing when dark is chosen, because that is the default", async () => {
+		onWideScreen();
 		localStorage.setItem("sugabots-theme", "light");
 		mount("/suga/settings/profile");
 

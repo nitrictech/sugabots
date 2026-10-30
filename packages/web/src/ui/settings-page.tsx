@@ -3,6 +3,7 @@ import { cn } from "cn";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { Alert } from "@/ui/alert.tsx";
+import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE } from "@/ui/back-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
@@ -17,7 +18,7 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
  * is, so Back lines up with the list's + beside it.
  */
 const PANEL_BACK_BAR =
-	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur";
+	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur max-md:bg-transparent max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2 max-md:backdrop-blur-none";
 
 const PANEL_BACK_LINK =
 	"focus-ring inline-flex min-h-[30px] min-w-0 items-center gap-1 rounded-md font-medium text-[14px] text-link";
@@ -70,7 +71,8 @@ export function SettingsPage({
 				className={cn(
 					"mx-auto flex w-full max-w-[760px] flex-col gap-8 px-4 pb-20 md:px-8",
 					// Close under its Back; on a wide screen, as high as any other page.
-					!back ? "pt-10" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
+					// On a phone every page has a Back above it, the frame's or its own.
+					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
 					className,
 				)}
 			>
@@ -621,16 +623,16 @@ export interface BackTarget {
 	render: useRender.RenderProp;
 }
 
-/** The small Back link above a page's title, for `SettingsPage`'s `back`. */
+/** The small Back link above a page's title, for `SettingsPage`'s `back`; a phone's round Back there. */
 export function PageBackLink({ label, render }: BackTarget) {
 	return useRender({
 		render,
 		props: {
-			className: PANEL_BACK_LINK,
+			className: cn(PANEL_BACK_LINK, BACK_ON_PHONE),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
-					<span className="min-w-0 truncate">{label}</span>
+					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-[22px]" />
+					<span className={cn("min-w-0 truncate", BACK_LABEL_ON_PHONE)}>{label}</span>
 				</>
 			),
 		},
@@ -639,19 +641,22 @@ export function PageBackLink({ label, render }: BackTarget) {
 
 /**
  * The bar across the top of a page on a narrow screen, with its Back in the
- * larger size a phone's is. `className` hides it where the page is wide enough
- * for its own: `md:hidden`.
+ * larger size a tablet's is, and on a phone the round Back every page there
+ * has. `className` hides it where the page is wide enough for its own:
+ * `md:hidden`.
  */
 export function CompactBackBar({ label, render, className }: BackTarget & { className: string }) {
 	const link = useRender({
 		render,
 		props: {
-			className:
+			className: cn(
 				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link",
+				BACK_ON_PHONE,
+			),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} />
-					{label}
+					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-[22px]" />
+					<span className={BACK_LABEL_ON_PHONE}>{label}</span>
 				</>
 			),
 		},
@@ -660,6 +665,8 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 		<div
 			className={cn(
 				"sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur",
+				// A phone's Back floats on its own, at a page's inset, over nothing.
+				"max-md:h-auto max-md:bg-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2 max-md:backdrop-blur-none",
 				className,
 			)}
 		>

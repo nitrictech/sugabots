@@ -1,5 +1,12 @@
 import type { Pod } from "@sugabots/contracts";
-import { Link, useLocation, useMatch, useNavigate } from "@tanstack/react-router";
+import {
+	type HistoryState,
+	Link,
+	Navigate,
+	useLocation,
+	useMatch,
+	useNavigate,
+} from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, Plus } from "lucide-react";
 import {
@@ -15,6 +22,7 @@ import {
 import { useAgents, usePodAgent } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { podSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { findPod, usePodMembers, usePods } from "@/lib/pods.ts";
@@ -66,6 +74,10 @@ export function SettingsLayout({
 	children: ReactNode;
 }) {
 	const pathname = useSettingsPath();
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const { data: pods } = usePods();
+	// A phone lists settings in its You tab.
+	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
 	return (
 		// A group, so the frame's Back can stand aside for one the page draws itself.
 		<div className="group/settings flex min-h-0 min-w-0 flex-1">
@@ -78,8 +90,12 @@ export function SettingsLayout({
 				 * to need one, so a long page, such as Usage, centres its column where
 				 * a short one does.
 				 */}
-				<main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable]">
-					{!index && <CompactPageBackBar parent={parentPage(pathname)} />}
+				<main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable] max-md:[scrollbar-gutter:auto]">
+					{!index && (
+						<CompactPageBackBar
+							parent={phone ? phoneParentPage(pathname, pods) : parentPage(pathname)}
+						/>
+					)}
 					{/*
 					 * Nothing rather than a skeleton: the navigation has already answered
 					 * the click, and a shape that flashes beside it reads as a fault.
@@ -136,6 +152,24 @@ function parentPage(pathname: string): BackTarget {
 		}
 	}
 	return settingsList;
+}
+
+/**
+ * The page `pathname` sits under on a phone, whose settings are listed in You:
+ * a pod's own pages sit under the pod's page there, and what would sit under
+ * the list of settings sits under You.
+ */
+function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): BackTarget {
+	const [, sectionId, item, , detail] = pathname.split("/").filter(Boolean);
+	if (sectionId === "pods" && item !== undefined && detail === undefined) {
+		return {
+			label: findPod(pods, item)?.name ?? "Pod",
+			render: <Link from="/$workspace" to="./you/pods/$pod" params={{ pod: item }} />,
+		};
+	}
+	const parent = parentPage(pathname);
+	if (parent !== settingsList) return parent;
+	return { label: "You", render: <Link from="/$workspace" to="./you" /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */
@@ -391,7 +425,7 @@ function storedOpenPods(): Record<string, boolean> {
 }
 
 /** What each of a pod's pages holds, counted once the pod is open in the navigation. */
-function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
+export function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
 	const { agents } = useAgents();
 	const connections = useConnections(open ? pod.id : undefined);
 	// Only you are ever in a personal pod, so there is nobody to count.
@@ -440,9 +474,6 @@ function NewPodButton() {
  * you at the top and every section a row that opens it full screen.
  */
 function CompactSettingsList() {
-	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
-	const session = useSession();
 	return (
 		<nav
 			aria-label="Settings sections"
@@ -460,6 +491,28 @@ function CompactSettingsList() {
 					Done
 				</Link>
 			</div>
+			<SettingsListGroups />
+		</nav>
+	);
+}
+
+/**
+ * The groups of the list of settings: you, the workspace's sections, and its
+ * pods. A phone's You tab lists them too, with `linkState` saying where each
+ * page's Back returns, and its pods opening `podLink` rather than their General.
+ */
+export function SettingsListGroups({
+	linkState,
+	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
+}: {
+	linkState?: (state: HistoryState) => HistoryState;
+	podLink?: (pod: Pod) => ReactElement;
+}) {
+	const { sections, counts } = useWorkspaceSections();
+	const { shared, personal } = useListedPods();
+	const session = useSession();
+	return (
+		<>
 			{session.user && (
 				<SettingsGroup>
 					<SettingsRow
@@ -468,7 +521,12 @@ function CompactSettingsList() {
 						sub={session.user.email}
 						chevron
 						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "profile" }}
+								state={linkState}
+							/>
 						}
 					/>
 					<SettingsRow
@@ -479,6 +537,7 @@ function CompactSettingsList() {
 								from="/$workspace"
 								to="./settings/$section"
 								params={{ section: "notifications" }}
+								state={linkState}
 							/>
 						}
 					/>
@@ -496,7 +555,12 @@ function CompactSettingsList() {
 						}
 						chevron
 						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: section.id }} />
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: section.id }}
+								state={linkState}
+							/>
 						}
 					/>
 				))}
@@ -514,13 +578,13 @@ function CompactSettingsList() {
 									icon={<PodInitial pod={pod} size="sm" />}
 									label={pod.name}
 									chevron
-									render={<Link {...podSettingsLink(pod)} />}
+									render={podLink(pod)}
 								/>
 							))}
 						</SettingsGroup>
 					),
 			)}
-		</nav>
+		</>
 	);
 }
 

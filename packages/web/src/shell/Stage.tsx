@@ -1,6 +1,15 @@
+import { cn } from "cn";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
+import { BACK_BUTTON, BackChevron, useReturnToOpener } from "@/ui/back-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+
+/**
+ * Closes a `Stage`, showing what was open under it. `replace` asks for that in
+ * the stage's place in history, rather than as a page after it, for a phone's
+ * Back from a stage that was the first page opened.
+ */
+export type CloseStage = (how?: { replace: boolean }) => void;
 
 /**
  * Something a bot made or is doing, opened large beside its chat or a list so
@@ -24,9 +33,10 @@ export function Stage({
 	byline?: ReactNode;
 	/** Controls for what is shown, before Close. */
 	actions?: ReactNode;
-	onClose: () => void;
+	onClose: CloseStage;
 	children: ReactNode;
 }) {
+	const { goBack } = useReturnToOpener();
 	return (
 		<section
 			aria-label={label}
@@ -35,14 +45,28 @@ export function Stage({
 			}}
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background max-md:absolute max-md:inset-0 max-md:z-40"
 		>
-			<header className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:pl-3">
-				{icon}
+			<header className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
+				{/* On a phone it covers the page it was opened from, so it goes back to it, as a phone's pages do. */}
+				<button
+					type="button"
+					aria-label="Back"
+					onClick={() => {
+						// Opened first, it is replaced, so Back from what shows does not return to it.
+						if (!goBack()) onClose({ replace: true });
+					}}
+					className={cn(BACK_BUTTON, "md:hidden")}
+				>
+					<BackChevron />
+				</button>
+				<span className="contents max-md:hidden">{icon}</span>
 				<div className="flex min-w-0 flex-1 flex-col pl-1 leading-snug">
-					<h2 className="m-0 truncate font-medium text-[14px] text-foreground">{title}</h2>
+					<h2 className="m-0 truncate font-medium text-[14px] text-foreground max-md:font-semibold max-md:text-[17px]">
+						{title}
+					</h2>
 					{byline && <p className="m-0 truncate text-subtle-foreground text-xs">{byline}</p>}
 				</div>
 				{actions}
-				<IconButton label="Close" variant="bar" onClick={onClose}>
+				<IconButton label="Close" variant="bar" onClick={() => onClose()} className="max-md:hidden">
 					<X size={16} strokeWidth={1.75} />
 				</IconButton>
 			</header>

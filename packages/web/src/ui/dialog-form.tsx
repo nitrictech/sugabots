@@ -35,7 +35,9 @@ export function DialogForm({
  * each a DialogFormStep, swap, so the dialog does not close and open again.
  *
  * It is never taller than the screen: a body too long to fit scrolls between
- * the header and footer, which stay in view.
+ * the header and footer, which stay in view. On a phone it is the screen, as
+ * tall as the keyboard leaves, so its actions sit just above the keyboard
+ * rather than behind it.
  */
 export function DialogFormFrame({
 	width = "default",
@@ -50,6 +52,7 @@ export function DialogFormFrame({
 			className={cn(
 				"flex max-h-[calc(100dvh-20px)] flex-col gap-0 overflow-hidden p-0",
 				widths[width],
+				"max-md:inset-0 max-md:h-[var(--visible-height,100dvh)] max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none",
 			)}
 		>
 			{children}
@@ -69,7 +72,7 @@ export function DialogFormStep({
 		// `min-h-0`: a flex item is otherwise at least as tall as its content, so
 		// a long body would make the form taller than the dialog instead of
 		// scrolling inside it.
-		<form onSubmit={onSubmit} className="flex min-h-0 flex-col">
+		<form onSubmit={onSubmit} className="flex min-h-0 flex-col max-md:flex-1">
 			{children}
 		</form>
 	);
@@ -93,7 +96,7 @@ export function DialogFormHeader({
 	onClose?: () => void;
 }) {
 	return (
-		<header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-[18px] pt-4 pb-3">
+		<header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-[18px] pt-4 pb-3 max-md:px-4 max-md:pt-[max(16px,env(safe-area-inset-top))]">
 			{/* `flex`: an inline span would set Back on a line of text, taller than the title, so the header would grow with it. */}
 			<span className="flex justify-self-start">
 				{onBack && (
@@ -108,7 +111,7 @@ export function DialogFormHeader({
 					</button>
 				)}
 			</span>
-			<DialogTitle className="text-center font-semibold text-[15px] text-foreground">
+			<DialogTitle className="text-center font-semibold text-[15px] text-foreground max-md:text-[17px]">
 				{title}
 			</DialogTitle>
 			<span className="flex justify-self-end">
@@ -144,7 +147,8 @@ export function DialogFormFooter({
 	onCancel?: () => void;
 }) {
 	return (
-		<footer className="flex justify-end gap-2 px-[18px] pb-[18px]">
+		// On a phone, at the foot of the screen, its buttons shared out across it and sized for a thumb.
+		<footer className="flex justify-end gap-2 px-[18px] pb-[18px] max-md:mt-auto max-md:px-4 max-md:pt-3 max-md:pb-[max(16px,env(safe-area-inset-bottom))] max-md:*:h-11 max-md:*:flex-1 max-md:*:text-[15px]">
 			{beside}
 			{cancel &&
 				(onCancel ? (
@@ -180,7 +184,7 @@ export function DialogFormBody({
 	return (
 		<div
 			className={cn(
-				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-[18px] pt-1 pb-5",
+				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-[18px] pt-1 pb-5 max-md:flex-1 max-md:px-4",
 				gap === "compact" ? "gap-3" : "gap-3.5",
 			)}
 		>

@@ -179,7 +179,7 @@ export const Filtered = meta.story({
 	},
 });
 
-/** Mark all as read reads every conversation with something unread, and Inbox is caught up. */
+/** Mark all as read reads every conversation with something unread, and Inbox has nothing unread. */
 export const MarkAllAsRead = meta.story({
 	beforeEach({ msw }) {
 		const read = new Set<string>();
@@ -201,12 +201,14 @@ export const MarkAllAsRead = meta.story({
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Mark all as read" }, { timeout: 10_000 }),
 		);
-		await expect(await canvas.findByText("You're all caught up.")).toBeVisible();
+		await expect(
+			await within(canvas.getByRole("region", { name: "Inbox" })).findByText("Nothing unread"),
+		).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Mark all as read" })).toBeNull();
 	},
 });
 
-/** With nothing unread, Inbox says you are caught up. */
+/** With nothing unread, Inbox says so, and offers everything else. */
 export const CaughtUp = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -217,7 +219,9 @@ export const CaughtUp = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText("You're all caught up.", {}, { timeout: 10_000 }),
+			await within(
+				await canvas.findByRole("region", { name: "Inbox" }, { timeout: 10_000 }),
+			).findByText("Nothing unread", {}, { timeout: 10_000 }),
 		).toBeVisible();
 	},
 });
@@ -310,5 +314,15 @@ export const LongFeed = meta.story({
 		).toBeInTheDocument();
 		const page = canvasElement.ownerDocument.documentElement;
 		await expect(page.scrollHeight).toBeLessThanOrEqual(page.clientHeight);
+	},
+});
+
+/** On a phone: Inbox as a tab, titled large, its rows the page, with roomy controls at the top. */
+export const Phone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	play: async ({ canvas }) => {
+		const row = await canvas.findByText(/can you sign off the Acme quote/, {}, { timeout: 10_000 });
+		await expect(row).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Mark all as read" })).toBeVisible();
 	},
 });

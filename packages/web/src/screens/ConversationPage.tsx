@@ -5,7 +5,7 @@ import type { ConversationKind } from "@/lib/chats.ts";
 import { useDetailsOpen } from "@/lib/details-open.ts";
 import { usePresence } from "@/lib/notifications.ts";
 import type { BackTo } from "./ChatHeader.tsx";
-import { ConversationChat, type Staged } from "./ConversationChat.tsx";
+import { ConversationChat, type Staged, type StagedChange } from "./ConversationChat.tsx";
 
 interface ConversationPageProps {
 	/** Which kind of conversation it is, and its bot when it has one. */
@@ -25,7 +25,7 @@ interface ConversationPageProps {
 	onThreadChange: (threadId: string | undefined) => void;
 	/** What is open large beside the chat. */
 	staged?: Staged;
-	onStagedChange: (staged: Staged | undefined) => void;
+	onStagedChange: StagedChange;
 }
 
 export function ConversationPage({ away, ...chat }: ConversationPageProps) {
