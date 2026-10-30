@@ -5,8 +5,8 @@ import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { today } from "@/lib/routine-schedule.ts";
-import { agents, apiAnswers, jye, linear, mount, pods, sam, triager } from "@/test-api.tsx";
+import { formatTime, today } from "@/lib/routine-schedule.ts";
+import { agents, apiAnswers, jye, linear, mount, open, pods, sam, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -107,10 +107,14 @@ function withTrigger(one: WorkspaceRoutine, trigger: TestRoutineTrigger): Worksp
 }
 
 /** Picks the time a schedule's chip, counted from 1, runs at. */
-function pickTime(chip: number, minutesPastMidnight: number) {
-	fireEvent.change(screen.getByRole("combobox", { name: `Time ${chip}` }), {
-		target: { value: String(minutesPastMidnight) },
-	});
+async function pickTime(chip: number, minutesPastMidnight: number) {
+	const trigger = screen.getByRole("combobox", { name: `Time ${chip}` });
+	open(trigger);
+	// A select takes a click on an option only once the pointer went down on it.
+	const option = await screen.findByRole("option", { name: formatTime(minutesPastMidnight) });
+	fireEvent.pointerDown(option, { pointerType: "mouse" });
+	fireEvent.click(option);
+	await waitFor(() => expect(trigger.textContent).toBe(formatTime(minutesPastMidnight)));
 }
 
 describe("the workspace's routines", () => {
@@ -146,7 +150,7 @@ describe("the workspace's routines", () => {
 		const schedule = await addTrigger("Schedule");
 		fireEvent.click(within(schedule).getByRole("radio", { name: "Weekly" }));
 		fireEvent.click(within(schedule).getByRole("checkbox", { name: "Thursday" }));
-		pickTime(1, 10 * 60);
+		await pickTime(1, 10 * 60);
 		expect(
 			within(schedule).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
 		).toBeDefined();
@@ -627,8 +631,8 @@ describe("the workspace's routines", () => {
 		mount(routinePage(morningBrief));
 		const schedule = await openTrigger(/^Weekdays at 8:00/);
 
-		pickTime(1, 8 * 60 + 30);
-		pickTime(1, 9 * 60);
+		await pickTime(1, 8 * 60 + 30);
+		await pickTime(1, 9 * 60);
 		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
 		fireEvent.click(within(schedule).getByRole("button", { name: "Save" }));
 

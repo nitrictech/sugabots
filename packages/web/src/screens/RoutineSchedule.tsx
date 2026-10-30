@@ -1,10 +1,11 @@
+import { Select } from "@base-ui/react/select";
 import {
 	type CalendarSchedule,
 	MAX_EVERY_DAYS,
 	MAX_EVERY_MONTHS,
 	MAX_EVERY_WEEKS,
 } from "@sugabots/contracts";
-import { Minus, Plus, X } from "lucide-react";
+import { Check, Minus, Plus, X } from "lucide-react";
 import type { ReactNode } from "react";
 import {
 	canAddTime,
@@ -182,24 +183,15 @@ function TimesRow({
 							key={index}
 							className="flex items-center rounded-lg bg-chip"
 						>
-							<select
-								aria-label={`Time ${index + 1}`}
+							<TimeSelect
+								label={`Time ${index + 1}`}
 								value={time}
-								onChange={(event) =>
-									onChange(
-										times.map((current, other) =>
-											other === index ? Number(event.target.value) : current,
-										),
-									)
+								options={options}
+								taken={others}
+								onChange={(picked) =>
+									onChange(times.map((current, other) => (other === index ? picked : current)))
 								}
-								className="focus-ring cursor-pointer appearance-none rounded-lg bg-transparent py-1.5 pr-1 pl-3 font-semibold text-[14px] text-foreground tabular-nums"
-							>
-								{options.map((option) => (
-									<option key={option} value={option} disabled={others.includes(option)}>
-										{formatTime(option)}
-									</option>
-								))}
-							</select>
+							/>
 							{times.length > 1 ? (
 								<IconButton label={`Remove ${formatTime(time)}`} onClick={() => onChange(others)}>
 									<X />
@@ -224,6 +216,70 @@ function TimesRow({
 				)}
 			</ul>
 		</div>
+	);
+}
+
+/**
+ * A time chip's picker. Its list opens below the chip and scrolls within a
+ * few rows' height, rather than filling the screen with every half hour as
+ * the system's own select does.
+ */
+function TimeSelect({
+	label,
+	value,
+	options,
+	taken,
+	onChange,
+}: {
+	label: string;
+	value: number;
+	options: readonly number[];
+	/** Times the schedule's other chips hold, shown but not pickable. */
+	taken: readonly number[];
+	onChange: (time: number) => void;
+}) {
+	return (
+		<Select.Root
+			value={value}
+			itemToStringLabel={formatTime}
+			onValueChange={(picked) => {
+				if (picked !== null) onChange(picked);
+			}}
+		>
+			<Select.Trigger
+				aria-label={label}
+				className="focus-ring cursor-pointer rounded-lg py-1.5 pr-1 pl-3 font-semibold text-[14px] text-foreground tabular-nums"
+			>
+				<Select.Value />
+			</Select.Trigger>
+			<Select.Portal>
+				<Select.Positioner
+					className="isolate z-50 outline-none"
+					alignItemWithTrigger={false}
+					align="start"
+					sideOffset={6}
+				>
+					<Select.Popup className="max-h-[min(var(--available-height),16rem)] min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto [scrollbar-gutter:stable] rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0">
+						{options.map((option) => (
+							<Select.Item
+								key={option}
+								value={option}
+								disabled={taken.includes(option)}
+								className="flex min-h-8 cursor-pointer select-none items-center gap-3 rounded-tail py-1.5 pr-2 pl-2.5 text-[14px] tabular-nums outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground"
+							>
+								<Select.ItemText className="flex-1">{formatTime(option)}</Select.ItemText>
+								{/* Holds the tick's room on every row, so the list is as wide with it as without. */}
+								<span className="flex size-4 shrink-0 text-link">
+									<Select.ItemIndicator className="flex">
+										<Check aria-hidden className="size-4" />
+									</Select.ItemIndicator>
+								</span>
+							</Select.Item>
+						))}
+					</Select.Popup>
+				</Select.Positioner>
+			</Select.Portal>
+		</Select.Root>
 	);
 }
 
