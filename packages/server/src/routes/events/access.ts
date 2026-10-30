@@ -1,8 +1,8 @@
 export * as ChannelAccess from "./access.ts";
 
-import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import { type Channel, personChannel, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import { Authorization } from "@sugabots/core/authorization/authorization";
-import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
 import { query, serviceOperations } from "@sugabots/core/database/database";
 import { pod } from "@sugabots/core/database/schema";
@@ -25,6 +25,8 @@ export interface Interface {
 	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
 	workspace(workspaceRef: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	thread(threadId: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
+	/** The current actor's own channel, which nobody else may have. */
+	me(): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	/**
 	 * Whether the current actor reaches the pod `podId`, by `Visibility`'s
 	 * rule, and so may hear what a workspace channel says of its threads.
@@ -56,6 +58,8 @@ export const make = Effect.gen(function* () {
 					onFailure: () => undefined,
 				}),
 			),
+
+		me: () => Effect.map(CurrentActor.Service, ({ userId }) => personChannel(userId)),
 
 		reachesPod: (podId) =>
 			operation(

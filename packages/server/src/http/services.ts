@@ -11,6 +11,7 @@ import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/thread-view";
 import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
+import type { Notifications } from "@sugabots/core/notifications/notifications";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import type { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
@@ -59,6 +60,7 @@ export type HttpServices =
 	| ArtifactPages.Service
 	| ModelTrials.Service
 	| Usage.Service
+	| Notifications.Service
 	| Chats.Service
 	| ChatFiles.Service
 	| ChatView.Service

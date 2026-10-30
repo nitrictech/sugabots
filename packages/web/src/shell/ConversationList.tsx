@@ -4,6 +4,7 @@ import {
 	type ChatListItem,
 	FIRST_CHAT_NAME,
 	type ListedRoutine,
+	type NotificationSettings,
 	type Pod,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -21,7 +22,9 @@ import {
 	routinesLink,
 } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { useNotificationSettings } from "@/lib/notifications.ts";
 import { useOpenBots } from "@/lib/open-bots.ts";
+import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -61,6 +64,7 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
 	const { agents } = useAgents();
+	const { data: notificationSettings } = useNotificationSettings();
 	return (
 		<>
 			<ConversationListView
@@ -77,6 +81,7 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selected={selected}
 				onNewBot={newBot}
+				notificationSettings={notificationSettings}
 			/>
 			<Dialog open={namingChat} onOpenChange={setNamingChat}>
 				<ChatNameDialog
@@ -118,6 +123,7 @@ export function ConversationListView({
 	status,
 	selected,
 	onNewBot,
+	notificationSettings,
 }: {
 	pod: Pod;
 	/**
@@ -137,6 +143,8 @@ export function ConversationListView({
 	selected?: ListSelection;
 	/** Absent when the viewer may not make a bot here. */
 	onNewBot?: () => void;
+	/** What the viewer is notified about, once loaded, which a bot's menu changes. */
+	notificationSettings?: NotificationSettings;
 }) {
 	const [openBots, toggleBot] = useOpenBots(pod.id);
 	const [folded, toggleFolded] = useFolded();
@@ -272,6 +280,7 @@ export function ConversationListView({
 										open={open}
 										onToggle={toggle}
 										isSelected={isSelected}
+										notificationSettings={notificationSettings}
 										routines={
 											group.agent && (
 												<BotRoutines
@@ -533,7 +542,8 @@ const THREADS_BEFORE_SHOW_MORE = 4;
  * channel and, folded, under it; under the pointer, a + that starts a new
  * thread with it. The threads between people,
  * which have no channel, unfold from the whole row, where a caret takes the
- * place of their mark under the pointer or on focus.
+ * place of their mark under the pointer or on focus. Right-clicked, a bot
+ * offers its notifications.
  */
 function BotItem({
 	pod,
@@ -544,6 +554,7 @@ function BotItem({
 	isSelected,
 	routines,
 	routinesNeedYou = false,
+	notificationSettings,
 }: {
 	pod: Pod;
 	group: BotGroup;
@@ -557,6 +568,7 @@ function BotItem({
 	routines?: ReactNode;
 	/** Whether one of its routines' threads mentions the viewer. */
 	routinesNeedYou?: boolean;
+	notificationSettings?: NotificationSettings;
 }) {
 	const { agent, channel } = group;
 	// Unfolded, what is new in the threads shows on their own rows.
@@ -597,66 +609,82 @@ function BotItem({
 		attention || channelOpen
 			? "text-foreground"
 			: "text-muted-foreground group-hover/bot:text-foreground";
+	// Only a pod's own bots have notifications of their own; the rest follow the pod.
+	const notificationPlace = agent?.podId
+		? ({ kind: "bot", id: agent.id, podId: agent.podId } as const)
+		: undefined;
 	const label = (
-		<span className={cn("min-w-0 flex-1 truncate-fade", attention && "font-semibold")}>
-			{agent ? agent.name : "People"}
-		</span>
+		<>
+			<span className={cn("min-w-0 flex-1 truncate-fade", attention && "font-semibold")}>
+				{agent ? agent.name : "People"}
+			</span>
+			{notificationPlace && <MutedMark settings={notificationSettings} place={notificationPlace} />}
+		</>
+	);
+	const row = (
+		<div
+			className={cn(
+				"group/bot flex h-8 items-center rounded-[6px] pr-1.5",
+				channelOpen ? "bg-row-selected" : "hover:bg-row-hover",
+			)}
+		>
+			{agent ? (
+				<Link
+					{...(channel
+						? conversationLink({ pod, conversationId: channel.conversation.id })
+						: agentChatLink({ pod, agent }))}
+					aria-current={channelOpen ? "page" : undefined}
+					className={cn(botClassName, nameClassName)}
+				>
+					{mark}
+					{label}
+				</Link>
+			) : (
+				<button
+					type="button"
+					aria-expanded={open}
+					onClick={onToggle}
+					className={cn(botClassName, nameClassName)}
+				>
+					{markWithCaret}
+					{label}
+				</button>
+			)}
+			{/* What is unread stays in view; the + comes in beside it under the pointer or on focus. */}
+			{attention && (
+				<span className={END_SLOT}>
+					<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
+				</span>
+			)}
+			<span
+				className={cn(
+					"size-[22px] shrink-0 place-items-center",
+					attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
+				)}
+			>
+				<IconButton
+					label={agent ? `New thread with ${agent.name}` : "New thread with people"}
+					size="sm"
+					render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
+					className={cn(
+						"size-[22px]",
+						!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
+					)}
+				>
+					<Plus strokeWidth={2.2} />
+				</IconButton>
+			</span>
+		</div>
 	);
 	return (
 		<li className="flex flex-col">
-			<div
-				className={cn(
-					"group/bot flex h-8 items-center rounded-[6px] pr-1.5",
-					channelOpen ? "bg-row-selected" : "hover:bg-row-hover",
-				)}
-			>
-				{agent ? (
-					<Link
-						{...(channel
-							? conversationLink({ pod, conversationId: channel.conversation.id })
-							: agentChatLink({ pod, agent }))}
-						aria-current={channelOpen ? "page" : undefined}
-						className={cn(botClassName, nameClassName)}
-					>
-						{mark}
-						{label}
-					</Link>
-				) : (
-					<button
-						type="button"
-						aria-expanded={open}
-						onClick={onToggle}
-						className={cn(botClassName, nameClassName)}
-					>
-						{markWithCaret}
-						{label}
-					</button>
-				)}
-				{/* What is unread stays in view; the + comes in beside it under the pointer or on focus. */}
-				{attention && (
-					<span className={END_SLOT}>
-						<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
-					</span>
-				)}
-				<span
-					className={cn(
-						"size-[22px] shrink-0 place-items-center",
-						attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
-					)}
-				>
-					<IconButton
-						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
-						size="sm"
-						render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
-						className={cn(
-							"size-[22px]",
-							!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
-						)}
-					>
-						<Plus strokeWidth={2.2} />
-					</IconButton>
-				</span>
-			</div>
+			{notificationPlace ? (
+				<NotificationsContextMenu settings={notificationSettings} place={notificationPlace}>
+					{row}
+				</NotificationsContextMenu>
+			) : (
+				row
+			)}
 			{open && (group.threads.length > 0 || routines) && (
 				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
 			)}
@@ -770,6 +798,8 @@ function threadRowClassName(selected: boolean): string {
 function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; selected: boolean }) {
 	// Listed while it is the one open, as it is just after it is marked done.
 	const done = row.conversation.doneAt !== null;
+	// In a Personal pod a conversation is with the bot, so goes by its name.
+	const title = pod.kind === "personal" && row.agent ? row.agent.name : row.conversation.title;
 	const needsYou = row.needsApproval || row.mentionsYou;
 	const lit = !done && (row.unreadMessages > 0 || needsYou);
 	return (
@@ -783,7 +813,7 @@ function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; select
 			)}
 		>
 			{done && <Check aria-hidden size={12} strokeWidth={2.25} className="shrink-0" />}
-			<span className="min-w-0 flex-1 truncate-fade">{row.conversation.title}</span>
+			<span className="min-w-0 flex-1 truncate-fade">{title}</span>
 			<span className={END_SLOT}>
 				{!done && <UnreadMarker unreadMessages={row.unreadMessages} needsYou={needsYou} />}
 			</span>

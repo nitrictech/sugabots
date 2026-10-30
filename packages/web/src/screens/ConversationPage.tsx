@@ -3,6 +3,7 @@ import type { Pod, SessionUser } from "@sugabots/contracts";
 import type { ReactNode } from "react";
 import type { ConversationKind } from "@/lib/chats.ts";
 import { useDetailsOpen } from "@/lib/details-open.ts";
+import { usePresence } from "@/lib/notifications.ts";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ConversationChat, type Staged } from "./ConversationChat.tsx";
 
@@ -28,6 +29,7 @@ interface ConversationPageProps {
 }
 
 export function ConversationPage({ away, ...chat }: ConversationPageProps) {
+	usePresence(chat.conversationId);
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"

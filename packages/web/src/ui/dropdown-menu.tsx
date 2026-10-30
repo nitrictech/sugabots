@@ -103,6 +103,17 @@ function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
 	return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
 }
 
+/** A quiet heading over the items of the group or radio group it is in, such as a setting's name over its values. */
+function DropdownMenuGroupLabel({ className, ...props }: MenuPrimitive.GroupLabel.Props) {
+	return (
+		<MenuPrimitive.GroupLabel
+			data-slot="dropdown-menu-group-label"
+			className={cn("px-2.5 pt-2 pb-1 text-[13px] text-muted-foreground", className)}
+			{...props}
+		/>
+	);
+}
+
 /** One of a radio group's items, ticked at its end while it is the chosen one. */
 function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props) {
 	return (
@@ -186,6 +197,7 @@ export {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
+	DropdownMenuGroupLabel,
 	DropdownMenuItem,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,

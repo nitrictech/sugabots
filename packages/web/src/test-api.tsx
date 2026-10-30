@@ -411,6 +411,19 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.chats.activity.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
+	client.api.notifications.reportPresence.mockReturnValue(Effect.succeed(undefined));
+	client.api.notifications.settings.mockReturnValue(
+		Effect.succeed({
+			level: "mentions",
+			pausedUntil: null,
+			quietHours: null,
+			turnFailures: true,
+			routineRuns: "failures",
+			pods: {},
+			bots: {},
+			mutedUntil: { pods: {}, bots: {} },
+		}),
+	);
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
 	client.api.workspaces.members.mockReturnValue(
 		Effect.succeed([

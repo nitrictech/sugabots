@@ -43,6 +43,8 @@ export interface EventsApi {
 	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
 	/** One thread's messages, turns, tool calls and collaborations. */
 	thread(threadId: string, options?: EventStreamOptions): EventStream;
+	/** What is for the signed-in person alone, such as their notifications. */
+	me(options?: EventStreamOptions): EventStream;
 }
 
 export interface EventsApiOptions {
@@ -76,6 +78,7 @@ export function createEventsApi({
 		workspace: (workspaceId, options) =>
 			open(`/workspaces/${encodeURIComponent(workspaceId)}/events`, options),
 		thread: (threadId, options) => open(`/threads/${encodeURIComponent(threadId)}/events`, options),
+		me: (options) => open("/me/events", options),
 	};
 }
 

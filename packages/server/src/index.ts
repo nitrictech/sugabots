@@ -25,6 +25,7 @@ import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
+import { Notifications } from "@sugabots/core/notifications/notifications";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
@@ -88,9 +89,13 @@ const OutsideSystems = Layer.mergeAll(
 	ConnectionTools.layer,
 );
 
-/** Accounts, members, pods, agents, their artifacts and the providers they use, and trying a model. */
+/**
+ * Accounts, members, pods, agents, their artifacts and the providers they
+ * use, trying a model, and notifying people.
+ */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
+	Notifications.layer,
 	Onboarding.layer,
 	PodAdministration.layer,
 	AgentAdministration.layer,
