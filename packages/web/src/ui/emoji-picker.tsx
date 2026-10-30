@@ -111,7 +111,7 @@ const EMOJI_BUTTON = "flex size-8 items-center justify-center rounded-tail text-
  */
 const LIST_PARTS: EmojiPickerListComponents = {
 	CategoryHeader: ({ category, ...props }) => (
-		<div className={cn(CATEGORY_HEADER, "bg-panel")} {...props}>
+		<div className={cn(CATEGORY_HEADER, "emoji-category-header bg-panel")} {...props}>
 			{category.label}
 		</div>
 	),

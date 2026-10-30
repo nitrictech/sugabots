@@ -497,6 +497,28 @@
 	}
 }
 
+/*
+ * A category header in the emoji picker, which sticks at the top of the list
+ * until the next category's pushes it out. Its words clear as it starts to
+ * go, so no half-cut line of them is left under the recent emoji; its
+ * background stays, covering the emoji it scrolls over. Without scroll-driven
+ * animations the animation would run once at once and leave every header
+ * blank, so those browsers keep the plain push.
+ */
+@supports (animation-timeline: view()) {
+	.emoji-category-header {
+		animation: emoji-category-header-leave linear both;
+		animation-timeline: view();
+		animation-range: exit 0% exit 40%;
+	}
+}
+
+@keyframes emoji-category-header-leave {
+	to {
+		color: transparent;
+	}
+}
+
 /* A bot typing, or a collaboration still talking: three dots that rise in turn. */
 .typing-dots {
 	display: inline-flex;
