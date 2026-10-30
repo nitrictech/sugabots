@@ -1,4 +1,5 @@
 import { Sandbox, SandboxApiException } from "@alibaba-group/opensandbox";
+import { SANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { Effect, Redacted, Result } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Ids } from "../../ids/ids.ts";
@@ -18,6 +19,7 @@ describe("OpenSandbox creation failures", () => {
 					baseUrl: "http://localhost:8090",
 					apiKey: Redacted.make("test-key"),
 					image: "example/image:latest",
+					size: SANDBOX_DEFAULT_SIZE,
 					networkMode: "allowlist",
 				},
 				await Effect.runPromise(Ids.make),

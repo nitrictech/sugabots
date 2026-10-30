@@ -133,7 +133,7 @@ export interface E2bConnection {
 	/** The template sandboxes are made from. */
 	readonly template: string;
 	/** What the template is built with, so every sandbox made from it has. */
-	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
+	readonly size: Size;
 	readonly networkMode: SandboxNetworkMode;
 }
 
@@ -144,7 +144,14 @@ export interface OpenSandboxConnection {
 	readonly apiKey: Redacted.Redacted;
 	/** The image sandboxes are made from. */
 	readonly image: string;
+	/** The most each sandbox may use, set when it is made. */
+	readonly size: Size;
 	readonly networkMode: SandboxNetworkMode;
+}
+
+export interface Size {
+	readonly cpuCount: number;
+	readonly memoryGiB: number;
 }
 
 export type SandboxId = Brand.Branded<string, "SandboxId">;
