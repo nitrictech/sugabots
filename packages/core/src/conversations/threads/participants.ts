@@ -1,5 +1,6 @@
 import type {
 	AgentColor,
+	FormAnswer,
 	Message,
 	MessagePart,
 	MessageReaction,
@@ -16,7 +17,7 @@ import { agent, message, user } from "../../database/schema.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
 import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
-import { type StoredForm, toToolCallPart } from "./tool-calls.ts";
+import { toToolCallPart } from "./tool-calls.ts";
 
 /**
  * Turning joined rows into the API's people-and-agents shapes.
@@ -211,15 +212,7 @@ export const messageRelations = {
 		orderBy: { startedAt: "asc", id: "asc" },
 		with: {
 			decidedBy: { columns: { name: true } },
-			form: {
-				columns: { request: true },
-				with: {
-					response: {
-						columns: { answer: true, createdAt: true },
-						with: { responder: { columns: { name: true } } },
-					},
-				},
-			},
+			formAnswer: { columns: { answer: true } },
 		},
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
@@ -238,7 +231,10 @@ export interface MessageWithRelations extends schema.MessageRow {
 	authorUser: PersonIdentity | null;
 	authorAgent: AgentIdentity | null;
 	toolCalls: Array<
-		schema.ToolCallRow & { decidedBy: { name: string } | null; form: StoredForm | null }
+		schema.ToolCallRow & {
+			decidedBy: { name: string } | null;
+			formAnswer: { answer: FormAnswer } | null;
+		}
 	>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	files: AttachedFileRow[];
@@ -261,7 +257,7 @@ export function messageFromRelations(
 		authorRow(stored.authorUser, stored.authorAgent),
 		{
 			toolCalls: stored.toolCalls.map((call) =>
-				toToolCallPart(call, call.decidedBy?.name, call.form),
+				toToolCallPart(call, call.decidedBy?.name, call.formAnswer?.answer),
 			),
 			collaborations: stored.collaborations.map((made) =>
 				toCollaborationPart(made, made.collaborator.name),

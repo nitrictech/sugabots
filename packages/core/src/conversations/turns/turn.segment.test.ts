@@ -11,7 +11,6 @@ import {
 	message,
 	pod,
 	toolCall,
-	toolCallForm,
 	turn,
 	workspace,
 	workspaceMember,
@@ -361,8 +360,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			requestedSchema: {
 				type: "object",
 				properties: {
-					post_keep: { type: "boolean", default: true },
-					post_text: { type: "string", default: "Launch day!" },
+					publish: { type: "boolean", default: true },
+					text: { type: "string", default: "Launch day!" },
 				},
 			},
 		};
@@ -390,18 +389,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["form-approval"] });
 		const [parked] = await onDatabase((db) =>
-			db
-				.select({ call: toolCall, request: toolCallForm.request })
-				.from(toolCall)
-				.innerJoin(toolCallForm, eq(toolCallForm.toolCallId, toolCall.id))
-				.where(eq(toolCall.turnId, prepared.turnId)),
+			db.select().from(toolCall).where(eq(toolCall.turnId, prepared.turnId)),
 		);
-		expect(parked?.call).toMatchObject({
+		expect(parked).toMatchObject({
 			tool: ASK_FORM_TOOL,
 			approvalStatus: "pending",
 			mutating: false,
 		});
-		expect(JSON.stringify(parked?.request)).toBe(JSON.stringify(form));
+		// `jsonb` would put "text" before "publish".
+		expect(parked?.executionInput).toEqual({ input: form, fieldOrder: ["publish", "text"] });
 	});
 
 	describe("saving its own instructions", () => {

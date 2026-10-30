@@ -1,16 +1,16 @@
 import { formContentProblems } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Data, Effect, Option } from "effect";
 import { mayDecideApprovals, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
-import { thread, toolCall, toolCallForm, turn } from "../../database/schema.ts";
+import { thread, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
-import { ASK_FORM_TOOL } from "../tools/ask-form/tool.ts";
+import { ASK_FORM_TOOL, readStoredFormInput } from "../tools/ask-form/tool.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -134,18 +134,17 @@ export const makeControls = Effect.gen(function* () {
 							db
 								.select({
 									call: toolCall,
-									request: toolCallForm.request,
 									threadId: thread.id,
 									owner: turn.owner,
 									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 								})
 								.from(toolCall)
-								.innerJoin(toolCallForm, eq(toolCallForm.toolCallId, toolCall.id))
 								.innerJoin(turn, eq(turn.id, toolCall.turnId))
 								.innerJoin(thread, eq(thread.id, toolCall.threadId))
 								.where(
 									and(
 										eq(toolCall.id, input.toolCallId),
+										eq(toolCall.tool, ASK_FORM_TOOL),
 										eq(thread.workspaceId, pod.workspaceId),
 										eq(thread.podId, pod.id),
 									),
@@ -154,7 +153,8 @@ export const makeControls = Effect.gen(function* () {
 								// The call alone: the turn is locked by whoever transitions it.
 								.for("update", { of: toolCall }),
 						);
-						if (!candidate?.call.approvalId || !candidate.owner) {
+						const form = Option.getOrUndefined(readStoredFormInput(candidate?.call.executionInput));
+						if (!candidate?.call.approvalId || !candidate.owner || !form) {
 							return yield* new ToolApprovalNotFound();
 						}
 						// Anyone taking part in the thread may answer, so seeing it is enough.
@@ -163,7 +163,7 @@ export const makeControls = Effect.gen(function* () {
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
 						if (
 							input.answer.action === "accept" &&
-							Object.keys(formContentProblems(candidate.request, input.answer.content)).length > 0
+							Object.keys(formContentProblems(form.input, input.answer.content)).length > 0
 						) {
 							return yield* new FormAnswerInvalid();
 						}

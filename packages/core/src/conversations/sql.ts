@@ -1,7 +1,6 @@
 import type {
 	CollaborationStatus,
 	FormAnswer,
-	FormRequest,
 	JsonValue,
 	MessageStatus,
 	RoutineExecutionState,
@@ -26,7 +25,6 @@ import {
 	foreignKey,
 	index,
 	integer,
-	json,
 	jsonb,
 	pgTable,
 	text,
@@ -647,36 +645,16 @@ export const toolCall = pgTable(
 export type ToolCallRow = typeof toolCall.$inferSelect;
 
 /**
- * A form an agent asked people in its thread to fill in, by its call to
- * `ask_form`. `request` is `json` rather than `jsonb` because `jsonb`
- * reorders an object's keys, and people see the fields in the order the agent
- * wrote them.
+ * Someone's answer to a form an agent asked for by calling `ask_form`, or
+ * their declining it, kept for the call to read when its turn resumes. The
+ * form is the call's input; who answered, and when, is the call's decision.
  */
-export const toolCallForm = pgTable("tool_call_form", {
+export const toolCallFormAnswer = pgTable("tool_call_form_answer", {
 	toolCallId: uuid("tool_call_id")
 		.primaryKey()
 		.references(() => toolCall.id, { onDelete: "cascade" }),
-	request: json("request").$type<FormRequest>().notNull(),
-	createdAt: stamp("created_at"),
+	answer: jsonb("answer").$type<FormAnswer>().notNull(),
 });
-
-/**
- * Someone's answer to a form, or their declining it. A form takes one: the
- * first recorded stands, as the call's approval decision does.
- */
-export const toolCallFormResponse = pgTable(
-	"tool_call_form_response",
-	{
-		id: primaryKey(),
-		toolCallId: uuid("tool_call_id")
-			.notNull()
-			.references(() => toolCallForm.toolCallId, { onDelete: "cascade" }),
-		responderId: uuid("responder_id").references(() => user.id, { onDelete: "set null" }),
-		answer: jsonb("answer").$type<FormAnswer>().notNull(),
-		createdAt: stamp("created_at"),
-	},
-	(table) => [uniqueIndex("tool_call_form_response_form_idx").on(table.toolCallId)],
-);
 
 /**
  * Where a thread's file came from: a tool's result too large to hand a model

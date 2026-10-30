@@ -4,9 +4,10 @@ import {
 	type FormRequest,
 	formRequestProblems,
 	formRequestSchema,
+	type JsonValue,
 } from "@sugabots/contracts";
 import { tool } from "ai";
-import { type Effect, Schema } from "effect";
+import { type Effect, Option, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 
 export const ASK_FORM_TOOL = "ask_form" satisfies BuiltInToolKey;
@@ -72,6 +73,35 @@ export function askFormTool({
 		},
 	});
 }
+
+/**
+ * How a form call's complete input is kept in `tool_call.execution_input`:
+ * the input as the agent sent it, and its fields' names in the order the agent
+ * wrote them, which is the order people see them in. `jsonb` sorts an
+ * object's keys, so the order is kept beside the input.
+ */
+export type StoredFormInput = {
+	input: JsonValue;
+	fieldOrder: string[];
+};
+
+/**
+ * A form call's input as it is stored, read while its keys are still in the
+ * order the agent wrote them; the input unchanged when it is not a form.
+ */
+export function storedFormInput(input: JsonValue): StoredFormInput | JsonValue {
+	return Option.match(decodeForm(input), {
+		onNone: () => input,
+		onSome: (request) => ({ input, fieldOrder: Object.keys(request.requestedSchema.properties) }),
+	});
+}
+
+const decodeForm = Schema.decodeUnknownOption(formRequestSchema);
+
+/** The form a stored form call asked for, and its fields' order; none for anything else. */
+export const readStoredFormInput = Schema.decodeUnknownOption(
+	Schema.Struct({ input: formRequestSchema, fieldOrder: Schema.Array(Schema.String) }),
+);
 
 /** Why a call cannot be put to anyone, which then runs at once; none when it waits for an answer. */
 export function whyNotShown(askedBy: string | null, request: FormRequest): string | undefined {

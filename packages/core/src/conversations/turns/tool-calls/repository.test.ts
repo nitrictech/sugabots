@@ -585,7 +585,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 					input: request,
 					binding: { kind: "built-in" },
 					mutating: false,
-					form: request,
 				});
 			const answered: FormAnswer = {
 				action: "accept",
@@ -609,11 +608,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 				const form = await shownForm();
 
-				expect(Object.keys(form?.request.requestedSchema.properties ?? {})).toEqual([
-					"post_1_keep",
-					"post_1_text",
-					"audience",
-				]);
+				// `jsonb`, which keeps the input, would put "audience" first.
+				expect(form?.fieldOrder).toEqual(["post_1_keep", "post_1_text", "audience"]);
 				expect(form?.response).toBeNull();
 			});
 
