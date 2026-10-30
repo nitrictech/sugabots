@@ -150,6 +150,11 @@ describe.skipIf(!process.env.DATABASE_URL)("list_threads and read_thread, agains
 			title: "Threads pod",
 			updatedAt: minutesAgo(1),
 		});
+		const channel = await createThread({
+			type: "bot_channel",
+			title: "Helper",
+			updatedAt: minutesAgo(5),
+		});
 		const done = await createThread({
 			title: "Old budget",
 			doneAt: new Date(),
@@ -170,6 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)("list_threads and read_thread, agains
 		expect(listed).toEqual({
 			threads: [
 				expect.objectContaining({ id: chat, kind: "pod chat", title: "Threads pod", done: false }),
+				expect.objectContaining({ id: channel, kind: "channel", bot: "Helper" }),
 				expect.objectContaining({ id: launch, kind: "thread", bot: "Helper", done: false }),
 				expect.objectContaining({ id: done, title: "Old budget", done: true }),
 			],

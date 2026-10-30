@@ -1,4 +1,4 @@
-import { isoTimestampSchema } from "@sugabots/contracts";
+import { isoTimestampSchema, type ThreadType } from "@sugabots/contracts";
 import { tool } from "ai";
 import { and, desc, eq, gte, ilike, inArray, isNull, lt, ne, type SQL } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
@@ -38,7 +38,21 @@ const MAX_READ_MESSAGES = 20;
 const MAX_READ_CHARACTERS = 40_000;
 
 /** What a thread is, as the bot is told: what people see it as in the pod. */
-type ThreadKind = "thread" | "pod chat" | "routine";
+type ThreadKind = "thread" | "channel" | "pod chat" | "routine";
+
+/** What a thread of `type` is listed as; anything else readable is a thread. */
+function kindOf(type: ThreadType): ThreadKind {
+	switch (type) {
+		case "pod_chat":
+			return "pod chat";
+		case "bot_channel":
+			return "channel";
+		case "routine_feed":
+			return "routine";
+		default:
+			return "thread";
+	}
+}
 
 export interface ListedThread {
 	id: string;
@@ -94,7 +108,7 @@ export function podThreadTools({
 	const readable: ReadableThreads = { podId, except: threadId };
 	return {
 		[LIST_THREADS_TOOL]: tool({
-			description: `List the other threads in this pod: threads with bots or between people, pod chats, and routines' threads, most recently active first, up to ${MAX_LISTED_THREADS}. Each comes with its id, title, the bot it is with, when it was last active, and whether it is done. Give \`title\` to find threads with all of some words in their title. Read one with ${READ_THREAD_TOOL}.`,
+			description: `List the other threads in this pod: threads with bots or between people, bots' channels, pod chats, and routines' threads, most recently active first, up to ${MAX_LISTED_THREADS}. Each comes with its id, title, the bot it is with, when it was last active, and whether it is done. Give \`title\` to find threads with all of some words in their title. Read one with ${READ_THREAD_TOOL}.`,
 			inputSchema: Schema.Struct({
 				title: Schema.optional(
 					Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
@@ -213,8 +227,7 @@ const listThreads = Effect.fn("PodThreads.listThreads")(function* (
 		threads: rows.slice(0, MAX_LISTED_THREADS).map(
 			(row): ListedThread => ({
 				id: row.id,
-				kind:
-					row.type === "pod_chat" ? "pod chat" : row.type === "routine_feed" ? "routine" : "thread",
+				kind: kindOf(row.type),
 				title: row.title,
 				...(row.bot ? { bot: row.bot } : {}),
 				lastActiveAt: formatHistoryTime(row.updatedAt),

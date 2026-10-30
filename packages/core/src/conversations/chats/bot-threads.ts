@@ -25,7 +25,8 @@ export interface Interface {
 	readonly start: (bot: Bot, input: NewThread) => Effect.Effect<StartedThread, Refused>;
 	/**
 	 * Marks the thread `conversationId` done. It stays done until somebody
-	 * posts in it. A pod's chat and a routine's thread are never done.
+	 * posts in it. A bot's channel, a pod's chat and a routine's thread are
+	 * never done.
 	 */
 	readonly markDone: (bot: Bot, conversationId: string) => Effect.Effect<void, Refused>;
 }
@@ -156,6 +157,6 @@ export class BotNotInPod extends Data.TaggedError("BotNotInPod") implements User
 
 export class NotAThread extends Data.TaggedError("NotAThread") implements UserFacing {
 	get userMessage() {
-		return userText`Only a thread can be marked done, not a pod's chat, a routine's thread or a collaboration.`;
+		return userText`Only a thread can be marked done, not a bot's channel, a pod's chat, a routine's thread or a collaboration.`;
 	}
 }
