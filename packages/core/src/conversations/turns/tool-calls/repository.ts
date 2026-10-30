@@ -1,7 +1,7 @@
 export * as ToolCallRepository from "./repository.ts";
 
 import { isDeepStrictEqual } from "node:util";
-import type { FormAnswer, FormRequest, JsonValue, ToolCallPart } from "@sugabots/contracts";
+import type { FormAnswer, JsonValue, ToolCallPart } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
@@ -18,15 +18,14 @@ import {
 	type ToolCallRow,
 	thread,
 	toolCall,
-	toolCallForm,
-	toolCallFormResponse,
+	toolCallFormAnswer,
 	turn,
 	user,
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
-import { loadStoredForm, toToolCallPart } from "../../threads/tool-calls.ts";
-import { ASK_FORM_TOOL, type FormAnswers } from "../../tools/ask-form/tool.ts";
+import { loadFormAnswer, toToolCallPart } from "../../threads/tool-calls.ts";
+import { ASK_FORM_TOOL, type FormAnswers, storedFormInput } from "../../tools/ask-form/tool.ts";
 import { withImagesCounted } from "../../tools/images.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
@@ -271,7 +270,7 @@ export const make = Effect.gen(function* () {
 										approvalReason: approval.reason ?? null,
 										...bindingColumns(approval.binding),
 										input: boundedJson(approval.input),
-										executionInput: executionJson(approval.input),
+										executionInput: storedExecutionInput(approval.tool, approval.input),
 										status: "awaiting_approval" as const,
 										mutating: approval.mutating,
 										atOffset: approval.atOffset,
@@ -279,12 +278,6 @@ export const make = Effect.gen(function* () {
 								)
 								.returning(),
 						);
-						const forms = approvals.flatMap((approval) =>
-							approval.form ? [{ toolCallId: approval.id, request: approval.form }] : [],
-						);
-						if (forms.length > 0) {
-							yield* query((db) => db.insert(toolCallForm).values(forms));
-						}
 						// In the order the reply asked for them, which is how the thread lists them.
 						const byId = new Map(rows.map((row) => [row.id, row]));
 						const changes = yield* Effect.forEach(
@@ -327,11 +320,7 @@ export const make = Effect.gen(function* () {
 						if (!decided) return false;
 						// The call is locked and was undecided until now, so it has no answer yet.
 						yield* query((db) =>
-							db.insert(toolCallFormResponse).values({
-								toolCallId: row.id,
-								responderId: input.userId,
-								answer: input.answer,
-							}),
+							db.insert(toolCallFormAnswer).values({ toolCallId: row.id, answer: input.answer }),
 						);
 						yield* emitDecided(decided, input.userId);
 						return true;
@@ -345,10 +334,10 @@ export const make = Effect.gen(function* () {
 				Effect.map(
 					query((db) =>
 						db
-							.select({ answer: toolCallFormResponse.answer, answeredByName: user.name })
+							.select({ answer: toolCallFormAnswer.answer, answeredByName: user.name })
 							.from(toolCall)
-							.innerJoin(toolCallFormResponse, eq(toolCallFormResponse.toolCallId, toolCall.id))
-							.leftJoin(user, eq(user.id, toolCallFormResponse.responderId))
+							.innerJoin(toolCallFormAnswer, eq(toolCallFormAnswer.toolCallId, toolCall.id))
+							.leftJoin(user, eq(user.id, toolCall.decidedById))
 							.where(
 								and(
 									eq(toolCall.turnId, call.turnId),
@@ -526,8 +515,6 @@ export interface PendingToolApproval {
 	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
 	mutating: boolean;
 	atOffset: number;
-	/** The form the call asks people to fill in, for a call to `ask_form`, which answering it decides. */
-	form?: FormRequest;
 }
 
 /** A started call, or why it may not start; `reason` is for the logs. */
@@ -553,9 +540,13 @@ export function boundedJson(value: unknown): JsonValue {
 	};
 }
 
-/** The complete input, as JSON keeps it, for running the call exactly as it was approved. */
-function executionJson(value: unknown): JsonValue {
-	return JSON.parse(JSON.stringify(value ?? null));
+/**
+ * The complete input, as JSON keeps it, for running the call exactly as it
+ * was approved; a form's with its fields' order, which `jsonb` would lose.
+ */
+function storedExecutionInput(tool: string, input: unknown): JsonValue {
+	const json: JsonValue = JSON.parse(JSON.stringify(input ?? null));
+	return tool === ASK_FORM_TOOL ? storedFormInput(json) : json;
 }
 
 const lockedCall = (condition: SQL | undefined) =>
@@ -595,7 +586,7 @@ function sameCallAsApproved(
 			},
 			bindingColumns(input.binding),
 		) &&
-		isDeepStrictEqual(row.executionInput, executionJson(input.input))
+		isDeepStrictEqual(row.executionInput, storedExecutionInput(input.tool, input.input))
 	);
 }
 
@@ -610,15 +601,16 @@ function bindingColumns(binding: ApprovalBinding) {
 		: { connectionId: null, connectionRevision: null, remoteToolName: null };
 }
 
-/** The call as an event carries it once it has changed, with the form it asked people to fill in. */
+/** The call as an event carries it once it has changed, with the answer to the form it asked for. */
 const toolCallChange = Effect.fn("ToolCallRepository.toolCallChange")(function* (
 	row: ToolCallRow,
 	decidedByName: string | null = null,
 ) {
-	const form = row.tool === ASK_FORM_TOOL ? yield* query((db) => loadStoredForm(db, row.id)) : null;
+	const formAnswer =
+		row.tool === ASK_FORM_TOOL ? yield* query((db) => loadFormAnswer(db, row.id)) : null;
 	return {
 		threadId: row.threadId,
 		messageId: row.messageId,
-		toolCall: toToolCallPart(row, decidedByName, form),
+		toolCall: toToolCallPart(row, decidedByName, formAnswer),
 	} satisfies ToolCallChange;
 });

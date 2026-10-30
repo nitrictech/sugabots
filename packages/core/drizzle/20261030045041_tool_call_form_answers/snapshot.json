@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "81c71a5a-9331-4a10-bade-9fdecb13ddaf",
+  "id": "20c4f603-7df1-4d04-b4ff-02a3116f9bb5",
   "prevIds": [
     "3f69a137-b4d2-45bb-9479-d4df358cc1c4"
   ],
@@ -116,13 +116,7 @@
     },
     {
       "isRlsEnabled": false,
-      "name": "tool_call_form",
-      "entityType": "tables",
-      "schema": "public"
-    },
-    {
-      "isRlsEnabled": false,
-      "name": "tool_call_form_response",
+      "name": "tool_call_form_answer",
       "entityType": "tables",
       "schema": "public"
     },
@@ -2850,72 +2844,7 @@
       "name": "tool_call_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "tool_call_form"
-    },
-    {
-      "type": "json",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "request",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form"
-    },
-    {
-      "type": "timestamp with time zone",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "now()",
-      "generated": null,
-      "identity": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "uuidv7()",
-      "generated": null,
-      "identity": null,
-      "name": "id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form_response"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "tool_call_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form_response"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "responder_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form_response"
+      "table": "tool_call_form_answer"
     },
     {
       "type": "jsonb",
@@ -2928,20 +2857,7 @@
       "name": "answer",
       "entityType": "columns",
       "schema": "public",
-      "table": "tool_call_form_response"
-    },
-    {
-      "type": "timestamp with time zone",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "now()",
-      "generated": null,
-      "identity": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_call_form_response"
+      "table": "tool_call_form_answer"
     },
     {
       "type": "uuid",
@@ -7195,27 +7111,6 @@
       "nameExplicit": true,
       "columns": [
         {
-          "value": "tool_call_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "with": "",
-      "method": "btree",
-      "concurrently": false,
-      "name": "tool_call_form_response_form_idx",
-      "entityType": "indexes",
-      "schema": "public",
-      "table": "tool_call_form_response"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        {
           "value": "thread_id",
           "isExpression": false,
           "asc": true,
@@ -9409,44 +9304,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "tool_call_form_tool_call_id_tool_call_id_fkey",
+      "name": "tool_call_form_answer_tool_call_id_tool_call_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "tool_call_form"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
-        "tool_call_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "tool_call_form",
-      "columnsTo": [
-        "tool_call_id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_call_form_response_YXXoQW5UmNp1_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_call_form_response"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
-        "responder_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "user",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "SET NULL",
-      "name": "tool_call_form_response_responder_id_user_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_call_form_response"
+      "table": "tool_call_form_answer"
     },
     {
       "nameExplicit": false,
@@ -10444,19 +10305,9 @@
         "tool_call_id"
       ],
       "nameExplicit": false,
-      "name": "tool_call_form_pkey",
+      "name": "tool_call_form_answer_pkey",
       "schema": "public",
-      "table": "tool_call_form",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "id"
-      ],
-      "nameExplicit": false,
-      "name": "tool_call_form_response_pkey",
-      "schema": "public",
-      "table": "tool_call_form_response",
+      "table": "tool_call_form_answer",
       "entityType": "pks"
     },
     {

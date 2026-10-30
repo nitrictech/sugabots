@@ -609,22 +609,20 @@ const streamReply = (
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
 					const target = findApprovalTarget(connections.tools, request.toolCall);
-					const form =
-						request.toolCall.toolName === ASK_FORM_TOOL
-							? Option.getOrUndefined(decodeForm(request.toolCall.input))
-							: undefined;
+					const asksForm =
+						request.toolCall.toolName === ASK_FORM_TOOL &&
+						Option.isSome(decodeForm(request.toolCall.input));
 					const asked:
 						| Pick<
 								ToolCallRepository.PendingToolApproval,
-								"tool" | "input" | "binding" | "mutating" | "form"
+								"tool" | "input" | "binding" | "mutating"
 						  >
-						| undefined = form
+						| undefined = asksForm
 						? {
 								tool: ASK_FORM_TOOL,
 								input: request.toolCall.input,
 								binding: { kind: "built-in" },
 								mutating: false,
-								form,
 							}
 						: sandbox.requests[request.toolCall.toolName]
 							? {
