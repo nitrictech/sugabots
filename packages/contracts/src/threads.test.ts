@@ -1,5 +1,5 @@
+import { loadEmojiDataset } from "@sugabots/emoji";
 import { Result, Schema, SchemaIssue } from "effect";
-import emojibase from "emojibase-data/en/data.json" with { type: "json" };
 import { describe, expect, it } from "vitest";
 import { testPerson } from "./testing.ts";
 import {
@@ -277,10 +277,12 @@ describe("reactionEmojiSchema", () => {
 		}
 	});
 
-	it("takes every emoji the picker offers, in every skin tone", () => {
-		const offered = emojibase.flatMap(({ emoji, skins }) => [
+	it("takes every emoji the app offers, in every skin tone", async () => {
+		const { emojis } = await loadEmojiDataset();
+		const offered = emojis.flatMap(({ emoji, skins, aliases }) => [
 			emoji,
-			...(skins ?? []).map((skin) => skin.emoji),
+			...Object.values(skins ?? {}),
+			...(aliases ?? []),
 		]);
 		const refused = offered.filter((emoji) =>
 			Result.isFailure(Schema.decodeUnknownResult(reactionEmojiSchema)(emoji)),

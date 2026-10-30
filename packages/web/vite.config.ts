@@ -1,11 +1,9 @@
-import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, normalizePath, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
-import { EMOJI_DATA_PATH, EMOJI_LOCALE, EMOJI_SHORTCODES } from "./src/lib/emoji-data.ts";
 
 export default defineConfig({
 	plugins: [
@@ -22,17 +20,6 @@ export default defineConfig({
 					rename: { stripBase: true, name: "favicon.svg" },
 				},
 				{ src: avatarsAsset("app-icons/*"), dest: ".", rename: { stripBase: true } },
-				// The emoji picker's names and categories, served by the app rather than fetched from a CDN.
-				{
-					src: emojiDataFiles(),
-					dest: `${EMOJI_DATA_PATH.slice(1)}/${EMOJI_LOCALE}`,
-					rename: { stripBase: true },
-				},
-				{
-					src: emojiDataFile(EMOJI_SHORTCODES),
-					dest: `${EMOJI_DATA_PATH.slice(1)}/${EMOJI_LOCALE}/${dirname(EMOJI_SHORTCODES)}`,
-					rename: { stripBase: true },
-				},
 			],
 		}),
 	],
@@ -105,16 +92,4 @@ function preloadMe(): Plugin {
  */
 function avatarsAsset(exportPath: string): string {
 	return normalizePath(fileURLToPath(import.meta.resolve(`@sugabots/avatars/${exportPath}`)));
-}
-
-/** The Emojibase files the emoji picker loads for its one locale. */
-function emojiDataFiles(): string[] {
-	return ["data.json", "messages.json"].map(emojiDataFile);
-}
-
-/** An Emojibase file of the one locale, as a path the copy plugin's globbing accepts. */
-function emojiDataFile(file: string): string {
-	return normalizePath(
-		fileURLToPath(import.meta.resolve(`emojibase-data/${EMOJI_LOCALE}/${file}`)),
-	);
 }

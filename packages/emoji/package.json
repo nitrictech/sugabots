@@ -1,0 +1,18 @@
+{
+	"name": "@sugabots/emoji",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./emoji.json": "./src/emoji.json"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"generate": "node scripts/generate.ts"
+	},
+	"devDependencies": {
+		"emojibase-data": "^17.0.0"
+	}
+}

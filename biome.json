@@ -14,7 +14,8 @@
 			"!docker/sandbox/theme",
 			"!packages/core/drizzle",
 			"!packages/web/.storybook/public/mockServiceWorker.js",
-			"!packages/website/src/routeTree.gen.ts"
+			"!packages/website/src/routeTree.gen.ts",
+			"!packages/emoji/src/emoji.json"
 		]
 	},
 	"formatter": {

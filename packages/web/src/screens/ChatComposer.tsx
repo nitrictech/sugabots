@@ -6,6 +6,7 @@ import {
 	messageAuthorName,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
+import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
 import { AtSign, Paperclip, Send, Smile, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -15,12 +16,8 @@ import {
 	canSend,
 	sendReadiness,
 } from "@/lib/composer-attachments.ts";
-import {
-	emojiNamed,
-	findEmoji,
-	type ShortcodeEmoji,
-	useShortcodeEmoji,
-} from "@/lib/emoji-shortcodes.ts";
+import { useAvailableEmoji } from "@/lib/emoji.ts";
+import { rememberEmoji } from "@/lib/recent-emoji.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { EmojiPicker } from "@/ui/emoji-picker.tsx";
@@ -45,7 +42,8 @@ const toolButtonClassName =
  * Typing `:` and two letters of a shortcode, as in `:th`, offers the emoji it
  * names, and a shortcode closed with its colon, as `:thinking:`, becomes its
  * emoji. The smile opens a picker of every emoji and puts the one chosen at
- * the cursor. With `replyingTo`, a strip
+ * the cursor. Either way it counts as a recent emoji in the picker; the emoji
+ * load as the composer appears, so both have them at once. With `replyingTo`, a strip
  * over the draft names the message it answers; its × or Escape stops replying.
  */
 export function ChatComposer({
@@ -96,14 +94,14 @@ export function ChatComposer({
 	/** Where the `@` or `:` of the menu that was closed is, so only that one stays closed. */
 	const [dismissedMenuAt, setDismissedMenuAt] = useState<number>();
 	const shortcodeTyped = shortcodeBeingTyped(value, cursor);
-	const shortcodeEmoji = useShortcodeEmoji(shortcodeTyped !== undefined);
+	const availableEmoji = useAvailableEmoji()?.emojis;
 	const mentionTyped = mentionBeingTyped(value, cursor);
 	const menu = openMenu(
-		shortcodeTyped && shortcodeEmoji
+		shortcodeTyped && availableEmoji
 			? {
 					kind: "emoji",
 					typed: shortcodeTyped,
-					matches: findEmoji(shortcodeEmoji, shortcodeTyped.query),
+					matches: findByShortcode(availableEmoji, shortcodeTyped.query),
 				}
 			: mentionTyped && {
 					kind: "mention",
@@ -159,7 +157,9 @@ export function ChatComposer({
 			return;
 		}
 		const emoji = open.matches[index];
-		if (emoji) replaceTyped(open.typed, emoji.emoji);
+		if (!emoji) return;
+		replaceTyped(open.typed, emoji.emoji);
+		rememberEmoji(emoji.emoji);
 	}
 
 	/** Writes `text` over the `@` or `:` and what follows it, then one space: the one already there, or a new one. */
@@ -180,9 +180,10 @@ export function ChatComposer({
 	 */
 	function completeShortcode(next: string, caret: number): boolean {
 		const closed = shortcodeClosed(next, caret);
-		const named = closed && shortcodeEmoji && emojiNamed(shortcodeEmoji, closed.shortcode);
+		const named = closed && availableEmoji && emojiNamed(availableEmoji, closed.shortcode);
 		if (!closed || !named) return false;
 		editor.current?.replace(closed, named.emoji);
+		rememberEmoji(named.emoji);
 		return true;
 	}
 
@@ -467,7 +468,7 @@ interface TypedRange {
 /** What the menu over the draft offers for what is being typed. */
 type SuggestionMenu =
 	| { kind: "mention"; typed: TypedRange; matches: readonly ThreadParticipant[] }
-	| { kind: "emoji"; typed: TypedRange; matches: readonly ShortcodeEmoji[] };
+	| { kind: "emoji"; typed: TypedRange; matches: readonly Emoji[] };
 
 /** The menu, unless it has nothing to offer or was closed where it was typed. */
 function openMenu(
@@ -564,7 +565,7 @@ function MentionOption({ participant }: { participant: ThreadParticipant }) {
 	);
 }
 
-function EmojiOption({ emoji }: { emoji: ShortcodeEmoji }) {
+function EmojiOption({ emoji }: { emoji: Emoji }) {
 	return (
 		<>
 			<span aria-hidden className="grid size-[26px] place-items-center text-[20px] leading-none">

@@ -5,14 +5,15 @@ import {
 	useEmojiDetails,
 } from "frimousse";
 import { Suspense, useState } from "react";
-import { EMOJI_DATA_PATH, EMOJI_LOCALE } from "@/lib/emoji-data.ts";
+import { resolveEmojiData } from "@/lib/emoji.ts";
 import { useRecentEmoji } from "@/lib/recent-emoji.ts";
 
 /*
  * A searchable grid of every emoji, by category, with a skin tone to pick
  * them in, and over it a row of the ones last chosen in this browser. The
- * names and categories come from the app's own copy of Emojibase, so opening
- * it reaches no other site. Typing filters the grid and hides the recent row,
+ * emoji are the app's own, built with it, so opening it reaches no other
+ * site, and once they have loaded for the page it opens with them at once.
+ * Typing filters the grid, by name or shortcode, and hides the recent row,
  * the arrow keys move through the grid, and Enter chooses.
  */
 
@@ -27,16 +28,14 @@ export function EmojiPicker({
 	className?: string;
 }) {
 	const [search, setSearch] = useState("");
-	// One row's worth.
-	const [recent, remember] = useRecentEmoji(COLUMNS);
+	const [recent, remember] = useRecentEmoji();
 	function choose(emoji: string) {
 		remember(emoji);
 		onSelect(emoji);
 	}
 	return (
 		<EmojiPickerPrimitive.Root
-			locale={EMOJI_LOCALE}
-			emojibaseUrl={EMOJI_DATA_PATH}
+			resolveEmojiData={resolveEmojiData}
 			columns={COLUMNS}
 			onEmojiSelect={({ emoji }) => choose(emoji)}
 			className={cn("isolate flex h-[332px] w-[332px] max-w-full flex-col", className)}
@@ -128,7 +127,7 @@ const LIST_PARTS: EmojiPickerListComponents = {
 	),
 };
 
-const DATA_OPTIONS = { locale: EMOJI_LOCALE, emojibaseUrl: EMOJI_DATA_PATH };
+const DATA_OPTIONS = { resolveEmojiData };
 
 /** A recent emoji named as the picker names it, as in "Party popper", once its names have loaded. */
 function NamedRecentEmoji({
