@@ -23639,6 +23639,30 @@
 									}
 								]
 							},
+							"cpuCount": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 64
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"memoryGiB": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 64
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"networkMode": {
 								"anyOf": [
 									{
