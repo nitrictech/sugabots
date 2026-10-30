@@ -65,7 +65,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("startThread", ({ params, payload }) =>
 				chats
 					.startThread({
-						podChatId: params.conversationId,
+						conversationId: params.conversationId,
 						messageId: payload.id,
 						content: payload.message,
 						attachments: payload.attachments,

@@ -2,7 +2,12 @@ import type { AgentParticipant, Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useAgents, useModelName } from "@/lib/agents.ts";
-import { THREAD_NOT_STARTED, useOpenPodChat, useThreadStarter } from "@/lib/chats.ts";
+import {
+	THREAD_NOT_STARTED,
+	useOpenBotChannel,
+	useOpenPodChat,
+	useThreadStarter,
+} from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { useThread } from "@/lib/threads.ts";
@@ -17,7 +22,8 @@ import { firstBotNamed, mentionableIn } from "./mentions.tsx";
  * asks what the bot should work on, in the middle of the page, and the thread
  * is with that bot whatever the message says. Otherwise it is with the bot the
  * message names, which a chip puts in it, or between people when it names
- * none. Sending starts the thread and opens it.
+ * none. Sending starts the thread and opens it. A Personal pod has no chat,
+ * so there the thread starts from the bot's channel instead.
  */
 export function NewThread({
 	pod,
@@ -28,19 +34,22 @@ export function NewThread({
 	userId: string;
 	agentHandle?: string;
 }) {
-	const podChat = useOpenPodChat(pod);
-	const details = useThread(podChat.data?.id).data;
-	// Files are uploaded to the pod's chat, and move to the thread when it starts.
-	const attachments = useComposerAttachments(podChat.data?.id);
-	const threads = useThreadStarter(podChat.data?.id, attachments);
-	const navigate = useNavigate();
-	const [draft, setDraft] = useState("");
-	const [failed, setFailed] = useState(false);
 	// The bot it was opened from, from the roster the sidebar has already loaded.
 	const { agents } = useAgents();
 	const chosen = agentHandle
 		? agents?.find((agent) => agent.podId === pod.id && agent.handle === agentHandle)
 		: undefined;
+	const personal = pod.kind === "personal";
+	const podChat = useOpenPodChat(pod);
+	const botChannel = useOpenBotChannel(pod, personal ? chosen?.id : undefined);
+	const startsFrom = personal ? botChannel : podChat;
+	const details = useThread(startsFrom.data?.id).data;
+	// Files are uploaded to where the thread starts from, and move to the thread when it starts.
+	const attachments = useComposerAttachments(startsFrom.data?.id);
+	const threads = useThreadStarter(startsFrom.data?.id, attachments);
+	const navigate = useNavigate();
+	const [draft, setDraft] = useState("");
+	const [failed, setFailed] = useState(false);
 	const threadWith = chosen ?? (details ? firstBotNamed(draft, details.crew) : undefined);
 	// The model that answers: the chosen bot's, or the named one's, from the roster.
 	const threadWithModel = useModelName(
@@ -54,7 +63,7 @@ export function NewThread({
 		</div>
 	);
 
-	if (podChat.isError) {
+	if (startsFrom.isError) {
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
 				{header}

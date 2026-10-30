@@ -54,7 +54,7 @@ describe("starting a thread from a pod's chat", () => {
 		);
 
 		expect(asked).toMatchObject({
-			podChatId: CHAT,
+			conversationId: CHAT,
 			messageId: MESSAGE,
 			hostAgentId: BOT,
 			replyTo: QUOTED,

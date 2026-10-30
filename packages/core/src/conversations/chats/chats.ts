@@ -106,20 +106,23 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Posts the actor's message in the pod's chat `podChatId` and starts a
-	 * thread from it: with the bot `hostAgentId`, which is given the floor and
-	 * answers in the thread, or between people when it is absent. The thread
-	 * is titled from the message and hangs off it in the chat. Starting it again
-	 * with the same message returns the thread it started.
+	 * Posts the actor's message in `conversationId`, a pod's chat or a bot's
+	 * channel, and starts a thread from it: with the bot `hostAgentId`, which is
+	 * given the floor and answers in the thread, or between people when it is
+	 * absent. From a bot's channel the thread is always with that bot, which is
+	 * how a Personal pod, having no chat, starts one. The thread is titled from
+	 * the message and hangs off it. Starting it again with the same message
+	 * returns the thread it started.
 	 */
 	readonly startThread: (input: {
-		podChatId: string;
+		conversationId: string;
 		messageId: string;
 		content: string;
-		/** Ids of the actor's uploads to the pod's chat, not yet sent. None unless set. */
+		/** Ids of the actor's uploads to the conversation, not yet sent. None unless set. */
 		attachments?: readonly string[];
-		/** The id of the message in the pod's chat that this one quotes and answers. */
+		/** The id of the message in the conversation that this one quotes and answers. */
 		replyTo?: string;
+		/** Ignored in a bot's channel, where the thread is with its bot. */
 		hostAgentId?: string;
 	}) => Effect.Effect<
 		StartedThread,
@@ -364,13 +367,14 @@ export const make = Effect.gen(function* () {
 				"startThread",
 				transaction(
 					Effect.gen(function* () {
-						const podChat = yield* visibility.conversation(input.podChatId);
-						if (podChat.type !== "pod_chat") {
+						const parent = yield* visibility.conversation(input.conversationId);
+						if (parent.type !== "pod_chat" && parent.type !== "bot_channel") {
 							return yield* new ResourceHidden({ resource: "conversation" });
 						}
-						const { hostAgentId } = input;
+						const hostAgentId =
+							parent.type === "bot_channel" ? parent.hostAgentId : input.hostAgentId;
 						if (hostAgentId) {
-							const placement = { ...podChat, hostAgentId };
+							const placement = { ...parent, hostAgentId };
 							if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 								return yield* new HostNotCrew();
 							}
@@ -379,17 +383,17 @@ export const make = Effect.gen(function* () {
 							}
 						}
 						const actor = yield* CurrentActor.Service;
-						// The message stays in the chat, where the thread hangs off it.
+						// The message stays where it was sent, and the thread hangs off it there.
 						const posted = yield* threads.post({
 							id: input.messageId,
-							threadId: podChat.id,
+							threadId: parent.id,
 							author: yield* senderOf(actor),
 							content: input.content,
 							attachments: input.attachments ?? [],
 							replyTo: input.replyTo,
 						});
 						const started = yield* threads.openThread({
-							parent: podChat,
+							parent,
 							originMessageId: posted.message.id,
 							hostAgentId: hostAgentId ?? null,
 							title: threadTitleFrom(input.content),
