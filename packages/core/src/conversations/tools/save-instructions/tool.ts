@@ -46,7 +46,7 @@ export function saveInstructionsTool({
 }) {
 	return tool({
 		description:
-			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, or when someone asks you to change how you work. Not for remembering things about a person. Returns your settings page, where people read and change them.",
+			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, when someone asks you to change how you work, or when their reply shows you set yourself up for the wrong kind of work: then set yourself up again for the work they meant, and do that work yourself. Not for remembering things about a person. Returns your settings page, where people read and change them.",
 		inputSchema: Schema.Struct({
 			instructions: Schema.String.check(
 				Schema.isMinLength(1),
