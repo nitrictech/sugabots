@@ -1024,24 +1024,42 @@ const approvalRoute = createRoute({
 	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
 });
 
-/** You on a phone, where the sidebar's foot has no room: your workspace, its pods, and signing out. */
+/**
+ * You on a phone, where the sidebar's foot has no room: your workspace, its
+ * pods, and signing out. A wider screen, as a window widened from a phone's
+ * size, has settings of its own, which it goes to in this page's place.
+ */
 const youRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/you",
-	component: () => (
-		<Panes>
-			<You />
-		</Panes>
-	),
+	component: () => {
+		const wide = useMediaQuery(SIDE_BY_SIDE);
+		if (wide) return <Navigate from="/$workspace" to="./settings" replace />;
+		return (
+			<Panes>
+				<You />
+			</Panes>
+		);
+	},
 });
 
-/** A pod's settings as a phone opens them from You: a page of its parts. */
+/**
+ * A pod's settings as a phone opens them from You: a page of its parts. A
+ * wider screen goes to the pod's own settings in its place.
+ */
 const youPodRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/you/pods/$pod",
 	component: () => {
+		const wide = useMediaQuery(SIDE_BY_SIDE);
+		const { pod: podSlug } = youPodRoute.useParams();
 		const { data: pods, isPending } = usePods();
-		const pod = findPod(pods, youPodRoute.useParams().pod);
+		const pod = findPod(pods, podSlug);
+		if (wide) {
+			return (
+				<Navigate from="/$workspace" to="./settings/pods/$pod" params={{ pod: podSlug }} replace />
+			);
+		}
 		return (
 			<Panes>
 				{isPending ? null : pod ? <YouPod pod={pod} /> : <EmptyState title="No such pod here" />}
