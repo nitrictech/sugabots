@@ -1,7 +1,7 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { useEffect, useState } from "react";
-import { expect, fn, spyOn, within } from "storybook/test";
+import { expect, fn, spyOn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
 import {
@@ -211,6 +211,83 @@ export const MentionButton = meta.story({
 		await expect(
 			await canvas.findByRole("listbox", { name: "People and bots to mention" }),
 		).toBeVisible();
+	},
+});
+
+/**
+ * Typing `:` and part of a shortcode offers the emoji it names, best match
+ * first, and Enter writes the highlighted one without sending. A `:` in a time
+ * or a smiley like `:)` offers nothing.
+ */
+export const EmojiShortcode = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "Hmm :thin");
+		const list = await canvas.findByRole(
+			"listbox",
+			{ name: "Emoji matching what was typed" },
+			{ timeout: 5_000 },
+		);
+		await expect(within(list).getAllByRole("option")[0]).toHaveAccessibleName("🤔 :thinking:");
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Hmm 🤔 ");
+		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
+		await expect(args.onSubmit).not.toHaveBeenCalled();
+		await userEvent.clear(input);
+		await userEvent.type(input, "at 10:30 :)");
+		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
+	},
+});
+
+/** A shortcode typed out and closed with its colon becomes its emoji. */
+export const ClosedShortcode = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "Shipped :tad");
+		await canvas.findByRole(
+			"listbox",
+			{ name: "Emoji matching what was typed" },
+			{ timeout: 5_000 },
+		);
+		await userEvent.type(input, "a:");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Shipped 🎉");
+	},
+});
+
+/** The smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
+export const EmojiButton = meta.story({
+	args: { value: "Nice work" },
+	parameters: {
+		a11y: {
+			config: {
+				rules: [
+					{
+						// As in the picker's own stories: Frimousse numbers its grid from 0, where ARIA starts at 1.
+						id: "aria-valid-attr-value",
+						selector: "[frimousse-row], [frimousse-emoji]",
+						enabled: false,
+					},
+				],
+			},
+		},
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
+		const page = within(document.body);
+		await page.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await userEvent.keyboard("hundred points");
+		await waitFor(
+			() =>
+				expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+					"aria-selected",
+					"true",
+				),
+			{ timeout: 5_000 },
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Nice work💯");
+		await waitFor(() => expect(input).toHaveFocus());
 	},
 });
 
