@@ -40,30 +40,33 @@ export function EmojiPicker({
 			onEmojiSelect={({ emoji }) => choose(emoji)}
 			className={cn("isolate flex h-[332px] w-[332px] max-w-full flex-col", className)}
 		>
-			<div className="p-2 pb-1">
-				<EmojiPickerPrimitive.Search
-					aria-label="Search emoji"
-					placeholder="Search emoji"
-					value={search}
-					onChange={(event) => setSearch(event.target.value)}
-					className="focus-ring h-8 w-full rounded-tail border border-border-strong bg-background px-2.5 text-base text-foreground placeholder:text-subtle-foreground"
-				/>
+			{/* Ruled off from the grid, so a category's name pushed out at the top of the grid is seen leaving under the line. */}
+			<div className="border-border-strong border-b pb-1.5">
+				<div className="p-2 pb-1">
+					<EmojiPickerPrimitive.Search
+						aria-label="Search emoji"
+						placeholder="Search emoji"
+						value={search}
+						onChange={(event) => setSearch(event.target.value)}
+						className="focus-ring h-8 w-full rounded-tail border border-border-strong bg-background px-2.5 text-base text-foreground placeholder:text-subtle-foreground"
+					/>
+				</div>
+				{recent.length > 0 && !search && (
+					<section aria-label="Recent">
+						<div className={CATEGORY_HEADER}>Recent</div>
+						<div className="flex px-1.5">
+							{recent.map((emoji) => (
+								<Suspense
+									key={emoji}
+									fallback={<RecentEmoji emoji={emoji} label={emoji} onChoose={choose} />}
+								>
+									<NamedRecentEmoji emoji={emoji} onChoose={choose} />
+								</Suspense>
+							))}
+						</div>
+					</section>
+				)}
 			</div>
-			{recent.length > 0 && !search && (
-				<section aria-label="Recent">
-					<div className={CATEGORY_HEADER}>Recent</div>
-					<div className="flex px-1.5">
-						{recent.map((emoji) => (
-							<Suspense
-								key={emoji}
-								fallback={<RecentEmoji emoji={emoji} label={emoji} onChoose={choose} />}
-							>
-								<NamedRecentEmoji emoji={emoji} onChoose={choose} />
-							</Suspense>
-						))}
-					</div>
-				</section>
-			)}
 			{/* Focusable, so the keyboard can scroll it as well as move through it from the search. */}
 			<EmojiPickerPrimitive.Viewport
 				tabIndex={0}
