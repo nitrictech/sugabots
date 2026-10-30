@@ -6,12 +6,11 @@ import {
 	connectionPresetFor,
 	connectionToolMutating,
 	type Pod,
-	toolAccessCountsOf,
 } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronDown, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
 import {
 	bearerAuthorization,
@@ -20,37 +19,38 @@ import {
 } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
-import { podSettingsLink } from "@/lib/links.ts";
+import { podSettingsPageLink } from "@/lib/links.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
-import { Alert, Success } from "@/ui/alert.tsx";
+import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
+import { Alert } from "@/ui/alert.tsx";
+import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
-import { MoreMenu } from "@/ui/more-menu.tsx";
-import { SettingsGroup, SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
-import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import {
-	AccessMenu,
-	type AccessSetting,
-	AccessToggle,
-	AccessValue,
-	accessSettingOf,
-} from "./tool-access.tsx";
+	PageBackLink,
+	SETTINGS_CARD,
+	SettingsDanger,
+	SettingsGroup,
+	SettingsPage,
+	SettingsRow,
+	SettingsRowButton,
+	SettingsTestOutcome,
+	SettingsValue,
+} from "@/ui/settings-page.tsx";
+import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
+import { ACCESS_WORDS, AccessToggle } from "./tool-access.tsx";
 
 /*
- * One connection, on a page of its own under its pod: its name, Disconnect,
- * and a menu with what keeps it working (signing in again, its secret, a
- * check that it answers); then its tools, those that read apart from those
- * that make changes, each group with Allow, Ask or Off for all of it and each
- * tool with its own.
+ * One connection, on a page of its own under its pod: who connected it and
+ * what keeps it working (signing in again, its secret, a check that it
+ * answers), then its tools as two settings, one for those that only read and
+ * one for those that make changes, with any tool set apart from its group on
+ * a page of its own, and Disconnect at the foot.
  */
 
 /** The docs on fixing a connection whose check failed. */
 const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troubleshooting`;
-
-/** More tools than this and the page offers to search them. */
-const SEARCHABLE_TOOL_COUNT = 8;
 
 export function ConnectionPage({
 	connection,
@@ -59,8 +59,61 @@ export function ConnectionPage({
 }: {
 	connection: Connection;
 	pod: Pod;
-	/** The link back to the pod, or to wherever the page was opened from: a `PageBackLink`. */
+	/** The link back to the pod's connections, or to wherever the page was opened from: a `PageBackLink`. */
 	back: ReactNode;
+}) {
+	const [page, setPage] = useState<"connection" | "tools">("connection");
+	const canManage = pod.permissions.manageConnections;
+	const actions = useConnectionActions(pod.id);
+	const detail = useConnectionWithTools(pod.id, connection.id);
+	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
+		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
+
+	if (page === "tools" && detail.data) {
+		return (
+			<IndividualTools
+				connection={connection}
+				tools={detail.data.tools}
+				canManage={canManage}
+				setToolAccess={setToolAccess}
+				error={actions.update.error}
+				back={
+					<PageBackLink
+						label={connection.name}
+						render={<button type="button" onClick={() => setPage("connection")} />}
+					/>
+				}
+			/>
+		);
+	}
+	return (
+		<ConnectionCard
+			connection={connection}
+			pod={pod}
+			back={back}
+			tools={detail}
+			setToolAccess={setToolAccess}
+			onOpenTools={() => setPage("tools")}
+		/>
+	);
+}
+
+type ToolsQuery = ReturnType<typeof useConnectionWithTools>;
+
+function ConnectionCard({
+	connection,
+	pod,
+	back,
+	tools,
+	setToolAccess,
+	onOpenTools,
+}: {
+	connection: Connection;
+	pod: Pod;
+	back: ReactNode;
+	tools: ToolsQuery;
+	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
+	onOpenTools: () => void;
 }) {
 	const canManage = pod.permissions.manageConnections;
 	const actions = useConnectionActions(pod.id);
@@ -69,18 +122,10 @@ export function ConnectionPage({
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
 	const preset = connectionPresetFor(connection.url);
-	const mark = connectionMarkFor(connection);
 	// A GitHub connection works through its app: it has no address to sign in to or check.
 	const isServer = connection.kind !== "github";
-	const checked =
-		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
-	const failure = checked
-		? !checked.reachable && (checked.error ?? "The server did not answer.")
-		: connection.status === "error" && (connection.lastTestError ?? "The last check failed.");
 	const error =
 		actions.update.error ?? actions.signIn.error ?? actions.test.error ?? installApp.error;
-	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
-		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 	const signIn = () => actions.signIn.mutate({ connectionId: connection.id });
 	const install = () => installApp.mutate(connection.id);
 
@@ -91,101 +136,95 @@ export function ConnectionPage({
 			return;
 		}
 		setRemoving(false);
-		await navigate({ ...podSettingsLink(pod), replace: true });
+		await navigate({ ...podSettingsPageLink(pod, "connections"), replace: true });
 	}
 
 	return (
-		<SettingsPage back={back}>
-			<div className="flex items-center gap-3.5">
-				<ConnectionMark presetId={mark} name={connection.name} size="lg" />
-				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<h2 className="m-0 truncate font-bold text-[22px] text-foreground tracking-[-0.01em]">
-						{connection.name}
-					</h2>
-					<p className="m-0 truncate text-[13px] text-muted-foreground">
-						{connection.connectedBy
-							? `${pod.name} pod connected by ${connection.connectedBy}`
-							: `${pod.name} pod`}
-					</p>
-					{/* A catalog app is known by its name; only a server added by URL is told apart by it. */}
-					{!preset && (
-						<p className="m-0 truncate font-mono text-[12.5px] text-subtle-foreground">
-							{connection.url}
-						</p>
-					)}
-				</div>
-				{/* On a phone it is in the menu, leaving the name its room. */}
-				{canManage && (
-					<Button
-						size="sm"
-						variant="secondary"
-						className="max-md:hidden"
-						onClick={() => setRemoving(true)}
-					>
-						Disconnect
-					</Button>
-				)}
-				<MoreMenu label={`More for ${connection.name}`}>
-					{isServer && canManage && connection.auth === "oauth" && (
-						<DropdownMenuItem onClick={signIn}>
-							{connection.signedIn ? "Sign in again" : "Sign in"}
-						</DropdownMenuItem>
-					)}
-					{isServer && canManage && connection.auth === "header" && (
-						<DropdownMenuItem onClick={() => setReplacingSecret(true)}>
-							{secretActionLabel(connection)}
-						</DropdownMenuItem>
-					)}
-					{connection.kind === "github" && canManage && connection.signedIn && (
-						<DropdownMenuItem onClick={install}>Change access on GitHub</DropdownMenuItem>
-					)}
-					{isServer && (
-						<DropdownMenuItem onClick={() => actions.test.mutate({ connectionId: connection.id })}>
-							Check connection
-						</DropdownMenuItem>
-					)}
-					{canManage && (
-						<DropdownMenuItem
-							variant="destructive"
-							className="md:hidden"
-							onClick={() => setRemoving(true)}
-						>
-							Disconnect
-						</DropdownMenuItem>
-					)}
-				</MoreMenu>
-			</div>
-			{/* Hidden while none of what it may show applies, so it leaves no gap. */}
-			<div className="flex flex-col gap-3 empty:hidden">
-				{!connection.signedIn && connection.kind === "github" && (
-					<SettingsGroup>
-						<SettingsRow
-							label="Not installed yet"
-							sub="Bots can't use GitHub until the pod's app is installed on the account it works on."
-							trailing={
-								canManage && (
-									<Button size="sm" disabled={installApp.isPending} onClick={install}>
-										Install on GitHub
-									</Button>
-								)
-							}
-						/>
-					</SettingsGroup>
-				)}
-				{!connection.signedIn && isServer && (
-					<SettingsGroup>
-						<SettingsRow
-							label="Not signed in yet"
-							sub={`Bots can't use ${connection.name} until someone signs in.`}
-							trailing={
-								canManage && (
-									<Button size="sm" disabled={actions.signIn.isPending} onClick={signIn}>
+		// Back and the mark as Individual tools has them, so the title stays put between the two.
+		<SettingsPage
+			back={back}
+			backOnWide
+			hero={<ConnectionPageMark connection={connection} />}
+			title={connection.name}
+			description={
+				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `In ${pod.name}`
+			}
+		>
+			{error && <Alert>{failureMessage(error)}</Alert>}
+			<SettingsGroup
+				label={connection.auth === "oauth" || !isServer ? "Account" : "Connection"}
+				// A test is a button under the group, with how it went beside it, so it never moves the page.
+				note={isServer && <TestConnection connection={connection} podId={pod.id} />}
+			>
+				{(connection.auth === "oauth" || !isServer) && (
+					<SettingsRow
+						label={isServer ? "Signed in as" : "Installed by"}
+						sub={
+							connection.signedIn
+								? undefined
+								: isServer
+									? `Bots can't use ${connection.name} until someone signs in.`
+									: "Bots can't use GitHub until the pod's app is installed on the account it works on."
+						}
+						trailing={
+							connection.signedIn ? (
+								<span className="flex min-w-0 items-center gap-3">
+									<SignedInPerson name={connection.connectedBy} />
+									{canManage &&
+										(isServer ? (
+											connection.auth === "oauth" && (
+												<SettingsRowButton disabled={actions.signIn.isPending} onClick={signIn}>
+													Reconnect
+												</SettingsRowButton>
+											)
+										) : (
+											<SettingsRowButton disabled={installApp.isPending} onClick={install}>
+												Manage access
+											</SettingsRowButton>
+										))}
+								</span>
+							) : (
+								canManage &&
+								(isServer ? (
+									<SettingsRowButton disabled={actions.signIn.isPending} onClick={signIn}>
 										Sign in
-									</Button>
-								)
-							}
-						/>
-					</SettingsGroup>
+									</SettingsRowButton>
+								) : (
+									<SettingsRowButton disabled={installApp.isPending} onClick={install}>
+										Install on GitHub
+									</SettingsRowButton>
+								))
+							)
+						}
+					/>
+				)}
+				{/* A catalog app is known by its name; only a server added by URL is told apart by it. */}
+				{!preset && isServer && (
+					<SettingsRow
+						label="Address"
+						trailing={
+							<span className="min-w-0 truncate font-mono text-[13px] text-muted-foreground">
+								{connection.url}
+							</span>
+						}
+					/>
+				)}
+				{isServer && connection.auth === "header" && (
+					<SettingsRow
+						label={connection.secretHeader === null ? "Access token" : "Secret"}
+						sub={
+							connection.secretHeader === null
+								? "None yet"
+								: `Sent in the ${connection.secretHeader} header`
+						}
+						trailing={
+							canManage && (
+								<SettingsRowButton onClick={() => setReplacingSecret(true)}>
+									{secretActionLabel(connection)}
+								</SettingsRowButton>
+							)
+						}
+					/>
 				)}
 				{replacingSecret && (
 					<SecretForm
@@ -194,41 +233,7 @@ export function ConnectionPage({
 						done={() => setReplacingSecret(false)}
 					/>
 				)}
-				{actions.test.isPending && (
-					<p className="m-0 px-1 text-muted-foreground text-sm">Checking the connection…</p>
-				)}
-				{failure && !actions.test.isPending && (
-					<Alert>
-						{failure}{" "}
-						<a
-							href={TROUBLESHOOTING_URL}
-							target="_blank"
-							rel="noreferrer"
-							className="focus-ring rounded-sm font-medium text-link"
-						>
-							How to fix this
-						</a>
-					</Alert>
-				)}
-				{failure && isServer && canManage && connection.auth === "header" && !replacingSecret && (
-					<Button
-						size="sm"
-						variant="secondary"
-						className="self-start"
-						onClick={() => setReplacingSecret(true)}
-					>
-						{secretActionLabel(connection)}
-					</Button>
-				)}
-				{checked?.reachable && !actions.test.isPending && (
-					<Success>
-						{connection.kind === "http"
-							? "The address is allowed. A check sends no request to it."
-							: "Connection successful"}
-					</Success>
-				)}
-				{error && <Alert>{failureMessage(error)}</Alert>}
-			</div>
+			</SettingsGroup>
 			{connection.kind === "github" && (
 				<GitHubRepositoriesGroup
 					podId={pod.id}
@@ -237,12 +242,20 @@ export function ConnectionPage({
 					canManage={canManage}
 				/>
 			)}
-			<ConnectionTools
-				pod={pod}
-				connectionId={connection.id}
+			<ToolSettings
+				tools={tools}
 				canManage={canManage}
 				setToolAccess={setToolAccess}
+				onOpenTools={onOpenTools}
 			/>
+			{canManage && (
+				<SettingsDanger
+					label={`Disconnect ${connection.name}`}
+					description="Bots in this pod lose access straight away."
+					action="Disconnect"
+					onClick={() => setRemoving(true)}
+				/>
+			)}
 			<DeleteDialog
 				open={removing}
 				onOpenChange={setRemoving}
@@ -275,13 +288,82 @@ export function ConnectionPage({
 	);
 }
 
+/**
+ * Test connection, with how the last check went beside it rather than under
+ * it, so a check never moves the page. A failure says why in a line, with the
+ * way to fix it next to that.
+ */
+function TestConnection({ connection, podId }: { connection: Connection; podId: string }) {
+	const actions = useConnectionActions(podId);
+	const checked =
+		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
+	const reachable = checked ? checked.reachable : connection.status === "error" ? false : undefined;
+	const failure = checked
+		? (checked.error ?? "The server did not answer.")
+		: (connection.lastTestError ?? "The last check failed.");
+	return (
+		<span className="flex min-w-0 items-center gap-3">
+			<Button
+				variant="secondary"
+				size="sm"
+				disabled={actions.test.isPending}
+				onClick={() => actions.test.mutate({ connectionId: connection.id })}
+			>
+				Test connection
+			</Button>
+			{actions.test.isPending ? (
+				<span className="text-subtle-foreground">Checking…</span>
+			) : reachable === true ? (
+				<SettingsTestOutcome good>
+					{connection.kind === "http"
+						? "The address is allowed. A check sends no request to it."
+						: "Connection successful"}
+				</SettingsTestOutcome>
+			) : reachable === false ? (
+				<>
+					<SettingsTestOutcome good={false}>{failure}</SettingsTestOutcome>
+					<a
+						href={TROUBLESHOOTING_URL}
+						target="_blank"
+						rel="noreferrer"
+						className="focus-ring shrink-0 rounded-sm font-medium text-link"
+					>
+						How to fix this
+					</a>
+				</>
+			) : null}
+		</span>
+	);
+}
+
+/**
+ * Whoever signed the connection in, with their face. A connection records
+ * only their name, so the face is found among the workspace's people by it,
+ * and is their initials when it isn't there.
+ */
+function SignedInPerson({ name }: { name: string | null }) {
+	const { workspace } = useWorkspace();
+	const { data: members } = useWorkspaceMembers(workspace?.id);
+	if (name === null) return <SettingsValue>Someone no longer here</SettingsValue>;
+	const person = members?.find((member) => member.user.name === name)?.user ?? {
+		name,
+		email: "",
+	};
+	return (
+		<span className="flex min-w-0 items-center gap-2">
+			<PersonAvatar person={person} size={20} />
+			<SettingsValue>{name}</SettingsValue>
+		</span>
+	);
+}
+
 /** What changing a header connection's secret is called: adding one, or replacing the one it has. */
 function secretActionLabel(connection: Connection): string {
 	if (connection.secretHeader === null) return "Add access token";
 	return connection.hasSecret ? "Replace secret" : "Add secret";
 }
 
-/** A new secret for a header connection, or its first access token. */
+/** A new secret for a header connection, or its first access token, in a row of its own group. */
 function SecretForm({
 	connection,
 	podId,
@@ -312,222 +394,344 @@ function SecretForm({
 	}
 
 	return (
-		<SettingsGroup
-			label={secretActionLabel(connection)}
-			note={
-				needsToken
-					? "Sent as Authorization: Bearer, followed by the token."
-					: `Sent in the ${connection.secretHeader} header.`
-			}
+		<form
+			onSubmit={save}
+			className="flex min-h-14 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0"
 		>
-			<form onSubmit={save} className="flex items-center gap-3 px-4 py-2.5">
-				<input
-					aria-label={`${connection.name} secret`}
-					type="password"
-					autoComplete="off"
-					// biome-ignore lint/a11y/noAutofocus: opened by asking to change it, so typing is next.
-					autoFocus
-					value={secret}
-					onChange={(event) => setSecret(event.target.value)}
-					placeholder={needsToken ? "Paste the access token" : "Paste the new secret"}
-					className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+			<input
+				aria-label={`${connection.name} secret`}
+				type="password"
+				autoComplete="off"
+				// biome-ignore lint/a11y/noAutofocus: opened by asking to change it, so typing is next.
+				autoFocus
+				value={secret}
+				onChange={(event) => setSecret(event.target.value)}
+				placeholder={needsToken ? "Paste the access token" : "Paste the new secret"}
+				className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+			/>
+			<Button type="button" size="sm" variant="ghost" onClick={done}>
+				Cancel
+			</Button>
+			<Button type="submit" size="sm" disabled={!secret || actions.update.isPending}>
+				Save
+			</Button>
+		</form>
+	);
+}
+
+/** A connection's tools in its two kinds, and what each kind is set to before any tool is set apart. */
+interface ToolKind {
+	kind: "read" | "change";
+	tools: ConnectionToolSetting[];
+	/** What most of its tools are set to: the group's setting, which a tool set apart differs from. */
+	setting: ConnectionAccess;
+}
+
+/** Where a kind's setting starts when its tools are split evenly: reads run, changes ask. */
+const KIND_LEANING: Record<ToolKind["kind"], ConnectionAccess> = { read: "allow", change: "ask" };
+
+/** The connection's tools that only read, then those that may make changes, leaving out an empty kind. */
+function toolKinds(tools: readonly ConnectionToolSetting[]): ToolKind[] {
+	return [
+		{ kind: "read" as const, tools: tools.filter((tool) => !connectionToolMutating(tool)) },
+		{ kind: "change" as const, tools: tools.filter(connectionToolMutating) },
+	].flatMap(({ kind, tools: ofKind }) =>
+		ofKind.length === 0 ? [] : [{ kind, tools: ofKind, setting: settingOf(ofKind, kind) }],
+	);
+}
+
+/** The access most of `tools` have, leaning as the kind does when two are tied. */
+function settingOf(tools: readonly ConnectionToolSetting[], kind: ToolKind["kind"]) {
+	const count = (access: ConnectionAccess) => tools.filter((tool) => tool.access === access).length;
+	const leaning = KIND_LEANING[kind];
+	return (["allow", "ask", "off"] as const).reduce<ConnectionAccess>(
+		(best, access) => (count(access) > count(best) ? access : best),
+		leaning,
+	);
+}
+
+/** The tools of `kinds` set apart from their kind's setting. */
+function setApart(kinds: readonly ToolKind[]) {
+	return kinds.flatMap(({ tools, setting }) =>
+		tools.filter((tool) => tool.access !== setting).map((tool) => ({ tool, setting })),
+	);
+}
+
+/** How many of a kind's tools show before its list scrolls inside its card rather than lengthening the page. */
+const TOOLS_SHOWN_BEFORE_SCROLLING = 8;
+
+const KIND_WORDS = {
+	read: {
+		heading: "Tools that read",
+		all: (count: number) => `All ${count} read ${count === 1 ? "tool" : "tools"}`,
+		sub: "Look things up without changing anything",
+	},
+	change: {
+		heading: "Tools that make changes",
+		all: (count: number) => `All ${count} change ${count === 1 ? "tool" : "tools"}`,
+		sub: "Create, edit, delete or send things",
+	},
+} as const;
+
+/**
+ * Each kind's setting, which moves every tool still at it and leaves those set
+ * apart as they are, then the way to the tools set apart. The tools are
+ * fetched on their own because a server can list hundreds.
+ */
+function ToolSettings({
+	tools,
+	canManage,
+	setToolAccess,
+	onOpenTools,
+}: {
+	tools: ToolsQuery;
+	canManage: boolean;
+	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
+	onOpenTools: () => void;
+}) {
+	if (tools.isPending) {
+		return (
+			<div role="status" aria-label="Loading tools" className="flex flex-col gap-3">
+				<div className="h-[92px] animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
+				<div className="h-[92px] animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
+			</div>
+		);
+	}
+	if (tools.isError) return <Alert>{failureMessage(tools.error)}</Alert>;
+	const kinds = toolKinds(tools.data.tools);
+	if (kinds.length === 0) {
+		return (
+			<SettingsGroup label="Tools">
+				<SettingsRow label={<span className="text-muted-foreground">No actions found yet</span>} />
+			</SettingsGroup>
+		);
+	}
+	const apart = setApart(kinds).length;
+	return (
+		<>
+			{kinds.map(({ kind, tools: ofKind, setting }) => {
+				const words = KIND_WORDS[kind];
+				return (
+					<SettingsGroup
+						key={kind}
+						label={words.heading}
+						note={
+							kind === "change"
+								? "Ask first sends the action to Approvals before it runs."
+								: undefined
+						}
+					>
+						<SettingsRow
+							label={words.all(ofKind.length)}
+							sub={words.sub}
+							trailing={
+								<AccessToggle
+									label={words.heading}
+									value={setting}
+									canManage={canManage}
+									onChange={(access) =>
+										setToolAccess(
+											Object.fromEntries(
+												ofKind
+													.filter((tool) => tool.access === setting)
+													.map((tool) => [tool.name, access]),
+											),
+										)
+									}
+								/>
+							}
+						/>
+					</SettingsGroup>
+				);
+			})}
+			<SettingsGroup>
+				<SettingsRow
+					label="Individual tools"
+					sub={
+						canManage
+							? "Set one tool differently from its group"
+							: "Tools set apart from their group"
+					}
+					trailing={apart > 0 && <SettingsValue>{apart} changed</SettingsValue>}
+					chevron
+					onClick={onOpenTools}
 				/>
-				<Button type="button" size="sm" variant="ghost" onClick={done}>
-					Cancel
-				</Button>
-				<Button type="submit" size="sm" disabled={!secret || actions.update.isPending}>
-					Save
-				</Button>
-			</form>
-		</SettingsGroup>
+			</SettingsGroup>
+		</>
 	);
 }
 
 /**
- * The connection's tools, fetched on their own because a server can list
- * hundreds, with a placeholder while they load.
+ * A section of the Individual tools list: its heading, what its tools have in
+ * common, and an action beside them, held at the top of the list while its
+ * tools scroll under it.
  */
-function ConnectionTools({
-	pod,
-	connectionId,
+function ToolSection({
+	heading,
+	description,
+	action,
+	children,
+}: {
+	heading: string;
+	description: string;
+	action?: ReactNode;
+	children: ReactNode;
+}) {
+	const headingId = useId();
+	return (
+		<section aria-labelledby={headingId}>
+			<div className="sticky top-0 z-10 flex items-center gap-3 border-border border-b bg-chip px-4 py-2.5">
+				<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.35]">
+					<h3 id={headingId} className="m-0 font-medium text-[13px] text-foreground">
+						{heading}
+					</h3>
+					<span className="text-pretty text-subtle-foreground text-xs">{description}</span>
+				</div>
+				{action}
+			</div>
+			{children}
+		</section>
+	);
+}
+
+/**
+ * Every tool on a page of its own: those set apart from their kind first, each
+ * saying what its kind is set to, with the way to put them all back; then the
+ * rest by kind. Searching narrows all of them.
+ */
+/** The connection's mark at the head of its pages. */
+function ConnectionPageMark({ connection }: { connection: Connection }) {
+	return (
+		<ConnectionMark presetId={connectionMarkFor(connection)} name={connection.name} size="lg" />
+	);
+}
+
+function IndividualTools({
+	connection,
+	tools,
 	canManage,
 	setToolAccess,
+	error,
+	back,
 }: {
-	pod: Pod;
-	connectionId: string;
+	connection: Connection;
+	tools: readonly ConnectionToolSetting[];
 	canManage: boolean;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
+	error: unknown;
+	back: ReactNode;
 }) {
-	const detail = useConnectionWithTools(pod.id, connectionId);
 	const [query, setQuery] = useState("");
 	const needle = useDeferredValue(query.trim().toLowerCase());
 	const matches = (tool: ConnectionToolSetting) =>
 		needle === "" ||
 		tool.name.toLowerCase().includes(needle) ||
 		wordsFromKey(tool.name).toLowerCase().includes(needle);
-	if (detail.isPending) {
-		return (
-			<div role="status" aria-label="Loading tools" className="flex flex-col gap-3">
-				<div className="h-12 animate-pulse rounded-panel bg-list" />
-				<div className="h-[212px] animate-pulse rounded-panel bg-list" />
-			</div>
-		);
-	}
-	if (detail.isError) return <Alert>{failureMessage(detail.error)}</Alert>;
-	const { tools } = detail.data;
-	if (tools.length === 0) {
-		return (
-			<SettingsGroup label="Tools">
-				<SettingsRow label="No actions found yet." />
-			</SettingsGroup>
-		);
-	}
-	return (
-		<div className="flex flex-col gap-5">
-			<div className="flex flex-col gap-1 px-1">
-				<h3 className="m-0 font-semibold text-[15px] text-foreground">Tool permissions</h3>
-				<p className="m-0 text-sm text-subtle-foreground">
-					Ask means the bot waits for approval first. Off means it can't use that tool at all. These
-					apply to every bot in {pod.name}.
-				</p>
-			</div>
-			{tools.length > SEARCHABLE_TOOL_COUNT && (
-				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-					<input
-						type="search"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-						placeholder={`Search ${tools.length} tools`}
-						aria-label="Search tools"
-						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
-					/>
-				</label>
-			)}
-			{toolGroups(tools).map((group) => (
-				<ToolGroup
-					key={group.label}
-					label={group.label}
-					tools={group.tools}
-					setting={group.setting}
-					shown={group.tools.filter(matches)}
-					canManage={canManage}
-					setToolAccess={setToolAccess}
-				/>
-			))}
-		</div>
-	);
-}
-
-/**
- * The connection's tools that only read, then those that may make changes,
- * each with the setting its tools share, leaving out an empty one.
- */
-function toolGroups(
-	tools: readonly ConnectionToolSetting[],
-): { label: string; tools: ConnectionToolSetting[]; setting: AccessSetting }[] {
-	return [
-		{ label: "Reading", tools: tools.filter((tool) => !connectionToolMutating(tool)) },
-		{ label: "Making changes", tools: tools.filter(connectionToolMutating) },
-	].flatMap((group) => {
-		const setting = accessSettingOf(toolAccessCountsOf(group.tools));
-		return setting ? [{ ...group, setting }] : [];
-	});
-}
-
-/**
- * One group of tools, open to start with: its name and how many, a menu that
- * sets all of them and reads Custom while they differ, and each of `shown`
- * with its own setting. Choosing Custom opens the group.
- */
-function ToolGroup({
-	label,
-	tools,
-	setting,
-	shown,
-	canManage,
-	setToolAccess,
-}: {
-	label: string;
-	/** Every tool in the group, which its menu sets. */
-	tools: ConnectionToolSetting[];
-	/** What `tools` share, which its menu reads. */
-	setting: AccessSetting;
-	/** The ones the search leaves. */
-	shown: ConnectionToolSetting[];
-	canManage: boolean;
-	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
-}) {
-	const [open, setOpen] = useState(true);
-	const listId = useId();
-	if (shown.length === 0) return null;
-	return (
-		<section aria-label={label} className="flex flex-col gap-2">
-			<div className="flex items-center gap-2 pl-1">
-				<button
-					type="button"
-					aria-expanded={open}
-					aria-controls={listId}
-					aria-label={`${label}, ${tools.length} ${tools.length === 1 ? "tool" : "tools"}`}
-					onClick={() => setOpen(!open)}
-					className="focus-ring flex min-w-0 items-center gap-1.5 rounded-md text-left"
+	const kinds = toolKinds(tools);
+	const apart = setApart(kinds);
+	const shownApart = apart.filter(({ tool }) => matches(tool));
+	const row = (tool: ConnectionToolSetting, setting: ConnectionAccess, changed: boolean) => (
+		<SettingsRow
+			key={tool.name}
+			// Set in under its section's heading, so the heading reads as one and the tools as its.
+			className="pl-9"
+			label={
+				<span
+					className={cn(
+						"font-mono",
+						// Off fades to a quieter colour, not by opacity, which would take it below a readable contrast.
+						tool.access === "off" && "text-muted-foreground",
+					)}
 				>
-					<ChevronDown
-						aria-hidden
-						size={16}
-						className={cn(
-							"shrink-0 text-subtle-foreground transition-transform",
-							!open && "-rotate-90",
-						)}
-					/>
-					<span className="font-medium text-[14.5px] text-foreground">{label}</span>
-					<span className="rounded-md bg-chip px-1.5 py-px font-medium text-muted-foreground text-xs">
-						{tools.length}
-					</span>
-				</button>
-				{canManage ? (
-					<AccessMenu
-						label={`${label} tools`}
-						value={setting}
-						onChange={(access) =>
-							setToolAccess(Object.fromEntries(tools.map((tool) => [tool.name, access])))
-						}
-						onCustom={() => setOpen(true)}
-						className="ml-auto"
-					/>
-				) : (
-					<AccessValue value={setting} className="ml-auto" />
-				)}
-			</div>
-			{open && (
-				<div id={listId} className="overflow-hidden rounded-panel bg-list">
-					{shown.map((tool) => {
-						const name = wordsFromKey(tool.name);
+					{tool.name}
+				</span>
+			}
+			sub={changed ? `Default: ${ACCESS_WORDS[setting].toLowerCase()}` : undefined}
+			trailing={
+				<AccessToggle
+					label={tool.name}
+					value={tool.access}
+					canManage={canManage}
+					onChange={(access) => setToolAccess({ [tool.name]: access })}
+				/>
+			}
+		/>
+	);
+	const anyShown = shownApart.length > 0 || kinds.some(({ tools: of }) => of.some(matches));
+
+	return (
+		<SettingsPage
+			back={back}
+			backOnWide
+			hero={<ConnectionPageMark connection={connection} />}
+			title="Individual tools"
+			description={`Set a tool of ${connection.name} differently from its group.`}
+		>
+			{Boolean(error) && <Alert>{failureMessage(error)}</Alert>}
+			{/* One card, searched from its top and read down: a long list scrolls inside it rather than lengthening the page. */}
+			<section aria-label="Tools" className={SETTINGS_CARD}>
+				<div className="border-border border-b p-2.5">
+					<label className="focus-ring-within flex h-[34px] items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+						<input
+							type="search"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={`Search ${tools.length} ${connection.name} tools`}
+							aria-label="Search tools"
+							className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+						/>
+					</label>
+				</div>
+				{/* Sized by every tool, not those a search leaves, so searching never resizes it. */}
+				<div
+					className={cn(
+						tools.length > TOOLS_SHOWN_BEFORE_SCROLLING &&
+							// Relative, so the hidden radios inside are held to it: placed by the page instead, those scrolled out of view would lengthen it.
+							"relative h-[min(560px,60vh)] overflow-y-auto [scrollbar-gutter:stable]",
+					)}
+				>
+					{shownApart.length > 0 && (
+						<ToolSection
+							heading={`Changed (${shownApart.length})`}
+							description="Set apart from their group."
+							action={
+								canManage && (
+									<SettingsRowButton
+										onClick={() =>
+											setToolAccess(
+												Object.fromEntries(apart.map(({ tool, setting }) => [tool.name, setting])),
+											)
+										}
+									>
+										Reset all
+									</SettingsRowButton>
+								)
+							}
+						>
+							{shownApart.map(({ tool, setting }) => row(tool, setting, true))}
+						</ToolSection>
+					)}
+					{kinds.map(({ kind, tools: ofKind, setting }) => {
+						const shown = ofKind.filter((tool) => tool.access === setting && matches(tool));
+						if (shown.length === 0) return null;
 						return (
-							<div
-								key={tool.name}
-								className="flex min-h-[52px] items-center gap-3 border-border border-b px-4 py-2 last:border-b-0"
+							<ToolSection
+								key={kind}
+								heading={KIND_WORDS[kind].heading}
+								description={`Follow the group's setting, ${ACCESS_WORDS[setting]}, until one is set differently.`}
 							>
-								{/* A tool that is off fades to a quieter colour, not by opacity, which would take its name below a readable contrast. */}
-								<span
-									className={cn(
-										"min-w-0 flex-1 truncate text-[14.5px] transition-colors duration-150",
-										tool.access === "off" ? "text-muted-foreground" : "text-foreground",
-									)}
-								>
-									{name}
-								</span>
-								<AccessToggle
-									label={name}
-									value={tool.access}
-									canManage={canManage}
-									onChange={(access) => setToolAccess({ [tool.name]: access })}
-								/>
-							</div>
+								{shown.map((tool) => row(tool, setting, false))}
+							</ToolSection>
 						);
 					})}
+					{!anyShown && (
+						<p className="m-0 px-4 py-8 text-center text-[13px] text-subtle-foreground">
+							No tools match.
+						</p>
+					)}
 				</div>
-			)}
-		</section>
+			</section>
+		</SettingsPage>
 	);
 }

@@ -33,6 +33,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		disabledTools: row.disabledTools,
 		usesSandbox: row.usesSandbox,
 		naturalBrowsing: row.naturalBrowsing,
+		createdById: row.createdById,
 		createdAt: row.createdAt.toISOString(),
 	};
 }

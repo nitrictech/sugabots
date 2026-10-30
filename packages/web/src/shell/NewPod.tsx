@@ -9,7 +9,7 @@ import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useCreatePod, usePods } from "@/lib/pods.ts";
 import { PodColourPicker } from "@/shell/LookPicker.tsx";
-import { PodTile } from "@/shell/PodTile.tsx";
+import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {
 	DialogForm,
@@ -20,7 +20,7 @@ import {
 import { SettingsControlRow, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
- * Making a pod: a colour and a name, under the empty tile it starts as, laid
+ * Making a pod: a name and a colour, under the pod as the sidebar will show it, laid
  * out as New bot is. Its bots, people and connections come after.
  */
 export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<void> }) {
@@ -52,15 +52,14 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 
 			<DialogFormBody gap="compact">
 				<div className="flex justify-center pt-1 pb-2">
-					<PodTile bots={[]} color={color} size={88} />
+					{/* The pod as the sidebar will show it: its initial, once named, on its colour. */}
+					<PodInitial
+						pod={{ name, color, kind: "shared" }}
+						size="lg"
+						className="size-16 rounded-2xl text-[26px]"
+					/>
 				</div>
-				<SettingsGroup>
-					<SettingsControlRow label="Colour">
-						<PodColourPicker value={color} onChange={setChosenColor} />
-					</SettingsControlRow>
-				</SettingsGroup>
-
-				<SettingsGroup className="mt-2">
+				<SettingsGroup note="You'll add bots, people and connections next.">
 					<SettingsFieldRow
 						label="Name"
 						value={name}
@@ -68,10 +67,10 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 						placeholder="e.g. Support"
 						maxLength={POD_NAME_MAX_LENGTH}
 					/>
+					<SettingsControlRow label="Colour">
+						<PodColourPicker value={color} onChange={setChosenColor} />
+					</SettingsControlRow>
 				</SettingsGroup>
-				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
-					You'll add bots, people and connections next.
-				</p>
 
 				{create.error && (
 					<Alert>

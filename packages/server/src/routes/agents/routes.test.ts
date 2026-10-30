@@ -37,6 +37,7 @@ const agent: Agent = {
 	disabledTools: [],
 	usesSandbox: false,
 	naturalBrowsing: false,
+	createdById: null,
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 

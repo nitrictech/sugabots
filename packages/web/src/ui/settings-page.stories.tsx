@@ -4,6 +4,7 @@ import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { SegmentedControl } from "./segmented-control.tsx";
 import {
+	PageBackLink,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -61,7 +62,12 @@ export const Hero = meta.story({
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<Theme />} />
 			</SettingsGroup>
-			<SettingsDanger onClick={fn()}>Delete workspace</SettingsDanger>
+			<SettingsDanger
+				label="Delete workspace"
+				description="Removes every pod, bot and thread in Nitric."
+				action="Delete"
+				onClick={fn()}
+			/>
 		</SettingsPage>
 	),
 });
@@ -95,5 +101,40 @@ export const Listing = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: /Overnight outbound/ }));
 		await expect(opened).toHaveBeenCalled();
+	},
+});
+
+/**
+ * A page opened from another, with its Back, beside the page it came from: on
+ * a wide screen the Back sits above the title, so both titles are level and
+ * moving between the pages doesn't move the title.
+ */
+export const OpenedFromAnother = meta.story({
+	globals: { viewport: { value: "desktop", isRotated: false } },
+	render: () => (
+		<div className="flex">
+			<div className="flex-1">
+				<SettingsPage title="Models" description="What your bots think with.">
+					{null}
+				</SettingsPage>
+			</div>
+			<div className="flex-1">
+				<SettingsPage
+					back={<PageBackLink label="Models" render={<button type="button" />} />}
+					backOnWide
+					title="Default for new bots"
+					description="The model a new bot starts with."
+				>
+					{null}
+				</SettingsPage>
+			</div>
+		</div>
+	),
+	play: async ({ canvas }) => {
+		const page = canvas.getByRole("heading", { name: "Models" }).getBoundingClientRect();
+		const opened = canvas
+			.getByRole("heading", { name: "Default for new bots" })
+			.getBoundingClientRect();
+		await expect(opened.top).toBe(page.top);
 	},
 });

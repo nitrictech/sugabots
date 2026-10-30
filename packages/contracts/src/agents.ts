@@ -175,6 +175,11 @@ export const agentSchema = Schema.Struct({
 	 * typing pace. Slower, so off unless somebody turns it on, as for a demo.
 	 */
 	naturalBrowsing: Schema.Boolean,
+	/**
+	 * Who added it, by user id. `null` when it was made for the workspace, such
+	 * as the first bot at setup, or once the person who added it is deleted.
+	 */
+	createdById: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 });
 

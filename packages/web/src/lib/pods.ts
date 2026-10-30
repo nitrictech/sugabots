@@ -116,11 +116,14 @@ export function useDeletePod() {
 	});
 }
 
-export function usePodMembers(podId: string) {
+/** Who is in the pod; nothing is asked while `podId` is undefined. */
+export function usePodMembers(podId: string | undefined) {
 	return useQuery({
 		queryKey: ["pod-members", podId],
-		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.pods.listMembers({ params: { podId } }), { signal }),
+		queryFn: podId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.pods.listMembers({ params: { podId } }), { signal })
+			: skipToken,
 	});
 }
 

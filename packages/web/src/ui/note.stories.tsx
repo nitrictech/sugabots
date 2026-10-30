@@ -8,14 +8,14 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		children:
-			"Sandboxes are experimental. How they work, and what they keep, may change between releases.",
+			"Computers are experimental. How they work, and what they keep, may change between releases.",
 	},
 });
 
 /** A caveat beside settings, read in passing rather than announced. */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Sandboxes are experimental/)).toBeVisible();
+		await expect(canvas.getByText(/Computers are experimental/)).toBeVisible();
 		await expect(canvas.queryByRole("alert")).toBeNull();
 	},
 });

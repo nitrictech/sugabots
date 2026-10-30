@@ -1,6 +1,6 @@
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { Alert } from "@/ui/alert.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -22,23 +22,33 @@ const PANEL_BACK_BAR =
 const PANEL_BACK_LINK =
 	"focus-ring inline-flex min-h-[30px] min-w-0 items-center gap-1 rounded-md font-medium text-[14px] text-link";
 
+const PAGE_TITLE = "m-0 font-semibold text-2xl text-foreground leading-[30px] tracking-[-0.025em]";
+
 /** A settings page: its title and what it is for, then its groups. */
 export function SettingsPage({
 	title,
 	description,
 	hero,
 	back,
+	backOnWide = false,
 	headerAction,
 	children,
 	className,
 }: {
 	title?: ReactNode;
 	description?: ReactNode;
-	/** A picture above the title, such as a bot's face or your avatar, which centres the heading. */
+	/** A 44px picture beside the title, such as a bot's face or your avatar. */
 	hero?: ReactNode;
 	/** The link back to where this page was opened from, at the panel's top left: a `PageBackLink`. */
 	back?: ReactNode;
-	/** A control beside the title, such as Invite people, or under it with `hero`. */
+	/**
+	 * Whether `back` shows on a wide screen too, where it otherwise gives way to
+	 * the trail: for a step inside another page with no address of its own,
+	 * such as a bot's Instructions, which the trail can't lead back from, and
+	 * for a page opened from one beside it, such as a provider from Models.
+	 */
+	backOnWide?: boolean;
+	/** A control beside the title, such as Invite people. */
 	headerAction?: ReactNode;
 	children: ReactNode;
 	className?: string;
@@ -47,36 +57,43 @@ export function SettingsPage({
 		<>
 			{back && (
 				// Marked, so the settings frame leaves out its own Back beside this one.
-				<div data-page-back="" className={PANEL_BACK_BAR}>
+				<div
+					data-page-back=""
+					// On a wide screen it fits in the room above every page's title (8 + 30
+					// of the 40), so the title doesn't move between a page and one opened from it.
+					className={cn(PANEL_BACK_BAR, backOnWide ? "lg:pt-2 lg:pb-0" : "lg:hidden")}
+				>
 					{back}
 				</div>
 			)}
 			<div
 				className={cn(
-					"mx-auto flex w-full max-w-[620px] flex-col gap-7 px-4 pb-12 md:px-8",
-					back ? "pt-3" : "pt-9",
+					"mx-auto flex w-full max-w-[760px] flex-col gap-8 px-4 pb-20 md:px-8",
+					// Close under its Back; on a wide screen, as high as any other page.
+					!back ? "pt-10" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
 					className,
 				)}
 			>
 				{hero ? (
-					<div className="flex flex-col items-center gap-2.5 text-center">
-						{hero}
-						{title && <h2 className="m-0 pt-1 font-bold text-2xl text-foreground">{title}</h2>}
-						{description && <p className="m-0 text-[14px] text-muted-foreground">{description}</p>}
-						{headerAction}
+					<div className="flex flex-wrap items-center gap-x-3.5 gap-y-3">
+						{/* One size of slot for every picture, so moving between pages never moves the title. */}
+						<span className="grid size-11 shrink-0 place-items-center">{hero}</span>
+						<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5">
+							{title && <h2 className={cn(PAGE_TITLE, "truncate")}>{title}</h2>}
+							{description && (
+								<p className="m-0 text-[13px] text-muted-foreground">{description}</p>
+							)}
+						</div>
+						{headerAction && <div className="shrink-0">{headerAction}</div>}
 					</div>
 				) : (
 					(title || description) && (
 						// The actions wrap under the title when they leave it too narrow, as on a phone.
-						<div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-							<div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-1.5">
-								{title && (
-									<h2 className="m-0 font-bold text-[24px] text-foreground tracking-[-0.01em]">
-										{title}
-									</h2>
-								)}
+						<div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+							<div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-1">
+								{title && <h2 className={PAGE_TITLE}>{title}</h2>}
 								{description && (
-									<p className="m-0 text-[14px] text-muted-foreground leading-normal">
+									<p className="m-0 text-pretty text-[13px] text-muted-foreground leading-normal">
 										{description}
 									</p>
 								)}
@@ -91,9 +108,46 @@ export function SettingsPage({
 	);
 }
 
+/** The card a group's rows sit on, and anything else on a settings page drawn as one. */
+export const SETTINGS_CARD =
+	"overflow-hidden rounded-xl border border-settings-card-border bg-settings-card";
+
+/** The outlined + beside a page's title that adds to it: Invite people, New bot. */
+export function SettingsAddButton({
+	children,
+	onClick,
+	disabled,
+	render,
+}: {
+	children: ReactNode;
+	onClick?: () => void;
+	disabled?: boolean;
+	/** The element it is, when it opens something itself, such as a menu: `render={<DropdownMenuTrigger />}`. */
+	render?: useRender.RenderProp;
+}) {
+	return useRender({
+		render,
+		defaultTagName: "button",
+		props: {
+			type: render ? undefined : "button",
+			onClick,
+			disabled,
+			className:
+				"focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border-strong pr-3 pl-2.5 font-medium text-[13px] text-foreground transition-colors hover:border-border-dashed hover:bg-row-hover disabled:cursor-default disabled:opacity-50",
+			children: (
+				<>
+					<Plus aria-hidden size={14} strokeWidth={2} />
+					{children}
+				</>
+			),
+		},
+	});
+}
+
 /** A named group of rows on one card, with an optional note beneath. */
 export function SettingsGroup({
 	label,
+	description,
 	note,
 	action,
 	headingLevel = 3,
@@ -101,6 +155,9 @@ export function SettingsGroup({
 	className,
 }: {
 	label?: ReactNode;
+	/** A line under the label, before the rows: what the rows below have in common. */
+	description?: ReactNode;
+	/** A line after the rows: what follows from them. */
 	note?: ReactNode;
 	/** A control at the right of the label, such as Invite people. */
 	action?: ReactNode;
@@ -115,11 +172,11 @@ export function SettingsGroup({
 		// Named by its label, so a screen reader can move between a page's groups by name.
 		<section aria-labelledby={label ? headingId : undefined} className="flex flex-col">
 			{(label || action) && (
-				<div className="flex items-center gap-2 px-1 pb-2">
+				<div className={cn("flex items-center gap-2 px-0.5", description ? "pb-1" : "pb-2.5")}>
 					{label && (
 						<Heading
 							id={headingId}
-							className="m-0 min-w-0 flex-1 font-medium text-sm text-subtle-foreground"
+							className="m-0 min-w-0 flex-1 font-medium text-[13px] text-muted-foreground"
 						>
 							{label}
 						</Heading>
@@ -127,13 +184,24 @@ export function SettingsGroup({
 					{action}
 				</div>
 			)}
-			<div className={cn("overflow-hidden rounded-panel bg-list", className)}>{children}</div>
+			{description && (
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal">
+					{description}
+				</p>
+			)}
+			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="px-1 pt-2 text-sm text-subtle-foreground leading-normal">{note}</div>
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal">
+					{note}
+				</div>
 			)}
 		</section>
 	);
 }
+
+/** A row of a settings card, ruled off from the one below it. */
+const SETTINGS_ROW =
+	"flex min-h-14 items-center gap-3.5 border-border border-b px-4 last:border-b-0";
 
 /**
  * One row of a group: an optional icon, a label and a line under it, and what
@@ -169,26 +237,23 @@ export function SettingsRow({
 			type: onClick && !render ? "button" : undefined,
 			onClick,
 			className: cn(
-				"flex w-full min-w-0 items-center gap-3 border-border border-b px-4 py-3 text-left last:border-b-0",
-				interactive && "focus-ring cursor-pointer transition-colors hover:bg-panel",
+				`${SETTINGS_ROW} w-full min-w-0 py-3 text-left`,
+				interactive && "focus-ring cursor-pointer transition-colors hover:bg-settings-row-hover",
 				className,
 			),
 			children: (
 				<>
 					{icon}
-					<span className="flex min-w-0 flex-1 flex-col gap-px">
-						{/* The design sets a lone label in the regular weight, and a name with a line under it in medium. */}
-						<span className={cn("truncate text-[14.5px] text-foreground", sub && "font-medium")}>
-							{label}
-						</span>
-						{sub && <span className="truncate text-muted-foreground text-sm">{sub}</span>}
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
+						<span className="truncate text-[13px] text-foreground">{label}</span>
+						{sub && <span className="text-pretty text-subtle-foreground text-xs">{sub}</span>}
 					</span>
 					{trailing}
 					{chevron && (
 						<ChevronRight
 							aria-hidden
-							size={15}
-							strokeWidth={2.4}
+							size={14}
+							strokeWidth={2}
 							className="shrink-0 text-subtle-foreground"
 						/>
 					)}
@@ -230,8 +295,8 @@ export function SettingsFieldRow({
 				placeholder={placeholder}
 				maxLength={maxLength}
 				className={cn(
-					"min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
-					mono ? "font-mono text-[13.5px]" : "text-[14.5px]",
+					"min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground",
+					mono && "font-mono",
 				)}
 			/>
 		</SettingsControlRow>
@@ -282,11 +347,13 @@ export function SettingsNameRow({
 						if (event.key === "Escape") setDraft(name);
 					}}
 					maxLength={maxLength}
-					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-[13px] text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
 				/>
 			</SettingsControlRow>
 			{error && (
-				<Alert className="border-border border-b px-4 py-2.5 last:border-b-0">{error}</Alert>
+				<Alert className="border-border border-b px-4 py-2.5 text-[13px] last:border-b-0">
+					{error}
+				</Alert>
 			)}
 		</>
 	);
@@ -316,7 +383,8 @@ export function SettingsControlRow({
 	return (
 		<div
 			className={cn(
-				"flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0",
+				SETTINGS_ROW,
+				"py-2.5",
 				stackOnPhone && "max-sm:flex-col max-sm:items-stretch max-sm:gap-2",
 			)}
 		>
@@ -343,7 +411,7 @@ export function SettingsChoiceRow<Value extends string>({
 	onChange: (value: Value) => void;
 }) {
 	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
+		<div className={cn(SETTINGS_ROW, "py-2.5 max-sm:flex-col max-sm:items-stretch max-sm:gap-2")}>
 			<SettingsFieldLabel>{label}</SettingsFieldLabel>
 			<SegmentedControl
 				label={label}
@@ -368,7 +436,7 @@ export function SettingsFieldLabel({
 	htmlFor?: string;
 	children: ReactNode;
 }) {
-	const className = "min-w-[88px] shrink-0 whitespace-nowrap text-[14px] text-foreground";
+	const className = "min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground";
 	return htmlFor ? (
 		<label htmlFor={htmlFor} className={className}>
 			{children}
@@ -380,10 +448,83 @@ export function SettingsFieldLabel({
 
 /** The value at a row's end, in the muted colour. */
 export function SettingsValue({ children }: { children: ReactNode }) {
-	return <span className="shrink-0 text-[13.5px] text-muted-foreground">{children}</span>;
+	return (
+		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground">{children}</span>
+	);
 }
 
-/** A 30px square that stands for what a row is about: an app's letters, an icon. */
+/** An outlined button at a row's end, for the one thing the row offers: Connect, Replace. */
+export function SettingsRowButton({
+	children,
+	onClick,
+	disabled,
+}: {
+	children: ReactNode;
+	onClick: () => void;
+	disabled?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			disabled={disabled}
+			className="focus-ring h-[30px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-[13px] text-foreground transition-colors hover:bg-row-hover disabled:cursor-default disabled:opacity-50"
+		>
+			{children}
+		</button>
+	);
+}
+
+/** The round mark at the end of a pick-one row, filled for the one picked. */
+export function SettingsRadioMark({ checked }: { checked: boolean }) {
+	return (
+		<span
+			aria-hidden
+			className={cn(
+				"grid size-4 shrink-0 place-items-center rounded-full border",
+				checked ? "border-foreground" : "border-border-dashed",
+			)}
+		>
+			{checked && <span className="size-2 rounded-full bg-foreground" />}
+		</span>
+	);
+}
+
+/** A pick-one row's look, for a `<label>` around a hidden radio: the row lifts under the pointer and rings when focused. */
+export const SETTINGS_RADIO_ROW =
+	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
+
+/** How a Test went, as a dot and a line cut short to fit, given whole when pointed at. */
+export function SettingsTestOutcome({ good, children }: { good: boolean; children: string }) {
+	return (
+		<span
+			role={good ? "status" : "alert"}
+			title={children}
+			className={cn(
+				"flex min-w-0 items-center gap-1.5 text-xs",
+				good ? "text-muted-foreground" : "text-destructive-text",
+			)}
+		>
+			<span
+				aria-hidden
+				className={cn("size-1.5 shrink-0 rounded-full", good ? "bg-success" : "bg-destructive")}
+			/>
+			<span className="truncate">{children}</span>
+		</span>
+	);
+}
+
+/** A row's state as a small green pill with a dot, for something working: Connected. */
+export function SettingsStatusBadge({ children }: { children: ReactNode }) {
+	return (
+		<span className="flex h-[22px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-success/12 px-2 font-medium text-success-text text-xs">
+			<span aria-hidden className="size-1.5 rounded-full bg-success" />
+			{children}
+		</span>
+	);
+}
+
+/** A 28px square that stands for what a row is about: an app's letters, an icon. */
 export function SettingsRowIcon({
 	children,
 	className,
@@ -395,7 +536,7 @@ export function SettingsRowIcon({
 		<span
 			aria-hidden
 			className={cn(
-				"grid size-[30px] shrink-0 place-items-center rounded-[9px] bg-border-strong font-bold text-soft-foreground text-xs",
+				"grid size-7 shrink-0 place-items-center rounded-[7px] border border-border-strong font-semibold text-soft-foreground text-xs",
 				className,
 			)}
 		>
@@ -404,105 +545,72 @@ export function SettingsRowIcon({
 	);
 }
 
-/** A row that adds to its group, such as New bot: a dashed circle with a plus, and what it adds in the link colour. */
+/** A row that adds to its group, such as New bot: a square with a plus, and what it adds, quieter than the rows above it. */
 export function SettingsAddRow({ label, onClick }: { label: string; onClick: () => void }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
-			className="focus-ring flex w-full items-center gap-3 border-border border-t px-4 py-2.5 text-left transition-colors first:border-t-0 hover:bg-panel"
+			className={cn(
+				SETTINGS_ROW,
+				"focus-ring w-full border-t py-3 text-left transition-colors first:border-t-0 hover:bg-settings-row-hover",
+			)}
 		>
 			<SettingsAddMark />
-			<span className="font-medium text-[14.5px] text-link">{label}</span>
+			<span className="text-[13px] text-muted-foreground">{label}</span>
 		</button>
 	);
 }
 
-/** The dashed circle with a plus that marks a row adding to its group. */
+/** The square with a plus that marks a row adding to its group. */
 export function SettingsAddMark() {
 	return (
-		<span
-			aria-hidden
-			className="grid size-[30px] shrink-0 place-items-center rounded-full border-[1.5px] border-border-dashed border-dashed text-link"
-		>
-			<Plus size={14} strokeWidth={2.4} />
-		</span>
+		<SettingsRowIcon>
+			<Plus size={14} strokeWidth={2} />
+		</SettingsRowIcon>
 	);
 }
 
 /** The foot of a page for something that cannot be undone: Delete pod, Sign out. */
 export function SettingsDanger({
-	children,
+	label,
+	description,
+	action,
 	onClick,
 	disabledReason,
 }: {
-	children: ReactNode;
+	/** What the action does, in full: Delete pod. */
+	label: string;
+	/** What follows from it: Removes its bots, threads and artifacts. */
+	description: ReactNode;
+	/** The button's own word, short beside the label: Delete. */
+	action: string;
 	onClick: () => void;
-	/** Why it cannot be done yet, shown beneath it; the action is disabled while there is one. */
+	/** Why it cannot be done yet, in place of the description; the action is disabled while there is one. */
 	disabledReason?: string;
 }) {
 	return (
-		<div className="flex flex-col items-center gap-1">
+		<div
+			className={cn(
+				SETTINGS_CARD,
+				"flex min-h-14 flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3",
+			)}
+		>
+			<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5 leading-[1.4]">
+				<span className="text-[13px] text-foreground">{label}</span>
+				<span className="text-pretty text-subtle-foreground text-xs">
+					{disabledReason ?? description}
+				</span>
+			</div>
 			<button
 				type="button"
 				onClick={onClick}
 				disabled={disabledReason !== undefined}
-				className="focus-ring rounded-md px-3 py-2 font-medium text-[14px] text-destructive-text transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+				aria-label={label}
+				className="focus-ring -mr-1.5 h-[30px] shrink-0 whitespace-nowrap rounded-lg px-3 font-medium text-[13px] text-destructive-text transition-colors hover:bg-destructive-hover disabled:cursor-not-allowed disabled:opacity-50"
 			>
-				{children}
+				{action}
 			</button>
-			{disabledReason && (
-				<p className="m-0 max-w-sm px-4 text-center text-sm text-subtle-foreground">
-					{disabledReason}
-				</p>
-			)}
-		</div>
-	);
-}
-
-/**
- * A list of things beside the one that is open, as Bots and Pods are laid out.
- * On a phone they take turns: an open item covers its list.
- */
-export function SettingsListDetail({
-	list,
-	detail,
-	detailOpen,
-	listLink,
-	returnTo,
-}: {
-	list: ReactNode;
-	detail: ReactNode;
-	/** Whether an item is open, which on a phone hides the list. */
-	detailOpen: boolean;
-	/** The list's own page, which on a phone an open item goes back to when there is no `returnTo`. */
-	listLink: BackTarget;
-	/** The page the open item was reached from, when that is not the list beside it. */
-	returnTo: BackTarget | undefined;
-}) {
-	return (
-		<div className="flex min-h-full min-w-0 flex-1">
-			<div
-				className={cn(
-					"flex w-[280px] shrink-0 flex-col border-border-subtle border-r max-md:w-full max-md:border-r-0",
-					detailOpen && "max-md:hidden",
-				)}
-			>
-				{list}
-			</div>
-			<div className={cn("group/detail min-w-0 flex-1", !detailOpen && "max-md:hidden")}>
-				<CompactBackBar
-					{...(returnTo ?? listLink)}
-					className="group-has-[[data-page-back]]/detail:hidden md:hidden"
-				/>
-				{returnTo && (
-					<SettingsReturnBar
-						{...returnTo}
-						className="group-has-[[data-page-back]]/detail:hidden max-md:hidden"
-					/>
-				)}
-				{detail}
-			</div>
 		</div>
 	);
 }
@@ -511,23 +619,6 @@ export function SettingsListDetail({
 export interface BackTarget {
 	label: string;
 	render: useRender.RenderProp;
-}
-
-/**
- * The bar across the top of a panel with the way back to the page you came
- * from, for a step that jumped between sections (a pod to one of its bots, a
- * chat to its bot's settings) and so left no Back of its own.
- */
-export function SettingsReturnBar({
-	label,
-	render,
-	className,
-}: BackTarget & { className?: string }) {
-	return (
-		<div className={cn(PANEL_BACK_BAR, className)}>
-			<PageBackLink label={`Back to ${label}`} render={render} />
-		</div>
-	);
 }
 
 /** The small Back link above a page's title, for `SettingsPage`'s `back`. */
@@ -575,108 +666,4 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 			{link}
 		</div>
 	);
-}
-
-/** The list half: its title and a round +, a search over it, then its rows. */
-export function SettingsListColumn({
-	title,
-	newLabel,
-	onNew,
-	search,
-	onSearch,
-	children,
-}: {
-	title: string;
-	/** Names the + for assistive technology; absent with `onNew` when nothing may be added. */
-	newLabel?: string;
-	onNew?: () => void;
-	search: string;
-	onSearch: (value: string) => void;
-	children: ReactNode;
-}) {
-	return (
-		<>
-			<div className="flex shrink-0 items-center gap-2.5 px-4 pt-5 pb-3">
-				<h2 className="m-0 flex-1 font-bold text-[17px] text-foreground">{title}</h2>
-				{onNew && (
-					<button
-						type="button"
-						aria-label={newLabel}
-						onClick={onNew}
-						className="focus-ring grid size-[30px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
-					>
-						<Plus size={16} strokeWidth={2.4} />
-					</button>
-				)}
-			</div>
-			<div className="shrink-0 px-2 pb-2.5">
-				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl border border-transparent bg-chip px-2.5">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-					<input
-						type="search"
-						value={search}
-						onChange={(event) => onSearch(event.target.value)}
-						placeholder={`Search ${title.toLowerCase()}`}
-						aria-label={`Search ${title.toLowerCase()}`}
-						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
-					/>
-				</label>
-			</div>
-			<nav aria-label={`Workspace ${title.toLowerCase()}`} className="flex min-h-0 flex-1 flex-col">
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-y-auto px-2 pb-3">
-					{children}
-				</ul>
-			</nav>
-		</>
-	);
-}
-
-/** One row of a settings list: a picture, a name and a line under it, and whether it is the open one. */
-export function SettingsListRow({
-	picture,
-	label,
-	sub,
-	trailing,
-	selected,
-	render,
-}: {
-	picture: ReactNode;
-	label: ReactNode;
-	sub?: ReactNode;
-	/** What sits at the row's end, such as Paused. */
-	trailing?: ReactNode;
-	/**
-	 * `true` for the item the address names. `"wide"` for the one open only
-	 * because none was chosen: open beside the list on a wide screen, and not on
-	 * a phone, where the list stands alone.
-	 */
-	selected: boolean | "wide";
-	/** The link the row is: `render={<Link … />}`. */
-	render: useRender.RenderProp;
-}) {
-	const row = useRender({
-		render,
-		props: {
-			"aria-current": selected === true ? "page" : undefined,
-			className: cn(
-				"focus-ring flex items-center gap-3 rounded-[14px] px-2.5 py-[9px] transition-colors",
-				selected === true
-					? "bg-row-selected"
-					: selected === "wide"
-						? "hover:bg-row-hover md:bg-row-selected"
-						: "hover:bg-row-hover",
-			),
-			children: (
-				<>
-					{picture}
-					<span className="flex min-w-0 flex-1 flex-col gap-px">
-						<span className="truncate font-medium text-[14.5px] text-foreground">{label}</span>
-						{sub && <span className="truncate text-muted-foreground text-sm">{sub}</span>}
-					</span>
-					{trailing}
-				</>
-			),
-		},
-	});
-	return <li>{row}</li>;
 }

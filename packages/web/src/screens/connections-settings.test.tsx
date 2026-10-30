@@ -64,7 +64,9 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const wikiPage = `${page}/connections/${wiki.id}`;
+/** The pod's Connections, a page of its own beside the pod's General. */
+const connectionsPage = `${page}/connections`;
+const wikiPage = `${connectionsPage}/${wiki.id}`;
 
 /** The connection's own page, once it and its tools have loaded. */
 async function openedWiki() {
@@ -72,7 +74,13 @@ async function openedWiki() {
 	await waitFor(() => expect(screen.queryByRole("status", { name: "Loading tools" })).toBeNull());
 }
 
-/** The pod page is one page, so its Connections are there once it has loaded. */
+/** The connection's Individual tools, opened from its page. */
+async function openIndividualTools() {
+	fireEvent.click(screen.getByRole("button", { name: /^Individual tools/ }));
+	await screen.findByRole("heading", { name: "Individual tools", level: 2 });
+}
+
+/** The pod's Connections page, once it has loaded. */
 async function showConnections() {
 	await screen.findByRole("heading", { name: "Connections" });
 }
@@ -93,7 +101,7 @@ describe("the Connections settings", () => {
 				authorizationUrl: "https://notion.example/authorize?state=s-1",
 			}),
 		);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const list = await openAdd();
@@ -118,7 +126,7 @@ describe("the Connections settings", () => {
 		route.startOAuth.mockReturnValue(
 			Effect.succeed({ authorizationUrl: "https://wiki.example/authorize" }),
 		);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
@@ -128,13 +136,30 @@ describe("the Connections settings", () => {
 		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example/authorize"));
 	});
 
+	it("says on a connection's page who it is signed in as, or offers to sign it in", async () => {
+		serveConnections({ ...wiki, auth: "oauth", signedIn: true, secretHeader: null });
+		mount(`${page}/connections/${wiki.id}`);
+
+		const account = await screen.findByRole("region", { name: "Account" });
+		expect(within(account).getByText("Signed in as")).toBeDefined();
+		expect(within(account).getByText("Sam")).toBeDefined();
+		expect(within(account).queryByRole("button", { name: "Sign in" })).toBeNull();
+		cleanup();
+
+		serveConnections({ ...wiki, auth: "oauth", signedIn: false, secretHeader: null });
+		mount(`${page}/connections/${wiki.id}`);
+
+		const notYet = await screen.findByRole("region", { name: "Account" });
+		expect(within(notYet).getByRole("button", { name: "Sign in" })).toBeDefined();
+	});
+
 	it("adds any other server by name and address", async () => {
 		serveConnections();
 		route.create.mockImplementation(() => {
 			serveConnections(wiki);
 			return Effect.succeed(listedConnection(wiki));
 		});
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
@@ -166,7 +191,7 @@ describe("the Connections settings", () => {
 		route.create.mockImplementation(() =>
 			Effect.succeed(listedConnection({ ...wiki, kind: "http" })),
 		);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /HTTP endpoint/ }));
@@ -187,7 +212,7 @@ describe("the Connections settings", () => {
 	it("tests a server by address before adding it", async () => {
 		serveConnections();
 		route.testUnsaved.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 3 }));
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
@@ -214,7 +239,7 @@ describe("the Connections settings", () => {
 		route.connectFromCatalog.mockReturnValue(
 			Effect.fail(new BadRequest({ message: userText`The server didn't start a sign-in.` })),
 		);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
@@ -238,7 +263,7 @@ describe("the Connections settings", () => {
 		route.connectFromCatalog.mockReturnValue(
 			Effect.succeed({ connectionId: wiki.id, authorizationUrl: "https://wiki.example/authorize" }),
 		);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
@@ -259,7 +284,7 @@ describe("the Connections settings", () => {
 
 	it("opens a connection on its own page, its tools apart by whether they make changes", async () => {
 		serveConnections(wikiAt("allow"));
-		const router = mount(page);
+		const router = mount(connectionsPage);
 		await showConnections();
 
 		expect(screen.queryByText("Search pages")).toBeNull();
@@ -269,44 +294,44 @@ describe("the Connections settings", () => {
 		await openedWiki();
 
 		expect(router.state.location.pathname).toBe(`${page}/connections/${wiki.id}`);
-		const reading = screen.getByRole("region", { name: "Reading" });
-		expect(within(reading).getByRole("group", { name: "Search pages" })).toBeDefined();
-		// A tool is shown by its name alone.
-		expect(within(reading).queryByText("Search the wiki for pages.")).toBeNull();
+		expect(screen.getByText("Connected by Sam")).toBeDefined();
+		const reading = screen.getByRole("region", { name: "Tools that read" });
+		expect(within(reading).getByText("All 1 read tool")).toBeDefined();
 		expect(
-			within(screen.getByRole("region", { name: "Making changes" })).getByRole("group", {
-				name: "Wipe",
-			}),
-		).toBeDefined();
+			(within(reading).getByRole("radio", { name: "Allowed" }) as HTMLInputElement).checked,
+		).toBe(true);
+		const changes = screen.getByRole("region", { name: "Tools that make changes" });
+		expect(within(changes).getByText("All 1 change tool")).toBeDefined();
+		// Each tool is on Individual tools, not here.
+		expect(screen.queryByText("search_pages")).toBeNull();
 		// A server added by its address is told apart by it.
 		expect(screen.getByText(wiki.url)).toBeDefined();
 		const backBar = document.querySelector<HTMLElement>("[data-page-back]");
-		expect(backBar && within(backBar).getByRole("link", { name: pod.name })).toBeDefined();
+		expect(backBar && within(backBar).getByRole("link", { name: "Connections" })).toBeDefined();
 	});
 
-	it("opens a connection from its row, but not from its menu", async () => {
+	it("opens a connection from its row, which offers nothing to change on the list", async () => {
 		serveConnections(wikiAt("ask"));
-		route.update.mockReturnValue(Effect.never);
-		const router = mount(page);
+		const router = mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		fireEvent.click(within(row).getByRole("button", { name: "Wiki, all tools: Ask" }));
-		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Allow" }));
-		expect(router.state.location.pathname).toBe(page);
+		// What its tools may do is set inside it, not from the pod's list.
+		expect(within(row).queryByRole("button")).toBeNull();
 
 		fireEvent.click(within(row).getByRole("link", { name: /^Wiki, / }));
 		await openedWiki();
 		expect(router.state.location.pathname).toBe(wikiPage);
 	});
 
-	it("sets one tool on its own, showing the change before the server answers", async () => {
+	it("sets one tool on its own on Individual tools, showing the change before the server answers", async () => {
 		serveConnections(wikiAt("ask"));
 		route.update.mockReturnValue(Effect.never);
 		mount(wikiPage);
 		await openedWiki();
 
-		const wipe = screen.getByRole("group", { name: "Wipe" });
+		await openIndividualTools();
+		const wipe = screen.getByRole("group", { name: "wipe" });
 		fireEvent.click(within(wipe).getByRole("radio", { name: "Off" }));
 
 		await waitFor(() =>
@@ -316,9 +341,13 @@ describe("the Connections settings", () => {
 			}),
 		);
 		await waitFor(() =>
-			expect((within(wipe).getByRole("radio", { name: "Off" }) as HTMLInputElement).checked).toBe(
-				true,
-			),
+			expect(
+				(
+					within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", {
+						name: "Off",
+					}) as HTMLInputElement
+				).checked,
+			).toBe(true),
 		);
 	});
 
@@ -328,58 +357,105 @@ describe("the Connections settings", () => {
 		mount(wikiPage);
 		await openedWiki();
 
-		const wipe = screen.getByRole("group", { name: "Wipe" });
-		fireEvent.click(within(wipe).getByRole("radio", { name: "Off" }));
+		await openIndividualTools();
+		fireEvent.click(
+			within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", { name: "Off" }),
+		);
 
 		expect(await screen.findByText("Nope")).toBeDefined();
-		expect((within(wipe).getByRole("radio", { name: "Ask" }) as HTMLInputElement).checked).toBe(
-			true,
-		);
+		expect(
+			(
+				within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", {
+					name: "Ask first",
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
 	});
 
-	it("sets every tool in a group from its menu, which reads Custom while they differ", async () => {
+	it("sets a kind of tool at once, leaving a tool set apart as it is", async () => {
 		const [search, wipe] = wiki.tools;
 		if (!search || !wipe) throw new Error("fixture");
-		const twoWipes = {
+		serveConnections({
 			...wiki,
 			tools: [
 				{ ...search, access: "allow" as const },
 				{ ...wipe, access: "ask" as const },
+				{ ...wipe, name: "wipe_more", access: "ask" as const },
 				{ ...wipe, name: "wipe_all", access: "off" as const },
 			],
-		};
-		serveConnections(twoWipes);
+		});
 		route.update.mockReturnValue(Effect.never);
 		mount(wikiPage);
 		await openedWiki();
 
-		const changes = screen.getByRole("region", { name: "Making changes" });
-		fireEvent.click(within(changes).getByRole("button", { name: "Making changes tools: Custom" }));
-		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Ask" }));
+		// Most of the changes ask first, so that is the kind's setting; wipe_all is set apart from it.
+		const changes = screen.getByRole("region", { name: "Tools that make changes" });
+		expect(
+			(within(changes).getByRole("radio", { name: "Ask first" }) as HTMLInputElement).checked,
+		).toBe(true);
+		expect(screen.getByText("1 changed")).toBeDefined();
+		fireEvent.click(within(changes).getByRole("radio", { name: "Allowed" }));
 
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				payload: { toolAccess: { wipe: "ask", wipe_all: "ask" } },
+				payload: { toolAccess: { wipe: "allow", wipe_more: "allow" } },
 			}),
 		);
-		expect(
-			await within(changes).findByRole("button", { name: "Making changes tools: Ask" }),
-		).toBeDefined();
+		expect(route.update.mock.calls[0]?.[0].payload.toolAccess).not.toHaveProperty("wipe_all");
 	});
 
-	it("folds a group away and opens it again", async () => {
+	it("lists the tools set apart first, saying their kind's setting, and puts them all back", async () => {
+		const [search, wipe] = wiki.tools;
+		if (!search || !wipe) throw new Error("fixture");
+		serveConnections({
+			...wiki,
+			tools: [
+				{ ...search, access: "allow" as const },
+				{ ...wipe, access: "ask" as const },
+				{ ...wipe, name: "wipe_more", access: "ask" as const },
+				{ ...wipe, name: "wipe_all", access: "off" as const },
+			],
+		});
+		route.update.mockReturnValue(Effect.never);
+		mount(wikiPage);
+		await openedWiki();
+
+		await openIndividualTools();
+		const changed = screen.getByRole("region", { name: "Changed (1)" });
+		expect(within(changed).getByRole("group", { name: "wipe_all" })).toBeDefined();
+		expect(within(changed).getByText("Default: ask first")).toBeDefined();
+		expect(screen.getByRole("region", { name: "Tools that make changes" })).toBeDefined();
+
+		// Searching narrows every group.
+		fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
+			target: { value: "more" },
+		});
+		await waitFor(() => expect(screen.queryByRole("region", { name: "Changed (1)" })).toBeNull());
+		expect(screen.getByRole("group", { name: "wipe_more" })).toBeDefined();
+		fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
+			target: { value: "" },
+		});
+
+		fireEvent.click(await screen.findByRole("button", { name: "Reset all" }));
+		await waitFor(() =>
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { toolAccess: { wipe_all: "ask" } },
+			}),
+		);
+	});
+
+	it("goes back from Individual tools to the connection", async () => {
 		serveConnections(wikiAt("ask"));
 		mount(wikiPage);
 		await openedWiki();
 
-		const reading = screen.getByRole("region", { name: "Reading" });
-		fireEvent.click(within(reading).getByRole("button", { name: "Reading, 1 tool" }));
-		expect(within(reading).queryByRole("group", { name: "Search pages" })).toBeNull();
-		fireEvent.click(within(reading).getByRole("button", { name: "Reading, 1 tool" }));
-		expect(within(reading).getByRole("group", { name: "Search pages" })).toBeDefined();
+		await openIndividualTools();
+		const backBar = document.querySelector<HTMLElement>("[data-page-back]");
+		if (backBar) fireEvent.click(within(backBar).getByRole("button", { name: "Wiki" }));
+		expect(await screen.findByRole("heading", { name: "Wiki", level: 2 })).toBeDefined();
 	});
 
-	it("reads Custom on the pod's page for a connection whose tools differ, and sets them all from it", async () => {
+	it("sums up on the pod's list what a connection's tools are set to", async () => {
 		const [search, wipe] = wiki.tools;
 		if (!search || !wipe) throw new Error("fixture");
 		serveConnections({
@@ -389,38 +465,16 @@ describe("the Connections settings", () => {
 				{ ...wipe, access: "off" as const },
 			],
 		});
-		route.update.mockReturnValue(Effect.never);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
 		expect(within(row).getByText("Custom: 1 allowed, 1 off")).toBeDefined();
-		fireEvent.click(within(row).getByRole("button", { name: "Wiki, all tools: Custom" }));
-		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Ask" }));
-
-		await waitFor(() =>
-			expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { access: "ask" } }),
-		);
-		expect(await within(row).findByText("Every tool asks first")).toBeDefined();
-	});
-
-	it("opens the connection from the pod's page to set each tool, by choosing Custom", async () => {
-		serveConnections(wikiAt("ask"));
-		const router = mount(page);
-		await showConnections();
-
-		const row = await screen.findByRole("article", { name: "Wiki" });
-		fireEvent.click(within(row).getByRole("button", { name: "Wiki, all tools: Ask" }));
-		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom" }));
-
-		await openedWiki();
-		expect(router.state.location.pathname).toBe(wikiPage);
-		expect(route.update).not.toHaveBeenCalled();
 	});
 
 	it("offers nothing to set for a connection with no tools found yet", async () => {
 		serveConnections({ ...wiki, tools: [] });
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
@@ -439,13 +493,15 @@ describe("the Connections settings", () => {
 		};
 		serveConnections(failing);
 		route.update.mockReturnValue(Effect.succeed(listedConnection(failing)));
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
 		fireEvent.click(within(row).getByRole("button", { name: "Fix" }));
 		await openedWiki();
-		expect(screen.getByText(/needs an access token/)).toBeDefined();
+		// Why, beside Test, with the way to fix it, so nothing moves under it.
+		expect(screen.getByRole("alert").textContent).toMatch(/needs an access token/);
+		expect(screen.getByRole("link", { name: "How to fix this" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Add access token" }));
 		fireEvent.change(screen.getByLabelText("Wiki secret"), { target: { value: "abc123" } });
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -457,7 +513,7 @@ describe("the Connections settings", () => {
 		);
 	});
 
-	it("checks, replaces the secret of and disconnects a connection from its page's menu", async () => {
+	it("tests, replaces the secret of and disconnects a connection from its page", async () => {
 		serveConnections({ ...wiki, hasSecret: true });
 		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 12, tools: 2 }));
 		route.update.mockReturnValue(Effect.succeed(listedConnection(wiki)));
@@ -468,12 +524,10 @@ describe("the Connections settings", () => {
 		const router = mount(wikiPage);
 		await openedWiki();
 
-		fireEvent.click(screen.getByRole("button", { name: "More for Wiki" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Check connection" }));
-		expect(await screen.findByText("Connection successful")).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+		expect((await screen.findByRole("status")).textContent).toBe("Connection successful");
 
-		fireEvent.click(screen.getByRole("button", { name: "More for Wiki" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Replace secret" }));
+		fireEvent.click(screen.getByRole("button", { name: "Replace secret" }));
 		fireEvent.change(screen.getByLabelText("Wiki secret"), { target: { value: "new-secret" } });
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() =>
@@ -483,7 +537,7 @@ describe("the Connections settings", () => {
 			}),
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+		fireEvent.click(screen.getByRole("button", { name: "Disconnect Wiki" }));
 		expect(await screen.findByRole("heading", { name: "Disconnect Wiki?" })).toBeDefined();
 		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
 		await waitFor(() =>
@@ -491,7 +545,7 @@ describe("the Connections settings", () => {
 				params: { podId: pod.id, connectionId: wiki.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(page));
+		await waitFor(() => expect(router.state.location.pathname).toBe(connectionsPage));
 	});
 
 	it("says so when the connection asked for is not in the pod", async () => {
@@ -504,32 +558,33 @@ describe("the Connections settings", () => {
 	it("lets a pod member see connections and their tools, with nothing to change", async () => {
 		apiAnswers({ role: "member" });
 		serveConnections(wiki);
-		mount(page);
+		mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).queryByRole("button", { name: /all tools/ })).toBeNull();
-		expect(within(row).getByText("Off")).toBeDefined();
+		expect(within(row).queryByRole("button")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
 
 		fireEvent.click(within(row).getByRole("link", { name: /^Wiki, / }));
 		await openedWiki();
-		expect(screen.getByText("Search pages")).toBeDefined();
 		expect(screen.queryByRole("radio")).toBeNull();
-		expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
-		fireEvent.click(screen.getByRole("button", { name: "More for Wiki" }));
-		expect(await screen.findByRole("menuitem", { name: "Check connection" })).toBeDefined();
-		expect(screen.queryByRole("menuitem", { name: "Replace secret" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Disconnect Wiki" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Test connection" })).toBeDefined();
+		expect(screen.queryByRole("button", { name: "Add secret" })).toBeNull();
+		await openIndividualTools();
+		expect(screen.getAllByText("search_pages").length).toBeGreaterThan(0);
+		expect(screen.queryByRole("radio")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Reset all" })).toBeNull();
 	});
 });
 
 describe("coming back from a connection sign-in", () => {
-	it("opens the pod page of the pod the sign-in was for", async () => {
+	it("opens the Connections of the pod the sign-in was for", async () => {
 		serveConnections(wiki);
 		const router = mount(`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}`);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
-		expect(router.state.location.href).toBe(page);
+		expect(router.state.location.href).toBe(connectionsPage);
 	});
 
 	it("says once why a sign-in for a pod did not finish", async () => {
@@ -543,14 +598,14 @@ describe("coming back from a connection sign-in", () => {
 				"Signing in did not finish: The server's sign-in was refused or cancelled.",
 			),
 		).toBeDefined();
-		await waitFor(() => expect(router.state.location.href).toBe(page));
+		await waitFor(() => expect(router.state.location.href).toBe(connectionsPage));
 
 		const other = pods[1] as (typeof pods)[number];
 		await router.navigate({
-			to: "/$workspace/settings/pods/$pod",
-			params: { workspace: "suga", pod: other.slug },
+			to: "/$workspace/settings/pods/$pod/$page",
+			params: { workspace: "suga", pod: other.slug, page: "connections" },
 		});
-		expect(await screen.findByRole("heading", { name: other.name })).toBeDefined();
+		expect(await screen.findByText(`Shared by every bot in ${other.name}.`)).toBeDefined();
 		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();
 	});
 

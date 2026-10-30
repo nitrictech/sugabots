@@ -4,7 +4,8 @@ import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
-import { routineSettingsLink } from "@/lib/links.ts";
+import { routineThreadLink } from "@/lib/links.ts";
+import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
@@ -110,7 +111,7 @@ export function ChatThreadPanel({
 		subheading: type === "collaboration" ? other && `${mine?.name} and ${other.name}` : undefined,
 		headingRef: heading,
 		actions: type === "routine" && routineExecution && (
-			<RoutineHeaderActions execution={routineExecution} />
+			<RoutineHeaderActions execution={routineExecution} podId={details.thread.podId} />
 		),
 	};
 	const body = query.isPending ? (
@@ -258,8 +259,16 @@ function ThreadPage({
 	);
 }
 
-function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
+function RoutineHeaderActions({
+	execution,
+	podId,
+}: {
+	execution: RoutineExecution;
+	/** The pod the run happened in, whose Routines page the routine is changed on. */
+	podId: string;
+}) {
 	const backToChat = useBackToHere("Chat");
+	const pod = usePods().data?.find((one) => one.id === podId);
 	return (
 		<>
 			{execution.trigger.kind === "webhook" && (
@@ -297,13 +306,15 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 					<ExternalLink aria-hidden size={15} strokeWidth={2.4} />
 				</IconButton>
 			)}
-			<IconButton
-				label="Routine settings"
-				variant="bar"
-				render={<Link {...routineSettingsLink({ id: execution.routineId })} state={backToChat} />}
-			>
-				<SettingsIcon />
-			</IconButton>
+			{pod && (
+				<IconButton
+					label="Routine settings"
+					variant="bar"
+					render={<Link {...routineThreadLink(pod, execution.routineId)} state={backToChat} />}
+				>
+					<SettingsIcon />
+				</IconButton>
+			)}
 		</>
 	);
 }

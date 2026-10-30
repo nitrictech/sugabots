@@ -2,7 +2,7 @@ import type { SearchProvider } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect } from "storybook/test";
+import { expect, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { SettingsPage } from "@/ui/settings-page.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
@@ -121,11 +121,12 @@ export const NeedsKey = meta.story({
 	beforeEach({ msw }) {
 		msw.use(answers(brave));
 	},
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("switch", { name: "Bots can use the web" }),
-		).toBeDisabled();
+	play: async ({ canvas, userEvent }) => {
+		const power = await canvas.findByRole("switch", { name: "Bots can use the web" });
+		await expect(power).toBeDisabled();
 		await expect(canvas.getByPlaceholderText("Paste your key")).toBeInTheDocument();
+		await userEvent.hover(power);
+		await waitFor(() => expect(screen.getByText("Brave Search requires an API key")).toBeVisible());
 	},
 });
 

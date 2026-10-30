@@ -67,8 +67,8 @@ export const AddedHosts = meta.story({
 		await expect(canvas.getByText("api.stripe.com")).toBeVisible();
 		await expect(canvas.getByText(/Added by Sam Rivera/)).toBeVisible();
 
-		await userEvent.type(canvas.getByLabelText("Add host"), "Docs.Example.com");
-		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
+		await userEvent.type(canvas.getByLabelText("Allow host"), "Docs.Example.com");
+		await userEvent.click(canvas.getByRole("button", { name: "Allow" }));
 		await expect(args.onAdd).toHaveBeenCalledWith("docs.example.com");
 
 		await userEvent.click(canvas.getByRole("button", { name: "Remove api.stripe.com" }));
@@ -112,7 +112,7 @@ export const Open = meta.story({
 	args: { settings: { ...settings, mode: "open" } },
 	play: async ({ canvas, args, userEvent }) => {
 		await expect(canvas.getByText(/Any host but the blocked ones below/)).toBeVisible();
-		await expect(canvas.queryByLabelText("Add host")).toBeNull();
+		await expect(canvas.queryByLabelText("Allow host")).toBeNull();
 		await expect(canvas.queryByText("api.stripe.com")).toBeNull();
 
 		await userEvent.type(canvas.getByLabelText("Block host"), "paste.example.com");

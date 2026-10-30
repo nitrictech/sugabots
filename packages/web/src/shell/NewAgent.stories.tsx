@@ -6,7 +6,7 @@ import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
 import { NewAgentDialog } from "./NewAgent.tsx";
-import { engineering, growthDesk, personal, podsWithBots, revenue } from "./story-fixtures.ts";
+import { growthDesk, podsWithBots, revenue } from "./story-fixtures.ts";
 
 const WORKSPACE = revenue.workspaceId;
 const API = import.meta.env.VITE_API_URL;
@@ -101,7 +101,7 @@ const meta = preview.meta({
  * bot as it will be, named over it.
  */
 export const InAPod = meta.story({
-	args: { podId: revenue.id, pods: [revenue] },
+	args: { podId: revenue.id },
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
@@ -119,22 +119,9 @@ export const InAPod = meta.story({
 	},
 });
 
-/** Opened from Bots: the pod is chosen at the foot, from those the viewer may add to. */
-export const ChoosingAPod = meta.story({
-	args: { pods: [revenue, engineering, personal] },
-	play: async ({ userEvent }) => {
-		const dialog = await screen.findByRole("dialog", { name: "New bot" });
-		await userEvent.click(within(dialog).getByRole("button", { name: "Pod: Revenue" }));
-		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Engineering" }));
-		await expect(
-			within(dialog).getByRole("button", { name: "Pod: Engineering" }),
-		).toBeInTheDocument();
-	},
-});
-
 /** Before any model is connected, it says where to connect one, and cannot make the bot yet. */
 export const NoModelYet = meta.story({
-	args: { podId: revenue.id, pods: [revenue] },
+	args: { podId: revenue.id },
 	render: (args) => (
 		<Preview models={false}>
 			<Dialog open>
@@ -155,7 +142,7 @@ export const NoModelYet = meta.story({
  * is shown, without a prompt, so it starts by asking what it's for.
  */
 export const MadeAsShown = meta.story({
-	args: { podId: revenue.id, pods: [revenue] },
+	args: { podId: revenue.id },
 	beforeEach({ msw }) {
 		created = [];
 		msw.use(createAgent, listAgents);
@@ -189,7 +176,7 @@ export const MadeAsShown = meta.story({
  * provider's, with what each can do; a search narrows a long list.
  */
 export const ChoosingAModel = meta.story({
-	args: { podId: revenue.id, pods: [revenue] },
+	args: { podId: revenue.id },
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		const models = within(dialog).getByRole("region", { name: "Model" });

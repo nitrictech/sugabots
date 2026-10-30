@@ -6,12 +6,12 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { LockKeyhole, Minus } from "lucide-react";
-import { type ReactNode, useDeferredValue, useState } from "react";
+import { Minus } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
 import {
 	useDeletePod,
 	useLeavePod,
@@ -21,13 +21,13 @@ import {
 	useUpdatePod,
 } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackTarget, useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
+import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
+import { type PodSettingsPage, podHasSettingsPage } from "@/lib/workspace-settings.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PodColourPicker } from "@/shell/LookPicker.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
-import { NewPodDialog } from "@/shell/NewPod.tsx";
-import { PodTile } from "@/shell/PodTile.tsx";
+import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -41,14 +41,10 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
 	PageBackLink,
-	SettingsAddMark,
-	SettingsAddRow,
+	SettingsAddButton,
 	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
-	SettingsListColumn,
-	SettingsListDetail,
-	SettingsListRow,
 	SettingsNameRow,
 	SettingsPage,
 	SettingsRow,
@@ -60,17 +56,19 @@ import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 import { PodSandboxSettings } from "./PodSandboxSettings.tsx";
 
 /**
- * Every pod you reach, beside the open one: its bots, its people and the
- * connections its bots share. Bots belong to a pod for good, so adding one
- * here makes it in this pod.
+ * One pod's settings, a page at a time as the navigation lists them: General,
+ * the connections its bots share, its people, and its bots. Bots belong to a
+ * pod for good, so adding one here makes it in this pod.
  */
 export function WorkspacePodsSettings({
 	selectedPodId,
+	podPage = "general",
 	selectedConnectionId,
 	connectionSignInError,
 	canCreatePods,
 }: {
 	selectedPodId?: string;
+	podPage?: PodSettingsPage;
 	/** One of the selected pod's connections, open on its own page in place of the pod's. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
@@ -78,103 +76,127 @@ export function WorkspacePodsSettings({
 }) {
 	const { data: pods, isPending, error } = usePods();
 	const { agents } = useAgents();
-	const navigate = useNavigate();
-	const returnTo = useSettingsBack();
-	const [search, setSearch] = useState("");
-	const [creating, setCreating] = useState(false);
-	const needle = useDeferredValue(search.trim().toLowerCase());
-	const ordered = [
-		...(pods?.filter((pod) => pod.kind === "shared") ?? []),
-		...(pods?.filter((pod) => pod.kind === "personal") ?? []),
-	];
-	const shown = ordered.filter((pod) => needle === "" || pod.name.toLowerCase().includes(needle));
-	// With none chosen, the first pod is open beside the list; on a phone the list comes first.
-	const selected = selectedPodId ? pods?.find((pod) => pod.id === selectedPodId) : ordered[0];
-	const botsIn = (pod: Pod) =>
-		agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
+	// With none chosen, the first shared pod is open, as the navigation lists them.
+	const selected = selectedPodId
+		? pods?.find((pod) => pod.id === selectedPodId)
+		: (pods?.find((pod) => pod.kind === "shared") ?? pods?.[0]);
+	const bots =
+		agents?.filter((agent) => agent.podId === selected?.id && agent.systemAgentKey === null) ?? [];
+	// Opened by the buttons beside the pages' titles, and shown by the lists below them.
+	const [addingConnection, setAddingConnection] = useState(false);
+	const [creatingBot, setCreatingBot] = useState(false);
 
 	if (isPending) return null;
-
-	return (
-		<>
-			<SettingsListDetail
-				detailOpen={selectedPodId !== undefined}
-				listLink={{
-					label: "Pods",
-					render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
-				}}
-				returnTo={returnTo}
-				list={
-					<SettingsListColumn
-						title="Pods"
-						newLabel="New pod"
-						onNew={canCreatePods ? () => setCreating(true) : undefined}
-						search={search}
-						onSearch={setSearch}
-					>
-						{shown.map((pod) => {
-							const bots = botsIn(pod).length;
-							return (
-								<SettingsListRow
-									key={pod.id}
-									picture={<PodPicture pod={pod} bots={botsIn(pod)} size={36} />}
-									label={pod.name}
-									sub={`${bots} ${bots === 1 ? "bot" : "bots"}`}
-									selected={pod.id === selected?.id && (selectedPodId ? true : "wide")}
-									render={<Link {...podSettingsLink(pod)} />}
-								/>
-							);
-						})}
-						{error && (
-							<li className="px-2.5 py-3">
-								<Alert>{failureMessage(error)}</Alert>
-							</li>
-						)}
-					</SettingsListColumn>
-				}
-				detail={
-					selected && selectedConnectionId ? (
-						<PodConnection
-							key={selectedConnectionId}
-							pod={selected}
-							connectionId={selectedConnectionId}
-						/>
-					) : selected ? (
-						<PodDetails
-							key={selected.id}
-							pod={selected}
-							bots={botsIn(selected)}
-							connectionSignInError={connectionSignInError}
-						/>
-					) : (
-						<div className="grid min-h-80 place-items-center p-6">
-							<EmptyState title={selectedPodId ? "No such pod here" : "No pods yet"}>
-								{selectedPodId
-									? "It may have been removed, or you may no longer have access to it."
-									: canCreatePods
-										? "Make the first pod for this workspace."
-										: "You are not in a pod yet."}
-							</EmptyState>
-						</div>
-					)
-				}
+	if (error) {
+		return (
+			<SettingsPage title="Pods">
+				<Alert>{failureMessage(error)}</Alert>
+			</SettingsPage>
+		);
+	}
+	if (!selected) {
+		return (
+			<div className="grid min-h-80 flex-1 place-items-center p-6">
+				<EmptyState title={selectedPodId ? "No such pod here" : "No pods yet"}>
+					{selectedPodId
+						? "It may have been removed, or you may no longer have access to it."
+						: canCreatePods
+							? "Make the first pod for this workspace."
+							: "You are not in a pod yet."}
+				</EmptyState>
+			</div>
+		);
+	}
+	if (selectedConnectionId) {
+		return (
+			<PodConnection
+				key={selectedConnectionId}
+				pod={selected}
+				connectionId={selectedConnectionId}
 			/>
-			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewPodDialog
-					onCreated={async (pod) => {
-						setCreating(false);
-						await navigate(podSettingsLink(pod));
-					}}
-				/>
-			</Dialog>
-		</>
-	);
+		);
+	}
+	// A page the pod doesn't have, such as a personal pod's General, gives way to its Connections.
+	switch (podHasSettingsPage(selected, podPage) ? podPage : "connections") {
+		case "connections":
+			return (
+				<SettingsPage
+					key={selected.id}
+					title="Connections"
+					description={`Shared by every bot in ${selected.name}.`}
+					headerAction={
+						selected.permissions.manageConnections && (
+							<SettingsAddButton onClick={() => setAddingConnection(true)}>
+								Add connection
+							</SettingsAddButton>
+						)
+					}
+				>
+					<ConnectionsSettings
+						pod={selected}
+						canManage={selected.permissions.manageConnections}
+						signInError={connectionSignInError}
+						adding={addingConnection}
+						onAddingChange={setAddingConnection}
+					/>
+				</SettingsPage>
+			);
+		case "people":
+			return (
+				<SettingsPage
+					key={selected.id}
+					title="People"
+					description={`Who can see ${selected.name} and talk to its bots.`}
+					headerAction={selected.permissions.manageMembers && <AddPeopleButton pod={selected} />}
+				>
+					<Members pod={selected} canManageMembers={selected.permissions.manageMembers} />
+				</SettingsPage>
+			);
+		case "bots":
+			return (
+				<SettingsPage
+					key={selected.id}
+					title="Bots"
+					description={`${bots.length} ${bots.length === 1 ? "bot" : "bots"} in ${selected.name}`}
+					headerAction={
+						selected.permissions.createAgents && (
+							<SettingsAddButton onClick={() => setCreatingBot(true)}>New bot</SettingsAddButton>
+						)
+					}
+				>
+					<PodBots
+						pod={selected}
+						bots={bots}
+						creating={creatingBot}
+						onCreatingChange={setCreatingBot}
+					/>
+				</SettingsPage>
+			);
+		case "computer":
+			return (
+				<SettingsPage
+					key={selected.id}
+					title="Computer"
+					description={`The computer ${selected.name}'s bots run commands, browse and edit files on. Experimental.`}
+				>
+					<PodSandboxSettings
+						podId={selected.id}
+						canManageNetwork={selected.permissions.manageSandbox}
+					/>
+				</SettingsPage>
+			);
+		case "general":
+			return <PodDetails key={selected.id} pod={selected} bots={bots} />;
+	}
 }
 
-/** One of the pod's connections on its own page, with Back to the pod. */
+/** One of the pod's connections on its own page, with Back to the pod's Connections. */
 function PodConnection({ pod, connectionId }: { pod: Pod; connectionId: string }) {
 	const connections = useConnections(pod.id);
-	const back = useBackTarget({ label: pod.name, render: <Link {...podSettingsLink(pod)} /> });
+	const back = useBackTarget({
+		label: "Connections",
+		render: <Link {...podSettingsPageLink(pod, "connections")} />,
+	});
 	const connection = connections.data?.find((one) => one.id === connectionId);
 	if (connections.isPending) return null;
 	if (!connection) {
@@ -193,31 +215,7 @@ function PodConnection({ pod, connectionId }: { pod: Pod; connectionId: string }
 	return <ConnectionPage connection={connection} pod={pod} back={<PageBackLink {...back} />} />;
 }
 
-/** A pod as its tile of faces, or Personal as its lock. */
-function PodPicture({ pod, bots, size }: { pod: Pod; bots: readonly Agent[]; size: 36 | 88 }) {
-	if (pod.kind === "personal") {
-		return (
-			<span
-				aria-hidden
-				className="grid shrink-0 place-items-center bg-tile text-soft-foreground"
-				style={{ width: size, height: size, borderRadius: size === 88 ? 26 : 11 }}
-			>
-				<LockKeyhole size={size === 88 ? 34 : 16} strokeWidth={2} />
-			</span>
-		);
-	}
-	return <PodTile bots={bots} color={pod.color} size={size} />;
-}
-
-function PodDetails({
-	pod,
-	bots,
-	connectionSignInError,
-}: {
-	pod: Pod;
-	bots: readonly Agent[];
-	connectionSignInError?: string;
-}) {
+function PodDetails({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 	const may = pod.permissions;
 	// Two mutations, so a failed rename is said under the name and a failed recolour above the page.
 	const rename = useUpdatePod(pod.id);
@@ -245,9 +243,9 @@ function PodDetails({
 
 	return (
 		<SettingsPage
-			hero={<PodPicture pod={pod} bots={bots} size={88} />}
+			hero={<PodInitial pod={pod} size="lg" />}
 			title={pod.name}
-			description={shared ? counts.join(", ") : "Only you can see this pod and its bots."}
+			description={counts.join(", ")}
 		>
 			{recolour.error && <Alert>{failureMessage(recolour.error)}</Alert>}
 			{may.rename && (
@@ -262,7 +260,7 @@ function PodDetails({
 				</SettingsGroup>
 			)}
 			{may.rename && pod.color !== null && (
-				<SettingsGroup label="Look">
+				<SettingsGroup label="Look" note="Shown on the pod's icon in the sidebar.">
 					<SettingsControlRow label="Colour">
 						<PodColourPicker
 							value={pod.color}
@@ -271,16 +269,13 @@ function PodDetails({
 					</SettingsControlRow>
 				</SettingsGroup>
 			)}
-			<ConnectionsSettings
-				pod={pod}
-				canManage={may.manageConnections}
-				signInError={connectionSignInError}
-			/>
-			<PodSandboxSettings podId={pod.id} canManageNetwork={may.manageSandbox} />
-			<PodBots pod={pod} bots={bots} />
-			{shared && <Members pod={pod} canManageMembers={may.manageMembers} />}
 			{shared && may.rename && (
-				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete pod</SettingsDanger>
+				<SettingsDanger
+					label="Delete pod"
+					description="Removes its bots, threads and artifacts."
+					action="Delete"
+					onClick={() => setConfirmingDelete(true)}
+				/>
 			)}
 			<DeleteDialog
 				open={confirmingDelete}
@@ -295,36 +290,42 @@ function PodDetails({
 	);
 }
 
-function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
-	const backToPod = useBackToHere(`${pod.name} pod`);
-	const [creating, setCreating] = useState(false);
+function PodBots({
+	pod,
+	bots,
+	creating,
+	onCreatingChange,
+}: {
+	pod: Pod;
+	bots: readonly Agent[];
+	/** Whether New bot is open, which the page's own button beside its title opens. */
+	creating: boolean;
+	onCreatingChange: (creating: boolean) => void;
+}) {
+	const backToPod = useBackToHere("Bots");
 	const navigate = useNavigate();
-	if (bots.length === 0 && !pod.permissions.createAgents) {
-		return (
-			<SettingsGroup label="Bots">
-				<SettingsRow label="No bots in this pod yet" />
-			</SettingsGroup>
-		);
-	}
 	return (
-		<SettingsGroup label="Bots">
+		<SettingsGroup>
+			{bots.length === 0 && (
+				<SettingsRow
+					label={<span className="text-muted-foreground">No bots in this pod yet</span>}
+				/>
+			)}
 			{bots.map((agent) => (
 				<SettingsRow
 					key={agent.id}
-					icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={30} />}
+					icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />}
 					label={agent.name}
+					sub={agent.description || undefined}
 					chevron
 					render={<Link {...agentSettingsLink({ pod, agent })} state={backToPod} />}
 				/>
 			))}
-			{pod.permissions.createAgents && (
-				<SettingsAddRow label="New bot" onClick={() => setCreating(true)} />
-			)}
-			<Dialog open={creating} onOpenChange={setCreating}>
+			<Dialog open={creating} onOpenChange={onCreatingChange}>
 				<NewAgentDialog
 					podId={pod.id}
 					onCreated={async (agent) => {
-						setCreating(false);
+						onCreatingChange(false);
 						await navigate({ ...agentSettingsLink({ pod, agent }), state: backToPod });
 					}}
 				/>
@@ -342,13 +343,11 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
 	const workspaceMembers = useWorkspaceMembers(pod.workspaceId);
-	const invite = usePlacePodMember(pod.id);
 	const remove = usePlacePodMember(pod.id);
 	const leave = useLeavePod(pod.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<PodMember>();
 	const session = useSession();
-	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
@@ -356,7 +355,6 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 		isYou(member.userId) ? pod.permissions.leave : canManageMembers && member.removable;
 	const leaving = removing !== undefined && isYou(removing.userId);
 	const pending = leaving ? leave : remove;
-	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
 
 	async function takeOut(member: PodMember) {
 		const isLeaving = isYou(member.userId);
@@ -392,7 +390,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 		rows = members.data?.map((member) => (
 			<SettingsRow
 				key={member.userId}
-				icon={<PersonAvatar person={member} size={30} />}
+				icon={<PersonAvatar person={member} size={24} />}
 				label={member.name}
 				trailing={
 					<>
@@ -422,44 +420,8 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	}
 
 	return (
-		<SettingsGroup label="Members">
+		<SettingsGroup>
 			{rows}
-			{canManageMembers && (
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						disabled={invite.isPending}
-						className="focus-ring flex w-full items-center gap-3 border-border border-t px-4 py-2.5 text-left transition-colors hover:bg-panel"
-					>
-						<SettingsAddMark />
-						<span className="font-medium text-[14.5px] text-link">Add people</span>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="start" className="min-w-52">
-						{workspaceMembers.isPending ? (
-							<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-						) : invitable.length === 0 ? (
-							<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
-						) : (
-							invitable.map((member) => (
-								<DropdownMenuItem
-									key={member.user.id}
-									onClick={() => invite.mutate({ userId: member.user.id, member: true })}
-								>
-									{/* Hidden from the name, or the initials would read as part of it. */}
-									<span aria-hidden>
-										<PersonAvatar person={member.user} size={22} />
-									</span>
-									<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
-								</DropdownMenuItem>
-							))
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
-			)}
-			{invite.error && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(invite.error)}</Alert>
-				</div>
-			)}
 			<DeleteDialog
 				open={removing !== undefined}
 				onOpenChange={(open) => {
@@ -483,5 +445,48 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 				}}
 			/>
 		</SettingsGroup>
+	);
+}
+
+/**
+ * Add people, beside the People title: a menu of the workspace's people who
+ * aren't in the pod yet, each added as they are picked. Why an add failed is
+ * said under the button.
+ */
+function AddPeopleButton({ pod }: { pod: Pod }) {
+	const members = usePodMembers(pod.id);
+	const workspaceMembers = useWorkspaceMembers(pod.workspaceId);
+	const invite = usePlacePodMember(pod.id);
+	const inPod = new Set(members.data?.map((member) => member.userId));
+	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
+	return (
+		<div className="flex flex-col items-end gap-2">
+			<DropdownMenu>
+				<SettingsAddButton disabled={invite.isPending} render={<DropdownMenuTrigger />}>
+					Add people
+				</SettingsAddButton>
+				<DropdownMenuContent align="end" className="min-w-52">
+					{workspaceMembers.isPending ? (
+						<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+					) : invitable.length === 0 ? (
+						<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
+					) : (
+						invitable.map((member) => (
+							<DropdownMenuItem
+								key={member.user.id}
+								onClick={() => invite.mutate({ userId: member.user.id, member: true })}
+							>
+								{/* Hidden from the name, or the initials would read as part of it. */}
+								<span aria-hidden>
+									<PersonAvatar person={member.user} size={22} />
+								</span>
+								<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
+							</DropdownMenuItem>
+						))
+					)}
+				</DropdownMenuContent>
+			</DropdownMenu>
+			{invite.error && <Alert>{failureMessage(invite.error)}</Alert>}
+		</div>
 	);
 }

@@ -97,7 +97,6 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 			<Dialog open={creating} onOpenChange={setCreating}>
 				<NewAgentDialog
 					podId={pod.id}
-					pods={[pod]}
 					onCreated={async (agent) => {
 						setCreating(false);
 						await navigate(agentChatLink({ pod, agent }));

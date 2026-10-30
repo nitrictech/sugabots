@@ -15,6 +15,7 @@ import {
 	Outlet,
 	RouterProvider,
 	redirect,
+	useMatch,
 	useMatchRoute,
 	useNavigate,
 	useParams,
@@ -33,7 +34,13 @@ import {
 	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { conversationLink, podChatLink, podLink, routineThreadLink } from "@/lib/links.ts";
+import {
+	conversationLink,
+	podChatLink,
+	podLink,
+	podSettingsPageLink,
+	routineThreadLink,
+} from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { defaultPod, findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -45,7 +52,11 @@ import {
 	useWorkspaceStanding,
 	useWorkspaces,
 } from "@/lib/workspace.ts";
-import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import {
+	podHasSettingsPage,
+	podSettingsPage,
+	workspaceSettingSection,
+} from "@/lib/workspace-settings.ts";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { ArtifactsPage } from "@/screens/Artifacts.tsx";
 import type { Staged } from "@/screens/ConversationChat.tsx";
@@ -72,6 +83,11 @@ const ResetPassword = lazyNamed(
 	"ResetPassword",
 );
 const Onboarding = lazyNamed(() => import("@/screens/Onboarding.tsx"), "Onboarding");
+// Its own export, or the module's other exports would decide the props.
+const NewRoutine = lazyNamed(
+	() => import("@/screens/RoutineEditing.tsx").then(({ NewRoutine }) => ({ NewRoutine })),
+	"NewRoutine",
+);
 /*
  * The settings sections are a chunk of their own; the window they open in is
  * not. `SettingsDialog` is imported eagerly so the click opens something, and
@@ -149,6 +165,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
  *   /$workspace/pods/$pod/routines/$routine  a routine's own thread, opened first if it has none
+ *   /$workspace/pods/$pod/routines/new  a routine being made, for `?bot=` when begun from that bot
  *   /$workspace/pods/$pod/threads/new         starting a thread from its first message
  *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
  *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
@@ -159,8 +176,6 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
- *   /$workspace/settings/routines/$routine   one routine, by id
- *   /$workspace/settings/routines/new   a routine being made, for `?agent=` when one is chosen
  *
  * An agent's address names its pod, because a handle is unique only within
  * one, and uses the handle rather than the name, so renaming an agent keeps
@@ -385,8 +400,8 @@ function SignInReturnRoute() {
 		if (!pod || !slug) return;
 		// Outside any workspace, so this names one; the link helpers are for pages inside.
 		void navigate({
-			to: "/$workspace/settings/pods/$pod",
-			params: { workspace: slug, pod: pod.slug },
+			to: "/$workspace/settings/pods/$pod/$page",
+			params: { workspace: slug, pod: pod.slug, page: "connections" },
 			search: { oauth_error: oauthError },
 			replace: true,
 		});
@@ -719,13 +734,21 @@ const settingsPodAgentRoute = createRoute({
 const settingsPodRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod",
+	loader: () => WorkspaceSettings.preload(),
+	component: SettingsPodRoute,
+});
+
+/** One of a pod's pages besides General: Connections, People or Bots. */
+const settingsPodPageRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/pods/$pod/$page",
 	validateSearch: (search: Record<string, unknown>): { oauth_error?: string } => ({
 		oauth_error: optionalString(search.oauth_error),
 	}),
 	// A sign-in error shown for one pod must not follow you to the next.
 	remountDeps: ({ params }) => [params.workspace, params.pod],
 	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPodRoute,
+	component: SettingsPodPageRoute,
 });
 
 /** One of a pod's connections, by its id. */
@@ -735,43 +758,6 @@ const settingsPodConnectionRoute = createRoute({
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsPodConnectionRoute,
 });
-
-/** One routine, by its id. */
-const settingsRoutineRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/routines/$routine",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsRoutineRoute,
-});
-
-function SettingsRoutineRoute() {
-	const { routine } = settingsRoutineRoute.useParams();
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="routines" selectedRoutineId={routine} />
-		</SettingsLayout>
-	);
-}
-
-/** A routine being made, for the bot `?agent=` names when it was started from that bot. */
-const settingsNewRoutineRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/routines/new",
-	validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
-		agent: optionalString(search.agent),
-	}),
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsNewRoutineRoute,
-});
-
-function SettingsNewRoutineRoute() {
-	const { agent } = settingsNewRoutineRoute.useSearch();
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="routines" newRoutine={{ agentId: agent }} />
-		</SettingsLayout>
-	);
-}
 
 /** One model provider, by its id. */
 const settingsProviderRoute = createRoute({
@@ -816,8 +802,31 @@ const settingsDefaultModelRoute = createRoute({
 
 function SettingsPodRoute() {
 	const { pod: podSlug } = settingsPodRoute.useParams();
-	const { oauth_error: oauthError } = settingsPodRoute.useSearch();
-	const navigate = settingsPodRoute.useNavigate();
+	const { data: pods, isPending, error } = usePods();
+	const pod = findPod(pods, podSlug);
+	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
+	if (!pod) {
+		return (
+			<Panes>
+				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
+			</Panes>
+		);
+	}
+	// A personal pod has no General: its settings start at Connections.
+	if (!podHasSettingsPage(pod, "general")) {
+		return <Navigate {...podSettingsPageLink(pod, "connections")} replace />;
+	}
+	return (
+		<SettingsLayout>
+			<WorkspaceSettings section="pods" selectedPodId={pod.id} />
+		</SettingsLayout>
+	);
+}
+
+function SettingsPodPageRoute() {
+	const { pod: podSlug, page: pageSegment } = settingsPodPageRoute.useParams();
+	const { oauth_error: oauthError } = settingsPodPageRoute.useSearch();
+	const navigate = settingsPodPageRoute.useNavigate();
 	// Kept after the error leaves the address, so a reload does not show it twice.
 	const [signInError, setSignInError] = useState(oauthError);
 	useEffect(() => {
@@ -830,6 +839,12 @@ function SettingsPodRoute() {
 	}, [oauthError, navigate]);
 	const { data: pods, isPending, error } = usePods();
 	const pod = findPod(pods, podSlug);
+	const page = podSettingsPage(pageSegment);
+	if (!page) {
+		return (
+			<Navigate from="/$workspace" to="./settings/pods/$pod" params={{ pod: podSlug }} replace />
+		);
+	}
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
 	if (!pod) {
 		return (
@@ -838,11 +853,16 @@ function SettingsPodRoute() {
 			</Panes>
 		);
 	}
+	// A page this pod doesn't have, such as a personal pod's People, gives way to its Connections.
+	if (!podHasSettingsPage(pod, page)) {
+		return <Navigate {...podSettingsPageLink(pod, "connections")} replace />;
+	}
 	return (
 		<SettingsLayout>
 			<WorkspaceSettings
 				section="pods"
 				selectedPodId={pod.id}
+				podPage={page}
 				connectionSignInError={signInError && signInFailureReason(signInError)}
 			/>
 		</SettingsLayout>
@@ -881,7 +901,7 @@ function SettingsPodAgentRoute() {
 	}
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="agents" selectedAgentId={found.agent.id} />
+			<WorkspaceSettings section="pods" selectedPodId={found.pod.id} selectedAgent={found} />
 		</SettingsLayout>
 	);
 }
@@ -1197,12 +1217,24 @@ const routinesRoute = createRoute({
 		const { pod: podSlug } = routinesRoute.useParams();
 		const { routine } = useParams({ strict: false });
 		const { bot } = routinesRoute.useSearch();
+		const making = useMatch({ from: newRoutineRoute.id, shouldThrow: false }) !== undefined;
 		const pod = findPod(usePods().data, podSlug);
 		return pod ? (
-			<RoutinesPage pod={pod} selectedRoutineId={routine} botHandle={bot}>
+			<RoutinesPage pod={pod} selectedRoutineId={routine} botHandle={bot} making={making}>
 				<Outlet />
 			</RoutinesPage>
 		) : null;
+	},
+});
+
+/** A routine being made, beside the pod's routines, for the bot `?bot=` names when it was begun from its. */
+const newRoutineRoute = createRoute({
+	getParentRoute: () => routinesRoute,
+	path: "/new",
+	component: () => {
+		const pod = findPod(usePods().data, newRoutineRoute.useParams().pod);
+		const { bot } = newRoutineRoute.useSearch();
+		return pod ? <NewRoutine pod={pod} botHandle={bot} /> : null;
 	},
 });
 
@@ -1519,11 +1551,10 @@ const routeTree = rootRoute.addChildren([
 		settingsRoute,
 		settingsSectionRoute,
 		settingsMemberRoute,
-		settingsNewRoutineRoute,
-		settingsRoutineRoute,
 		settingsPodAgentRoute,
 		settingsPodConnectionRoute,
 		settingsPodRoute,
+		settingsPodPageRoute,
 		settingsSystemModelRoute,
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
@@ -1534,7 +1565,7 @@ const routeTree = rootRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
 			podChatRoute,
-			routinesRoute.addChildren([routinesIndexRoute, routineThreadRoute]),
+			routinesRoute.addChildren([routinesIndexRoute, newRoutineRoute, routineThreadRoute]),
 			newThreadRoute,
 			conversationRoute,
 			artifactsRoute,

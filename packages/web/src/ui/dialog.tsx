@@ -33,7 +33,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 
 /** Pins the dialog to the bottom edge at full width below the `sm` breakpoint, undoing the centring. */
 const sheetOnPhoneClassName =
-	"max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-0 max-sm:max-w-full max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:pb-[max(20px,env(safe-area-inset-bottom))]";
+	"max-sm:top-auto max-sm:max-w-full max-sm:rounded-b-none max-sm:pb-[max(20px,env(safe-area-inset-bottom))]";
 
 function DialogContent({
 	className,
@@ -57,10 +57,15 @@ function DialogContent({
 			 * page. On a dialog that is not nested the flag changes nothing.
 			 */}
 			<DialogOverlay forceRender />
+			{/*
+			 * Centred by its margins rather than moved back by half its size: half
+			 * an odd height is half a pixel, so the text drawn there while it zooms
+			 * in would jump to the whole pixel when the zoom ends.
+			 */}
 			<DialogPrimitive.Popup
 				data-slot="dialog-content"
 				className={cn(
-					"fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-20px)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-dialog bg-panel p-4 text-foreground text-sm shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
+					"fixed inset-0 z-50 m-auto grid h-fit w-full max-w-[calc(100%-20px)] gap-4 rounded-dialog bg-panel p-4 text-foreground text-sm shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
 					sheetOnPhone && sheetOnPhoneClassName,
 					className,
 				)}

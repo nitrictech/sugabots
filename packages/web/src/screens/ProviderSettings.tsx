@@ -35,7 +35,7 @@ import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { Alert, Success } from "@/ui/alert.tsx";
+import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -56,6 +56,7 @@ import {
 	SettingsPage,
 	SettingsRow,
 	SettingsRowIcon,
+	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
@@ -86,17 +87,19 @@ export function isConnected(provider: ModelProvider): boolean {
 export function ProviderTile({
 	name,
 	preset,
-	size = 30,
+	size = 28,
 }: {
 	name: string;
 	preset: ProviderPresetId | null;
-	size?: 30 | 72;
+	size?: 28 | 44;
 }) {
-	const large = size === 72;
+	const large = size === 44;
 	return (
-		<SettingsRowIcon className={large ? "size-[72px] rounded-[22px] text-[30px]" : undefined}>
+		<SettingsRowIcon
+			className={large ? "size-11 rounded-[11px] border-0 bg-chip text-lg" : undefined}
+		>
 			{preset ? (
-				<ProviderLogo preset={preset} className={large ? "size-10" : "size-[18px]"} />
+				<ProviderLogo preset={preset} className={large ? "size-[22px]" : "size-3.5"} />
 			) : (
 				name.trim().charAt(0).toUpperCase()
 			)}
@@ -118,12 +121,12 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 					face={bot.face}
 					shape={bot.shape}
 					size={22}
-					ringed={{ color: "var(--list)", width: 2 }}
+					ringed={{ color: "var(--settings-card)", width: 2 }}
 					className={index > 0 ? "-ml-1.5" : undefined}
 				/>
 			))}
 			{more > 0 && (
-				<span className="-ml-1.5 grid h-[22px] min-w-[22px] place-items-center rounded-full bg-chip px-1 font-semibold text-[10.5px] text-soft-foreground shadow-[0_0_0_2px_var(--list)]">
+				<span className="-ml-1.5 grid h-[22px] min-w-[22px] place-items-center rounded-full bg-chip px-1 font-semibold text-[10.5px] text-soft-foreground shadow-[0_0_0_2px_var(--settings-card)]">
 					+{more}
 				</span>
 			)}
@@ -237,7 +240,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	return (
 		<SettingsPage
 			back={<BackToModels />}
-			hero={<ProviderTile name={provider.name} preset={provider.preset} size={72} />}
+			backOnWide
+			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
 			title={provider.name}
 		>
 			<SettingsGroup
@@ -268,11 +272,12 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			<Connection provider={provider} local={preset?.hosting === "local"} />
 			<Models provider={provider} />
 			<SettingsDanger
+				label={`Disconnect ${provider.name}`}
+				description="Bots using these models stop working until you pick another."
+				action="Disconnect"
 				onClick={() => setDisconnecting(true)}
 				disabledReason={held && heldReason(held, "one of its models")}
-			>
-				Disconnect {provider.name}
-			</SettingsDanger>
+			/>
 			<DeleteDialog
 				open={disconnecting}
 				onOpenChange={setDisconnecting}
@@ -321,7 +326,8 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 		<SettingsGroup
 			label="Connection"
 			note={
-				<span className="flex flex-col items-start gap-2">
+				// The result sits beside the button, so a test never moves what is below it.
+				<span className="flex items-center gap-2.5">
 					<Button
 						variant="secondary"
 						size="sm"
@@ -331,9 +337,12 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 						{actions.test.isPending && <RefreshCw className="animate-spin" />}
 						Test connection
 					</Button>
-					{tested?.reachable && <Success>Connection successful</Success>}
-					{!tested && provider.lastTestError && <Alert>{provider.lastTestError}</Alert>}
-					{tested && !tested.reachable && <Alert>{tested.error ?? "It did not answer."}</Alert>}
+					{!actions.test.isPending && (
+						<TestOutcome
+							reachable={tested ? tested.reachable : provider.lastTestError ? false : undefined}
+							error={tested ? tested.error : provider.lastTestError}
+						/>
+					)}
 				</span>
 			}
 		>
@@ -391,6 +400,27 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 	);
 }
 
+/**
+ * How the last test went, as a dot and a few words beside Test connection:
+ * green for working, red with the reason for not. A reason too long for the
+ * line is cut short, and given whole when pointed at.
+ */
+function TestOutcome({
+	reachable,
+	error,
+}: {
+	/** Undefined while there is nothing to say: no test run, and no failure on record. */
+	reachable: boolean | undefined;
+	error: string | null | undefined;
+}) {
+	if (reachable === undefined) return null;
+	return (
+		<SettingsTestOutcome good={reachable}>
+			{reachable ? "Connection successful" : (error ?? "It did not answer.")}
+		</SettingsTestOutcome>
+	);
+}
+
 /** The two APIs a custom provider can speak. */
 export const API_FORMATS = [
 	{ value: "openai", label: "OpenAI" },
@@ -398,7 +428,7 @@ export const API_FORMATS = [
 ] as const;
 
 const fieldText =
-	"w-full min-w-0 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground";
+	"w-full min-w-0 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground";
 
 function EditableRow({
 	label,
@@ -650,7 +680,11 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 	);
 }
 
-/** A catalogue of hundreds scrolls inside its group, so the search above it stays in reach. */
+/**
+ * A catalogue of hundreds scrolls inside its group, so the search above it
+ * stays in reach. Its height is fixed and its scrollbar's room kept, so
+ * narrowing the list by searching moves nothing around it.
+ */
 function ScrollingWhen({ large, children }: { large: boolean; children: ReactNode }) {
 	if (!large) return children;
 	return (
@@ -658,7 +692,7 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 			aria-label="Model list"
 			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must be reachable from the keyboard.
 			tabIndex={0}
-			className="focus-ring max-h-[min(560px,60vh)] overflow-y-auto border-border border-b last:border-b-0"
+			className="focus-ring relative h-[min(560px,60vh)] overflow-y-auto border-border border-b [scrollbar-gutter:stable] last:border-b-0"
 		>
 			{children}
 		</section>
@@ -720,16 +754,16 @@ function Models({ provider }: { provider: ModelProvider }) {
 			note="Only switched-on models show up when choosing a bot's model."
 		>
 			{large && (
-				<div className="border-border border-b p-3">
-					<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
-						<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+				<div className="border-border border-b p-2.5">
+					<label className="focus-ring-within flex h-[34px] items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
 						<input
 							type="search"
 							value={search}
 							onChange={(event) => setSearch(event.target.value)}
 							placeholder={`Search ${provider.models.length} models`}
 							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
 						/>
 					</label>
 				</div>
@@ -756,7 +790,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							label={modelName(model)}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `${held.newBots ? "Default" : "System agents"} · ${who}` : who}
+									{held ? `${held.newBots ? "Default" : "Summaries"} · ${who}` : who}
 									<CapabilityIcons model={model} />
 								</span>
 							}
