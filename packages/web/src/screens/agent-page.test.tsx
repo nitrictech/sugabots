@@ -11,6 +11,7 @@ import {
 	linear,
 	MODELS,
 	mount,
+	onWideScreen,
 	pendingAnswer,
 	pods,
 	serveConnections,
@@ -223,6 +224,7 @@ describe("a viewer", () => {
 
 describe("an admin", () => {
 	it("leads to its Routines page to set them up, saying how many it has", async () => {
+		onWideScreen();
 		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine, webhookRoutine]));
 		mount(page);
 
@@ -510,5 +512,20 @@ describe("an admin", () => {
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.slug}/bots`),
 		);
+	});
+
+	it("goes back to the bots it was opened from when deleted, rather than opening them again", async () => {
+		client.api.agents.remove.mockReturnValue(Effect.void);
+		const bots = `/suga/settings/pods/${suga.slug}/bots`;
+		const router = mount(bots);
+		await screen.findAllByRole("heading", { name: "Bots" });
+		await router.navigate({ href: page });
+
+		fireEvent.click(await screen.findByRole("button", { name: "Delete bot" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(bots));
+		// Where Bots was, not a step after the deleted bot, so Back from Bots doesn't stay on Bots.
+		expect(router.history.canGoBack()).toBe(false);
 	});
 });

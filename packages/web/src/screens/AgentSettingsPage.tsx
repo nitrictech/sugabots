@@ -9,14 +9,15 @@ import {
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowUpRight, Pencil } from "lucide-react";
+import { ArrowUpRight, Pencil, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsPageLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -25,6 +26,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { type Look, LookStep, type Part } from "@/shell/NewAgent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { BACK_BUTTON, useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -138,7 +140,8 @@ function ContactCard({
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 
 	async function deleteAgent() {
 		try {
@@ -146,7 +149,8 @@ function ContactCard({
 		} catch {
 			return;
 		}
-		await navigate(podSettingsPageLink(pod, "bots"));
+		// Back to Bots, or Bots in the deleted bot's place, so Back never returns to it.
+		leaveForPage(router.buildLocation(podSettingsPageLink(pod, "bots")).href);
 	}
 
 	return (
@@ -295,6 +299,7 @@ function LookEditor({
 	});
 	const [part, setPart] = useState<Part>("shape");
 	const [failure, setFailure] = useState<string>();
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const change: AgentUpdate = {
 		...(look.color !== agent.color && { color: look.color }),
 		...(look.shape !== agent.shape && { shape: look.shape }),
@@ -314,9 +319,63 @@ function LookEditor({
 		}
 	}
 
+	const lookStep = (
+		<LookStep
+			part={part}
+			look={look}
+			onPartChange={setPart}
+			onChange={(parts) => setLook((was) => ({ ...was, ...parts }))}
+		/>
+	);
+	// A tint of the bot's colour, fainter than New bot's, so the bot is in its own light without shouting.
+	const stage = {
+		background: `color-mix(in oklab, ${botColors[look.color].face} 5%, var(--list))`,
+	};
+
+	if (phone) {
+		// A page of its own, as New bot's look is: Close and Save across the top, the bot, then its parts.
+		return (
+			<DialogContent
+				showCloseButton={false}
+				className="inset-0 flex h-[var(--visible-height,100dvh)] max-h-none max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0"
+			>
+				<DialogTitle className="sr-only">{agent.name}'s look</DialogTitle>
+				<form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+					<header
+						className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2"
+						style={stage}
+					>
+						<span className="flex justify-self-start">
+							<button type="button" aria-label="Cancel" onClick={done} className={BACK_BUTTON}>
+								<X aria-hidden size={20} strokeWidth={2.25} />
+							</button>
+						</span>
+						<span className="font-semibold text-[17px] text-foreground">Look</span>
+						<span className="flex justify-self-end">
+							<Button
+								type="submit"
+								size="sm"
+								className="h-11 rounded-full px-5 text-[15px]"
+								disabled={!changed || savePending}
+							>
+								{savePending ? "Saving…" : "Save"}
+							</Button>
+						</span>
+					</header>
+					<div className="flex shrink-0 flex-col items-center gap-3 px-4 pt-2 pb-5" style={stage}>
+						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
+						{failure && <Alert>{failure}</Alert>}
+					</div>
+					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto border-border border-t bg-panel">
+						{lookStep}
+					</div>
+				</form>
+			</DialogContent>
+		);
+	}
+
 	return (
 		<DialogContent
-			sheetOnPhone
 			showCloseButton={false}
 			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[680px]"
 		>
@@ -327,10 +386,7 @@ function LookEditor({
 			>
 				<div
 					className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-[260px]"
-					// A fainter tint than New bot's, so the bot is in its own light without shouting.
-					style={{
-						background: `color-mix(in oklab, ${botColors[look.color].face} 5%, var(--list))`,
-					}}
+					style={stage}
 				>
 					<div className="grid flex-1 place-items-center py-2">
 						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
@@ -345,13 +401,8 @@ function LookEditor({
 						</Button>
 					</div>
 				</div>
-				<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border bg-panel max-md:border-t md:border-l">
-					<LookStep
-						part={part}
-						look={look}
-						onPartChange={setPart}
-						onChange={(parts) => setLook((was) => ({ ...was, ...parts }))}
-					/>
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border border-l bg-panel">
+					{lookStep}
 				</div>
 			</form>
 		</DialogContent>

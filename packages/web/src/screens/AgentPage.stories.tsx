@@ -133,7 +133,10 @@ const podChat: Message[] = [
 	},
 ];
 
-/** A pod's chat: everyone in the pod, no bot, and a composer addressed to the pod. */
+/**
+ * A pod's chat: everyone in the pod, no bot, and a composer addressed to the
+ * pod; its Details hold who is in it and its files.
+ */
 export const PodChat = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers({ podChatMessages: { [revenue.id]: podChat } }));
@@ -144,7 +147,7 @@ export const PodChat = meta.story({
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
 		await expect(canvas.getByRole("textbox", { name: "Message General" })).toBeInTheDocument();
-		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Details" })).toBeInTheDocument();
 	},
 });
 

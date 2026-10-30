@@ -130,6 +130,9 @@ export const OpeningNotificationSettings = meta.story({
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Notification settings" }));
 		await expect(await canvas.findByRole("heading", { name: "Notifications" })).toBeVisible();
+		// Done once the menus have finished closing, whose focus guards the accessibility check
+		// that follows would otherwise find while a busy machine is still animating them away.
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 	},
 });
 

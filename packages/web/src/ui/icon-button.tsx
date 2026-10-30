@@ -45,6 +45,20 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 type IconButtonVariant = "quiet" | "outline" | "pane" | "bar" | "round";
 
 /**
+ * Merged over a `bar` button beside a phone's large page title, such as
+ * Inbox's: sized for a thumb, with its icon to match.
+ */
+export const ROOMY_ON_PHONE = "max-md:size-10 max-md:rounded-[10px] max-md:[&_svg]:size-5";
+
+/**
+ * Merged over a `bar` button in a chat's header: on a phone it floats over the
+ * chat as a round glass button, 44px as a phone's own are, as Back there does,
+ * darker while pressed or while the menu it opens is open.
+ */
+export const FLOATING_ON_PHONE =
+	"max-md:size-11 max-md:rounded-full max-md:text-foreground max-md:glass max-md:[&_svg]:size-5 max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong";
+
+/**
  * An `IconButton`'s look, for a control that has to be another element, such
  * as the trigger of a menu.
  */

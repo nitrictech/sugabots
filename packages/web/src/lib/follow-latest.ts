@@ -1,4 +1,4 @@
-import { type RefObject, useEffect } from "react";
+import { type RefObject, useEffect, useState } from "react";
 
 /**
  * While `following` is set, keeps `viewport` scrolled to its bottom as what is
@@ -41,4 +41,40 @@ export function keepFootInView(viewport: HTMLElement): () => void {
 	});
 	observer.observe(viewport);
 	return () => observer.disconnect();
+}
+
+/** How many frames a log waits to reach its latest before it is shown wherever it is. */
+const SETTLE_FRAMES = 30;
+
+/**
+ * Whether `viewport`, opened at its latest once `ready`, has got there. Until
+ * then it scrolls there again each frame, as what is in it settles: Safari can
+ * draw a chat's first frames before scrolling it, showing its top for a moment.
+ * It counts as settled once the viewer stops `following`, or after a moment
+ * regardless, so a log never stays hidden.
+ */
+export function useSettledAtLatest(
+	viewport: RefObject<HTMLElement | null>,
+	following: RefObject<boolean>,
+	ready: boolean,
+): boolean {
+	const [settled, setSettled] = useState(false);
+	useEffect(() => {
+		if (settled || !ready) return;
+		let framesLeft = SETTLE_FRAMES;
+		let frame = requestAnimationFrame(function check() {
+			const element = viewport.current;
+			if (!element) return;
+			const atLatest = element.scrollHeight - element.scrollTop - element.clientHeight < 1;
+			if (atLatest || !following.current || framesLeft === 0) {
+				setSettled(true);
+				return;
+			}
+			element.scrollTop = element.scrollHeight;
+			framesLeft -= 1;
+			frame = requestAnimationFrame(check);
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [settled, ready, viewport, following]);
+	return settled;
 }

@@ -2,16 +2,18 @@ import type RFB from "@novnc/novnc";
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Monitor } from "lucide-react";
+import { Monitor, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
+import { BACK_BUTTON } from "@/ui/back-button.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -42,6 +44,7 @@ export function DesktopStage({
 	const sandboxes = access.data;
 	const may = useWorkspacePermissions();
 	const backToChat = useBackToHere("Chat");
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	// What stands between the bot and a computer, if anything: the workspace has none, or the bot doesn't use one.
 	const missing =
 		sandboxes === undefined
@@ -51,31 +54,9 @@ export function DesktopStage({
 				: !agent.usesSandbox
 					? "bot"
 					: null;
-	return (
-		<Stage
-			label={`${agent.name}'s computer`}
-			icon={
-				<StageMark>
-					<Monitor strokeWidth={2} />
-				</StageMark>
-			}
-			title={`${agent.name}'s computer`}
-			byline={
-				missing === undefined ? undefined : (
-					<span className="flex items-center gap-1.5">
-						<span
-							aria-hidden
-							className={cn(
-								"size-1.5 rounded-full",
-								missing === null ? "bg-success" : "bg-disabled-foreground",
-							)}
-						/>
-						{missing === null ? "Live from its computer" : "No computer"}
-					</span>
-				)
-			}
-			onClose={onClose}
-		>
+	// What the computer shows: its screen, or why there is none.
+	const content = (
+		<>
 			{missing === "workspace" ? (
 				<EmptyState icon={<Monitor strokeWidth={1.75} />} title="Computers aren't set up yet">
 					{may.manageProviders ? (
@@ -118,6 +99,53 @@ export function DesktopStage({
 					The API did not answer. Reload this page to try again.
 				</EmptyState>
 			) : null}
+		</>
+	);
+	// A phone shows it alone, over everything, with only a way out.
+	if (phone) {
+		return (
+			<section
+				aria-label={`${agent.name}'s computer`}
+				onKeyDown={(event) => {
+					if (event.key === "Escape") onClose();
+				}}
+				className="fixed inset-0 z-50 flex flex-col bg-black pt-[max(12px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]"
+			>
+				<div className="shrink-0 px-4">
+					<button type="button" aria-label="Close" onClick={onClose} className={BACK_BUTTON}>
+						<X aria-hidden size={20} strokeWidth={2.25} />
+					</button>
+				</div>
+				<div className="flex min-h-0 flex-1 flex-col pt-3">{content}</div>
+			</section>
+		);
+	}
+	return (
+		<Stage
+			label={`${agent.name}'s computer`}
+			icon={
+				<StageMark>
+					<Monitor strokeWidth={2} />
+				</StageMark>
+			}
+			title={`${agent.name}'s computer`}
+			byline={
+				missing === undefined ? undefined : (
+					<span className="flex items-center gap-1.5">
+						<span
+							aria-hidden
+							className={cn(
+								"size-1.5 rounded-full",
+								missing === null ? "bg-success" : "bg-disabled-foreground",
+							)}
+						/>
+						{missing === null ? "Live from its computer" : "No computer"}
+					</span>
+				)
+			}
+			onClose={onClose}
+		>
+			{content}
 		</Stage>
 	);
 }

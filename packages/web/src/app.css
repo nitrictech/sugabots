@@ -70,6 +70,13 @@
 	--border: light-dark(#e4e4e7, #1c1c1f);
 	--border-strong: light-dark(#d4d4d8, #26262a);
 	--border-dashed: light-dark(#d4d4d8, #3f3f46);
+	/*
+	 * The `glass` of a phone's floating controls, over whatever scrolls under
+	 * them. `glass-ring` cuts a count badge out of it.
+	 */
+	--glass: light-dark(rgb(247 247 248 / 0.8), rgb(30 30 34 / 0.72));
+	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
+	--glass-ring: light-dark(#f1f1f3, #1e1e22);
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
 	/* A pod tile, and a slot in one with no bot in it. */
@@ -193,6 +200,9 @@
 	--color-failed-card-heading: var(--failed-card-heading);
 	--color-failed-card-text: var(--failed-card-text);
 	--color-scrim: var(--scrim);
+	--color-glass: var(--glass);
+	--color-glass-edge: var(--glass-edge);
+	--color-glass-ring: var(--glass-ring);
 	--color-foreground: var(--foreground);
 	--color-body-foreground: var(--body-foreground);
 	--color-muted-foreground: var(--muted-foreground);
@@ -285,6 +295,71 @@
 	}
 }
 
+/*
+ * On a phone, every field types at 16px or more: below that, iOS Safari zooms
+ * the page in when one is focused, leaving the app part off the screen and the
+ * keyboard's height unaccounted for. Outside any layer, so it outranks a
+ * field's own smaller size.
+ */
+@media (width < 48rem) {
+	input:not([type="checkbox"], [type="radio"], [type="range"]),
+	textarea,
+	select,
+	[contenteditable="true"],
+	[contenteditable=""] {
+		font-size: max(16px, 1em);
+	}
+}
+
+/*
+ * On a phone, a page further in slides in from the right over the one it was
+ * opened from, which drifts a little left and dims, as a phone's own apps
+ * move; back runs it in reverse. The router names which way each navigation
+ * goes (`phoneSlide` in router.tsx). The tabs stay where they are.
+ */
+@media (width < 48rem) and (prefers-reduced-motion: no-preference) {
+	html:active-view-transition-type(forward, back)::view-transition-group(root) {
+		animation-duration: 320ms;
+		animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+	}
+	html:active-view-transition-type(forward)::view-transition-old(root) {
+		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-out-behind;
+	}
+	html:active-view-transition-type(forward)::view-transition-new(root) {
+		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-in-over;
+	}
+	html:active-view-transition-type(back)::view-transition-old(root) {
+		z-index: 1;
+		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-out-over;
+	}
+	html:active-view-transition-type(back)::view-transition-new(root) {
+		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-in-behind;
+	}
+}
+
+@keyframes slide-in-over {
+	from {
+		transform: translateX(100%);
+	}
+}
+@keyframes slide-out-over {
+	to {
+		transform: translateX(100%);
+	}
+}
+@keyframes slide-out-behind {
+	to {
+		transform: translateX(-30%);
+		opacity: 0.6;
+	}
+}
+@keyframes slide-in-behind {
+	from {
+		transform: translateX(-30%);
+		opacity: 0.6;
+	}
+}
+
 @layer base {
 	* {
 		border-color: var(--border);
@@ -294,6 +369,22 @@
 	body,
 	#root {
 		height: 100%;
+	}
+
+	/*
+	 * The app is exactly as tall as the screen and scrolls inside its panes, so
+	 * the page itself never scrolls. Without this, iOS Safari hands a drag that
+	 * reaches a pane's end to the page, which rubber-bands the whole app,
+	 * composer and tabs too, over the browser's own background. Only vertical,
+	 * so a sideways swipe still goes Back.
+	 */
+	html,
+	body {
+		overscroll-behavior-y: none;
+	}
+
+	html {
+		background: var(--background);
 	}
 
 	body {
@@ -350,6 +441,39 @@
 	&:focus-within {
 		border-color: var(--primary-tint-border);
 		box-shadow: var(--ring-shadow);
+	}
+}
+
+/*
+ * A phone's floating controls, such as the tabs and a chat's Back: frosted
+ * over whatever scrolls under them, with a hairline edge.
+ */
+@utility glass {
+	background: var(--glass);
+	box-shadow: inset 0 0 0 1px var(--glass-edge);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+}
+
+/*
+ * How much of the foot of a phone's page its tabs cover, while they show: the
+ * bar, and the inset under it. They float over the page, so what scrolls
+ * leaves this much room after its end to come clear of them.
+ */
+@media (width < 48rem) {
+	:root:has([data-tab-bar]) {
+		/* The bar's 60px and 8px of room above it, over its inset. */
+		--tab-bar-space: calc(68px + max(12px, env(safe-area-inset-bottom)));
+	}
+}
+
+/* Room after the end of what scrolls, for it to come clear of a phone's tabs. */
+@utility tab-bar-clearance {
+	&::after {
+		content: "";
+		display: block;
+		flex-shrink: 0;
+		height: var(--tab-bar-space, 0px);
 	}
 }
 

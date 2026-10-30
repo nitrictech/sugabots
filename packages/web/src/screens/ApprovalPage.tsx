@@ -1,14 +1,17 @@
 import type { AnsweredApproval, ApprovalInbox, ApprovalRequest } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
 import { toolTitle, wordsFromKey } from "@/lib/tool-names.ts";
+import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { Answer, fieldsOf, RequestValue } from "./ToolApprovalCard.tsx";
@@ -59,36 +62,47 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 		.filter(Boolean)
 		.join(" ");
 	const fields = fieldsOf(call.input) ?? [];
+	// A phone answers with two wide buttons, as Approvals does.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const backToApprovals = usePhoneBack(
+		<Link
+			from="/$workspace"
+			to="./approvals"
+			aria-label="Back to Approvals"
+			className={cn(
+				"focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm",
+				BACK_ON_PHONE,
+			)}
+		>
+			<ChevronLeft aria-hidden size={16} className="max-md:size-[22px]" />
+			<span className={BACK_LABEL_ON_PHONE}>Approvals</span>
+		</Link>,
+	);
 
 	return (
-		<div className="min-h-0 flex-1 overflow-y-auto">
+		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
 			<article
 				aria-label={`Approval request: ${toolTitle(call.tool)}`}
-				className="mx-auto flex w-full max-w-[880px] flex-col gap-4 px-8 pt-8 pb-8 max-md:px-5"
+				className="mx-auto flex w-full max-w-[880px] flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))]"
 			>
-				<Link
-					from="/$workspace"
-					to="./approvals"
-					className="focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm"
-				>
-					<ChevronLeft aria-hidden size={16} />
-					Approvals
-				</Link>
+				{backToApprovals}
 				<header className="flex flex-col gap-3">
 					<div className="flex items-center gap-3">
 						<span aria-hidden className="flex shrink-0">
 							<ConnectionMark presetId={look?.presetId} name={appName} size="sm" />
 						</span>
-						<div className="flex min-w-0 flex-col">
-							<span className="truncate text-muted-foreground text-xs">
+						{/* On a phone, the title first, then one line of who asked, for what, where and when. */}
+						<div className="flex min-w-0 flex-col max-md:flex-col-reverse max-md:gap-1">
+							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-[14px]">
 								{agent.name} wants to use {appName}
+								<span className="md:hidden"> · {askedIn}</span>
 							</span>
-							<h1 className="m-0 truncate font-bold text-[20px] text-foreground leading-tight tracking-[-0.01em]">
+							<h1 className="m-0 truncate font-bold text-[20px] text-foreground leading-tight tracking-[-0.01em] max-md:whitespace-normal max-md:font-semibold max-md:text-[22px]">
 								{action}
 							</h1>
 						</div>
 					</div>
-					<p className="m-0 text-subtle-foreground text-xs">Asked {askedIn}</p>
+					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
 				<dl className="m-0 overflow-hidden rounded-xl border border-border">
 					{fields.map(([key, value]) => (
@@ -97,7 +111,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						</Row>
 					))}
 				</dl>
-				<div className="flex flex-wrap items-center gap-3 pt-1">
+				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (
 						// Announced when the person has just answered it here.
 						<AnswerGiven answer={found.request.answer} announced={review.isSuccess} />
@@ -107,20 +121,21 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 							error={review.error}
 							onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
 							actionLabel={action}
+							pinned={phone}
 						/>
 					) : (
 						<p className="m-0 text-[13px] text-muted-foreground">
 							No longer waiting: {agent.name} stopped before it was answered.
 						</p>
 					)}
-					<span className="flex-1" />
+					<span className="flex-1 max-md:hidden" />
 					{pod && request.conversationId && (
 						<Link
 							{...conversationLink(
 								{ pod, conversationId: request.conversationId },
 								request.threadId === request.conversationId ? {} : { thread: request.threadId },
 							)}
-							className="focus-ring rounded-sm font-medium text-[13px] text-link"
+							className="focus-ring rounded-sm font-medium text-[13px] text-link max-md:self-center max-md:py-2 max-md:text-[15px]"
 						>
 							Open conversation
 						</Link>
@@ -157,12 +172,12 @@ function AnswerGiven({
 	);
 }
 
-/** One field of the request: its name, then its value. */
+/** One field of the request: its name, then its value; on a phone, the name over the value. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
 	return (
-		<div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4 border-border border-b px-3.5 py-2.5 last:border-b-0">
-			<dt className="text-[13px] text-subtle-foreground">{label}</dt>
-			<dd className="m-0 min-w-0 text-[13px] text-foreground">{children}</dd>
+		<div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4 border-border border-b px-3.5 py-2.5 last:border-b-0 max-md:grid-cols-1 max-md:gap-1 max-md:py-3">
+			<dt className="text-[13px] text-subtle-foreground max-md:text-[14px]">{label}</dt>
+			<dd className="m-0 min-w-0 text-[13px] text-foreground max-md:text-[15px]">{children}</dd>
 		</div>
 	);
 }

@@ -1,7 +1,7 @@
 import { act, cleanup, screen, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
-import { agents, apiAnswers, linear, mount, pendingAnswer } from "@/test-api.tsx";
+import { agents, apiAnswers, linear, mount, onWideScreen, pendingAnswer } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 const chatModule = vi.hoisted(() => Promise.withResolvers<void>());
@@ -62,6 +62,7 @@ it("keeps the sidebar and its conversations visible while the chat screen loads"
 it("keeps the sidebar, with the bot open, while the new thread screen loads", async () => {
 	// Nothing opened by hand before: the bot is open because a thread is being started with it.
 	localStorage.clear();
+	onWideScreen();
 	apiAnswers();
 	mount(`/suga/pods/suga-team/threads/new?agent=${linear.handle}`);
 

@@ -13,7 +13,7 @@ import {
 	seededPresets,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
 	Eye,
@@ -36,6 +36,7 @@ import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -197,7 +198,8 @@ export function ProviderSettings({ providerId }: { providerId: string }) {
 
 function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	const [disconnecting, setDisconnecting] = useState(false);
 	const preset = provider.preset === null ? null : providerPreset(provider.preset);
 	// The ones every workspace starts with cannot be deleted, so disconnecting
@@ -230,11 +232,17 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			return;
 		}
 		setDisconnecting(false);
-		await navigate({
-			from: "/$workspace",
-			to: "./settings/$section",
-			params: { section: "providers" },
-		});
+		// Back to Models, or Models in the provider's place, so Back never returns to one
+		// no longer connected.
+		leaveForPage(
+			router.buildLocation(
+				linkOptions({
+					from: "/$workspace",
+					to: "./settings/$section",
+					params: { section: "providers" },
+				}),
+			).href,
+		);
 	}
 
 	return (

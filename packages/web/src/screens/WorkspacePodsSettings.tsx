@@ -5,7 +5,7 @@ import {
 	type PodMember,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, linkOptions, useNavigate, useRouter } from "@tanstack/react-router";
 import { Minus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
@@ -30,6 +30,7 @@ import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -223,7 +224,8 @@ function PodDetails({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 	const members = usePodMembers(pod.id);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeletePod();
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	const shared = pod.kind === "shared";
 	const people = members.data?.length;
 
@@ -233,7 +235,16 @@ function PodDetails({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 		} catch {
 			return;
 		}
-		await navigate({ from: "/$workspace", to: "./settings/$section", params: { section: "pods" } });
+		// Back to the pods, or the pods in the deleted pod's place, so Back never returns to it.
+		leaveForPage(
+			router.buildLocation(
+				linkOptions({
+					from: "/$workspace",
+					to: "./settings/$section",
+					params: { section: "pods" },
+				}),
+			).href,
+		);
 	}
 
 	const counts = [

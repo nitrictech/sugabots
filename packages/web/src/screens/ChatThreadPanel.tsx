@@ -235,7 +235,7 @@ function ThreadPage({
 }) {
 	return (
 		<section aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
-			<header className="relative flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-4 pl-6 max-md:pl-12">
+			<header className="relative flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-4 pl-6 max-md:gap-3 max-md:pl-4">
 				<HeaderBack back={back} />
 				<div className="flex min-w-0 flex-1 items-baseline gap-2">
 					<h1

@@ -15,6 +15,7 @@ import {
 	Outlet,
 	RouterProvider,
 	redirect,
+	useLocation,
 	useMatch,
 	useMatchRoute,
 	useNavigate,
@@ -34,6 +35,7 @@ import {
 	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
+import { followTrail, historyIndex } from "@/lib/history-trail.ts";
 import {
 	conversationLink,
 	podChatLink,
@@ -63,9 +65,12 @@ import type { Staged } from "@/screens/ConversationChat.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
+import { MobileHome } from "@/shell/MobileHome.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
+import { You, YouPod } from "@/shell/You.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -963,6 +968,9 @@ const activityChatRoute = createRoute({
 	component: () => {
 		const { pod, conversation } = activityChatRoute.useParams();
 		const navigate = activityChatRoute.useNavigate();
+		const changeThread = useThreadChange((thread, replace) =>
+			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		);
 		const search = activityChatRoute.useSearch();
 		return (
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
@@ -978,13 +986,12 @@ const activityChatRoute = createRoute({
 						onThreadPageChange={(threadPage) =>
 							void navigate({ search: (previous) => ({ ...previous, threadPage }) })
 						}
-						onThreadChange={(thread) =>
-							void navigate({ search: (previous) => ({ ...previous, thread }) })
-						}
+						onThreadChange={changeThread}
 						staged={stagedOf(search)}
-						onStagedChange={(staged) =>
+						onStagedChange={(staged, how) =>
 							void navigate({
 								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+								...how,
 							})
 						}
 					/>
@@ -1015,6 +1022,50 @@ const approvalRoute = createRoute({
 	getParentRoute: () => approvalsRoute,
 	path: "/$call",
 	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
+});
+
+/**
+ * You on a phone, where the sidebar's foot has no room: your workspace, its
+ * pods, and signing out. A wider screen, as a window widened from a phone's
+ * size, has settings of its own, which it goes to in this page's place.
+ */
+const youRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/you",
+	component: () => {
+		const wide = useMediaQuery(SIDE_BY_SIDE);
+		if (wide) return <Navigate from="/$workspace" to="./settings" replace />;
+		return (
+			<Panes>
+				<You />
+			</Panes>
+		);
+	},
+});
+
+/**
+ * A pod's settings as a phone opens them from You: a page of its parts. A
+ * wider screen goes to the pod's own settings in its place.
+ */
+const youPodRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/you/pods/$pod",
+	component: () => {
+		const wide = useMediaQuery(SIDE_BY_SIDE);
+		const { pod: podSlug } = youPodRoute.useParams();
+		const { data: pods, isPending } = usePods();
+		const pod = findPod(pods, podSlug);
+		if (wide) {
+			return (
+				<Navigate from="/$workspace" to="./settings/pods/$pod" params={{ pod: podSlug }} replace />
+			);
+		}
+		return (
+			<Panes>
+				{isPending ? null : pod ? <YouPod pod={pod} /> : <EmptyState title="No such pod here" />}
+			</Panes>
+		);
+	},
 });
 
 /** Where `/` and closing settings land: the first shared pod, or Personal for somebody in none. */
@@ -1052,7 +1103,7 @@ const podRoute = createRoute({
 	component: PodRoute,
 });
 
-/** A pod's page beside the sidebar. On a phone, the pod's own address shows the sidebar alone. */
+/** A pod's page beside the sidebar. On a phone, the pod's own address is Home. */
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const matchRoute = useMatchRoute();
@@ -1072,9 +1123,12 @@ function PodRoute() {
 		);
 	}
 	return (
-		<Panes className={atPod ? "max-md:hidden" : undefined}>
-			<Outlet />
-		</Panes>
+		<>
+			{atPod && <MobileHome pod={pod} className="md:hidden" />}
+			<Panes className={atPod ? "max-md:hidden" : undefined}>
+				<Outlet />
+			</Panes>
+		</>
 	);
 }
 
@@ -1270,6 +1324,9 @@ const routineThreadRoute = createRoute({
 function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
 	const opened = useOpenRoutineFeed(pod, routineId);
 	const navigate = routineThreadRoute.useNavigate();
+	const changeThread = useThreadChange((thread, replace) =>
+		navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+	);
 	const search = routineThreadRoute.useSearch();
 	if (opened.isError) {
 		return (
@@ -1289,12 +1346,13 @@ function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
 					conversationId={conversationId}
 					user={user}
 					threadId={search.thread}
-					onThreadChange={(thread) =>
-						void navigate({ search: (previous) => ({ ...previous, thread }) })
-					}
+					onThreadChange={changeThread}
 					staged={stagedOf(search)}
-					onStagedChange={(staged) =>
-						void navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }) })
+					onStagedChange={(staged, how) =>
+						void navigate({
+							search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+							...how,
+						})
 					}
 				/>
 			)}
@@ -1423,6 +1481,9 @@ const conversationRoute = createRoute({
 	component: () => {
 		const { pod, conversation } = conversationRoute.useParams();
 		const navigate = conversationRoute.useNavigate();
+		const changeThread = useThreadChange((thread, replace) =>
+			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		);
 		const search = conversationRoute.useSearch();
 		return (
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
@@ -1433,13 +1494,12 @@ const conversationRoute = createRoute({
 						conversationId={conversation}
 						user={user}
 						threadId={search.thread}
-						onThreadChange={(thread) =>
-							void navigate({ search: (previous) => ({ ...previous, thread }) })
-						}
+						onThreadChange={changeThread}
 						staged={stagedOf(search)}
-						onStagedChange={(staged) =>
+						onStagedChange={(staged, how) =>
 							void navigate({
 								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+								...how,
 							})
 						}
 					/>
@@ -1561,6 +1621,8 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
+		youRoute,
+		youPodRoute,
 		podRoute.addChildren([
 			podIndexRoute,
 			agentRoute,
@@ -1574,12 +1636,118 @@ const routeTree = rootRoute.addChildren([
 	]),
 ]);
 
+/**
+ * Which way a phone slides from one page to the next, as a view transition's
+ * type: `forward` into a page further in, as a channel opened from Home or a
+ * thread from its channel, and `back` out of one. Switching tabs, or a change
+ * that stays on its page, such as opening a thread's computer, does not slide.
+ */
+function phoneSlide({
+	fromLocation,
+	toLocation,
+	hrefChanged,
+}: {
+	fromLocation?: ParsedLocation;
+	toLocation: ParsedLocation;
+	hrefChanged: boolean;
+}): string[] | false {
+	if (!fromLocation || !hrefChanged || matchesMedia(SIDE_BY_SIDE)) return false;
+	const fromIndex = historyIndex(fromLocation);
+	const toIndex = historyIndex(toLocation);
+	const from = locationDepth(fromLocation);
+	const to = locationDepth(toLocation);
+	// In place: a page that sends on to its own address, as a bot's chat does, doesn't
+	// slide, but Back from a page opened first, which goes up in its place, does.
+	if (toIndex === fromIndex) return to < from ? ["back"] : false;
+	if (to !== from) return [to > from ? "forward" : "back"];
+	// A tab for another tab.
+	if (to === 0) return false;
+	// Pages as deep as each other, as a bot's channel and a thread in it both are: a step
+	// through history tells which way, a page opened going forward and Back going back.
+	return [toIndex > fromIndex ? "forward" : "back"];
+}
+
+/**
+ * Opens a thread over a chat, or closes it, with `go`, which names it in the
+ * address. On a phone a thread covers its chat as a page of its own, so
+ * closing one shows its chat: back to it when the chat is the page behind,
+ * else the chat in the thread's place, as when the thread was opened from
+ * Inbox. Opening the chat as a page after the thread would have the chat's
+ * own Back return to the thread.
+ */
+function useThreadChange(go: (thread: string | undefined, replace: boolean) => void) {
+	const { leaveFor } = useLeave();
+	const { pathname } = useLocation();
+	return (thread: string | undefined) => {
+		if (thread !== undefined || matchesMedia(SIDE_BY_SIDE)) {
+			go(thread, false);
+			return;
+		}
+		leaveFor(
+			(page) => page.pathname === pathname && page.search.thread === undefined,
+			() => go(undefined, true),
+		);
+	};
+}
+
+/** Whether `pathname` is one of the settings, or a phone's You tab, which lists them. */
+function isSettingsPath(pathname: string): boolean {
+	const [section] = pathname.split("/").filter(Boolean).slice(1);
+	return section === "settings" || section === "you";
+}
+
+/**
+ * A page's depth, and a step more while a thread is open over it: a thread
+ * opened from a chat, or a run or collaboration from Inbox, which the address
+ * names in its search rather than its path.
+ */
+function locationDepth(location: ParsedLocation): number {
+	const search = location.search as { thread?: unknown; threadPage?: unknown };
+	const threadOpen = search.thread !== undefined || search.threadPage !== undefined;
+	return pageDepth(location.pathname) + (threadOpen ? 1 : 0);
+}
+
+/**
+ * How far into the app a page is on a phone: a tab is 0; what it opens, 1; and
+ * so on. A bot's thread is a step past the bot's chat, though its address is
+ * no longer, so depth is told from what the address names, not its length.
+ */
+function pageDepth(pathname: string): number {
+	// The workspace's own part of the address is the same everywhere, so it counts for nothing.
+	const [section, ...rest] = pathname.split("/").filter(Boolean).slice(1);
+	switch (section) {
+		case "pods": {
+			// pods/$pod is Home; its chat, a bot's chat, Artifacts or Routines one in; what those open, two.
+			const [, place, item] = rest;
+			if (place === undefined) return 0;
+			if (place === "threads") return 2;
+			return item === undefined || place === "agents" ? 1 : 2;
+		}
+		case "activity":
+		case "approvals":
+			return rest.length === 0 ? 0 : 1;
+		case "you":
+			// you/pods/$pod is one in.
+			return rest.length === 0 ? 0 : 1;
+		case "settings":
+			// Opened from You, so one in at least, and a step more for each part of the address.
+			return 1 + rest.length;
+		default:
+			return 0;
+	}
+}
+
 export function createAppRouter(options?: { history?: RouterHistory }) {
-	return createRouter({
+	const router = createRouter({
 		routeTree,
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
+		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
+		defaultViewTransition: { types: phoneSlide },
+		// Back to a list of settings returns to where it was left, not its top. Only settings:
+		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.
+		scrollRestoration: ({ location }) => isSettingsPath(location.pathname),
 		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,
@@ -1587,6 +1755,9 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// and search params are exercised rather than mocked around.
 		...options,
 	});
+	// So Back can tell where going back would land.
+	followTrail(router);
+	return router;
 }
 
 /** The app's routes, signed in as `session`: guards read who you are from it, and so do components. */

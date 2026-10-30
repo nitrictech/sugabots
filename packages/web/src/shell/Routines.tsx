@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { newRoutineLink, routineThreadLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -13,7 +14,7 @@ import { outcomeOf, RunStatus } from "@/screens/RoutineRun.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * A bot's routines down the left, the bot whose routine is chosen, each with
@@ -58,32 +59,63 @@ export function RoutinesPage({
 			// A link, so it says it is the page open rather than pressed.
 			aria-current={making ? "page" : undefined}
 			render={<Link {...newRoutineLink(pod, bot)} />}
-			className="aria-[current=page]:bg-chip aria-[current=page]:text-foreground"
+			className={cn(
+				"aria-[current=page]:bg-chip aria-[current=page]:text-foreground",
+				FLOATING_ON_PHONE,
+			)}
 		>
 			<Plus size={16} strokeWidth={1.75} />
 		</IconButton>
 	);
-	// With none yet, the list stays, with its + where it always is, and the space beside it says how one is made.
+	// With none yet, the list stays, with its + where it always is, and the space beside it says there are none.
 	const none = list.isSuccess && routines.length === 0;
+	// A phone has no space beside the list, so the list's own says so.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const noneYet = (
+		<div className="flex h-full pb-[10%]">
+			<EmptyState
+				title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
+				icon={<RefreshCcw strokeWidth={1.75} />}
+			>
+				Ask {bot ? bot.name : "a bot"} to set some up for you.
+			</EmptyState>
+		</div>
+	);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<section
 				aria-label="Routines"
 				className={cn(
-					"flex min-h-0 flex-col border-border border-r max-md:flex-1 md:w-[280px] md:shrink-0",
+					// `min-w-0`: a long bot's name in the title is cut short rather than widening the page.
+					"flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-[280px] md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
-				<PageHeader title={title} actions={newRoutine} />
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
+				<PageHeader title={title} place={{ kind: "pod", pod }} actions={newRoutine} />
+				{none && phone && <div className="flex min-h-0 flex-1 flex-col">{noneYet}</div>}
+				<ul
+					className={cn(
+						"tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2",
+						none && phone && "hidden",
+					)}
+				>
 					{list.isError && (
 						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">
 							Routines could not be loaded.
 						</li>
 					)}
-					{none && (
-						<li className="py-16 text-center text-[13px] text-subtle-foreground">
-							No routines yet.
+					{none && !phone && (
+						// Quiet and in the middle, as Inbox's empty list is, with the way to make one under it.
+						<li className="m-auto flex flex-col items-center gap-2 px-6 py-16 text-center">
+							<p className="m-0 text-[13px] text-muted-foreground">No routines yet</p>
+							{pod.permissions.manageRoutines && (
+								<Link
+									{...newRoutineLink(pod, bot)}
+									className="focus-ring rounded-md font-medium text-[13px] text-foreground"
+								>
+									New routine
+								</Link>
+							)}
 						</li>
 					)}
 					{routines.map((row) => (
@@ -99,19 +131,7 @@ export function RoutinesPage({
 				</ul>
 			</section>
 			<div className={cn("flex min-w-0 flex-1 flex-col", !chosen && "max-md:hidden")}>
-				{none && !chosen ? (
-					<div className="flex h-full pb-[10%]">
-						<EmptyState
-							title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
-							icon={<RefreshCcw strokeWidth={1.75} />}
-						>
-							Ask {bot ? bot.name : "a bot"} to do something on a schedule and it sets one up, or
-							make one with the +. Each routine gets its own thread for its runs.
-						</EmptyState>
-					</div>
-				) : (
-					children
-				)}
+				{none && !chosen && !phone ? noneYet : children}
 			</div>
 		</div>
 	);

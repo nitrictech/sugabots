@@ -18,18 +18,30 @@ import {
 	Brain,
 	Eye,
 	Image,
+	Pencil,
 	Search,
 	SmilePlus,
 	Star,
 	Wrench,
+	X,
 } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type FormEvent,
+	type KeyboardEvent,
+	type ReactNode,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { EyesGlyph, ShapeGlyph } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
+import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
@@ -108,86 +120,253 @@ export function NewAgentDialog({
 		}
 	}
 
+	// A tint of the bot's colour, so the bot is shown in its own light.
+	const stage = {
+		background: `color-mix(in oklab, ${botColors[look.color].face} 9%, var(--list))`,
+	};
+	const canCreate = Boolean(trimmedName && model) && !create.isPending;
+	// A phone has Create at the top, as its pages have their main action; one Create either way.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+
 	return (
 		<DialogContent
 			showCloseButton={false}
-			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[780px]"
+			// On a phone, a page of its own, as tall as what the keyboard leaves.
+			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[780px] max-md:inset-0 max-md:flex max-md:h-[var(--visible-height,100dvh)] max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:flex-col max-md:rounded-none"
 		>
 			<DialogTitle className="sr-only">New bot</DialogTitle>
 			<form
 				onSubmit={submit}
-				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-[580px] md:flex-row"
+				className="flex min-h-0 min-w-0 flex-col max-md:flex-1 max-md:overflow-y-auto md:h-[580px] md:flex-row"
 			>
-				<div
-					className="flex shrink-0 flex-col items-center gap-5 p-6 transition-colors md:w-[300px]"
-					// A tint of the bot's colour, so the bot is shown in its own light.
-					style={{
-						background: `color-mix(in oklab, ${botColors[look.color].face} 9%, var(--list))`,
-					}}
-				>
-					<input
-						aria-label="Name"
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-						placeholder="Name your bot"
-						maxLength={64}
-						autoComplete="off"
-						// biome-ignore lint/a11y/noAutofocus: naming the bot is the one thing the dialog cannot guess.
-						autoFocus
-						className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-[22px] text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip max-md:mt-2"
-					/>
-					<div className="grid flex-1 place-items-center">
-						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
-					</div>
-					<LookGrid
-						looks={looks}
-						chosen={chosenLook}
-						onChoose={(index) => {
-							setChosenLook(index);
-							setCustomising(false);
-						}}
+				{phone ? (
+					<PhoneNewBot
+						stage={stage}
+						name={name}
+						onNameChange={setName}
+						look={look}
 						customising={customising}
-						onCustomise={() => setCustomising(!customising)}
+						onCustomise={setCustomising}
+						lookStep={<LookStep part={part} look={look} onPartChange={setPart} onChange={change} />}
+						canCreate={canCreate}
+						alerts={
+							<>
+								{create.error && (
+									<Alert>
+										{failureMessage(create.error, {
+											Conflict: "A bot with that name already exists. Try another name.",
+											Forbidden: "Only a workspace admin can create a bot.",
+										})}
+									</Alert>
+								)}
+								{models.error && (
+									<Alert>Models could not be loaded. Close this and try again.</Alert>
+								)}
+							</>
+						}
+						modelPicker={
+							<ModelPicker
+								models={offered}
+								value={model}
+								defaultModel={models.data?.defaultModel}
+								loading={models.isPending}
+								onChoose={setChosenModel}
+							/>
+						}
 					/>
-					{create.error && (
-						<Alert>
-							{failureMessage(create.error, {
-								Conflict: "A bot with that name already exists. Try another name.",
-								Forbidden: "Only a workspace admin can create a bot.",
-							})}
-						</Alert>
-					)}
-					{models.error && <Alert>Models could not be loaded. Close this and try again.</Alert>}
-					<Button
-						type="submit"
-						className="w-full"
-						disabled={!trimmedName || !model || create.isPending}
-					>
-						Create
-					</Button>
-				</div>
+				) : (
+					<>
+						<div
+							className="flex w-[300px] shrink-0 flex-col items-center gap-5 p-6 transition-colors"
+							style={stage}
+						>
+							<input
+								aria-label="Name"
+								value={name}
+								onChange={(event) => setName(event.target.value)}
+								placeholder="Name your bot"
+								maxLength={64}
+								autoComplete="off"
+								// biome-ignore lint/a11y/noAutofocus: naming the bot is the one thing the dialog cannot guess.
+								autoFocus
+								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-[22px] text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip"
+							/>
+							<div className="grid flex-1 place-items-center">
+								<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
+							</div>
+							<LookGrid
+								looks={looks}
+								chosen={chosenLook}
+								onChoose={(index) => {
+									setChosenLook(index);
+									setCustomising(false);
+								}}
+								customising={customising}
+								onCustomise={() => setCustomising(!customising)}
+							/>
+							{create.error && (
+								<Alert>
+									{failureMessage(create.error, {
+										Conflict: "A bot with that name already exists. Try another name.",
+										Forbidden: "Only a workspace admin can create a bot.",
+									})}
+								</Alert>
+							)}
+							{models.error && <Alert>Models could not be loaded. Close this and try again.</Alert>}
+							<Button type="submit" className="w-full" disabled={!canCreate}>
+								Create
+							</Button>
+						</div>
 
-				<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border bg-panel max-md:border-t md:border-l">
-					{customising ? (
-						<LookStep
-							part={part}
-							look={look}
-							onPartChange={setPart}
-							onChange={change}
-							onDone={() => setCustomising(false)}
-						/>
-					) : (
-						<ModelPicker
-							models={offered}
-							value={model}
-							defaultModel={models.data?.defaultModel}
-							loading={models.isPending}
-							onChoose={setChosenModel}
-						/>
-					)}
-				</div>
+						<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border border-l bg-panel">
+							{customising ? (
+								<LookStep
+									part={part}
+									look={look}
+									onPartChange={setPart}
+									onChange={change}
+									onDone={() => setCustomising(false)}
+								/>
+							) : (
+								<ModelPicker
+									models={offered}
+									value={model}
+									defaultModel={models.data?.defaultModel}
+									loading={models.isPending}
+									onChoose={setChosenModel}
+								/>
+							)}
+						</div>
+					</>
+				)}
 			</form>
 		</DialogContent>
+	);
+}
+
+/**
+ * Making a bot on a phone, as two pages in one: the bot, its name and its
+ * model, with Close and Create at the top; and, from the bot's face, its look,
+ * with Back. The face rises and shrinks while the name is typed, so the name
+ * and the models stay in view above the keyboard.
+ */
+function PhoneNewBot({
+	stage,
+	name,
+	onNameChange,
+	look,
+	customising,
+	onCustomise,
+	lookStep,
+	canCreate,
+	alerts,
+	modelPicker,
+}: {
+	/** The bot's colour as a tint, behind its face. */
+	stage: CSSProperties;
+	name: string;
+	onNameChange: (name: string) => void;
+	look: Look;
+	/** Whether the look's page is open. */
+	customising: boolean;
+	onCustomise: (customising: boolean) => void;
+	/** The look's page: its shape, eyes and colour. */
+	lookStep: ReactNode;
+	canCreate: boolean;
+	alerts: ReactNode;
+	modelPicker: ReactNode;
+}) {
+	const [naming, setNaming] = useState(false);
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<header
+				className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2 transition-colors"
+				style={stage}
+			>
+				<span className="flex justify-self-start">
+					{customising ? (
+						<button
+							type="button"
+							aria-label="Back"
+							onClick={() => onCustomise(false)}
+							className={BACK_BUTTON}
+						>
+							<BackChevron />
+						</button>
+					) : (
+						<DialogClose aria-label="Close" className={BACK_BUTTON}>
+							<X aria-hidden size={20} strokeWidth={2.25} />
+						</DialogClose>
+					)}
+				</span>
+				<span className="font-semibold text-[17px] text-foreground">
+					{customising ? "Look" : "New bot"}
+				</span>
+				<span className="flex justify-self-end">
+					{!customising && (
+						<Button
+							type="submit"
+							size="sm"
+							className="h-11 rounded-full px-5 text-[15px]"
+							disabled={!canCreate}
+						>
+							Create
+						</Button>
+					)}
+				</span>
+			</header>
+			<div
+				className="flex shrink-0 flex-col items-center gap-4 px-4 pt-2 pb-5 transition-colors"
+				style={stage}
+			>
+				<button
+					type="button"
+					aria-label={customising ? undefined : "Change the look"}
+					disabled={customising}
+					onClick={() => onCustomise(true)}
+					className={cn(
+						"focus-ring relative flex justify-center rounded-3xl transition-[height] duration-300 ease-out motion-reduce:transition-none",
+						naming || customising ? "h-14" : "h-28",
+					)}
+				>
+					<span
+						className={cn(
+							"origin-top transition-transform duration-300 ease-out motion-reduce:transition-none",
+							(naming || customising) && "scale-50",
+						)}
+					>
+						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
+					</span>
+					{!customising && !naming && (
+						<span
+							aria-hidden
+							className="glass absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full text-foreground"
+						>
+							<Pencil size={14} strokeWidth={2} />
+						</span>
+					)}
+				</button>
+				{!customising && (
+					<>
+						<input
+							aria-label="Name"
+							value={name}
+							onChange={(event) => onNameChange(event.target.value)}
+							onFocus={() => setNaming(true)}
+							onBlur={() => setNaming(false)}
+							placeholder="Name your bot"
+							maxLength={64}
+							autoComplete="off"
+							className="h-12 w-full rounded-xl border border-border-strong bg-panel px-4 text-[16px] text-foreground outline-none placeholder:text-subtle-foreground focus:border-primary-tint-border"
+						/>
+						{alerts}
+					</>
+				)}
+			</div>
+			<div className="flex min-h-0 flex-1 flex-col border-border border-t bg-panel">
+				{customising ? lookStep : modelPicker}
+			</div>
+		</div>
 	);
 }
 
@@ -529,7 +708,7 @@ function Tile({
 /** The height of a right-hand page's title row, the same for the models and a look's parts. */
 const HEADER_ROW = "flex h-[22px] shrink-0 items-center";
 
-/** A step's title or tabs, with Back before them when the step was opened from the start. */
+/** A step past the start: Back, and its title or tabs beside it. */
 function StepHeader({ onBack, children }: { onBack?: () => void; children: ReactNode }) {
 	return (
 		// The same row as the models' title, so a step's tabs sit level with "Model".
@@ -553,9 +732,9 @@ function StepHeader({ onBack, children }: { onBack?: () => void; children: React
 	);
 }
 
-/** The dialog's ×, in a page's title row, so it is level with the title. */
+/** The dialog's ×, in a page's title row, so it is level with the title; a phone has its own at the top. */
 function Close() {
-	return <CloseButton render={<DialogClose />} className="-mr-1.5" />;
+	return <CloseButton render={<DialogClose />} className="-mr-1.5 max-md:hidden" />;
 }
 
 /**
@@ -575,6 +754,7 @@ export function LookStep({
 	look: Look;
 	onPartChange: (part: Part) => void;
 	onChange: (changes: Partial<Look>) => void;
+	/** Back from it to the models, in its own header; absent on a phone, whose Back is at the top of the page. */
 	onDone?: () => void;
 }) {
 	const group = useId();

@@ -670,7 +670,8 @@ function IndividualTools({
 			{Boolean(error) && <Alert>{failureMessage(error)}</Alert>}
 			{/* One card, searched from its top and read down: a long list scrolls inside it rather than lengthening the page. */}
 			<section aria-label="Tools" className={SETTINGS_CARD}>
-				<div className="border-border border-b p-2.5">
+				{/* Above the list and as solid as the card, so no row shows past the list's top as it scrolls. */}
+				<div className="relative z-1 border-border border-b bg-settings-card p-2.5">
 					<label className="focus-ring-within flex h-[34px] items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
 						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
 						<input
@@ -689,6 +690,10 @@ function IndividualTools({
 						tools.length > TOOLS_SHOWN_BEFORE_SCROLLING &&
 							// Relative, so the hidden radios inside are held to it: placed by the page instead, those scrolled out of view would lengthen it.
 							"relative h-[min(560px,60vh)] overflow-y-auto [scrollbar-gutter:stable]",
+						// Its sticky headings layered within it, under the search and the page's Back.
+						"isolate",
+						// A phone's scrollbar floats over the list, and pulling past its top would open a gap under the search.
+						"max-md:overscroll-none max-md:[scrollbar-gutter:auto]",
 					)}
 				>
 					{shownApart.length > 0 && (

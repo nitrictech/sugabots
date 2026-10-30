@@ -8,7 +8,7 @@ import {
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
-import { AtSign, Paperclip, Send, Smile, X } from "lucide-react";
+import { ArrowUp, AtSign, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
 	type ComposerAttachment,
@@ -232,18 +232,34 @@ export function ChatComposer({
 					{(emoji) => <EmojiOption emoji={emoji} />}
 				</SuggestionList>
 			)}
-			<div className="focus-ring-within flex flex-col rounded-xl border border-border-strong bg-panel transition-colors">
-				{replyingTo && (
-					<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
-				)}
-				<AttachmentTray
-					items={attachments.items}
-					onRemove={attachments.remove}
-					onRetry={attachments.retry}
-					focusDraft={() => editor.current?.focus()}
-				/>
-				<LeftOutNote count={attachments.leftOut} />
-				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3">
+			{/*
+			 * On a phone, one rounded line as a messaging app's is: attach, the
+			 * draft, and Send, with what it replies to or carries above them.
+			 * Mentions are typed, and the model is left to the bot's details.
+			 * A tap anywhere on it but a control lands in the draft.
+			 */}
+			{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: only widens where a pointer reaches the draft, which the keyboard reaches directly. */}
+			<div
+				onClick={(event) => {
+					if (!(event.target as Element).closest("button, a, input, [contenteditable]")) {
+						editor.current?.focus();
+					}
+				}}
+				className="focus-ring-within flex cursor-text flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-[23px] max-md:p-1"
+			>
+				<div className="flex flex-col max-md:w-full max-md:empty:hidden">
+					{replyingTo && (
+						<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
+					)}
+					<AttachmentTray
+						items={attachments.items}
+						onRemove={attachments.remove}
+						onRetry={attachments.retry}
+						focusDraft={() => editor.current?.focus()}
+					/>
+					<LeftOutNote count={attachments.leftOut} />
+				</div>
+				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3 max-md:order-2 max-md:min-w-0 max-md:flex-1 max-md:px-1 max-md:py-1">
 					<MentionEditor
 						ref={editor}
 						id={id}
@@ -274,7 +290,7 @@ export function ChatComposer({
 						aria-activedescendant={menu ? `${menuId}-${selectedSuggestion}` : undefined}
 					/>
 				</div>
-				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5">
+				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5 max-md:contents">
 					<AttachButton
 						full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
 						onAttach={attachments.attach}
@@ -284,18 +300,23 @@ export function ChatComposer({
 							type="button"
 							aria-label="Mention a bot or person"
 							onClick={startMention}
-							className={toolButtonClassName}
+							className={cn(toolButtonClassName, "max-md:hidden")}
 						>
 							<AtSign size={16} strokeWidth={2} />
 						</button>
 					</Tooltip>
-					<EmojiButton onChoose={insertEmoji} />
-					<span className="flex-1" />
+					{/* A phone's own keyboard has emoji. */}
+					<span className="contents max-md:hidden">
+						<EmojiButton onChoose={insertEmoji} />
+					</span>
+					<span className="flex-1 max-md:hidden" />
 					{/* Beside Send: what holds the message back, else the model that answers, else how to send it. */}
 					{filesNote(attachments.items) === undefined && model ? (
-						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs">{model}</span>
+						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs max-md:hidden">
+							{model}
+						</span>
 					) : (
-						<span className="pr-2 text-subtle-foreground text-xs [@media(hover:none)]:hidden">
+						<span className="pr-2 text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
 							{filesNote(attachments.items) ?? "Enter to send"}
 						</span>
 					)}
@@ -305,9 +326,10 @@ export function ChatComposer({
 						disabled={
 							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
 						}
-						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong"
+						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
 					>
-						<Send size={15} strokeWidth={2.2} />
+						<Send size={15} strokeWidth={2.2} className="max-md:hidden" />
+						<ArrowUp size={18} strokeWidth={2.25} className="md:hidden" />
 					</button>
 				</div>
 			</div>
@@ -378,9 +400,14 @@ function AttachButton({
 					onClick={() => {
 						if (!unavailable) picker.current?.click();
 					}}
-					className={cn(toolButtonClassName, unavailable && "opacity-40 hover:bg-transparent")}
+					className={cn(
+						toolButtonClassName,
+						"max-md:order-1 max-md:size-9 max-md:rounded-full",
+						unavailable && "opacity-40 hover:bg-transparent",
+					)}
 				>
-					<Paperclip aria-hidden size={16} strokeWidth={2} />
+					<Paperclip aria-hidden size={16} strokeWidth={2} className="max-md:hidden" />
+					<Plus aria-hidden size={20} strokeWidth={2} className="md:hidden" />
 				</button>
 			</Tooltip>
 		</>

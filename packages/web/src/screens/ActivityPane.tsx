@@ -8,7 +8,7 @@ import { useThread } from "@/lib/threads.ts";
 import { buttonStyles } from "@/ui/button.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
-import type { Staged } from "./ConversationChat.tsx";
+import type { Staged, StagedChange } from "./ConversationChat.tsx";
 import { ConversationPage } from "./ConversationPage.tsx";
 
 const BACK_TO_ACTIVITY: BackTo = { to: "activity" };
@@ -48,16 +48,17 @@ export function ActivityPane({
 	onThreadPageChange: (threadId: string) => void;
 	onThreadChange: (threadId: string | undefined) => void;
 	staged?: Staged;
-	onStagedChange: (staged: Staged | undefined) => void;
+	onStagedChange: StagedChange;
 }) {
 	// A routine's own thread opens on the Routines page, beside the pod's other routines.
 	const routineId = useThread(conversationId).data?.routine?.id;
+	// A phone shows the thread itself, whole, with Back to Inbox; it needs no way to another copy of it.
 	const openChat = (
 		<Link
 			{...(routineId
 				? routineThreadLink(pod, routineId)
 				: conversationLink({ pod, conversationId }))}
-			className={cn(buttonStyles({ variant: "outline", size: "sm" }), "shrink-0")}
+			className={cn(buttonStyles({ variant: "outline", size: "sm" }), "shrink-0 max-md:hidden")}
 		>
 			Open thread
 		</Link>

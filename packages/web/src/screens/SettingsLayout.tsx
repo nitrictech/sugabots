@@ -1,5 +1,12 @@
 import type { Pod } from "@sugabots/contracts";
-import { Link, useLocation, useMatch, useNavigate } from "@tanstack/react-router";
+import {
+	type HistoryState,
+	Link,
+	Navigate,
+	useLocation,
+	useMatch,
+	useNavigate,
+} from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, Plus } from "lucide-react";
 import {
@@ -15,6 +22,7 @@ import {
 import { useAgents, usePodAgent } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { podSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { findPod, usePodMembers, usePods } from "@/lib/pods.ts";
@@ -39,6 +47,7 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
 	type BackTarget,
 	CompactBackBar,
+	SETTINGS_CARD,
 	SettingsGroup,
 	SettingsRow,
 	SettingsValue,
@@ -66,6 +75,10 @@ export function SettingsLayout({
 	children: ReactNode;
 }) {
 	const pathname = useSettingsPath();
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const { data: pods } = usePods();
+	// A phone lists settings in its You tab.
+	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
 	return (
 		// A group, so the frame's Back can stand aside for one the page draws itself.
 		<div className="group/settings flex min-h-0 min-w-0 flex-1">
@@ -78,8 +91,15 @@ export function SettingsLayout({
 				 * to need one, so a long page, such as Usage, centres its column where
 				 * a short one does.
 				 */}
-				<main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable]">
-					{!index && <CompactPageBackBar parent={parentPage(pathname)} />}
+				<main
+					data-scroll-restoration-id="settings"
+					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable] max-md:[scrollbar-gutter:auto]"
+				>
+					{!index && (
+						<CompactPageBackBar
+							parent={phone ? phoneParentPage(pathname, pods) : parentPage(pathname)}
+						/>
+					)}
 					{/*
 					 * Nothing rather than a skeleton: the navigation has already answered
 					 * the click, and a shape that flashes beside it reads as a fault.
@@ -136,6 +156,31 @@ function parentPage(pathname: string): BackTarget {
 		}
 	}
 	return settingsList;
+}
+
+/**
+ * The page `pathname` sits under on a phone, whose settings are listed in its
+ * You tab: a pod's own pages sit under the pod's page there, Notifications
+ * under your profile, and what would sit under the list of settings under the tab.
+ */
+function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): BackTarget {
+	const [, sectionId, item, , detail] = pathname.split("/").filter(Boolean);
+	if (sectionId === "pods" && item !== undefined && detail === undefined) {
+		return {
+			label: findPod(pods, item)?.name ?? "Pod",
+			render: <Link from="/$workspace" to="./you/pods/$pod" params={{ pod: item }} />,
+		};
+	}
+	// Opened from a row on your profile.
+	if (sectionId === "notifications") {
+		return {
+			label: "You",
+			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />,
+		};
+	}
+	const parent = parentPage(pathname);
+	if (parent !== settingsList) return parent;
+	return { label: "Settings", render: <Link from="/$workspace" to="./you" /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */
@@ -391,7 +436,7 @@ function storedOpenPods(): Record<string, boolean> {
 }
 
 /** What each of a pod's pages holds, counted once the pod is open in the navigation. */
-function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
+export function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
 	const { agents } = useAgents();
 	const connections = useConnections(open ? pod.id : undefined);
 	// Only you are ever in a personal pod, so there is nobody to count.
@@ -436,53 +481,63 @@ function NewPodButton() {
 }
 
 /**
- * Settings on a phone or tablet: one list, as a phone's own settings are, with
- * you at the top and every section a row that opens it full screen.
+ * Settings on a tablet: one list, as a phone's own settings are, with you at
+ * the top and every section a row that opens it full screen. The sidebar
+ * beside it is the way out, so it has no Done.
  */
 function CompactSettingsList() {
-	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
-	const session = useSession();
 	return (
 		<nav
 			aria-label="Settings sections"
 			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-[620px] *:shrink-0 md:px-8 md:pt-9 lg:hidden"
 		>
-			<div className="flex items-center">
-				<h1 className="m-0 flex-1 font-semibold text-[28px] text-foreground tracking-[-0.025em]">
-					Settings
-				</h1>
+			<h1 className="m-0 font-semibold text-[28px] text-foreground tracking-[-0.025em]">
+				Settings
+			</h1>
+			<SettingsListGroups />
+		</nav>
+	);
+}
+
+/**
+ * The groups of the list of settings: you, the workspace's sections, and its
+ * pods. A phone's You tab lists them too, with `linkState` saying where each
+ * page's Back returns, its pods opening `podLink` rather than their General,
+ * and `you` in place of your own rows.
+ */
+export function SettingsListGroups({
+	linkState,
+	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
+}: {
+	linkState?: (state: HistoryState) => HistoryState;
+	podLink?: (pod: Pod) => ReactElement;
+}) {
+	const { sections, counts } = useWorkspaceSections();
+	const { shared, personal } = useListedPods();
+	const { user } = useSession();
+	return (
+		<>
+			{/* You first, on a card that opens your profile, which leads on to your Notifications. */}
+			{user && (
 				<Link
 					from="/$workspace"
-					to="./agents"
-					className="focus-ring rounded-md font-semibold text-[15px] text-link"
+					to="./settings/$section"
+					params={{ section: "profile" }}
+					state={linkState}
+					className={cn(
+						SETTINGS_CARD,
+						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
+					)}
 				>
-					Done
+					<PersonAvatar person={user} size={64} />
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<span className="truncate font-semibold text-[20px] text-foreground">{user.name}</span>
+						<span className="truncate text-[14px] text-subtle-foreground">
+							Profile and notifications
+						</span>
+					</span>
+					<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
 				</Link>
-			</div>
-			{session.user && (
-				<SettingsGroup>
-					<SettingsRow
-						icon={<PersonAvatar person={session.user} size={36} />}
-						label={session.user.name}
-						sub={session.user.email}
-						chevron
-						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />
-						}
-					/>
-					<SettingsRow
-						label="Notifications"
-						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "notifications" }}
-							/>
-						}
-					/>
-				</SettingsGroup>
 			)}
 			<SettingsGroup label="Workspace" headingLevel={2}>
 				{sections.map((section) => (
@@ -496,7 +551,12 @@ function CompactSettingsList() {
 						}
 						chevron
 						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: section.id }} />
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: section.id }}
+								state={linkState}
+							/>
 						}
 					/>
 				))}
@@ -514,13 +574,13 @@ function CompactSettingsList() {
 									icon={<PodInitial pod={pod} size="sm" />}
 									label={pod.name}
 									chevron
-									render={<Link {...podSettingsLink(pod)} />}
+									render={podLink(pod)}
 								/>
 							))}
 						</SettingsGroup>
 					),
 			)}
-		</nav>
+		</>
 	);
 }
 

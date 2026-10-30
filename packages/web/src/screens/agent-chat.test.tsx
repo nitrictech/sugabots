@@ -1124,7 +1124,7 @@ describe("ongoing agent Chat", () => {
 			"section",
 		);
 		if (!members) throw new Error("In this thread has no section");
-		fireEvent.click(within(members).getByRole("button", { name: /in this thread$/ }));
+		// A phone, as the tests are laid out, lists them without being asked.
 		const [first, second, ...rest] = within(members).getAllByRole("listitem");
 		expect(first?.textContent).toContain("You");
 		expect(second?.textContent).toContain(linear.name);

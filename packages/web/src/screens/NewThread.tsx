@@ -165,7 +165,7 @@ export function NewThread({
 					</ul>
 				)}
 			</div>
-			<div className="shrink-0 px-4 md:px-5">
+			<div className="shrink-0 px-4 max-md:pb-[var(--tab-bar-space,0px)] md:px-5">
 				{composer}
 				<div className="flex h-[26px] items-center">
 					<p className="m-0 px-1 text-[12.5px] text-muted-foreground">

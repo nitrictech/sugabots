@@ -1,10 +1,11 @@
 import type { Pod } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { Archive, Ellipsis, Pencil } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useArchiveChat, useRenameChat } from "@/lib/chats.ts";
 import { podLink } from "@/lib/links.ts";
 import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -15,25 +16,73 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
+/** One of a pod's channels, as changing it needs it. */
+export interface ChannelToChange {
+	pod: Pod;
+	conversationId: string;
+	name: string;
+	/** Whether it may be archived, which the pod's first may not. */
+	archivable: boolean;
+}
+
 /**
  * Beside a channel's name, for whoever may change the pod: renaming the
  * channel, and, unless it is the pod's first, archiving it, which takes it off
  * the pod's list and goes back to the pod. Its threads stay where they are.
+ * A phone has these in the channel's details instead.
  */
-export function ChatMenu({
+export function ChatMenu(channel: ChannelToChange) {
+	return (
+		<ChannelActions {...channel}>
+			{({ rename, archive }) => (
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<IconButton
+								label={`More for ${channel.name}`}
+								variant="bar"
+								className="size-8 max-md:hidden"
+							>
+								<Ellipsis size={18} strokeWidth={2} />
+							</IconButton>
+						}
+					/>
+					<DropdownMenuContent align="end" className="min-w-48">
+						<DropdownMenuItem onClick={rename}>
+							<Pencil aria-hidden size={16} />
+							Rename channel
+						</DropdownMenuItem>
+						{archive && (
+							<DropdownMenuItem variant="destructive" onClick={archive}>
+								<Archive aria-hidden size={16} />
+								Archive channel
+							</DropdownMenuItem>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			)}
+		</ChannelActions>
+	);
+}
+
+/**
+ * Renaming a channel and archiving it, which `children` offers as it likes,
+ * each opening its own dialog; `archive` is absent for a channel that may
+ * not be archived.
+ */
+export function ChannelActions({
 	pod,
 	conversationId,
 	name,
 	archivable,
-}: {
-	pod: Pod;
-	conversationId: string;
-	name: string;
-	archivable: boolean;
+	children,
+}: ChannelToChange & {
+	children: (open: { rename: () => void; archive?: () => void }) => ReactNode;
 }) {
 	const rename = useRenameChat(conversationId);
 	const archive = useArchiveChat(conversationId);
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	const [renaming, setRenaming] = useState(false);
 	const [archiving, setArchiving] = useState(false);
 
@@ -44,32 +93,16 @@ export function ChatMenu({
 			return;
 		}
 		setArchiving(false);
-		await navigate(podLink(pod));
+		// Back to Home, or Home in the archived channel's place, so Back never returns to it.
+		leaveForPage(router.buildLocation(podLink(pod)).href);
 	}
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<IconButton label={`More for ${name}`} variant="bar" className="size-8">
-							<Ellipsis size={18} strokeWidth={2} />
-						</IconButton>
-					}
-				/>
-				<DropdownMenuContent align="end" className="min-w-48">
-					<DropdownMenuItem onClick={() => setRenaming(true)}>
-						<Pencil aria-hidden size={16} />
-						Rename channel
-					</DropdownMenuItem>
-					{archivable && (
-						<DropdownMenuItem variant="destructive" onClick={() => setArchiving(true)}>
-							<Archive aria-hidden size={16} />
-							Archive channel
-						</DropdownMenuItem>
-					)}
-				</DropdownMenuContent>
-			</DropdownMenu>
+			{children({
+				rename: () => setRenaming(true),
+				archive: archivable ? () => setArchiving(true) : undefined,
+			})}
 			<Dialog open={renaming} onOpenChange={setRenaming}>
 				<ChatNameDialog
 					title="Rename channel"

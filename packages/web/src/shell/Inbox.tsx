@@ -25,7 +25,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { IconButton, ROOMY_ON_PHONE } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 
 /** A kind of item in the feed, which the filter can narrow Inbox to. */
@@ -87,7 +87,8 @@ export function Inbox({ children }: { children: ReactNode }) {
 					width === undefined ? undefined : ({ "--list-width": `${width}px` } as CSSProperties)
 				}
 				className={cn(
-					"relative flex min-h-0 flex-col border-border border-r max-md:flex-1 md:w-[clamp(280px,var(--list-width,380px),60%)] md:shrink-0",
+					// Free to be narrower than its longest row, which is cut short to fit a phone.
+					"relative flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 max-md:border-r-0 md:w-[clamp(280px,var(--list-width,380px),60%)] md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
@@ -100,6 +101,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 				/>
 				<PageHeader
 					title="Inbox"
+					place={{ kind: "tab" }}
 					actions={
 						<>
 							<IconButton
@@ -107,7 +109,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 								variant="bar"
 								aria-pressed={unreadOnly}
 								onClick={() => setUnreadOnly(!unreadOnly)}
-								className="aria-pressed:bg-chip aria-pressed:text-foreground"
+								className={cn("aria-pressed:bg-chip aria-pressed:text-foreground", ROOMY_ON_PHONE)}
 							>
 								<UnreadOnlyIcon />
 							</IconButton>
@@ -116,6 +118,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 								<IconButton
 									label="Mark all as read"
 									variant="bar"
+									className={ROOMY_ON_PHONE}
 									disabled={markRead.isPending}
 									onClick={() => markRead.mutate(unreadConversationIds)}
 								>
@@ -125,15 +128,33 @@ export function Inbox({ children }: { children: ReactNode }) {
 						</>
 					}
 				/>
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
+				<ul className="tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
 					{feed.isError && (
 						<li className="px-3 py-3 text-[13px] text-muted-foreground">
 							Inbox could not be loaded.
 						</li>
 					)}
 					{feed.isSuccess && items.length === 0 && (
-						<li className="py-16 text-center text-[13px] text-subtle-foreground">
-							{unreadOnly ? "You're all caught up." : "Nothing has happened here yet."}
+						// Quiet and in the middle; a phone, with no pane beside it, adds the tray.
+						<li className="m-auto flex flex-col items-center gap-2 px-6 py-16 text-center">
+							<InboxIcon
+								aria-hidden
+								size={40}
+								strokeWidth={1.25}
+								className="mb-2 text-subtle-foreground md:hidden"
+							/>
+							<p className="m-0 text-[13px] text-muted-foreground max-md:text-[15px]">
+								{unreadOnly ? "Nothing unread" : "Nothing here yet"}
+							</p>
+							{unreadOnly && (
+								<button
+									type="button"
+									onClick={() => setUnreadOnly(false)}
+									className="focus-ring rounded-md font-medium text-[13px] text-foreground max-md:text-[15px]"
+								>
+									Show everything
+								</button>
+							)}
 						</li>
 					)}
 					{items.map((item) => (
@@ -169,7 +190,7 @@ function KindFilter({
 				label="Filter"
 				variant="bar"
 				render={<DropdownMenuTrigger />}
-				className={cn(chosen.size > 0 && "bg-chip text-foreground")}
+				className={cn(ROOMY_ON_PHONE, chosen.size > 0 && "bg-chip text-foreground")}
 			>
 				<ListFilter size={16} strokeWidth={1.75} />
 			</IconButton>
@@ -450,7 +471,7 @@ function InboxRow({
 			className={cn(
 				layout,
 				"focus-ring transition-colors",
-				selected ? "bg-row-selected" : "hover:bg-row-hover",
+				selected ? "bg-row-selected" : "hover:bg-row-hover max-md:active:bg-row-selected",
 			)}
 		>
 			{content}

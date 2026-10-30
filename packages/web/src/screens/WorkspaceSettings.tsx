@@ -5,13 +5,15 @@ import {
 	type WorkspaceRole,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -272,6 +274,8 @@ function ProfileSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
+	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
+	const backToProfile = useBackToHere("You");
 	const user = session.user;
 	if (!user) return null;
 
@@ -294,6 +298,23 @@ function ProfileSettings() {
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
 			</SettingsGroup>
+			{/* Below a laptop's width your profile is opened from a card, with no list beside it that has Notifications. */}
+			{openedFromCard && (
+				<SettingsGroup>
+					<SettingsRow
+						label="Notifications"
+						chevron
+						render={
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "notifications" }}
+								state={backToProfile}
+							/>
+						}
+					/>
+				</SettingsGroup>
+			)}
 			<ReferralLinkSettings />
 			<SettingsDanger
 				label="Sign out"

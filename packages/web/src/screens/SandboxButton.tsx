@@ -1,8 +1,9 @@
 import type { Agent } from "@sugabots/contracts";
+import { cn } from "cn";
 import { Monitor } from "lucide-react";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * The bot's computer, for the top of its chat: always there, so it opens to
@@ -49,7 +50,7 @@ export function SandboxButton({
 			type="button"
 			onClick={onOpen}
 			aria-label={`${agentName} is using the sandbox. Open its desktop`}
-			className="focus-ring flex h-8 shrink-0 items-center gap-2 rounded-[8px] bg-bot-tint px-3 font-medium text-bot-text text-sm transition-colors max-md:px-2.5"
+			className="focus-ring flex h-8 shrink-0 items-center gap-2 rounded-[8px] bg-bot-tint px-3 font-medium text-bot-text text-sm transition-colors max-md:h-11 max-md:rounded-full max-md:px-3.5"
 		>
 			<span aria-hidden className="relative flex size-2">
 				<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
@@ -63,7 +64,7 @@ export function SandboxButton({
 			label="Computer"
 			variant="bar"
 			onClick={onOpen}
-			className="text-muted-foreground hover:text-foreground"
+			className={cn("text-muted-foreground hover:text-foreground", FLOATING_ON_PHONE)}
 		>
 			<Monitor size={16} strokeWidth={1.75} />
 		</IconButton>

@@ -130,7 +130,7 @@ function ConnectionRow({
 	return (
 		<article
 			aria-label={connection.name}
-			className="relative flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover"
+			className="relative flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected"
 		>
 			{/* Its link covers the whole row; the controls sit above it. */}
 			<Link
@@ -261,7 +261,7 @@ function AppList({
 						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
 					/>
 				</label>
-				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1">
+				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{(gitHubShown || shown.length > 0) && (
 						<SettingsGroup>
 							{gitHubShown && (

@@ -107,7 +107,7 @@ export function TriggerKindStep({
 						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
 					/>
 				</label>
-				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1">
+				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
 					{pod && (
 						<SettingsGroup label="From this pod's connections">

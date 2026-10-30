@@ -236,15 +236,15 @@ export const GeneralAsAMember = meta.story({
 		await expect(canvas.queryByRole("textbox", { name: "Name" })).toBeNull();
 	},
 });
-
+/** On a phone a pod's page opens full screen, with the way back to the pod's page in You. */
 /** On a phone a pod's page opens full screen, with the way back to the list of settings. */
 export const Phone = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: "Settings" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+			await canvas.findByRole("link", { name: revenue.name }, { timeout: 10_000 }),
+		).toHaveAttribute("href", `/${storyWorkspace.slug}/you/pods/${revenue.slug}`);
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 	},
 });

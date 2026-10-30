@@ -6,10 +6,15 @@ import { useAttentionCounts } from "@/lib/chats.ts";
 import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
+import { MobileTabBar } from "@/shell/MobileTabBar.tsx";
 import { NotificationsPrompt } from "@/shell/NotificationsPrompt.tsx";
 import { Sidebar } from "@/shell/Sidebar.tsx";
 
-/** The frame: the sidebar, then whatever the address shows beside it, under any bar asking for notifications. */
+/**
+ * The frame: the sidebar, then whatever the address shows beside it, under any
+ * bar asking for notifications. On a phone, the page alone, over the tabs while
+ * it is one of theirs.
+ */
 export function Shell() {
 	useWorkspaceEvents();
 	useNotificationsInThisBrowser();
@@ -25,6 +30,7 @@ export function Shell() {
 				<Sidebar />
 				<Outlet />
 			</div>
+			<MobileTabBar />
 		</div>
 	);
 }

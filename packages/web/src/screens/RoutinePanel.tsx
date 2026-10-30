@@ -13,6 +13,7 @@ import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useRoutineControls } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { routinesLink, routineThreadLink } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { triggerLabel } from "@/lib/routine-schedule.ts";
 import { useRoutineActions, useRoutines } from "@/lib/routines.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -96,32 +97,40 @@ export function RoutinePanel({
 		}
 	}
 
+	const more = mayManage && routine && (
+		<MoreMenu label={`More for ${routine.name}`}>
+			<DropdownMenuItem onClick={() => setDialog({ kind: "rename" })}>
+				<Pencil aria-hidden size={16} />
+				Rename
+			</DropdownMenuItem>
+			<DropdownMenuItem disabled={actions.create.isPending} onClick={() => void duplicate(routine)}>
+				<Copy aria-hidden size={16} />
+				Duplicate
+			</DropdownMenuItem>
+			<DropdownMenuItem variant="destructive" onClick={() => setDialog({ kind: "delete" })}>
+				<Trash2 aria-hidden size={16} />
+				Delete routine
+			</DropdownMenuItem>
+		</MoreMenu>
+	);
+
+	// On a phone, across from Back at the top, as a phone's page has its actions; else beside the name.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+
 	return (
-		<ChatSidebar label="Routine" onClose={onClose} headerless className="xl:w-[340px]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="flex h-[52px] shrink-0 items-center gap-2 pr-3 pl-5">
+		<ChatSidebar
+			label="Routine"
+			onClose={onClose}
+			headerless
+			className="xl:w-[340px]"
+			actions={phone && more}
+		>
+			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto">
+				<div className="flex h-[52px] shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
 					<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-[14px] text-foreground">
 						{routine?.name ?? "Routine"}
 					</h3>
-					{mayManage && routine && (
-						<MoreMenu label={`More for ${routine.name}`}>
-							<DropdownMenuItem onClick={() => setDialog({ kind: "rename" })}>
-								<Pencil aria-hidden size={16} />
-								Rename
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								disabled={actions.create.isPending}
-								onClick={() => void duplicate(routine)}
-							>
-								<Copy aria-hidden size={16} />
-								Duplicate
-							</DropdownMenuItem>
-							<DropdownMenuItem variant="destructive" onClick={() => setDialog({ kind: "delete" })}>
-								<Trash2 aria-hidden size={16} />
-								Delete routine
-							</DropdownMenuItem>
-						</MoreMenu>
-					)}
+					{!phone && more}
 				</div>
 				<div className="flex flex-col gap-3 px-4 pt-1 pb-6">
 					{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
@@ -283,7 +292,30 @@ function Instructions({
 	onEdit: (() => void) | undefined;
 }) {
 	const [open, setOpen] = useState(false);
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const folds = instructions.length > INSTRUCTIONS_FOLDED_OVER;
+	// On a phone, a row as settings' are, its first line cut short, which opens them all to change.
+	if (phone && onEdit) {
+		return (
+			<button
+				type="button"
+				aria-label="Edit instructions"
+				onClick={onEdit}
+				className="focus-ring flex w-full items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-3 text-left active:bg-row-selected"
+			>
+				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+					<span className="text-[13px] text-muted-foreground">Instructions</span>
+					<span className="truncate text-[14px] text-soft-foreground">{instructions}</span>
+				</span>
+				<ChevronRight
+					aria-hidden
+					size={16}
+					strokeWidth={2}
+					className="shrink-0 text-subtle-foreground"
+				/>
+			</button>
+		);
+	}
 	return (
 		<PanelCard className="flex flex-col gap-1.5 px-3.5 pt-3 pb-3.5">
 			<div className="flex items-center gap-2">

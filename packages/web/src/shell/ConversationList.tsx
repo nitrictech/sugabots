@@ -21,6 +21,7 @@ import {
 	podChatLink,
 	routinesLink,
 } from "@/lib/links.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
 import { useOpenBots } from "@/lib/open-bots.ts";
@@ -147,6 +148,8 @@ export function ConversationListView({
 }) {
 	const [openBots, toggleBot] = useOpenBots(pod.id);
 	const [folded, toggleFolded] = useFolded();
+	// A phone's Home is the list alone, with room for every bot's threads, and no channel open beside it to unfold them.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const chatsKey = `chats:${pod.id}`;
 	const botsKey = `bots:${pod.id}`;
 	// The open thread when the viewer closed the bot holding it, which stays closed until another opens.
@@ -263,9 +266,11 @@ export function ConversationListView({
 									isSelected(group.channel?.conversation.id);
 								// A bot is open while its channel or anything under it is; the threads
 								// between people, which have no channel, open and close by hand.
-								const open = group.agent
-									? channelOpen || holdsSelected
-									: openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey);
+								const open =
+									phone ||
+									(group.agent
+										? channelOpen || holdsSelected
+										: openBots.has(group.key) || (holdsSelected && closedOver !== selectedKey));
 								const toggle = () => {
 									if (openBots.has(group.key) === open) toggleBot(group.key);
 									setClosedOver(open && holdsSelected ? selectedKey : undefined);
@@ -320,7 +325,7 @@ function SectionHeading({
 	action?: ReactNode;
 }) {
 	return (
-		<h2 className="group/section m-0 flex h-8 items-center rounded-[6px] pr-1.5 font-normal text-[14px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground">
+		<h2 className="group/section m-0 flex h-8 items-center rounded-[6px] pr-1.5 font-normal text-[14px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground max-md:mt-2 max-md:h-9 max-md:font-medium max-md:text-subtle-foreground">
 			<button
 				type="button"
 				aria-expanded={open}
@@ -346,13 +351,13 @@ function SectionHeading({
 					<UnreadMarker {...news} />
 				</span>
 			)}
-			{/* The action comes in under the pointer or on focus, beside what is new. */}
+			{/* The action comes in under the pointer or on focus, beside what is new; a phone has no pointer, so always. */}
 			<span
 				className={cn(
 					END_SLOT,
 					!open && hasNews(news)
-						? "hidden group-hover/section:grid group-has-focus-visible/section:grid"
-						: "opacity-0 group-hover/section:opacity-100 group-has-focus-visible/section:opacity-100",
+						? "hidden group-hover/section:grid group-has-focus-visible/section:grid max-md:grid"
+						: "opacity-0 group-hover/section:opacity-100 group-has-focus-visible/section:opacity-100 max-md:opacity-100",
 				)}
 			>
 				{action}
@@ -414,10 +419,11 @@ function NoBots({ onNewBot }: { onNewBot?: () => void }) {
 	);
 }
 
-/** A row of the sidebar: a link or button 36px tall, shaded while it is the one open. */
+/** A row of the sidebar: a link or button 32px tall, or 44px for a thumb on a phone, shaded while it is the one open. */
 function sidebarRowClassName(selected: boolean): string {
 	return cn(
 		"focus-ring flex h-8 min-w-0 items-center gap-2.5 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors",
+		PHONE_ROW,
 		selected
 			? "bg-row-selected text-foreground"
 			: "text-muted-foreground hover:bg-row-hover hover:text-foreground",
@@ -528,9 +534,13 @@ function startedInChatOf(
 	);
 }
 
+/** A row's height and type on a phone, where a thumb taps it rather than a pointer, shaded while pressed. */
+const PHONE_ROW =
+	"max-md:h-11 max-md:gap-3 max-md:rounded-[10px] max-md:text-[16px] max-md:active:bg-row-selected";
+
 /** A bot's own part of its row: its face and name, filling the row up to its end. */
 const botClassName =
-	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left text-[14px]";
+	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left text-[14px] max-md:gap-3 max-md:rounded-[10px] max-md:text-[16px]";
 
 /** How many of a bot's open threads show before Show more. */
 const THREADS_BEFORE_SHOW_MORE = 4;
@@ -623,7 +633,7 @@ function BotItem({
 	const row = (
 		<div
 			className={cn(
-				"group/bot flex h-8 items-center rounded-[6px] pr-1.5",
+				"group/bot flex h-8 items-center rounded-[6px] pr-1.5 max-md:h-11 max-md:rounded-[10px] max-md:active:bg-row-selected",
 				channelOpen ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
@@ -649,7 +659,7 @@ function BotItem({
 					{label}
 				</button>
 			)}
-			{/* What is unread stays in view; the + comes in beside it under the pointer or on focus. */}
+			{/* What is unread stays in view; the + comes in beside it under the pointer or on focus, and always on a phone. */}
 			{attention && (
 				<span className={END_SLOT}>
 					<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
@@ -658,7 +668,9 @@ function BotItem({
 			<span
 				className={cn(
 					"size-[22px] shrink-0 place-items-center",
-					attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
+					attention
+						? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid max-md:grid"
+						: "grid",
 				)}
 			>
 				<IconButton
@@ -667,7 +679,8 @@ function BotItem({
 					render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
 					className={cn(
 						"size-[22px]",
-						!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
+						!attention &&
+							"opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100 max-md:opacity-100",
 					)}
 				>
 					<Plus strokeWidth={2.2} />
@@ -784,7 +797,7 @@ const quietButtonClassName =
 /** A row under a bot, shaded while it is the one open. */
 function threadRowClassName(selected: boolean): string {
 	return cn(
-		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors",
+		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors max-md:h-10 max-md:text-[15px] max-md:active:bg-row-selected",
 		selected ? "bg-row-selected text-foreground" : "text-muted-foreground hover:text-foreground",
 	);
 }

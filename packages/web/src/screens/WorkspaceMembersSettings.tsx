@@ -6,7 +6,7 @@ import {
 	workspaceRoleDescription,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
@@ -26,6 +26,7 @@ import {
 import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -294,7 +295,8 @@ function MemberPage({
 	const leave = useLeaveWorkspace(workspaceId);
 	const transfer = useTransferWorkspaceOwnership(workspaceId);
 	const pods = usePods();
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	const [confirming, setConfirming] = useState(false);
 	const [transferring, setTransferring] = useState(false);
 	const back = useBackTarget({
@@ -320,11 +322,17 @@ function MemberPage({
 		}
 		setConfirming(false);
 		if (!isYou) {
-			await navigate({
-				from: "/$workspace",
-				to: "./settings/$section",
-				params: { section: "members" },
-			});
+			// Back to People, or People in their page's place, so Back never returns to
+			// somebody no longer here.
+			leaveForPage(
+				router.buildLocation(
+					linkOptions({
+						from: "/$workspace",
+						to: "./settings/$section",
+						params: { section: "members" },
+					}),
+				).href,
+			);
 		}
 	}
 

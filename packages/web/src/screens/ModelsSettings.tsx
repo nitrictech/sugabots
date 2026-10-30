@@ -201,12 +201,47 @@ function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] })
 	const backToModels = useBackToHere("Models");
 	const current = useModels().data?.defaultModel ?? null;
 	return (
-		<SettingsRow
+		<DefaultRow
 			label="Default for new bots"
-			sub="Any model from a connected provider"
-			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
-			chevron
+			description="Any model from a connected provider"
+			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
+		/>
+	);
+}
+
+/**
+ * One of the defaults: what it is for, and the model it is set to, at the end.
+ * A phone has no room for both, so there the model goes under the name instead
+ * of what it is for.
+ */
+function DefaultRow({
+	label,
+	description,
+	model,
+	render,
+}: {
+	label: string;
+	description: string;
+	model: string;
+	render: React.ReactElement;
+}) {
+	return (
+		<SettingsRow
+			label={label}
+			sub={
+				<>
+					<span className="max-md:hidden">{description}</span>
+					<span className="block truncate text-soft-foreground text-[13px] md:hidden">{model}</span>
+				</>
+			}
+			trailing={
+				<span className="max-md:hidden">
+					<SettingsValue>{model}</SettingsValue>
+				</span>
+			}
+			chevron
+			render={render}
 		/>
 	);
 }
@@ -217,11 +252,10 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 	const systemAgents = useBuiltInAgents();
 	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
 	return (
-		<SettingsRow
+		<DefaultRow
 			label="Summaries"
-			sub="Used for thread summaries, chat titles and compacting long chats"
-			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
-			chevron
+			description="Used for thread summaries, chat titles and compacting long chats"
+			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
 	);
@@ -423,7 +457,7 @@ function AddProviderSteps({
 			<DialogFormHeader title="Add provider" />
 			<DialogFormBody>
 				{/* The catalog runs longer than a short window, so the list scrolls inside the dialog. */}
-				<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1">
+				<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{groups.map((group) => (
 						<SettingsGroup key={group.label} label={group.label}>
 							{group.presets.map((preset) => (

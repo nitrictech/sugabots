@@ -1,5 +1,6 @@
 import { cn } from "cn";
 import { type ReactNode, type Ref, useState } from "react";
+import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 
 /**
@@ -63,7 +64,8 @@ export function ChatSidebar({
 					"flex min-h-0 w-[380px] shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
 					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-[min(400px,100%)] md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					sheet
-						? "max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[82%] max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
+						? // Over the floating tabs, as a phone's sheet covers its tab bar.
+							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-[82%] max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
 						: "max-md:inset-0",
 					className,
 				)}
@@ -78,13 +80,29 @@ export function ChatSidebar({
 					className={cn(
 						"flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-[18px]",
 						headerless && "xl:hidden",
+						// On a phone, what it shows heads it, so its header is only the round Back.
+						headerless &&
+							"max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
 					)}
 				>
+					{headerless && (
+						<button
+							type="button"
+							aria-label="Back"
+							onClick={onClose}
+							className={cn(BACK_BUTTON, "md:hidden")}
+						>
+							<BackChevron />
+						</button>
+					)}
 					<div className="flex min-w-0 flex-1 items-baseline gap-2">
 						<h2
 							ref={headingRef}
 							tabIndex={headingRef ? -1 : undefined}
-							className="m-0 min-w-0 shrink-0 truncate font-semibold text-[15px] text-foreground outline-none max-md:shrink"
+							className={cn(
+								"m-0 min-w-0 shrink-0 truncate font-semibold text-[15px] text-foreground outline-none max-md:shrink",
+								headerless && "max-md:sr-only",
+							)}
 						>
 							{heading}
 						</h2>
@@ -98,7 +116,10 @@ export function ChatSidebar({
 					{/* A sheet closes by its dimmed backdrop on a phone; Close stays for the keyboard. */}
 					<CloseButton
 						onClick={onClose}
-						className={cn(sheet && "max-md:not-focus-visible:sr-only")}
+						className={cn(
+							sheet && "max-md:not-focus-visible:sr-only",
+							headerless && "max-md:hidden",
+						)}
 					/>
 				</header>
 				{children}
@@ -109,7 +130,8 @@ export function ChatSidebar({
 
 /**
  * A labelled group in a sidebar, ruled off from the one above: its name, with
- * `end` at the right, such as a figure, then what it holds.
+ * `end` at the right, such as a figure, then what it holds. On a phone, its
+ * name over a card of what it holds, as a phone's own settings group them.
  */
 export function SidebarSection({
 	title,
@@ -123,12 +145,23 @@ export function SidebarSection({
 	className?: string;
 }) {
 	return (
-		<section className={cn("flex flex-col gap-2.5 border-border border-t px-5 py-4", className)}>
-			<div className="flex items-center gap-2">
-				<h3 className="m-0 flex-1 font-medium text-subtle-foreground text-xs">{title}</h3>
+		<section
+			className={cn(
+				"flex flex-col gap-2.5 border-border border-t px-5 py-4 max-md:gap-2 max-md:border-t-0 max-md:px-4 max-md:py-2.5",
+				className,
+			)}
+		>
+			<div className="flex items-center gap-2 max-md:px-1">
+				<h3 className="m-0 flex-1 font-medium text-subtle-foreground text-xs max-md:text-[13px]">
+					{title}
+				</h3>
 				{end}
 			</div>
-			{children}
+			{children && (
+				<div className="flex flex-col gap-2.5 max-md:rounded-xl max-md:border max-md:border-border max-md:bg-card max-md:px-4 max-md:py-2 max-md:empty:hidden">
+					{children}
+				</div>
+			)}
 		</section>
 	);
 }
