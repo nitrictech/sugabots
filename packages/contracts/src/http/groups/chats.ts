@@ -86,7 +86,7 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: HttpApiSchema.Empty(204),
 			error: [Conflict, ...refused],
 		}),
-		/** Starts a thread from the pod's chat `conversationId` with its first message. */
+		/** Starts a thread from a pod's chat or a bot's channel, `conversationId`, with its first message. */
 		HttpApiEndpoint.post("startThread", "/conversations/:conversationId/threads", {
 			params: { conversationId: Schema.String },
 			payload: newThreadSchema,

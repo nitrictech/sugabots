@@ -638,26 +638,24 @@ function BotItem({
 						<UnreadMarker unreadMessages={unread} needsYou={waiting === true} />
 					</span>
 				)}
-				{pod.kind === "shared" && (
-					<span
+				<span
+					className={cn(
+						"size-[22px] shrink-0 place-items-center",
+						attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
+					)}
+				>
+					<IconButton
+						label={agent ? `New thread with ${agent.name}` : "New thread with people"}
+						size="sm"
+						render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
 						className={cn(
-							"size-[22px] shrink-0 place-items-center",
-							attention ? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid" : "grid",
+							"size-[22px]",
+							!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
 						)}
 					>
-						<IconButton
-							label={agent ? `New thread with ${agent.name}` : "New thread with people"}
-							size="sm"
-							render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
-							className={cn(
-								"size-[22px]",
-								!attention && "opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100",
-							)}
-						>
-							<Plus strokeWidth={2.2} />
-						</IconButton>
-					</span>
-				)}
+						<Plus strokeWidth={2.2} />
+					</IconButton>
+				</span>
 			</div>
 			{open && (group.threads.length > 0 || routines) && (
 				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} before={routines} />
@@ -772,8 +770,6 @@ function threadRowClassName(selected: boolean): string {
 function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; selected: boolean }) {
 	// Listed while it is the one open, as it is just after it is marked done.
 	const done = row.conversation.doneAt !== null;
-	// In a Personal pod a conversation is with the bot, so goes by its name.
-	const title = pod.kind === "personal" && row.agent ? row.agent.name : row.conversation.title;
 	const needsYou = row.needsApproval || row.mentionsYou;
 	const lit = !done && (row.unreadMessages > 0 || needsYou);
 	return (
@@ -787,7 +783,7 @@ function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; select
 			)}
 		>
 			{done && <Check aria-hidden size={12} strokeWidth={2.25} className="shrink-0" />}
-			<span className="min-w-0 flex-1 truncate-fade">{title}</span>
+			<span className="min-w-0 flex-1 truncate-fade">{row.conversation.title}</span>
 			<span className={END_SLOT}>
 				{!done && <UnreadMarker unreadMessages={row.unreadMessages} needsYou={needsYou} />}
 			</span>

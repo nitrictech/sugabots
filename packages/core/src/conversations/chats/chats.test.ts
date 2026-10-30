@@ -217,7 +217,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		const started = await chats.startThread({
-			podChatId: podChat.id,
+			conversationId: podChat.id,
 			messageId: crypto.randomUUID(),
 			content: "\n  Budget   review is Friday\nand bring the numbers",
 		});
@@ -261,7 +261,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const messageId = crypto.randomUUID();
 		const input = {
-			podChatId: podChat.id,
+			conversationId: podChat.id,
 			messageId,
 			content: `@${host?.handle} can you check the renewal numbers for Northwind before Friday? Thanks.`,
 			hostAgentId: agentId,
@@ -319,11 +319,37 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 	});
 
+	it("starts a thread with a bot from its channel, whichever bot is asked for, under the message in the channel", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const messageId = crypto.randomUUID();
+
+		const started = await chats.startThread({
+			conversationId: channel.id,
+			messageId,
+			content: "Draft the launch post",
+			hostAgentId: crypto.randomUUID(),
+		});
+
+		expect(started.conversation).toMatchObject({
+			hostAgentId: agentId,
+			title: "Draft the launch post",
+		});
+		expect(started.message).toMatchObject({ id: messageId, threadId: channel.id });
+		expect(await runOnPostgres(runningTurns(started.conversation.id))).toHaveLength(1);
+		expect((await view.messages(channel.id))?.items).toContainEqual(
+			expect.objectContaining({ kind: "thread", threadId: started.conversation.id }),
+		);
+	});
+
 	it("gives the thread's bot the message it was started from, which stays in the chat", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		const messageId = crypto.randomUUID();
 		const started = await chats.startThread({
-			podChatId: podChat.id,
+			conversationId: podChat.id,
 			messageId,
 			content: "Can you check the renewal numbers?",
 			hostAgentId: agentId,
@@ -384,7 +410,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		const { conversation: current } = await chats.startThread({
-			podChatId: podChat.id,
+			conversationId: podChat.id,
 			messageId: crypto.randomUUID(),
 			content: "Can you check the renewal numbers?",
 			hostAgentId: agentId,
@@ -516,7 +542,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("previews a bot's reply as the chat shows it, without the words before a tool call", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		const { conversation: current } = await chats.startThread({
-			podChatId: podChat.id,
+			conversationId: podChat.id,
 			messageId: crypto.randomUUID(),
 			content: "Can you try again?",
 			hostAgentId: agentId,
@@ -2266,7 +2292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			});
 
 			const started = await chats.startThread({
-				podChatId: podChat.id,
+				conversationId: podChat.id,
 				messageId: crypto.randomUUID(),
 				content: "Pricing for Northwind",
 				attachments: [uploaded.id],
@@ -2295,7 +2321,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 			await expect(
 				chats.startThread({
-					podChatId: podChat.id,
+					conversationId: podChat.id,
 					messageId,
 					content: "Pricing for Northwind",
 					attachments: [uploaded.id, crypto.randomUUID()],

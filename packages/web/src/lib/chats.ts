@@ -248,32 +248,34 @@ export function refreshAfterThreadChange(queries: QueryClient, workspaceId: stri
  * than the channel. It is read from the pod's conversation list, which the
  * screen loads anyway, so one that exists costs no request of its own. Only
  * a bot the list shows without one, because nobody opened it yet or it was
- * opened after the list loaded, has one opened with a request.
+ * opened after the list loaded, has one opened with a request. Waits while
+ * `hostAgentId` is not yet known.
  */
-export function useOpenBotChannel(pod: Pod, hostAgentId: string) {
+export function useOpenBotChannel(pod: Pod, hostAgentId: string | undefined) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["bot-channel", workspaceId, pod.id, hostAgentId],
-		queryFn: workspaceId
-			? async ({ signal }) => {
-					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-					const listed = list.channels.find(
-						(item) => item.conversation.hostAgentId === hostAgentId,
-					)?.conversation;
-					if (listed) return listed;
-					const opened = await Effect.runPromise(
-						client.api.chats.openBotChannel({
-							params: { workspace: workspaceId },
-							payload: { podId: pod.id, hostAgentId },
-						}),
-						{ signal },
-					);
-					// The list was loaded without the channel just opened.
-					void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
-					return opened;
-				}
-			: skipToken,
+		queryFn:
+			workspaceId && hostAgentId
+				? async ({ signal }) => {
+						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+						const listed = list.channels.find(
+							(item) => item.conversation.hostAgentId === hostAgentId,
+						)?.conversation;
+						if (listed) return listed;
+						const opened = await Effect.runPromise(
+							client.api.chats.openBotChannel({
+								params: { workspace: workspaceId },
+								payload: { podId: pod.id, hostAgentId },
+							}),
+							{ signal },
+						);
+						// The list was loaded without the channel just opened.
+						void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
+						return opened;
+					}
+				: skipToken,
 	});
 }
 
@@ -360,25 +362,27 @@ function conversationKindOf(known: {
 
 /**
  * The pod's first chat, read from its conversation list when somebody has
- * opened it, and otherwise opened with a request.
+ * opened it, and otherwise opened with a request. A Personal pod has none,
+ * so it waits there.
  */
 export function useOpenPodChat(pod: Pod) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["pod-chat", workspaceId, pod.id],
-		queryFn: workspaceId
-			? async ({ signal }) => {
-					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-					return (
-						list.chats.find((chat) => chat.conversation.main)?.conversation ??
-						Effect.runPromise(
-							client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
-							{ signal },
-						)
-					);
-				}
-			: skipToken,
+		queryFn:
+			workspaceId && pod.kind === "shared"
+				? async ({ signal }) => {
+						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+						return (
+							list.chats.find((chat) => chat.conversation.main)?.conversation ??
+							Effect.runPromise(
+								client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
+								{ signal },
+							)
+						);
+					}
+				: skipToken,
 	});
 }
 
@@ -546,28 +550,30 @@ export function useSendChatMessage(conversationId: string, user: SessionUser) {
 	});
 }
 
-/** A thread to start, with the files uploaded to the pod's chat that its first message attaches. */
+/** A thread to start, with the files uploaded to the conversation that its first message attaches. */
 export type ThreadToStart = Omit<NewThread, "attachments"> & { files?: readonly FilePart[] };
 
 /**
- * Starts a thread from the pod's chat `podChatId` with its first message, for
- * the bot it names. The pod's chat and its list show the thread once it has.
+ * Starts a thread from `conversationId`, a pod's chat or a bot's channel,
+ * with its first message, for the bot it names. The conversation and its
+ * list show the thread once it has.
  */
-function useStartThread(podChatId: string | undefined) {
+function useStartThread(conversationId: string | undefined) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
 		mutationFn: ({ files = [], ...thread }: ThreadToStart) => {
-			if (!podChatId) throw new Error("A thread was started before the pod's chat had opened");
+			if (!conversationId)
+				throw new Error("A thread was started before its conversation had opened");
 			const payload: NewThread = {
 				...thread,
 				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
 			};
 			return Effect.runPromise(
-				client.api.chats.startThread({ params: { conversationId: podChatId }, payload }),
+				client.api.chats.startThread({ params: { conversationId }, payload }),
 			);
 		},
-		onSettled: () => podChatId && refreshThreadsFrom(queries, workspaceId, podChatId),
+		onSettled: () => conversationId && refreshThreadsFrom(queries, workspaceId, conversationId),
 	});
 }
 
@@ -585,17 +591,20 @@ export type ThreadStart =
 	| { outcome: "notSent" };
 
 /**
- * Starts threads from the pod's chat `podChatId`, each with a draft as its
- * first message and the files staged in `attachments`.
+ * Starts threads from `conversationId`, a pod's chat or a bot's channel, each
+ * with a draft as its first message and the files staged in `attachments`.
  */
-export function useThreadStarter(podChatId: string | undefined, attachments: ComposerAttachments) {
-	const startThread = useStartThread(podChatId);
+export function useThreadStarter(
+	conversationId: string | undefined,
+	attachments: ComposerAttachments,
+) {
+	const startThread = useStartThread(conversationId);
 	async function start(
 		draft: string,
 		options: { hostAgentId?: string; replyTo?: string } = {},
 	): Promise<ThreadStart> {
 		const message = draft.trim();
-		if (!podChatId || startThread.isPending || message === "") return { outcome: "notSent" };
+		if (!conversationId || startThread.isPending || message === "") return { outcome: "notSent" };
 		const files = attachments.takeForSending(draft);
 		if (!files) return { outcome: "notSent" };
 		try {
