@@ -437,6 +437,25 @@ export const SeveralTimes = meta.story({
 	},
 });
 
+/** A time's picker open: a short list below the chip that scrolls, with the times other chips hold unpickable. */
+export const PickingATime = meta.story({
+	render: () => <StoryApp path={pageOf(standups)} />,
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await userEvent.click(dialog.getByRole("combobox", { name: "Time 1" }));
+		const list = await screen.findByRole("listbox");
+		await expect(within(list).getByRole("option", { name: "9:00" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await expect(within(list).getByRole("option", { name: "13:00" })).toHaveAttribute(
+			"aria-disabled",
+			"true",
+		);
+		await expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+	},
+});
+
 /** Every third month on its last day: Every and On the step through their values. */
 export const Monthly = meta.story({
 	render: () => <StoryApp path={pageOf(quarterClose)} />,
