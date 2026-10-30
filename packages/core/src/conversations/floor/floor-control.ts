@@ -76,7 +76,7 @@ export const make = Effect.gen(function* () {
 								threadId: event.threadId,
 								agentId: event.hostAgentId,
 								triggerMessageId: event.briefMessageId,
-								reason: "default",
+								reason: "brief",
 							});
 						case "CollaborationAnswered":
 							// While it was still waiting, the asking tool reads the answer itself.

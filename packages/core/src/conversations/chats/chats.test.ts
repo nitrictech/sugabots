@@ -416,6 +416,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			expect(prepared.context.agent.id).toBe(recipientAgentId);
+			// It acts for the person the thread was started for, though a bot wrote its brief.
+			expect(prepared.context.askedBy).toBe(userId);
 			expect(prepared.context.messages).toEqual([
 				expect.objectContaining({
 					content: "Pull the refunds issued in March.",
@@ -429,9 +431,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ agentId, workspaceId, podId, askedBy: userId },
 				{ title: "Follow-up", brief: "Draft the follow-up email." },
 			);
+			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
 			const [run] = await runOnPostgres(runningTurns(started.id));
 			if (!run) throw new Error("The thread's bot was not asked");
-			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
+
+			const prepared = await prepareRunnable(
+				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+				run,
+			);
+
+			expect(prepared.context.agent.id).toBe(agentId);
+			expect(prepared.context.askedBy).toBe(userId);
 		});
 
 		it("marks the thread it is in done for the person who asked, but never a pod's chat", async () => {

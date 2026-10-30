@@ -378,6 +378,8 @@ function whyYou(context: TurnContext): string {
 			return "It is your turn because another agent asked you to collaborate.";
 		case "resume":
 			return "It is your turn because an answer you were waiting on has arrived.";
+		case "brief":
+			return "It is your turn because a bot started this thread for the person in it, and its first message is your brief. Start on the work it describes now.";
 		case "routine":
 			return "It is your turn because this Routine was triggered.";
 		default:
