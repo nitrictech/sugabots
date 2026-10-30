@@ -14,6 +14,7 @@ import { Effect } from "effect";
 import { mayDecideApprovals, podStandingFor, reachesPodFor } from "../authorization/access.ts";
 import { findRoutineExecutionId } from "../conversations/routines/execution.ts";
 import { decidersOf } from "../conversations/tools/approval-deciders.ts";
+import { ASK_FORM_TOOL } from "../conversations/tools/ask-form/tool.ts";
 import type { Executor } from "../database/database.ts";
 import {
 	agent,
@@ -200,7 +201,11 @@ const answeredBy = Effect.fn("Notifications.answeredBy")(function* (db: Executor
 	return answering;
 });
 
-/** The notifications a turn waiting for approvals sends: to each person who may decide one. */
+/**
+ * The notifications a turn waiting for approvals sends: to each person who may
+ * decide one. Forms are answered in the thread, not on the approvals page, so
+ * a person who may decide only forms is told of a form and sent to its message.
+ */
 export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	db: Executor,
 	waiting: { threadId: string; turnId: string },
@@ -209,7 +214,13 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	const place = yield* placeOf(db, waiting.threadId);
 	if (!place) return [];
 	const calls = yield* db
-		.select({ id: toolCall.id, tool: toolCall.tool, agentId: agent.id, agentName: agent.name })
+		.select({
+			id: toolCall.id,
+			tool: toolCall.tool,
+			messageId: toolCall.messageId,
+			agentId: agent.id,
+			agentName: agent.name,
+		})
 		.from(toolCall)
 		.innerJoin(turn, eq(turn.id, toolCall.turnId))
 		.innerJoin(agent, eq(agent.id, turn.agentId))
@@ -217,29 +228,45 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		.orderBy(toolCall.startedAt);
 	const [first] = calls;
 	if (!first) return [];
+	const forms = calls.filter((call) => call.tool === ASK_FORM_TOOL);
+	const approvals = calls.filter((call) => call.tool !== ASK_FORM_TOOL);
 	const inRoutine = (yield* findRoutineExecutionId(db, waiting.threadId)) !== undefined;
 	const audience = yield* audienceOf(db, place, first.agentId, now);
 	const addressed: Addressed[] = [];
 	for (const person of audience) {
 		if (!wants(person, "approval", now)) continue;
 		const standing = yield* podStandingFor(db, place.podId, person.id);
-		const decides =
-			standing !== undefined &&
-			calls.some((call) => mayDecideApprovals(standing, inRoutine, decidersOf(call.tool)));
-		if (!decides) continue;
-		addressed.push({
-			userId: person.id,
-			notification: {
-				title: `${first.agentName} needs your approval`,
-				body:
-					calls.length === 1
-						? `To run ${first.tool} in ${place.title}`
-						: `To run ${calls.length} tools in ${place.title}`,
-				tag: `approval:${waiting.turnId}`,
-				path: `/${place.workspaceSlug}/approvals/${first.id}`,
-				conversationId: place.conversationId,
-			},
-		});
+		if (standing === undefined) continue;
+		const decides = (call: { tool: string }) =>
+			mayDecideApprovals(standing, inRoutine, decidersOf(call.tool));
+		const approval = approvals.find(decides);
+		const form = forms.find(decides);
+		if (approval) {
+			addressed.push({
+				userId: person.id,
+				notification: {
+					title: `${first.agentName} needs your approval`,
+					body:
+						approvals.length === 1
+							? `To run ${approval.tool} in ${place.title}`
+							: `To run ${approvals.length} tools in ${place.title}`,
+					tag: `approval:${waiting.turnId}`,
+					path: `/${place.workspaceSlug}/approvals/${approval.id}`,
+					conversationId: place.conversationId,
+				},
+			});
+		} else if (form) {
+			addressed.push({
+				userId: person.id,
+				notification: {
+					title: `${first.agentName} asked you to fill in a form`,
+					body: `In ${place.title}`,
+					tag: `approval:${waiting.turnId}`,
+					path: activityPath(place, place.conversationId, { message: form.messageId }),
+					conversationId: place.conversationId,
+				},
+			});
+		}
 	}
 	return addressed;
 });

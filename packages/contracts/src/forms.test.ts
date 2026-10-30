@@ -70,9 +70,18 @@ describe("formRequestProblems", () => {
 			'"code" has a pattern that is not a valid regular expression.',
 		],
 		[
+			{ properties: { code: { type: "string", maxLength: 20_000 } } },
+			'"code" asks for more than 10000 characters',
+		],
+		[
 			{ properties: { "two words": { type: "boolean" } } },
 			'"two words" is not a usable field name',
 		],
+		[
+			JSON.parse('{"properties": {"__proto__": {"type": "boolean"}}}'),
+			'"__proto__" is not a usable field name.',
+		],
+		[{ required: ["toString"] }, '"toString" is required but is not a field.'],
 		[{ properties: {} }, "The form has no fields."],
 	])("says what is wrong with %j", (change, problem) => {
 		const broken = decodeForm({
@@ -81,6 +90,19 @@ describe("formRequestProblems", () => {
 		});
 
 		expect(formRequestProblems(broken).join(" ")).toContain(problem);
+	});
+
+	it("takes a pattern written for JSON Schema rather than for unicode regular expressions", () => {
+		const phone = decodeForm({
+			message: "Phone",
+			requestedSchema: {
+				type: "object",
+				properties: { phone: { type: "string", pattern: "^\\d{3}\\-\\d{4}$" } },
+			},
+		});
+
+		expect(formRequestProblems(phone)).toEqual([]);
+		expect(formContentProblems(phone, { phone: "555-1234" })).toEqual({});
 	});
 });
 
@@ -99,6 +121,7 @@ describe("formContentProblems", () => {
 	it.each<[FormContent, Record<string, string>]>([
 		[{}, { post: "This field is required." }],
 		[{ post: "Hi", other: "x" }, { other: "The form has no such field." }],
+		[{ post: "Hi", toString: "x" }, { toString: "The form has no such field." }],
 		[{ post: "Hello!" }, { post: "Must be at most 5 characters." }],
 		[{ post: "Hi", launch: "next Tuesday" }, { launch: "Expected a date and time." }],
 		[{ post: "Hi", contact: "sam" }, { contact: "Expected an email address." }],

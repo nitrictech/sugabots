@@ -732,9 +732,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.bob.id)).toEqual([]);
 	});
 
-	it("asks the people who may decide a bot's tool call to approve it", async () => {
-		// A routine run elsewhere must not make this call one raised during a run.
-		await routineRunElsewhere();
+	/** A conversation with Ada whose bot's turn waits on one call to `tool`. */
+	async function turnWaitingOn(tool: string) {
 		const conversation = await conversationWithBot([people.ada.id]);
 		const triggerId = crypto.randomUUID();
 		const replyId = crypto.randomUUID();
@@ -780,16 +779,22 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				threadId: conversation,
 				messageId: replyId,
 				turnId,
-				tool: "post_message",
+				tool,
 				approvalStatus: "pending",
 				input: {},
 				atOffset: 0,
 			}),
 		);
-
 		await emit(
 			ConversationEvent.TurnSuspended({ threadId: conversation, workspaceId, podId, turnId }),
 		);
+		return { conversation, turnId, callId, replyId };
+	}
+
+	it("asks the people who may decide a bot's tool call to approve it", async () => {
+		// A routine run elsewhere must not make this call one raised during a run.
+		await routineRunElsewhere();
+		const { conversation, turnId, callId } = await turnWaitingOn("post_message");
 
 		expect(await deliveredTo(people.ada.id)).toEqual([
 			{
@@ -802,5 +807,19 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 		// Outside the pod, so nobody asks them.
 		expect(sentTo(people.outsider.id)).toEqual([]);
+	});
+
+	it("sends the people who may answer a bot's form to it in the thread", async () => {
+		const { conversation, turnId, replyId } = await turnWaitingOn("ask_form");
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			{
+				title: "Scout asked you to fill in a form",
+				body: "In Release notes",
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/activity/${podSlug}/${conversation}?message=${replyId}`,
+				conversationId: conversation,
+			},
+		]);
 	});
 });

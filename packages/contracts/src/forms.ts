@@ -13,7 +13,7 @@ import { Schema } from "effect";
 export const MAX_FORM_FIELDS = 30;
 export const MAX_FORM_OPTIONS = 50;
 export const MAX_FORM_MESSAGE_CHARACTERS = 2_000;
-/** The longest text answer a field takes when the form sets no `maxLength` of its own. */
+/** The longest text answer any field takes, and the default `maxLength` of one that sets none. */
 export const MAX_FORM_TEXT_ANSWER_CHARACTERS = 10_000;
 
 const FIELD_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -248,7 +248,7 @@ export function formRequestProblems(request: FormRequest): string[] {
 		problems.push(`The form has more than ${MAX_FORM_FIELDS} fields.`);
 	}
 	for (const name of request.requestedSchema.required ?? []) {
-		if (!(name in request.requestedSchema.properties)) {
+		if (!Object.hasOwn(request.requestedSchema.properties, name)) {
 			problems.push(`"${name}" is required but is not a field.`);
 		}
 	}
@@ -258,6 +258,8 @@ export function formRequestProblems(request: FormRequest): string[] {
 				`"${name}" is not a usable field name: use 1 to 64 letters, digits, "_" or "-".`,
 			);
 		}
+		// Assigning `__proto__` on a plain object sets its prototype, so its answer would be lost.
+		if (name === "__proto__") problems.push(`"${name}" is not a usable field name.`);
 		problems.push(...boundsProblems(name, classifyFormField(field)));
 		if (field.default !== undefined) {
 			const problem = valueProblem(field, field.default);
@@ -274,6 +276,11 @@ function boundsProblems(name: string, classified: ClassifiedFormField): string[]
 			const problems: string[] = [];
 			if (crosses(field.minLength, field.maxLength)) {
 				problems.push(`"${name}" has a minLength above its maxLength.`);
+			}
+			if (Math.max(field.minLength ?? 0, field.maxLength ?? 0) > MAX_FORM_TEXT_ANSWER_CHARACTERS) {
+				problems.push(
+					`"${name}" asks for more than ${MAX_FORM_TEXT_ANSWER_CHARACTERS} characters, the most an answer may have.`,
+				);
 			}
 			if (field.pattern !== undefined && compiled(field.pattern) === undefined) {
 				problems.push(`"${name}" has a pattern that is not a valid regular expression.`);
@@ -311,7 +318,7 @@ function crosses(low: number | undefined, high: number | undefined): boolean {
 
 function compiled(pattern: string): RegExp | undefined {
 	try {
-		return new RegExp(pattern, "u");
+		return new RegExp(pattern);
 	} catch {
 		return undefined;
 	}
@@ -330,7 +337,7 @@ export function formContentProblems(
 	const problems: Record<string, string> = {};
 	const { properties } = request.requestedSchema;
 	for (const name of Object.keys(content)) {
-		if (!(name in properties)) problems[name] = "The form has no such field.";
+		if (!Object.hasOwn(properties, name)) problems[name] = "The form has no such field.";
 	}
 	for (const [name, field] of formFields(request)) {
 		const value = content[name];
