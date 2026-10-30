@@ -3,7 +3,10 @@ import {
 	type ModelProvider,
 	type ProviderPreset,
 	type ProviderPresetId,
+	presetSignsIn,
 	providerCatalog,
+	providerLacksCredential,
+	providerPreset,
 	signInServiceNames,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -35,48 +38,83 @@ import {
 } from "@/ui/dialog-form.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
-	SettingsAddRow,
+	SettingsAddMark,
 	SettingsFieldRow,
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowButton,
 	SettingsRowIcon,
+	SettingsStatusBadge,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import {
 	API_FORMATS,
 	BackToModels,
-	BotFaces,
 	isConnected,
 	modelName,
 	ProviderTile,
-	useBotsByModel,
 } from "./ProviderSettings.tsx";
 
 /**
- * What bots think with: the models new bots and the system bots use, then each
- * connected provider with how many of its models are switched on, and adding
- * another.
+ * The providers most people connect, listed whether or not they are, each
+ * with Connect until it is. Other providers are listed once connected.
+ */
+const POPULAR_PRESETS: readonly ProviderPresetId[] = [
+	"openrouter",
+	"anthropic",
+	"openai",
+	"gemini",
+];
+
+/**
+ * What bots think with: the models new bots and the system bots use, then the
+ * popular providers and any other connected one, and adding another.
  */
 export function ModelsSettings() {
 	const backToModels = useBackToHere("Models");
 	const providers = useModelProviders();
 	const may = useWorkspacePermissions();
-	const botsOn = useBotsByModel();
-	const [adding, setAdding] = useState(false);
+	// `true` for the whole list; a preset for Connect beside that provider.
+	const [adding, setAdding] = useState<ProviderPresetId | true>();
 	const navigate = useNavigate();
-	const listed = (providers.data ?? []).filter(
-		(provider) => isConnected(provider) || provider.preset === null,
+	const all = providers.data ?? [];
+	const byPreset = new Map(all.map((provider) => [provider.preset, provider]));
+	const others = all.filter(
+		(provider) =>
+			(provider.preset === null || !POPULAR_PRESETS.includes(provider.preset)) &&
+			(isConnected(provider) || provider.preset === null),
+	);
+	const popularWithCredential = (presetId: ProviderPresetId) => {
+		const provider = byPreset.get(presetId);
+		return provider && !providerLacksCredential(provider) ? provider : undefined;
+	};
+	// What is connected leads, the popular ones in their order and then the rest; what could be follows.
+	const connected = [
+		...POPULAR_PRESETS.flatMap((presetId) => popularWithCredential(presetId) ?? []),
+		...others,
+	];
+	// Nothing until the list arrives: a popular provider would read Not connected whether it is or not.
+	const toConnect = providers.data
+		? POPULAR_PRESETS.filter((presetId) => !popularWithCredential(presetId))
+		: [];
+	const providerLink = (provider: ModelProvider) => (
+		<Link
+			from="/$workspace"
+			to="./settings/providers/$provider"
+			params={{ provider: provider.id }}
+			state={backToModels}
+		/>
 	);
 
 	return (
 		<SettingsPage
 			title="Models"
-			description="What your bots think with. Connect a provider, then pick which of its models bots can use."
+			description="Which models bots can think with. Each bot picks one of these."
 		>
-			<SettingsGroup label="Default">
-				<DefaultModelRow providers={providers.data ?? []} />
-				{may.configureBuiltInAgents && <SystemModelRow providers={providers.data ?? []} />}
+			<SettingsGroup label="Defaults">
+				<DefaultModelRow providers={all} />
+				{may.configureBuiltInAgents && <SystemModelRow providers={all} />}
 			</SettingsGroup>
 			<SettingsGroup label="Providers">
 				{providers.error && (
@@ -84,42 +122,39 @@ export function ModelsSettings() {
 						<Alert>{failureMessage(providers.error)}</Alert>
 					</div>
 				)}
-				{listed.map((provider) => {
-					const bots = provider.models
-						.filter((model) => model.enabled)
-						.flatMap((model) => botsOn(model.modelId));
+				{connected.map((provider) => (
+					<ProviderRow key={provider.id} provider={provider} render={providerLink(provider)} />
+				))}
+				{toConnect.map((presetId) => {
+					const preset = providerPreset(presetId);
 					return (
 						<SettingsRow
-							key={provider.id}
-							icon={<ProviderTile name={provider.name} preset={provider.preset} />}
-							label={provider.name}
-							sub={
-								provider.active
-									? `${provider.enabledModelCount} of ${provider.modelCount} models on`
-									: "Turned off"
-							}
-							trailing={<BotFaces bots={bots} />}
-							chevron
-							render={
-								<Link
-									from="/$workspace"
-									to="./settings/providers/$provider"
-									params={{ provider: provider.id }}
-									state={backToModels}
-								/>
+							key={presetId}
+							icon={<ProviderTile name={preset.name} preset={presetId} />}
+							label={preset.name}
+							sub="Not connected"
+							trailing={
+								<SettingsRowButton onClick={() => setAdding(presetId)}>Connect</SettingsRowButton>
 							}
 						/>
 					);
 				})}
-				<SettingsAddRow label="Add provider" onClick={() => setAdding(true)} />
+				<SettingsRow
+					icon={<SettingsAddMark />}
+					label={<span className="text-muted-foreground">Add a provider</span>}
+					sub="Any OpenAI-compatible endpoint, or one on your own machine"
+					chevron
+					onClick={() => setAdding(true)}
+				/>
 			</SettingsGroup>
-			<Dialog open={adding} onOpenChange={setAdding}>
-				{adding && (
+			<Dialog open={adding !== undefined} onOpenChange={(open) => !open && setAdding(undefined)}>
+				{adding !== undefined && (
 					<AddProviderDialog
-						providers={providers.data ?? []}
-						done={() => setAdding(false)}
+						providers={all}
+						startWith={adding === true ? undefined : adding}
+						done={() => setAdding(undefined)}
 						onAdded={async (provider) => {
-							setAdding(false);
+							setAdding(undefined);
 							await navigate({
 								from: "/$workspace",
 								to: "./settings/providers/$provider",
@@ -134,13 +169,41 @@ export function ModelsSettings() {
 	);
 }
 
+/** A provider with its credential in place: Connected while it is on, and what it holds under its name. */
+function ProviderRow({
+	provider,
+	render,
+}: {
+	provider: ModelProvider;
+	render: React.ReactElement;
+}) {
+	return (
+		<SettingsRow
+			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
+			label={provider.name}
+			sub={!provider.active ? "Turned off" : credentialLine(provider)}
+			trailing={provider.active && <SettingsStatusBadge>Connected</SettingsStatusBadge>}
+			chevron
+			render={render}
+		/>
+	);
+}
+
+/** What a connected provider is connected with, under its name. */
+function credentialLine(provider: ModelProvider): string {
+	if (presetSignsIn(provider.preset)) return "Signed in";
+	if (provider.hasApiKey) return "API key set";
+	return "No key needed";
+}
+
 /** The model new bots start on. */
 function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] }) {
 	const backToModels = useBackToHere("Models");
 	const current = useModels().data?.defaultModel ?? null;
 	return (
 		<SettingsRow
-			label="New bots use"
+			label="Default for new bots"
+			sub="Any model from a connected provider"
 			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
 			chevron
 			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
@@ -155,7 +218,8 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
 	return (
 		<SettingsRow
-			label="System agents use"
+			label="Summaries"
+			sub="Used for thread summaries, chat titles and compacting long chats"
 			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
 			chevron
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
@@ -181,7 +245,7 @@ export function DefaultModelSettings() {
 	const chooseDefault = useChooseDefaultModel();
 	return (
 		<ModelChoicePage
-			title="New bots"
+			title="Default for new bots"
 			description="The model a new bot starts on. Each bot can move to another model in its own settings."
 			current={models.data?.defaultModel ?? null}
 			pending={chooseDefault.isPending}
@@ -202,7 +266,7 @@ export function SystemModelSettings() {
 	const choosers = { summarise, compact };
 	return (
 		<ModelChoicePage
-			title="System agents"
+			title="Summaries"
 			description="The model Sugabots uses behind the scenes: summaries, chat titles and compacting long chats. A fast, cheap model works best."
 			current={systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null}
 			pending={summarise.isPending || compact.isPending}
@@ -249,7 +313,7 @@ function ModelChoicePage({
 	}
 
 	return (
-		<SettingsPage back={<BackToModels />} title={title} description={description}>
+		<SettingsPage back={<BackToModels />} backOnWide title={title} description={description}>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			{groups.length === 0 && !providers.isPending && (
 				<SettingsGroup>
@@ -276,7 +340,7 @@ function ModelChoicePage({
 					})}
 				</SettingsGroup>
 			))}
-			<p className="-mt-3 m-0 px-1 text-sm text-subtle-foreground">
+			<p className="-mt-5 m-0 px-0.5 text-subtle-foreground text-xs">
 				Only models that are switched on appear here.
 			</p>
 		</SettingsPage>
@@ -292,6 +356,8 @@ type Choice = { preset: ProviderPreset; existing?: ModelProvider } | "custom";
  */
 export function AddProviderDialog(props: {
 	providers: readonly ModelProvider[];
+	/** A provider to open on, as Connect beside it does, with Back to the whole list. */
+	startWith?: ProviderPresetId;
 	done: () => void;
 	onAdded: (provider: ModelProvider) => Promise<void>;
 }) {
@@ -304,18 +370,24 @@ export function AddProviderDialog(props: {
 
 function AddProviderSteps({
 	providers,
+	startWith,
 	done,
 	onAdded,
 }: {
 	providers: readonly ModelProvider[];
+	startWith?: ProviderPresetId;
 	done: () => void;
 	onAdded: (provider: ModelProvider) => Promise<void>;
 }) {
-	const [choice, setChoice] = useState<Choice>();
 	const byPreset = new Map(
 		providers
 			.filter((provider) => provider.preset !== null)
 			.map((provider) => [provider.preset as ProviderPresetId, provider]),
+	);
+	const [choice, setChoice] = useState<Choice | undefined>(() =>
+		startWith
+			? { preset: providerPreset(startWith), existing: byPreset.get(startWith) }
+			: undefined,
 	);
 	// Ollama is on in every workspace from the start, so being reachable is not
 	// enough to leave it out: it has to have listed models.
@@ -545,8 +617,8 @@ function CustomProviderStep({
 						placeholder="https://llm.example.com/v1"
 						mono
 					/>
-					<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5">
-						<span className="flex-1 text-[14px] text-foreground">Format</span>
+					<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5">
+						<span className="flex-1 text-[13px] text-foreground">Format</span>
 						<SegmentedControl
 							label="API format"
 							options={API_FORMATS}

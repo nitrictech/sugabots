@@ -7,7 +7,6 @@ import {
 	agentColors,
 	agentFaces,
 	agentShapes,
-	type Pod,
 	type ProviderModelCapability,
 	type ProviderPresetId,
 } from "@sugabots/contracts";
@@ -17,7 +16,6 @@ import {
 	ArrowLeft,
 	AudioLines,
 	Brain,
-	ChevronDown,
 	Eye,
 	Image,
 	Search,
@@ -35,16 +33,9 @@ import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
-interface Look {
+export interface Look {
 	color: AgentColor;
 	shape: AgentShape;
 	face: AgentFace;
@@ -66,7 +57,7 @@ interface OfferedModel {
 }
 
 /** Which part of a look is being chosen. */
-type Part = "shape" | "eyes";
+export type Part = "shape" | "eyes";
 
 /**
  * Making a bot. At the left the bot as it will be, on a tint of its colour,
@@ -77,15 +68,12 @@ type Part = "shape" | "eyes";
  * first chat.
  */
 export function NewAgentDialog({
-	podId: fixedPodId,
-	pods = [],
+	podId,
 	onCreated,
 }: {
-	/** The pod the bot is made in, when the dialog is opened from one. */
-	podId?: string;
-	/** The pods to choose from when it is not: those the viewer may add a bot to. */
-	pods?: readonly Pod[];
-	onCreated: (agent: Agent, pod: Pod | undefined) => Promise<void>;
+	/** The pod the bot is made in. */
+	podId: string;
+	onCreated: (agent: Agent) => Promise<void>;
 }) {
 	const [name, setName] = useState("");
 	const [looks, setLooks] = useState(randomLooks);
@@ -93,8 +81,6 @@ export function NewAgentDialog({
 	const [customising, setCustomising] = useState(false);
 	const [part, setPart] = useState<Part>("shape");
 	const [chosenModel, setChosenModel] = useState<string>();
-	const [chosenPodId, setChosenPodId] = useState(pods[0]?.id);
-	const podId = fixedPodId ?? chosenPodId ?? "";
 	const create = useCreateAgent(podId);
 	const models = useModels();
 	const offered: readonly OfferedModel[] = models.data?.models ?? [];
@@ -104,7 +90,6 @@ export function NewAgentDialog({
 		offered.find((candidate) => candidate.modelId === models.data?.defaultModel)?.modelId ??
 		offered[0]?.modelId;
 	const trimmedName = name.trim();
-	const chosenPod = pods.find((pod) => pod.id === podId);
 	const look = looks[chosenLook] ?? looks[0] ?? { color: "violet", shape: "circle", face: "pill" };
 
 	function change(changes: Partial<Look>) {
@@ -113,11 +98,11 @@ export function NewAgentDialog({
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
-		if (!trimmedName || !model || !podId) return;
+		if (!trimmedName || !model) return;
 		try {
 			// Made without a prompt, a bot starts by interviewing its creator.
 			const agent = await create.mutateAsync({ name: trimmedName, model, ...look });
-			await onCreated(agent, chosenPod);
+			await onCreated(agent);
 		} catch {
 			return;
 		}
@@ -151,9 +136,6 @@ export function NewAgentDialog({
 						autoFocus
 						className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-[22px] text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip max-md:mt-2"
 					/>
-					{fixedPodId === undefined && pods.length > 1 && (
-						<PodPicker pods={pods} chosen={chosenPod} onChoose={(pod) => setChosenPodId(pod.id)} />
-					)}
 					<div className="grid flex-1 place-items-center">
 						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
 					</div>
@@ -179,7 +161,7 @@ export function NewAgentDialog({
 					<Button
 						type="submit"
 						className="w-full"
-						disabled={!trimmedName || !model || !podId || create.isPending}
+						disabled={!trimmedName || !model || create.isPending}
 					>
 						Create
 					</Button>
@@ -254,44 +236,6 @@ function LookGrid({
 				<SmilePlus aria-hidden size={20} strokeWidth={1.75} />
 			</button>
 		</fieldset>
-	);
-}
-
-/** The pod the bot will live in, as a menu of those the viewer may add a bot to. */
-function PodPicker({
-	pods,
-	chosen,
-	onChoose,
-}: {
-	pods: readonly Pod[];
-	chosen: Pod | undefined;
-	onChoose: (pod: Pod) => void;
-}) {
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				aria-label={`Pod: ${chosen?.name ?? "choose one"}`}
-				className="focus-ring -mt-3 flex min-w-0 items-center gap-1.5 rounded-md text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-			>
-				<span className="truncate">In {chosen?.name ?? "a pod"}</span>
-				<ChevronDown aria-hidden size={14} strokeWidth={2} className="shrink-0" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="center" className="min-w-48">
-				<DropdownMenuRadioGroup
-					value={chosen?.id}
-					onValueChange={(id: string) => {
-						const pod = pods.find((one) => one.id === id);
-						if (pod) onChoose(pod);
-					}}
-				>
-					{pods.map((pod) => (
-						<DropdownMenuRadioItem key={pod.id} value={pod.id} closeOnClick>
-							{pod.name}
-						</DropdownMenuRadioItem>
-					))}
-				</DropdownMenuRadioGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
 	);
 }
 
@@ -585,20 +529,22 @@ function Tile({
 /** The height of a right-hand page's title row, the same for the models and a look's parts. */
 const HEADER_ROW = "flex h-[22px] shrink-0 items-center";
 
-/** A step past the start: Back, and its title or tabs beside it. */
-function StepHeader({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+/** A step's title or tabs, with Back before them when the step was opened from the start. */
+function StepHeader({ onBack, children }: { onBack?: () => void; children: ReactNode }) {
 	return (
 		// The same row as the models' title, so a step's tabs sit level with "Model".
 		<div className="shrink-0 px-5 pt-5 pb-4">
 			<div className={cn(HEADER_ROW, "gap-2")}>
-				<button
-					type="button"
-					onClick={onBack}
-					aria-label="Back"
-					className="focus-ring -ml-1 grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
-				>
-					<ArrowLeft aria-hidden size={16} strokeWidth={1.75} />
-				</button>
+				{onBack && (
+					<button
+						type="button"
+						onClick={onBack}
+						aria-label="Back"
+						className="focus-ring -ml-1 grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+					>
+						<ArrowLeft aria-hidden size={16} strokeWidth={1.75} />
+					</button>
+				)}
 				{children}
 				<span className="flex-1" />
 				<Close />
@@ -614,9 +560,11 @@ function Close() {
 
 /**
  * Every head shape, drawn bare in the look's colour, or every pair of eyes,
- * drawn alone, with the colours along the foot. Back returns to the start.
+ * drawn alone, with the colours along the foot. Given `onDone`, Back returns
+ * to where it was opened from; a bot's own editor shows it with nothing to
+ * go back to.
  */
-function LookStep({
+export function LookStep({
 	part,
 	look,
 	onPartChange,
@@ -627,7 +575,7 @@ function LookStep({
 	look: Look;
 	onPartChange: (part: Part) => void;
 	onChange: (changes: Partial<Look>) => void;
-	onDone: () => void;
+	onDone?: () => void;
 }) {
 	const group = useId();
 	return (
@@ -651,39 +599,38 @@ function LookStep({
 					))}
 				</div>
 			</StepHeader>
-			<fieldset
-				role="tabpanel"
-				className="m-0 grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-4 justify-items-center gap-2 overflow-y-auto border-0 px-5 pb-4"
-			>
-				<legend className="sr-only">{part === "shape" ? "Shape" : "Eyes"}</legend>
-				{part === "shape"
-					? agentShapes.map((one) => (
-							<Tile
-								key={one}
-								group={group}
-								label={one}
-								chosen={one === look.shape}
-								onChoose={() => onChange({ shape: one })}
-							>
-								<span className="flex" style={{ color: botColors[look.color].face }}>
-									<ShapeGlyph shape={one} size={44} />
-								</span>
-							</Tile>
-						))
-					: agentFaces.map((one) => (
-							<Tile
-								key={one}
-								group={group}
-								label={one}
-								chosen={one === look.face}
-								onChoose={() => onChange({ face: one })}
-							>
-								<span className="flex text-foreground">
-									<EyesGlyph face={one} width={44} />
-								</span>
-							</Tile>
-						))}
-			</fieldset>
+			<div role="tabpanel" className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<fieldset className="m-0 grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-4 justify-items-center gap-2 overflow-y-auto border-0 px-5 pb-4">
+					<legend className="sr-only">{part === "shape" ? "Shape" : "Eyes"}</legend>
+					{part === "shape"
+						? agentShapes.map((one) => (
+								<Tile
+									key={one}
+									group={group}
+									label={one}
+									chosen={one === look.shape}
+									onChoose={() => onChange({ shape: one })}
+								>
+									<span className="flex" style={{ color: botColors[look.color].face }}>
+										<ShapeGlyph shape={one} size={44} />
+									</span>
+								</Tile>
+							))
+						: agentFaces.map((one) => (
+								<Tile
+									key={one}
+									group={group}
+									label={one}
+									chosen={one === look.face}
+									onChoose={() => onChange({ face: one })}
+								>
+									<span className="flex text-foreground">
+										<EyesGlyph face={one} width={44} />
+									</span>
+								</Tile>
+							))}
+				</fieldset>
+			</div>
 			<div className="shrink-0 px-5 pb-5">
 				<div className="rounded-2xl border border-border-strong px-4 py-3.5">
 					<ColourRow value={look.color} onChange={(color) => onChange({ color })} />

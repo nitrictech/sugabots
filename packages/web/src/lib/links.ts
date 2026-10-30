@@ -1,5 +1,6 @@
 import type { Agent, Connection, Pod } from "@sugabots/contracts";
 import { linkOptions } from "@tanstack/react-router";
+import type { PodSettingsPage } from "@/lib/workspace-settings.ts";
 
 /*
  * Where a pod or an agent lives in the workspace being looked at.
@@ -54,21 +55,23 @@ export function podSettingsLink(pod: Pod) {
 	});
 }
 
-/** A routine's page in the workspace's Routines settings. */
-export function routineSettingsLink(routine: { id: string }) {
+/** One of a pod's settings pages, General being the pod's own address. */
+export function podSettingsPageLink(pod: Pod, page: PodSettingsPage) {
+	if (page === "general") return podSettingsLink(pod);
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/routines/$routine",
-		params: { routine: routine.id },
+		to: "./settings/pods/$pod/$page",
+		params: { pod: pod.slug, page },
 	});
 }
 
-/** A new routine's page, for `agent` when it is made from that bot's settings. */
-export function newRoutineLink(agent?: { id: string }) {
+/** A routine being made beside its pod's routines, for `bot` when it was begun from that bot's. */
+export function newRoutineLink(pod: Pick<Pod, "slug">, bot?: { handle: string }) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/routines/new",
-		search: agent ? { agent: agent.id } : {},
+		to: "./pods/$pod/routines/new",
+		params: { pod: pod.slug },
+		search: bot ? { bot: bot.handle } : {},
 	});
 }
 

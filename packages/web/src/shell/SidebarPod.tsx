@@ -144,9 +144,14 @@ export function PodInitial({
 	size = "md",
 	className,
 }: {
-	pod: Pod;
-	/** `sm` is a quieter mark for a row that names its pod: the letter in the pod's colour on a tint of it. */
-	size?: "md" | "sm";
+	/** Only what it is drawn from, so a pod not made yet, such as New pod's, can be drawn too. */
+	pod: Pick<Pod, "name" | "color" | "kind">;
+	/**
+	 * `sm` is a quieter mark for a row that names its pod: the letter in the
+	 * pod's colour on a tint of it. `lg` stands beside the title of the pod's
+	 * own settings.
+	 */
+	size?: "lg" | "md" | "sm";
 	className?: string;
 }) {
 	const palette = pod.color === null ? undefined : podPalettes[pod.color];
@@ -156,7 +161,11 @@ export function PodInitial({
 			aria-hidden
 			className={cn(
 				"grid shrink-0 place-items-center font-semibold",
-				small ? "size-4 rounded-[4px] text-[10px]" : "size-5 rounded-[5px] text-[11px]",
+				{
+					sm: "size-4 rounded-[4px] text-[10px]",
+					md: "size-5 rounded-[5px] text-[11px]",
+					lg: "size-11 rounded-[11px] text-lg",
+				}[size],
 				!palette && "bg-tile text-foreground",
 				palette && !small && "text-black/80",
 				className,
@@ -169,9 +178,9 @@ export function PodInitial({
 			}
 		>
 			{pod.kind === "personal" ? (
-				<User size={small ? 10 : 11} strokeWidth={2.25} />
+				<User size={{ sm: 10, md: 11, lg: 20 }[size]} strokeWidth={2.25} />
 			) : (
-				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "?")
+				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "")
 			)}
 		</span>
 	);

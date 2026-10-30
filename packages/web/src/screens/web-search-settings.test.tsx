@@ -78,6 +78,25 @@ describe("the Web search settings", () => {
 	});
 
 	it("changes provider from the list, keeping the switch as it was", async () => {
+		const searxng = { ...exa, preset: "searxng" as const, name: "SearXNG" };
+		route.get.mockReturnValue(Effect.succeed({ provider: exa }));
+		route.replace.mockImplementation(() => {
+			route.get.mockReturnValue(Effect.succeed({ provider: searxng }));
+			return Effect.succeed(searxng);
+		});
+		mount("/suga/settings/search");
+		await searchSwitch();
+
+		fireEvent.click(within(openAdvanced()).getByRole("radio", { name: /SearXNG/ }));
+
+		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
+		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
+			payload: { preset: "searxng", enabled: true },
+		});
+		expect(await screen.findByRole("heading", { name: "SearXNG" })).toBeDefined();
+	});
+
+	it("switches the web off on a swap to a provider that needs a key, until it has one", async () => {
 		route.get.mockReturnValue(Effect.succeed({ provider: exa }));
 		route.replace.mockImplementation(() => {
 			route.get.mockReturnValue(Effect.succeed({ provider: brave }));
@@ -88,12 +107,15 @@ describe("the Web search settings", () => {
 
 		fireEvent.click(within(openAdvanced()).getByRole("radio", { name: /Brave Search/ }));
 
+		// The API refuses a provider that is on without a key, so the swap turns the web off.
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "brave", enabled: true },
+			payload: { preset: "brave", enabled: false },
 		});
 		expect(await screen.findByRole("heading", { name: "Brave Search" })).toBeDefined();
-		expect(screen.getByText("A key is required.")).toBeDefined();
+		const power = await searchSwitch();
+		await waitFor(() => expect(power.getAttribute("aria-checked")).toBe("false"));
+		expect(power).toHaveProperty("disabled", true);
 	});
 
 	it("holds the switch off until a provider that needs a key has one", async () => {

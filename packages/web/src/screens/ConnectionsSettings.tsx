@@ -8,7 +8,6 @@ import {
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { cn } from "cn";
 import { ArrowUpRight, ChevronRight, Code, Globe, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
@@ -28,14 +27,13 @@ import {
 } from "@/ui/dialog-form.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
-	SettingsAddRow,
 	SettingsFieldRow,
 	SettingsGroup,
 	SettingsRow,
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
 import { GitHubConnectStep } from "./GitHubConnect.tsx";
-import { AccessMenu, AccessValue, accessSettingOf, accessSummaryText } from "./tool-access.tsx";
+import { accessSummaryText } from "./tool-access.tsx";
 
 /*
  * The apps a pod's bots can reach, as one group on the pod's page: each with
@@ -50,43 +48,50 @@ export function ConnectionsSettings({
 	pod,
 	canManage,
 	signInError,
+	adding,
+	onAddingChange,
 }: {
 	pod: Pod;
 	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
+	/** Whether Add connection is open, which the page's own button beside its title opens. */
+	adding: boolean;
+	onAddingChange: (adding: boolean) => void;
 }) {
 	const connections = useConnections(pod.id);
-	const [adding, setAdding] = useState(false);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	const listed = connections.data;
 	const taken = new Set(listed.map((one) => connectionPresetFor(one.url)?.id));
+	const setAdding = onAddingChange;
 
 	return (
 		<>
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
-			<SettingsGroup
-				label="Connections"
-				note="Every bot in this pod can use these. Open one to choose for each tool."
-			>
+			<SettingsGroup note="Bots act as whoever connected each one. Open one to choose for each tool.">
 				{listed.map((one) => (
 					<ConnectionRow key={one.id} connection={one} pod={pod} canManage={canManage} />
 				))}
-				{listed.length === 0 && !canManage && <SettingsRow label="No connections in this pod." />}
-				{canManage && <SettingsAddRow label="Add connection" onClick={() => setAdding(true)} />}
-			</SettingsGroup>
-			<Dialog open={adding} onOpenChange={setAdding}>
-				{adding && (
-					<AddConnectionDialog
-						podId={pod.id}
-						podName={pod.name}
-						available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
-						offersGitHub={!listed.some((one) => one.kind === "github")}
-						done={() => setAdding(false)}
+				{listed.length === 0 && (
+					<SettingsRow
+						label={<span className="text-muted-foreground">No connections in this pod yet</span>}
 					/>
 				)}
-			</Dialog>
+			</SettingsGroup>
+			{canManage && (
+				<Dialog open={adding} onOpenChange={setAdding}>
+					{adding && (
+						<AddConnectionDialog
+							podId={pod.id}
+							podName={pod.name}
+							available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
+							offersGitHub={!listed.some((one) => one.kind === "github")}
+							done={() => setAdding(false)}
+						/>
+					)}
+				</Dialog>
+			)}
 		</>
 	);
 }
@@ -109,7 +114,7 @@ function ConnectionRow({
 }) {
 	const actions = useConnectionActions(pod.id);
 	const navigate = useNavigate();
-	const backToPod = useBackToHere(pod.name);
+	const backToPod = useBackToHere("Connections");
 	const page = { ...connectionSettingsLink(pod, connection), state: backToPod };
 	const needsSignIn = !connection.signedIn;
 	const failing = connection.signedIn && connection.status === "error";
@@ -121,30 +126,27 @@ function ConnectionRow({
 			? actions.signIn.mutate({ connectionId: connection.id })
 			: void navigate(page);
 	const line = error ? failureMessage(error) : lineFor(connection);
-	const access = accessSettingOf(connection.toolCounts);
 
 	return (
 		<article
 			aria-label={connection.name}
-			className="relative flex min-h-[60px] items-center gap-3 border-border border-b px-4 py-2.5 transition-colors last:border-b-0 hover:bg-panel"
+			className="relative flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover"
 		>
 			{/* Its link covers the whole row; the controls sit above it. */}
 			<Link
 				{...page}
 				aria-label={`${connection.name}, ${line}. Open tools`}
-				className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left after:absolute after:inset-0"
+				className="focus-ring flex min-w-0 flex-1 items-center gap-3.5 rounded-lg text-left after:absolute after:inset-0"
 			>
 				<ConnectionMark
 					presetId={connectionMarkFor(connection)}
 					name={connection.name}
 					size="tile"
 				/>
-				<span className="flex min-w-0 flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-[14.5px] text-foreground">
-						{connection.name}
-					</span>
+				<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
+					<span className="truncate text-[13px] text-foreground">{connection.name}</span>
 					<span
-						className={`text-pretty text-sm ${failing || error ? "line-clamp-2 text-destructive-text" : "text-muted-foreground"}`}
+						className={`text-pretty text-xs ${failing || error ? "line-clamp-2 text-destructive-text" : "text-subtle-foreground"}`}
 					>
 						{line}
 					</span>
@@ -156,24 +158,11 @@ function ConnectionRow({
 						{needsSignIn ? "Sign in" : connection.auth === "oauth" ? "Reconnect" : "Fix"}
 					</Button>
 				)}
-				{/* With no tools found yet, there is nothing to set. On a phone, the setting is opened to change. */}
-				{access && canManage && (
-					<AccessMenu
-						label={`${connection.name}, all tools`}
-						value={access}
-						onChange={(chosen) =>
-							actions.update.mutate({ connectionId: connection.id, json: { access: chosen } })
-						}
-						onCustom={() => void navigate(page)}
-						className="max-md:hidden"
-					/>
-				)}
-				{access && <AccessValue value={access} className={cn(canManage && "md:hidden")} />}
 			</span>
 			<ChevronRight
 				aria-hidden
-				size={16}
-				strokeWidth={2.4}
+				size={14}
+				strokeWidth={2}
 				className="shrink-0 text-subtle-foreground"
 			/>
 		</article>

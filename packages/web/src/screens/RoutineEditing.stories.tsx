@@ -1,4 +1,4 @@
-import type { Agent, Pod, Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
+import type { Agent, ChatList, Pod, Routine, WorkspaceRoutine } from "@sugabots/contracts";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
@@ -14,16 +14,24 @@ import {
 	personal,
 	revenue,
 } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyPods, storyUser, storyWorkspace } from "../story-app.tsx";
+import {
+	appHandlers,
+	StoryApp,
+	storyChatDetails,
+	storyPods,
+	storyWorkspace,
+} from "../story-app.tsx";
 
 /*
- * Routines in settings: every routine beside the open one, or the one being
- * made. On a phone the open routine covers the list, with the way back to it.
+ * Making and changing routines on a pod's Routines page: one set up in the
+ * panel beside its own thread, or one being made beside the list. On a phone
+ * the routine covers the list, with the way back to it.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const routines = `/${storyWorkspace.slug}/settings/routines`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
+/** A routine being made beside Revenue's routines. */
+const newInRevenue = `/${storyWorkspace.slug}/pods/${revenue.slug}/routines/new`;
 
 function placed(
 	n: number,
@@ -202,16 +210,94 @@ const everyRoutine = [
 	quarterClose,
 ];
 
-const routinesAnswer = (items: WorkspaceRoutine[]) =>
-	http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items }));
+/** The id of `one`'s own thread, where its runs post. */
+const feedOf = (one: WorkspaceRoutine) =>
+	`${one.routine.id.slice(0, -4)}f${one.routine.id.slice(-3)}`;
 
-const pageOf = (one: WorkspaceRoutine) => `${routines}/${one.routine.id}`;
+/**
+ * `items` as the workspace's routines, each with its own thread beside its
+ * pod's routines: the list, each bot's routines, and each thread, empty.
+ */
+function routinesAnswer(items: WorkspaceRoutine[]) {
+	return [
+		http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items })),
+		http.get(`${API}/agents/:agentId/routines`, ({ params }) =>
+			HttpResponse.json(
+				items.map(({ routine }) => routine).filter((routine) => routine.agentId === params.agentId),
+			),
+		),
+		http.get(`${API}/workspaces/:workspace/chats`, ({ request }) => {
+			const pod = new URL(request.url).searchParams.get("pod");
+			const chatList: ChatList = {
+				chats: [],
+				channels: [],
+				threads: [],
+				routines: items
+					.filter((item) => item.pod.slug === pod || item.pod.id === pod)
+					.map(({ routine, agent, pod }) => ({
+						routine: { id: routine.id, name: routine.name, state: routine.state, failed: false },
+						agent,
+						conversation: {
+							kind: "routine_feed",
+							id: feedOf({ routine, agent, pod }),
+							workspaceId: storyWorkspace.id,
+							podId: pod.id,
+							title: routine.name,
+							createdAt: routine.createdAt,
+							updatedAt: routine.updatedAt,
+							hostAgentId: agent.id,
+							routineId: routine.id,
+						},
+						mentionsYou: false,
+					})),
+			};
+			return HttpResponse.json(chatList);
+		}),
+		http.get(`${API}/threads/:threadId`, ({ params }) => {
+			const one = items.find((item) => feedOf(item) === params.threadId);
+			if (!one) return HttpResponse.json({ message: "No such thread" }, { status: 404 });
+			const details = storyChatDetails(one.agent);
+			return HttpResponse.json({
+				...details,
+				thread: {
+					...details.thread,
+					id: feedOf(one),
+					conversationId: feedOf(one),
+					type: "routine_feed",
+					title: one.routine.name,
+				},
+				routine: {
+					id: one.routine.id,
+					agentId: one.agent.id,
+					state: one.routine.state,
+					failed: false,
+					pausedAfterFailures: false,
+				},
+			});
+		}),
+		http.get(`${API}/conversations/:conversationId/messages`, () =>
+			HttpResponse.json({ items: [], nextCursor: null }),
+		),
+	];
+}
+
+/** `one`'s own thread, beside its pod's routines, where the panel beside it sets the routine up. */
+const pageOf = (one: WorkspaceRoutine) =>
+	`/${storyWorkspace.slug}/pods/${one.pod.slug}/routines/${one.routine.id}`;
 
 type Canvas = ReturnType<typeof within>;
 
-/** The rows of the Triggers group, once the routine's page has loaded. */
+/** The routine's panel, opened with Details if the page didn't open it already. */
+async function openPanel(canvas: Canvas) {
+	const details = await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 });
+	if (!canvas.queryByRole("complementary", { name: "Routine" })) await userEvent.click(details);
+	return within(await canvas.findByRole("complementary", { name: "Routine" }));
+}
+
+/** The rows of the panel's Triggers, once the routine has loaded. */
 async function triggerRows(canvas: Canvas) {
-	const group = await canvas.findByRole("region", { name: "Triggers" }, { timeout: 10_000 });
+	const panel = await openPanel(canvas);
+	const group = await panel.findByRole("region", { name: "Triggers" }, { timeout: 10_000 });
 	return within(group).getAllByRole("button");
 }
 
@@ -223,152 +309,41 @@ async function openFirstTrigger(canvas: Canvas) {
 	return screen.findByRole("dialog");
 }
 
-/** Opens Add trigger's first step, the kinds of trigger. */
-async function openAddTrigger(canvas: Canvas) {
+/** Opens Add trigger's first step, the kinds of trigger: in the panel, or on a routine being made. */
+async function openAddTrigger(canvas: Canvas, inPanel = false) {
+	const where = inPanel ? await openPanel(canvas) : canvas;
 	await userEvent.click(
-		await canvas.findByRole("button", { name: "Add trigger" }, { timeout: 10_000 }),
+		await where.findByRole("button", { name: "Add trigger" }, { timeout: 10_000 }),
 	);
 	return screen.findByRole("dialog", { name: "Add a trigger" });
 }
 
 const meta = preview.meta({
-	title: "Views/Routines",
+	title: "Views/Routine editing",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(routinesAnswer(everyRoutine), ...appHandlers());
+		msw.use(...routinesAnswer(everyRoutine), ...appHandlers());
 	},
 });
 
-/** Every routine with when it runs and its bot, beside the first one. */
-export const List = meta.story({
-	render: () => <StoryApp path={routines} />,
-	play: async ({ canvas }) => {
-		const list = await canvas.findByRole(
-			"navigation",
-			{ name: "Workspace routines" },
-			{ timeout: 10_000 },
-		);
-		await expect(await within(list).findByText("Daily at 6:00, Growth Desk")).toBeInTheDocument();
-		await expect(within(list).getByText("Webhook, On-call")).toBeInTheDocument();
-		await expect(within(list).getByText("Mon Wed Fri, 3 times, Chief")).toBeInTheDocument();
-		await expect(
-			within(list).getByText("Every 3 months at 10:00, Account Manager"),
-		).toBeInTheDocument();
-		await expect(within(list).getByText("Paused")).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("heading", { name: "Overnight outbound" }),
-		).toBeInTheDocument();
-	},
-});
-
-/** A scheduled routine: on, with its bot, when it runs, where its result goes, and Run now. */
+/** A scheduled routine in its panel: on, when it runs, where its result goes, Run now, and ⋯. */
 export const Scheduled = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
+		const panel = await openPanel(canvas);
 		await expect(
-			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+			await panel.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "On" })).toBeChecked();
+		await expect(panel.getByRole("switch", { name: "Routine on" })).toBeChecked();
 		await expect(await triggerRows(canvas)).toHaveLength(2);
-		await expect(canvas.getByRole("button", { name: /^Daily at 6:00/ })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "More" })).toBeInTheDocument();
-	},
-});
-
-/** Instructions open on a page of their own, with room to write and Save, as a bot's do. */
-export const Instructions = meta.story({
-	render: () => <StoryApp path={pageOf(overnight)} />,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Instructions/ }, { timeout: 10_000 }),
-		);
-		await expect(await canvas.findByLabelText("Instructions")).toHaveValue(
-			overnight.routine.instructions,
-		);
-		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
-		await expect(canvas.getByRole("button", { name: "Overnight outbound" })).toBeInTheDocument();
-	},
-});
-
-function run(
-	n: number,
-	fields: Pick<RoutineExecution, "trigger" | "state" | "acceptedAt"> & Partial<RoutineExecution>,
-): RoutineExecution {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000003${n}0`,
-		conversationId: "0199a3a0-0000-7000-8000-000000000350",
-		routineId: overnight.routine.id,
-		workspaceId: storyWorkspace.id,
-		agentId: growthDesk.id,
-		threadId: `0199a3a0-0000-7000-8000-0000000003${n}1`,
-		routineName: overnight.routine.name,
-		instructions: overnight.routine.instructions,
-		error: null,
-		startedAt: fields.acceptedAt,
-		finishedAt: null,
-		...fields,
-	};
-}
-
-const scheduled = (at: string) => ({ kind: "cron" as const, scheduledAt: at, acceptedAt: at });
-
-const overnightRuns = [
-	run(1, {
-		trigger: {
-			kind: "manual",
-			requestedAt: "2026-10-07T22:10:00.000Z",
-			requestedByUserId: storyUser.id,
-			requestId: "0199a3a0-0000-7000-8000-0000000003ff",
-		},
-		acceptedAt: "2026-10-07T22:10:00.000Z",
-		state: "running",
-	}),
-	run(2, {
-		trigger: scheduled("2026-10-07T06:00:00.000Z"),
-		acceptedAt: "2026-10-07T06:00:00.000Z",
-		finishedAt: "2026-10-07T06:00:14.000Z",
-		state: "completed",
-	}),
-	run(3, {
-		trigger: scheduled("2026-10-06T06:00:00.000Z"),
-		acceptedAt: "2026-10-06T06:00:00.000Z",
-		finishedAt: "2026-10-06T06:01:02.000Z",
-		state: "failed",
-		error: "HubSpot timed out",
-	}),
-	run(4, {
-		trigger: {
-			kind: "webhook",
-			receivedAt: "2026-10-05T06:00:00.000Z",
-			idempotencyKey: null,
-			payload: {},
-		},
-		acceptedAt: "2026-10-05T06:00:00.000Z",
-		state: "cancelled",
-	}),
-];
-
-/** Its latest runs: one running, one done, one failed with why, one stopped; each opens its thread. */
-export const RecentRuns = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			routinesAnswer(everyRoutine),
-			http.get(`${API}/agents/:agentId/routines/:routineId/executions`, () =>
-				HttpResponse.json({ items: overnightRuns, nextCursor: null }),
-			),
-			...appHandlers(),
-		);
-	},
-	render: () => <StoryApp path={pageOf(overnight)} />,
-	play: async ({ canvas }) => {
-		const runs = await canvas.findByRole("region", { name: "Recent runs" }, { timeout: 10_000 });
-		await expect(await within(runs).findByText("Run by you")).toBeInTheDocument();
-		await expect(within(runs).getByText("Running…")).toBeInTheDocument();
-		await expect(within(runs).getByText("14s")).toBeInTheDocument();
-		await expect(within(runs).getByText("HubSpot timed out")).toBeInTheDocument();
-		await expect(within(runs).getByText("Cancelled")).toBeInTheDocument();
+		await expect(
+			panel.getByRole("button", { name: /^Schedule.*Daily at 6:00/ }),
+		).toBeInTheDocument();
+		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
+		await expect(
+			panel.getByRole("button", { name: "More for Overnight outbound" }),
+		).toBeInTheDocument();
 	},
 });
 
@@ -390,14 +365,14 @@ export const Trigger = meta.story({
 /** Several triggers: two schedules and a webhook, each a row, then Add trigger. */
 export const SeveralTriggers = meta.story({
 	beforeEach({ msw }) {
-		msw.use(routinesAnswer([...everyRoutine, releaseWatch]));
+		msw.use(...routinesAnswer([...everyRoutine, releaseWatch]));
 	},
 	render: () => <StoryApp path={pageOf(releaseWatch)} />,
 	play: async ({ canvas }) => {
 		const rows = await triggerRows(canvas);
 		await expect(rows.map((row) => row.textContent)).toEqual([
-			"Weekdays at 9:00Schedule",
-			"Fri at 17:00Schedule",
+			"ScheduleWeekdays at 9:00",
+			"ScheduleFri at 17:00",
 			"WebhookWebhook",
 			"Add trigger",
 		]);
@@ -407,11 +382,11 @@ export const SeveralTriggers = meta.story({
 /** Add trigger's first step: the kinds of trigger, Sugabots' own, then the integrations the bot's pod is connected to. */
 export const AddTrigger = meta.story({
 	beforeEach({ msw }) {
-		msw.use(routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
+		msw.use(...routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
 	},
 	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
 	play: async ({ canvas, userEvent }) => {
-		const step = await openAddTrigger(canvas);
+		const step = await openAddTrigger(canvas, true);
 		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
@@ -475,8 +450,16 @@ export const Monthly = meta.story({
 export const MoreMenu = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "More" }, { timeout: 10_000 }));
+		const panel = await openPanel(canvas);
+		await userEvent.click(
+			await panel.findByRole(
+				"button",
+				{ name: "More for Overnight outbound" },
+				{ timeout: 10_000 },
+			),
+		);
 		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
 		await expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
 		await expect(
 			within(menu).getByRole("menuitem", { name: "Delete routine" }),
@@ -488,10 +471,11 @@ export const MoreMenu = meta.story({
 export const Paused = meta.story({
 	render: () => <StoryApp path={pageOf(churnReport)} />,
 	play: async ({ canvas }) => {
+		const panel = await openPanel(canvas);
 		await expect(
-			await canvas.findByRole("switch", { name: "On" }, { timeout: 10_000 }),
+			await panel.findByRole("switch", { name: "Routine on" }, { timeout: 10_000 }),
 		).not.toBeChecked();
-		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
+		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 	},
 });
 
@@ -553,7 +537,7 @@ export const BasicWebhook = meta.story({
 
 /** A new webhook signs by default, and starts with no secret, which the note warns lets anyone run it. */
 export const NewWebhook = meta.story({
-	render: () => <StoryApp path={`${routines}/new`} />,
+	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas);
 		await userEvent.click(within(step).getByRole("button", { name: /^Webhook/ }));
@@ -570,12 +554,13 @@ export const NewWebhook = meta.story({
 /** A repository's events: which of the pod's GitHub connection's repositories, and what happening there runs it. */
 export const RepositoryTrigger = meta.story({
 	beforeEach({ msw }) {
-		msw.use(routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
+		msw.use(...routinesAnswer([...everyRoutine, pullRequestReviews]), ...podRepositories);
 	},
 	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
 	play: async ({ canvas }) => {
+		const panel = await openPanel(canvas);
 		await expect(
-			await canvas.findByRole("button", { name: /^On acme\/web/ }, { timeout: 10_000 }),
+			await panel.findByRole("button", { name: /^GitHub.*On acme\/web/ }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		const dialog = within(await openFirstTrigger(canvas));
 		// The pod's GitHub connection, then its repositories, load once the trigger opens.
@@ -591,7 +576,7 @@ export const NewRepositoryRoutine = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...podRepositories);
 	},
-	render: () => <StoryApp path={`${routines}/new`} />,
+	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas);
 		await userEvent.click(await within(step).findByRole("button", { name: /^GitHub/ }));
@@ -610,21 +595,20 @@ export const NewRepositoryRoutine = meta.story({
  * to the chat, and waits for a name and instructions.
  */
 export const NewRoutine = meta.story({
-	render: () => <StoryApp path={`${routines}/new`} />,
+	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText("Not created yet")).toBeInTheDocument();
 		await expect(canvas.getByText("No triggers")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
 		await expect(canvas.queryByRole("switch", { name: "On" })).toBeNull();
 	},
 });
 
-/** A schedule added: Weekly adds a row of days, and the bot list opens in place under its pods. */
+/** A schedule added: Weekly adds a row of days, and the bot list opens in place with the pod's own bots. */
 export const ChoosingDaysAndABot = meta.story({
-	render: () => <StoryApp path={`${routines}/new`} />,
+	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas);
 		await userEvent.click(within(step).getByRole("button", { name: /^Schedule/ }));
@@ -637,7 +621,9 @@ export const ChoosingDaysAndABot = meta.story({
 			await canvas.findByRole("button", { name: /^Mon Fri at 9:00/ }),
 		).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: /^Bot(?!s\b)/ }));
-		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
+		// Only the pod's own bots: a routine is kept beside its bot's pod.
+		await expect(canvas.getByRole("heading", { name: revenue.name })).toBeInTheDocument();
+		await expect(canvas.queryByRole("heading", { name: engineering.name })).toBeNull();
 	},
 });
 
@@ -648,59 +634,34 @@ export const AsAMember = meta.story({
 			...pod,
 			permissions: { ...pod.permissions, manageRoutines: false, runRoutines: false },
 		}));
-		msw.use(routinesAnswer(everyRoutine), ...appHandlers({ role: "member", pods: asMember }));
+		msw.use(...routinesAnswer(everyRoutine), ...appHandlers({ role: "member", pods: asMember }));
 	},
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
+		const panel = await openPanel(canvas);
 		await expect(
-			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+			await panel.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "On" })).toBeDisabled();
-		await expect(canvas.queryByRole("button", { name: "Run now" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "More" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "New routine" })).toBeNull();
-		await expect(canvas.getByText("Daily at 6:00")).toBeInTheDocument();
-		await expect(canvas.queryByRole("button", { name: /^Daily at 6:00/ })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Add trigger" })).toBeNull();
+		await expect(panel.getByRole("switch", { name: "Routine on" })).toBeDisabled();
+		await expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+		await expect(panel.queryByRole("button", { name: /^More for / })).toBeNull();
+		await expect(canvas.queryByRole("link", { name: "New routine" })).toBeNull();
+		await expect(panel.getByText("Daily at 6:00")).toBeInTheDocument();
+		await expect(panel.queryByRole("button", { name: /^Schedule/ })).toBeNull();
+		await expect(panel.queryByRole("button", { name: "Add trigger" })).toBeNull();
+		await expect(panel.queryByRole("button", { name: "Edit instructions" })).toBeNull();
 	},
 });
 
-/** Nothing made yet: what a routine is, and New routine. */
-export const Empty = meta.story({
-	beforeEach({ msw }) {
-		msw.use(routinesAnswer([]), ...appHandlers());
-	},
-	render: () => <StoryApp path={routines} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText("No routines yet", {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
-		await expect(canvas.getAllByRole("button", { name: "New routine" }).length).toBeGreaterThan(0);
-	},
-});
-
-/** On a phone the list stands alone. */
-export const PhoneList = meta.story({
+/** On a phone a routine being made covers the list, with the way back to it. */
+export const PhoneNewRoutine = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={routines} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("navigation", { name: "Workspace routines" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
-		await expect(canvas.queryByRole("heading", { name: "Overnight outbound" })).toBeNull();
-	},
-});
-
-/** On a phone the open routine covers the list, with the way back to it. */
-export const PhoneRoutine = meta.story({
-	globals: PHONE,
-	render: () => <StoryApp path={pageOf(churnReport)} />,
+	render: () => <StoryApp path={`${newInRevenue}?bot=${accountManager.handle}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("link", { name: "Routines" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("heading", { name: "Weekly churn report" }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "New routine" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeInTheDocument();
 	},
 });

@@ -7,13 +7,14 @@ import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyPods, storyUser, storyWorkspace } from "../story-app.tsx";
 
 /*
- * Pods in settings: every pod beside the open one, which shows its bots, its
- * people and the apps its bots share. On a phone the open pod covers the list,
- * with the way back to it.
+ * A pod in settings, listed in the navigation with its pages: General, the
+ * apps its bots share, its people, and its bots. On a phone a pod's page
+ * opens full screen, with the way back to the list of settings.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 const pods = `/${storyWorkspace.slug}/settings/pods`;
+const revenuePage = (page: "connections" | "people" | "bots") => `${pods}/${revenue.slug}/${page}`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 const people = [
@@ -100,30 +101,56 @@ const meta = preview.meta({
 	},
 });
 
-/** Every pod, before one is chosen. */
-export const List = meta.story({
-	render: () => <StoryApp path={pods} />,
+/** Every pod in the navigation, shared ones apart from yours, and the open one's pages under it. */
+export const Navigation = meta.story({
+	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		const list = await canvas.findByRole(
-			"navigation",
-			{ name: "Workspace pods" },
-			{ timeout: 10_000 },
+		const nav = await canvas.findByRole("navigation", { name: "Settings" }, { timeout: 10_000 });
+		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toHaveAttribute(
+			"aria-expanded",
+			"true",
 		);
-		await expect(await within(list).findByRole("link", { name: /Revenue/ })).toBeInTheDocument();
-		await expect(within(list).getByRole("link", { name: /Personal/ })).toBeInTheDocument();
+		await expect(within(nav).getByRole("heading", { name: "Personal pods" })).toBeInTheDocument();
+		await expect(
+			await within(nav).findByRole("link", { name: "Connections, 2" }),
+		).toBeInTheDocument();
+		await expect(within(nav).getByRole("button", { name: "New pod" })).toBeInTheDocument();
 	},
 });
 
-/**
- * A shared pod: its bots, its people, the apps they share, and deleting it.
- * Administrators are in every shared pod, so only Mara, a member, can be taken
- * out, and you cannot leave.
- */
+/** A shared pod's General: its name and colour, its computer, and deleting it. */
 export const SharedPod = meta.story({
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "Revenue" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Delete pod" })).toBeInTheDocument();
+	},
+});
+
+/** The apps every bot in the pod shares, each with what its tools may do. */
+export const Connections = meta.story({
+	render: () => <StoryApp path={revenuePage("connections")} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Connections" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(await canvas.findByRole("article", { name: "HubSpot" })).toBeInTheDocument();
+		await expect(canvas.getByRole("article", { name: "Gmail" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
+	},
+});
+
+/**
+ * Who can see into the pod. Administrators are in every shared pod, so only
+ * Mara, a member, can be taken out, and you cannot leave.
+ */
+export const People = meta.story({
+	render: () => <StoryApp path={revenuePage("people")} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "People" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Jay Young")).toBeInTheDocument();
 		await expect(await canvas.findByText("Admin")).toBeInTheDocument();
@@ -132,23 +159,43 @@ export const SharedPod = meta.story({
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Remove Jay Young" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Leave Revenue" })).toBeNull();
-		await expect(await canvas.findByText("HubSpot")).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Delete pod" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Add people" })).toBeInTheDocument();
 	},
 });
 
-/** Personal: only you, so no people to add and nothing to delete. */
+/** The pod's bots, each with what it does, and New bot. */
+export const Bots = meta.story({
+	render: () => <StoryApp path={revenuePage("bots")} />,
+	play: async ({ canvas }) => {
+		const page = await canvas.findByRole("main", {}, { timeout: 10_000 });
+		await expect(
+			await within(page).findByRole("heading", { name: "Bots" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(
+			await within(page).findByRole("link", { name: /^Growth Desk/ }),
+		).toBeInTheDocument();
+		await expect(within(page).getByRole("button", { name: "New bot" })).toBeInTheDocument();
+	},
+});
+
+/**
+ * Personal: only you, so it has no People, and nothing to rename or delete,
+ * so no General. Its settings open on its Connections.
+ */
 export const PersonalPod = meta.story({
 	render: () => <StoryApp path={`${pods}/personal`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText("Only you can see this pod and its bots.", {}, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Connections", level: 2 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		const personal = canvas.getByRole("group", { name: "Personal pods" });
+		await expect(within(personal).queryByRole("link", { name: "General" })).toBeNull();
+		await expect(within(personal).queryByRole("link", { name: /^People/ })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
 	},
 });
 
-/** A member reads the same pod, without the controls only an administrator has, and can leave it. */
+/** A member reads the pod's people, without the controls only an administrator has, and can leave it. */
 export const AsAMember = meta.story({
 	beforeEach({ msw }) {
 		// A pod carries what its viewer may do there; a member may not rename, delete or manage it.
@@ -166,25 +213,37 @@ export const AsAMember = meta.story({
 		}));
 		msw.use(...revenueHandlers, ...appHandlers({ role: "member", pods: asMember }));
 	},
-	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
+	render: () => <StoryApp path={revenuePage("people")} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Revenue" }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "People" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Add people" })).toBeNull();
 		await expect(await canvas.findByRole("button", { name: "Leave Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Remove Mara Kent" })).toBeNull();
 	},
 });
 
-/** On a phone the open pod covers the list, with the way back to it. */
+/** A member's General for the same pod: nothing to rename and no Delete pod. */
+export const GeneralAsAMember = meta.story({
+	beforeEach: AsAMember.input.beforeEach,
+	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Revenue" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
+		await expect(canvas.queryByRole("textbox", { name: "Name" })).toBeNull();
+	},
+});
+
+/** On a phone a pod's page opens full screen, with the way back to the list of settings. */
 export const Phone = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: "Pods" }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Settings" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 	},

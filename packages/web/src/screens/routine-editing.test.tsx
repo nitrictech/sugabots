@@ -1,4 +1,4 @@
-import type { Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
+import type { Routine, WorkspaceRoutine } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
@@ -6,7 +6,16 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatTime, today } from "@/lib/routine-schedule.ts";
-import { agents, apiAnswers, jye, linear, mount, open, pods, sam, triager } from "@/test-api.tsx";
+import {
+	agents,
+	apiAnswers,
+	channelDetails,
+	linear,
+	mount,
+	open,
+	pods,
+	triager,
+} from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -75,7 +84,104 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-const routinePage = (one: WorkspaceRoutine) => `/suga/settings/routines/${one.routine.id}`;
+/** A routine's own thread, where its runs post, with the routine set up in the panel beside it. */
+const threadPage = (one: WorkspaceRoutine) =>
+	`/suga/pods/${one.pod.slug}/routines/${one.routine.id}`;
+/** A routine being made beside Suga-Team's routines. */
+const newPage = `/suga/pods/${suga.slug}/routines/new`;
+
+/** The id of `one`'s own thread, where its runs post. */
+const feedOf = (one: WorkspaceRoutine) =>
+	`${one.routine.id.slice(0, -4)}f${one.routine.id.slice(-3)}`;
+
+/**
+ * Serves `one` as its pod's only routine, with its own thread, and its bot's
+ * routines as `one` and `others`: what the routine's page reads to show it.
+ */
+function serveRoutine(one: WorkspaceRoutine, others: readonly Routine[] = []) {
+	const feed = feedOf(one);
+	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [one] }));
+	client.api.routines.list.mockImplementation(({ params }: { params: { agentId: string } }) =>
+		Effect.succeed(
+			[one.routine, ...others].filter((routine) => routine.agentId === params.agentId),
+		),
+	);
+	client.api.chats.list.mockReturnValue(
+		Effect.succeed({
+			chats: [],
+			channels: [],
+			threads: [],
+			routines: [
+				{
+					routine: {
+						id: one.routine.id,
+						name: one.routine.name,
+						state: one.routine.state,
+						failed: false,
+					},
+					agent: one.agent,
+					conversation: {
+						kind: "routine_feed",
+						id: feed,
+						workspaceId: one.agent.workspaceId,
+						podId: one.agent.podId,
+						title: one.routine.name,
+						createdAt: "2026-09-18T00:00:00.000Z",
+						updatedAt: "2026-09-18T00:00:00.000Z",
+						hostAgentId: one.agent.id,
+						routineId: one.routine.id,
+					},
+					mentionsYou: false,
+				},
+			],
+		}),
+	);
+	const details = channelDetails(one.agent);
+	client.api.threads.get.mockReturnValue(
+		Effect.succeed({
+			...details,
+			thread: {
+				...details.thread,
+				id: feed,
+				conversationId: feed,
+				type: "routine_feed",
+				title: one.routine.name,
+			},
+			routine: {
+				id: one.routine.id,
+				agentId: one.agent.id,
+				state: one.routine.state,
+				failed: false,
+				pausedAfterFailures: false,
+			},
+		}),
+	);
+}
+
+/** Opens `one`'s page and its panel, as a person would: Details beside its thread. */
+async function openPanel(one: WorkspaceRoutine, others: readonly Routine[] = []) {
+	serveRoutine(one, others);
+	const router = mount(threadPage(one));
+	const panel = await showPanel();
+	await within(panel).findByRole("heading", { name: one.routine.name });
+	return { router, panel };
+}
+
+/**
+ * Details on the routine's thread, until its panel shows. The thread's page
+ * can mount again as it finishes loading, which drops a click made before.
+ */
+async function showPanel() {
+	return waitFor(
+		() => {
+			const shown = screen.queryByRole("complementary", { name: "Routine" });
+			if (shown) return shown;
+			fireEvent.click(screen.getByRole("button", { name: "Details" }));
+			throw new Error("The routine's panel isn't open yet");
+		},
+		{ timeout: 5000 },
+	);
+}
 
 /** Opens the dialog of the trigger whose row's name matches `row`. */
 async function openTrigger(row: RegExp) {
@@ -117,30 +223,18 @@ async function pickTime(chip: number, minutesPastMidnight: number) {
 	await waitFor(() => expect(trigger.textContent).toBe(formatTime(minutesPastMidnight)));
 }
 
-describe("the workspace's routines", () => {
-	it("lists every routine with when it runs and its bot, beside the first one", async () => {
-		mount("/suga/settings/routines");
-
-		const list = await screen.findByRole("navigation", { name: "Workspace routines" });
-		expect(within(list).getByText(`Weekdays at 8:00, ${linear.name}`)).toBeDefined();
-		expect(within(list).getByText(`Mon at 9:00, ${researcher.name}`)).toBeDefined();
-		expect(within(list).getByText("Paused")).toBeDefined();
-		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
-		const nav = screen.getByRole("navigation", { name: "Settings" });
-		expect(within(nav).getByRole("link", { name: "Routines, 2" })).toBeDefined();
-	});
-
-	it("makes a routine for the bot chosen, then opens it", async () => {
+describe("a pod's routines", () => {
+	it("makes a routine for the bot chosen from the pod's own, then opens its thread", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		const router = mount("/suga/settings/routines/new");
+		const router = mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Bot(?!s\b)/ }));
-		expect(screen.getByRole("heading", { name: suga.name })).toBeDefined();
-		expect(screen.getByRole("heading", { name: sales.name })).toBeDefined();
-		fireEvent.click(within(screen.getByRole("main")).getByRole("button", { name: triager.name }));
+		// Only this pod's bots: a routine is kept beside its bot's pod.
+		expect(screen.queryByRole("button", { name: researcher.name })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: triager.name }));
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
 			target: { value: "Sweep the queue." },
@@ -181,14 +275,14 @@ describe("the workspace's routines", () => {
 				},
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(routinePage(morningBrief)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(threadPage(morningBrief)));
 	});
 
 	it("makes a routine that runs at several times on the last day of every third month", async () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		mount("/suga/settings/routines/new");
+		mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Quarter close" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
@@ -234,11 +328,39 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("starts a routine made from a bot's settings on that bot", async () => {
-		mount(`/suga/settings/routines/new?agent=${researcher.id}`);
+	it("makes a routine begun from a bot's routines for that bot, with no other to choose", async () => {
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: churnReport.routine, secrets: [] }),
+		);
+		mount(`/suga/pods/${sales.slug}/routines/new?bot=${researcher.handle}`);
 
-		const bot = await screen.findByRole("button", { name: /^Bot(?!s\b)/ });
-		expect(within(bot).getByText(researcher.name)).toBeDefined();
+		expect(await screen.findByText(researcher.name, { selector: "main *" })).toBeDefined();
+		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
+		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Pipeline check" } });
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
+			target: { value: "Check the pipeline." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Create routine" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({ params: { agentId: researcher.id } }),
+			),
+		);
+	});
+
+	it("goes back to the bot's routines when a routine being made is cancelled", async () => {
+		const router = mount(`/suga/pods/${sales.slug}/routines/new?bot=${researcher.handle}`);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/pods/${sales.slug}/routines`),
+		);
+		expect(router.state.location.search).toEqual({ bot: researcher.handle });
+		expect(client.api.routines.create).not.toHaveBeenCalled();
 	});
 
 	it("makes a webhook with the secret typed for it, which its page shows", async () => {
@@ -249,8 +371,8 @@ describe("the workspace's routines", () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
-		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
-		mount("/suga/settings/routines/new");
+		serveRoutine(webhook);
+		const router = mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
@@ -286,7 +408,10 @@ describe("the workspace's routines", () => {
 				}),
 			),
 		);
-		await openTrigger(/^Webhook/);
+		// Made, it opens its thread; its panel beside it has the address and the secret.
+		await waitFor(() => expect(router.state.location.pathname).toBe(threadPage(webhook)));
+		const panel = await showPanel();
+		fireEvent.click(await within(panel).findByRole("button", { name: /^Webhook/ }));
 		expect(
 			await screen.findByText(new RegExp(`/hooks/triggers/${webhook.routine.id}$`)),
 		).toBeDefined();
@@ -300,7 +425,7 @@ describe("the workspace's routines", () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		mount("/suga/settings/routines/new");
+		mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Stripe events" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
@@ -340,7 +465,7 @@ describe("the workspace's routines", () => {
 		client.api.routines.updateTrigger.mockReturnValue(
 			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
 		expect(await screen.findByText(/Send the key in the X-API-Key header\./)).toBeDefined();
@@ -371,7 +496,7 @@ describe("the workspace's routines", () => {
 		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.routines.rotateSecret.mockReturnValue(Effect.succeed({ secret: null }));
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
 		const secret = await screen.findByLabelText("Signing secret");
@@ -398,7 +523,7 @@ describe("the workspace's routines", () => {
 		client.api.routines.rotateSecret.mockReturnValue(
 			Effect.succeed({ secret: "8f742231b10e8888abcd99yyyzzz85a5" }),
 		);
-		mount(routinePage(slack));
+		await openPanel(slack);
 		await openTrigger(/^Webhook/);
 
 		expect(await screen.findByText(/Request URL, and paste its Signing Secret\./)).toBeDefined();
@@ -429,7 +554,7 @@ describe("the workspace's routines", () => {
 			auth: { kind: "api_key", header: "X-API-Key" },
 		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
 		const key = await screen.findByLabelText("Key");
@@ -447,80 +572,6 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("shows a routine's latest runs: how each went, what started it, and how long it took", async () => {
-		const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
-		const run = (
-			n: number,
-			fields: Pick<RoutineExecution, "trigger" | "state"> & Partial<RoutineExecution>,
-		): RoutineExecution => ({
-			id: `0199a3a0-0000-7000-8000-0000000003${n}0`,
-			conversationId: "0199a3a0-0000-7000-8000-000000000350",
-			routineId: morningBrief.routine.id,
-			workspaceId: linear.workspaceId,
-			agentId: linear.id,
-			threadId: `0199a3a0-0000-7000-8000-0000000003${n}1`,
-			routineName: "Morning brief",
-			instructions: "Brief us.",
-			error: null,
-			acceptedAt: at(60 * n),
-			startedAt: at(60 * n),
-			finishedAt: null,
-			...fields,
-		});
-		const manual = (userId: string) => ({
-			kind: "manual" as const,
-			requestedAt: at(0),
-			requestedByUserId: userId,
-			requestId: "0199a3a0-0000-7000-8000-0000000003ff",
-		});
-		client.api.routines.executions.mockReturnValue(
-			Effect.succeed({
-				items: [
-					run(1, { trigger: manual(sam.id), state: "running" }),
-					run(2, {
-						trigger: manual(jye.id),
-						state: "completed",
-						startedAt: at(120),
-						finishedAt: at(106),
-					}),
-					run(3, {
-						trigger: { kind: "cron", scheduledAt: at(180), acceptedAt: at(180) },
-						state: "failed",
-						error: "HubSpot timed out",
-						finishedAt: at(170),
-					}),
-				],
-				nextCursor: null,
-			}),
-		);
-		mount(routinePage(morningBrief));
-
-		const runs = await screen.findByRole("region", { name: "Recent runs" });
-		const [running, completed, failed] = within(runs).getAllByRole("link");
-		expect(within(running as HTMLElement).getByText("Run by you")).toBeDefined();
-		expect(within(running as HTMLElement).getByText("Running…")).toBeDefined();
-		expect(within(running as HTMLElement).getByText(/^Today, /)).toBeDefined();
-		expect(within(completed as HTMLElement).getByText("Run by Jye")).toBeDefined();
-		expect(within(completed as HTMLElement).getByText("14s")).toBeDefined();
-		expect(within(failed as HTMLElement).getByText("HubSpot timed out")).toBeDefined();
-		expect(within(failed as HTMLElement).getByRole("img", { name: "Failed" })).toBeDefined();
-		const href = completed?.getAttribute("href") ?? "";
-		expect(href).toContain("/suga/activity/");
-		expect(href).toContain("threadPage=0199a3a0-0000-7000-8000-000000000321");
-		expect(client.api.routines.executions).toHaveBeenCalledWith(
-			expect.objectContaining({
-				params: { agentId: linear.id, routineId: morningBrief.routine.id },
-				query: { limit: 5 },
-			}),
-		);
-	});
-
-	it("says a routine that has never run can be tried with Run now", async () => {
-		mount(routinePage(morningBrief));
-
-		expect(await screen.findByText("No runs yet. Run now to try it.")).toBeDefined();
-	});
-
 	it("duplicates a routine, paused and with a name of its own, then opens the copy", async () => {
 		const copyOf = (n: number, name: string): WorkspaceRoutine => ({
 			...morningBrief,
@@ -533,15 +584,13 @@ describe("the workspace's routines", () => {
 		});
 		const firstCopy = copyOf(1, "Morning brief copy");
 		const secondCopy = copyOf(2, "Morning brief copy 2");
-		let items = [morningBrief, firstCopy];
-		client.api.routines.listInWorkspace.mockImplementation(() => Effect.succeed({ items }));
-		client.api.routines.create.mockImplementation(() => {
-			items = [...items, secondCopy];
-			return Effect.succeed({ routine: secondCopy.routine, secrets: [] });
-		});
-		const router = mount(routinePage(morningBrief));
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: secondCopy.routine, secrets: [] }),
+		);
+		// Its bot already has one copy, so this one takes the next name.
+		const { router, panel } = await openPanel(morningBrief, [firstCopy.routine]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "More" }));
+		fireEvent.click(within(panel).getByRole("button", { name: "More for Morning brief" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
 
 		await waitFor(() =>
@@ -562,16 +611,16 @@ describe("the workspace's routines", () => {
 				},
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(routinePage(secondCopy)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(threadPage(secondCopy)));
 	});
 
-	it("turns a routine back on from its page", async () => {
+	it("turns a routine back on from its panel", async () => {
 		client.api.routines.update.mockReturnValue(
 			Effect.succeed({ routine: { ...churnReport.routine, state: "enabled" }, secrets: [] }),
 		);
-		mount(routinePage(churnReport));
+		const { panel } = await openPanel(churnReport);
 
-		const on = await screen.findByRole("switch", { name: "On" });
+		const on = within(panel).getByRole("switch", { name: "Routine on" });
 		expect(on.getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(on);
 
@@ -591,7 +640,7 @@ describe("the workspace's routines", () => {
 				duplicate: false,
 			}),
 		);
-		mount(routinePage(churnReport));
+		await openPanel(churnReport);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Run now" }));
 
@@ -603,16 +652,19 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("saves instructions from their own page, then goes back to the routine", async () => {
+	it("saves instructions from their dialog, then closes it", async () => {
 		client.api.routines.update.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		mount(routinePage(morningBrief));
-		fireEvent.click(await screen.findByRole("button", { name: /^Instructions/ }));
-		const instructions = await screen.findByLabelText("Instructions");
-		expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
-		fireEvent.change(instructions, { target: { value: "  Brief the team.  " } });
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const { panel } = await openPanel(morningBrief);
+		fireEvent.click(within(panel).getByRole("button", { name: "Edit instructions" }));
+		const dialog = await screen.findByRole("dialog", { name: "Instructions" });
+		const save = within(dialog).getByRole("button", { name: "Save" });
+		expect(save).toHaveProperty("disabled", true);
+		fireEvent.change(within(dialog).getByLabelText("Instructions"), {
+			target: { value: "  Brief the team.  " },
+		});
+		fireEvent.click(save);
 
 		await waitFor(() =>
 			expect(client.api.routines.update).toHaveBeenCalledWith({
@@ -620,16 +672,15 @@ describe("the workspace's routines", () => {
 				payload: { instructions: "Brief the team." },
 			}),
 		);
-		fireEvent.click(screen.getByRole("button", { name: "Morning brief" }));
-		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("saves a schedule's change once it is saved, then closes", async () => {
 		client.api.routines.updateTrigger.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		mount(routinePage(morningBrief));
-		const schedule = await openTrigger(/^Weekdays at 8:00/);
+		await openPanel(morningBrief);
+		const schedule = await openTrigger(/^Schedule.*Weekdays at 8:00/);
 
 		await pickTime(1, 8 * 60 + 30);
 		await pickTime(1, 9 * 60);
@@ -661,7 +712,7 @@ describe("the workspace's routines", () => {
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		client.api.routines.removeTrigger.mockReturnValue(Effect.void);
-		mount(routinePage(morningBrief));
+		await openPanel(morningBrief);
 
 		const adding = await addTrigger("Webhook");
 		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
@@ -677,7 +728,7 @@ describe("the workspace's routines", () => {
 		);
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-		const schedule = await openTrigger(/^Weekdays at 8:00/);
+		const schedule = await openTrigger(/^Schedule.*Weekdays at 8:00/);
 		fireEvent.click(within(schedule).getByRole("button", { name: "Remove" }));
 		await waitFor(() =>
 			expect(client.api.routines.removeTrigger).toHaveBeenCalledWith({
@@ -697,8 +748,8 @@ describe("the workspace's routines", () => {
 		client.api.routines.updateTrigger.mockReturnValue(
 			Effect.succeed({ routine: hourly.routine, secrets: [] }),
 		);
-		mount(routinePage(hourly));
-		const schedule = await openTrigger(/Schedule$/);
+		await openPanel(hourly);
+		const schedule = await openTrigger(/^Schedule/);
 
 		expect(within(schedule).getByText("15 */2 * * *")).toBeDefined();
 		expect(within(schedule).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
@@ -719,17 +770,21 @@ describe("the workspace's routines", () => {
 
 	it("says when a change or a new secret fails to save", async () => {
 		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
-		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.routines.update.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
 		);
 		client.api.routines.rotateSecret.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Rotation unavailable` })),
 		);
-		mount(routinePage(webhook));
+		const { panel } = await openPanel(webhook);
 
-		fireEvent.click(await screen.findByRole("switch", { name: "On" }));
-		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
+		// Pausing goes through the thread's controls, a change through the panel's own: both say why.
+		fireEvent.click(within(panel).getByRole("switch", { name: "Routine on" }));
+		expect((await within(panel).findByRole("alert")).textContent).toContain("Update unavailable");
+		fireEvent.click(
+			within(panel).getByRole("switch", { name: "Also post result in the pod's channel" }),
+		);
+		await waitFor(() => expect(within(panel).getAllByRole("alert")).toHaveLength(2));
 
 		await openTrigger(/^Webhook/);
 		const token = await screen.findByLabelText("Token");
@@ -745,11 +800,11 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("deletes a routine after asking, then goes back to the list", async () => {
+	it("deletes a routine after asking, then goes back to its bot's routines", async () => {
 		client.api.routines.remove.mockReturnValue(Effect.void);
-		const router = mount(routinePage(morningBrief));
+		const { router, panel } = await openPanel(morningBrief);
 
-		fireEvent.click(await screen.findByRole("button", { name: "More" }));
+		fireEvent.click(within(panel).getByRole("button", { name: "More for Morning brief" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete routine" }));
 		const confirm = await screen.findByRole("dialog", { name: "Delete Morning brief?" });
 		expect(client.api.routines.remove).not.toHaveBeenCalled();
@@ -760,7 +815,10 @@ describe("the workspace's routines", () => {
 				params: { agentId: linear.id, routineId: morningBrief.routine.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/routines"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/pods/${suga.slug}/routines`),
+		);
+		expect(router.state.location.search).toEqual({ bot: linear.handle });
 	});
 
 	it("shows a routine its viewer may not manage without a way to change it", async () => {
@@ -772,19 +830,20 @@ describe("the workspace's routines", () => {
 				})),
 			),
 		);
-		mount(routinePage(morningBrief));
+		const { panel } = await openPanel(morningBrief);
 
-		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "More" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: "Run now" })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: /^More for / })).toBeNull();
+		expect(screen.queryByRole("link", { name: "New routine" })).toBeNull();
+		expect(within(panel).getByRole("switch", { name: "Routine on" })).toHaveProperty(
+			"disabled",
+			true,
+		);
 
-		expect(screen.getByText("Weekdays at 8:00")).toBeDefined();
-		expect(screen.queryByRole("button", { name: /^Weekdays at 8:00/ })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Add trigger" })).toBeNull();
-
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(true);
-		expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+		expect(within(panel).getByText("Weekdays at 8:00")).toBeDefined();
+		expect(within(panel).queryByRole("button", { name: /^Schedule/ })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: "Add trigger" })).toBeNull();
+		expect(within(panel).getByText(morningBrief.routine.instructions)).toBeDefined();
+		expect(within(panel).queryByRole("button", { name: "Edit instructions" })).toBeNull();
 	});
 });

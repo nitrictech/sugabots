@@ -242,6 +242,7 @@ export const agents: Agent[] = [
 		disabledTools: [],
 		usesSandbox: false,
 		naturalBrowsing: false,
+		createdById: null,
 		podId: pods[1]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -260,6 +261,7 @@ export const agents: Agent[] = [
 		disabledTools: [],
 		usesSandbox: false,
 		naturalBrowsing: false,
+		createdById: null,
 		podId: pods[0]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -278,6 +280,7 @@ export const agents: Agent[] = [
 		disabledTools: [],
 		usesSandbox: false,
 		naturalBrowsing: false,
+		createdById: sam.id,
 		podId: pods[0]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -302,6 +305,7 @@ export const personalAssistant: Agent = {
 	disabledTools: [],
 	usesSandbox: false,
 	naturalBrowsing: false,
+	createdById: null,
 	podId: personalPod.id,
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
@@ -537,6 +541,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 	client.api.modelProviders.list.mockReturnValue(Effect.succeed(modelProviders));
 	client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: true }));
+	// No computers, unless a case sets one up.
+	client.api.sandboxProviders.access.mockReturnValue(Effect.succeed({ enabled: false }));
 	client.api.modelProviders.listEnabledModels.mockReturnValue(
 		Effect.succeed({
 			models: MODELS.map((modelId) => ({

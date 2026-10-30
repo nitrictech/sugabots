@@ -45,6 +45,7 @@ const placeholder = {
 	disabledTools: [],
 	usesSandbox: false,
 	naturalBrowsing: false,
+	createdById: null,
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 const enabledModel = {

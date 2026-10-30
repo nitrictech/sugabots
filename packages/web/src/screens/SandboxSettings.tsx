@@ -12,31 +12,44 @@ import {
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
 } from "@sugabots/contracts";
+import { Link } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { Check } from "lucide-react";
 import { useId, useState } from "react";
+import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
+import { usePods } from "@/lib/pods.ts";
 import {
 	usePrepareSandboxTemplate,
 	useSandboxProviderActions,
 	useSandboxProviders,
 	useSandboxTemplate,
 } from "@/lib/sandbox-providers.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
-import { SettingsGroup, SettingsRow, SettingsRowIcon, SettingsValue } from "@/ui/settings-page.tsx";
+import {
+	SETTINGS_CARD,
+	SETTINGS_RADIO_ROW,
+	SettingsGroup,
+	SettingsRadioMark,
+	SettingsRow,
+	SettingsRowIcon,
+	SettingsValue,
+} from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
- * The workspace's sandbox settings, experimental: a switch for whether bots
- * get a Linux machine per pod to run commands on, which provider makes those
- * machines, and that provider's account. A workspace may keep a provider
- * configured for each preset; the switch enables the chosen one, which
- * disables any other.
+ * The workspace's computers, experimental: a switch for whether bots get a
+ * Linux computer per pod to run commands on, which provider makes those
+ * computers, that provider's account, what the computers may reach, and the
+ * bots using one. A workspace may keep a provider configured for each preset;
+ * the switch enables the chosen one, which disables any other. Code calls a
+ * computer a sandbox; people read "computer".
  */
 
 const networkModes: readonly { value: SandboxNetworkMode; label: string }[] = [
@@ -103,28 +116,32 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 		);
 	}
 
+	const settings: SandboxProviderSettings = configured?.settings ?? { preset: chosen };
+
 	return (
 		<>
-			<Note>
-				Sandboxes are experimental. How they work, and what they keep, may change between releases.
+			<Note className="-mt-6 rounded-xl border border-settings-card-border bg-settings-card text-[13px]">
+				Computers are experimental. How they work, and what they keep, may change between releases.
 			</Note>
 			<SettingsGroup
 				note={
-					!ready
-						? `${preset.name} needs an API key first. Add it below.`
-						: enabled && enabled.preset !== chosen
-							? `Turning this on moves sandboxes from ${enabled.name} to ${preset.name}. Each pod gets a new one, without the old one's files.`
-							: undefined
+					ready && enabled && enabled.preset !== chosen
+						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each pod gets a new one, without the old one's files.`
+						: undefined
 				}
 			>
 				<SettingsRow
-					label="Bots can use a sandbox"
-					sub="A Linux machine for each pod, to run commands and edit files"
+					label={<span className="font-medium">Bots can use a computer</span>}
+					sub={
+						ready
+							? "Each pod gets its own private computer"
+							: `${preset.name} needs an API key first. Add it below.`
+					}
 					trailing={
 						<Toggle
 							checked={enabled?.preset === chosen}
 							disabled={!ready || pending}
-							label="Bots can use a sandbox"
+							label="Bots can use a computer"
 							onChange={(next) => void switchTo(next)}
 						/>
 					}
@@ -157,8 +174,69 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 				}}
 			/>
 			{error && <Alert>{error}</Alert>}
-			<SandboxNetworkSection />
+			<SandboxNetworkSection
+				modeRow={
+					<SettingsRow
+						label={
+							<span className="font-medium">
+								{(settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT) === "allowlist"
+									? "Allowlist"
+									: "Open"}
+							</span>
+						}
+						sub={networkSummary(settings)}
+						trailing={
+							<SegmentedControl
+								label="Network"
+								options={networkModes}
+								value={settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT}
+								disabled={pending}
+								onChange={(networkMode) =>
+									void configure({ settings: { ...settings, networkMode } })
+								}
+							/>
+						}
+					/>
+				}
+			/>
+			<BotsUsingAComputer />
 		</>
+	);
+}
+
+/**
+ * The bots with their computer switched on, each opening its own settings,
+ * where that switch is. A bot can have one only while the workspace does, so
+ * the list says so when there is none.
+ */
+function BotsUsingAComputer() {
+	const { agents } = useAgents();
+	const { data: pods } = usePods();
+	const podById = new Map(pods?.map((pod) => [pod.id, pod]));
+	const using = (agents ?? []).flatMap((agent) => {
+		const pod = podById.get(agent.podId);
+		return agent.usesSandbox && agent.systemAgentKey === null && pod ? [{ agent, pod }] : [];
+	});
+	if (!agents || !pods) return null;
+	return (
+		<SettingsGroup
+			label="Bots using a computer"
+			note="Switch a computer on or off in each bot's settings."
+		>
+			{using.length === 0 && (
+				<SettingsRow label={<span className="text-muted-foreground">None yet</span>} />
+			)}
+			{using.map(({ agent, pod }) => (
+				<SettingsRow
+					key={agent.id}
+					icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />}
+					label={agent.name}
+					sub={pod.name}
+					chevron
+					render={<Link {...agentSettingsLink({ pod, agent })} />}
+				/>
+			))}
+		</SettingsGroup>
 	);
 }
 
@@ -177,13 +255,12 @@ function ProviderChoice({
 	const name = useId();
 	return (
 		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-1 pb-2 font-medium text-sm text-subtle-foreground">Provider</legend>
-			<div className="overflow-hidden rounded-panel bg-list">
+			<legend className="px-0.5 pb-2.5 font-medium text-[13px] text-muted-foreground">
+				Provider
+			</legend>
+			<div className={SETTINGS_CARD}>
 				{sandboxProviderCatalog.map((candidate) => (
-					<label
-						key={candidate.id}
-						className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-panel has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default"
-					>
+					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
 						<input
 							type="radio"
 							name={name}
@@ -193,20 +270,18 @@ function ProviderChoice({
 							className="sr-only"
 						/>
 						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
-						<span className="flex min-w-0 flex-1 flex-col gap-px">
-							<span className="truncate font-medium text-[14.5px] text-foreground">
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
+							<span className="truncate font-medium text-[13px] text-foreground">
 								{candidate.name}
 								{candidate.id === enabled && (
-									<span className="ml-2 font-normal text-muted-foreground text-sm">In use</span>
+									<span className="ml-2 font-normal text-subtle-foreground text-xs">In use</span>
 								)}
 							</span>
-							<span className="truncate text-muted-foreground text-sm">
+							<span className="text-pretty text-subtle-foreground text-xs">
 								{providerDescriptions[candidate.id]}
 							</span>
 						</span>
-						{candidate.id === chosen && (
-							<Check aria-hidden size={16} strokeWidth={2.4} className="shrink-0 text-link" />
-						)}
+						<SettingsRadioMark checked={candidate.id === chosen} />
 					</label>
 				))}
 			</div>
@@ -214,7 +289,7 @@ function ProviderChoice({
 	);
 }
 
-/** The chosen provider's account: where it is, its key, what sandboxes are made from. */
+/** The chosen provider's account: where it is, its key, what computers are made from. */
 function ProviderSettings({
 	chosen,
 	provider,
@@ -295,7 +370,7 @@ function ProviderSettings({
 						}
 					/>
 					<TextEntryRow
-						label="Sandbox URL"
+						label="Computer URL"
 						saved={settings.sandboxUrl}
 						placeholder="E2B Cloud"
 						disabled={pending}
@@ -336,19 +411,6 @@ function ProviderSettings({
 					/>
 				</>
 			)}
-			<SettingsRow
-				label="Network"
-				sub={networkSummary(settings)}
-				trailing={
-					<SegmentedControl
-						label="Network"
-						options={networkModes}
-						value={settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT}
-						disabled={pending}
-						onChange={(networkMode) => void onConfigure({ settings: { ...settings, networkMode } })}
-					/>
-				}
-			/>
 			{chosen === "e2b" && provider && hasKey && <TemplateRow providerId={provider.id} />}
 			{provider && hasKey && (
 				<SettingsRow
@@ -360,7 +422,7 @@ function ProviderSettings({
 			{provider && (
 				<SettingsRow
 					label={`Remove ${preset.name}`}
-					sub="Removes its sandboxes and settings."
+					sub="Removes its computers and settings."
 					onClick={pending ? undefined : () => setRemoving(true)}
 				/>
 			)}
@@ -368,7 +430,7 @@ function ProviderSettings({
 				open={removingKey}
 				onOpenChange={setRemovingKey}
 				title={`Remove the ${preset.name} key?`}
-				description="Bots stop getting sandboxes from this provider until another key is added."
+				description="Bots stop getting computers from this provider until another key is added."
 				confirmLabel="Remove"
 				pending={pending}
 				onDelete={async () => {
@@ -385,7 +447,7 @@ function ProviderSettings({
 				title={`Remove ${preset.name}?`}
 				description={
 					removeError ??
-					"Every pod's sandbox at this provider is destroyed, with its files, including work that wasn't pushed."
+					"Every pod's computer at this provider is destroyed, with its files, including work that wasn't pushed."
 				}
 				confirmLabel="Remove"
 				pending={pending}
@@ -403,8 +465,8 @@ function ProviderSettings({
 }
 
 /**
- * E2B makes sandboxes from a template, built in the workspace's own E2B
- * account from Sugabots' sandbox image. Until it is, sandboxes can't be made;
+ * E2B makes computers from a template, built in the workspace's own E2B
+ * account from Sugabots' computer image. Until it is, computers can't be made;
  * once it is, it can be rebuilt to take a newer image.
  */
 function TemplateRow({ providerId }: { providerId: string }) {
@@ -427,12 +489,12 @@ function TemplateRow({ providerId }: { providerId: string }) {
 					: template.error
 						? failureMessage(template.error)
 						: state === "ready"
-							? "Ready. Rebuilding takes Sugabots' latest image, which pods' sandboxes move to when upgraded."
+							? "Ready. Rebuilding takes Sugabots' latest image, which pods' computers move to when upgraded."
 							: state === "building"
 								? "Building in your E2B account. This takes a few minutes."
 								: state === "failed"
 									? "The last build failed. Try again."
-									: "Builds Sugabots' sandbox image into a template in your E2B account."
+									: "Builds Sugabots' computer image into a template in your E2B account."
 			}
 			trailing={
 				state === "ready" || state === "building" ? (
@@ -444,7 +506,7 @@ function TemplateRow({ providerId }: { providerId: string }) {
 	);
 }
 
-/** What the provider's sandboxes reach. E2B can't refuse hosts by name, so open, it blocks nothing. */
+/** What the provider's computers reach. E2B can't refuse hosts by name, so open, it blocks nothing. */
 function networkSummary(settings: SandboxProviderSettings): string {
 	if ((settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT) === "allowlist") {
 		return "Only the hosts allowed";
@@ -457,7 +519,7 @@ function networkSummary(settings: SandboxProviderSettings): string {
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
 		? "The server's own API key, from its configuration. Leave the image empty to use the default."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's sandbox is reset.";
+		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's computer is reset.";
 }
 
 /** A number typed into a row, or undefined when the row was emptied. */

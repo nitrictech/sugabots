@@ -23,7 +23,7 @@ import {
 	useWorkspaceInvitations,
 	useWorkspaceMembers,
 } from "@/lib/workspace.ts";
-import { PodTile } from "@/shell/PodTile.tsx";
+import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -40,6 +40,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	PageBackLink,
+	SettingsAddButton,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -140,9 +141,13 @@ function Roster({
 
 	return (
 		<SettingsPage
-			title="Members"
-			description="People who can see pods and talk to their bots."
-			headerAction={canManage && <Button onClick={() => setInviting(true)}>Invite people</Button>}
+			title="People"
+			description="Everyone in the workspace. Add them to pods to give them bots."
+			headerAction={
+				canManage && (
+					<SettingsAddButton onClick={() => setInviting(true)}>Invite people</SettingsAddButton>
+				)
+			}
 		>
 			{members.isPending ? (
 				<p className="m-0 text-md text-muted-foreground">Loading members…</p>
@@ -153,14 +158,12 @@ function Roster({
 					{members.data?.map((member) => (
 						<SettingsRow
 							key={member.id}
-							icon={<PersonAvatar person={member.user} size={32} />}
-							label={member.user.name}
-							sub={member.user.email}
-							trailing={
-								<SettingsValue>
-									{member.user.id === currentUserId ? "You" : workspaceRoleLabel(member.role)}
-								</SettingsValue>
+							icon={<PersonAvatar person={member.user} size={24} />}
+							label={
+								member.user.id === currentUserId ? `${member.user.name} (you)` : member.user.name
 							}
+							sub={member.user.email}
+							trailing={<SettingsValue>{workspaceRoleLabel(member.role)}</SettingsValue>}
 							chevron
 							render={
 								<Link
@@ -328,7 +331,7 @@ function MemberPage({
 	return (
 		<SettingsPage
 			back={<PageBackLink {...back} />}
-			hero={<PersonAvatar person={member.user} size={88} />}
+			hero={<PersonAvatar person={member.user} size={44} />}
 			title={member.user.name}
 			description={member.user.email}
 		>
@@ -400,9 +403,16 @@ function MemberPage({
 				</SettingsGroup>
 			)}
 			{(mayLeave || mayManageThem) && (
-				<SettingsDanger onClick={() => setConfirming(true)}>
-					{isYou ? "Leave workspace" : "Remove from workspace"}
-				</SettingsDanger>
+				<SettingsDanger
+					label={isYou ? "Leave workspace" : "Remove from workspace"}
+					description={
+						isYou
+							? "You lose access to every pod in the workspace."
+							: "They lose access to every pod straight away."
+					}
+					action={isYou ? "Leave" : "Remove"}
+					onClick={() => setConfirming(true)}
+				/>
 			)}
 			<DeleteDialog
 				open={transferring}
@@ -471,7 +481,7 @@ function PodMembershipRow({
 
 	return (
 		<SettingsRow
-			icon={<PodTile bots={bots} color={pod.color} size={30} />}
+			icon={<PodInitial pod={pod} className="size-7 rounded-[7px] text-xs" />}
 			label={pod.name}
 			sub={place.error ? failureMessage(place.error) : counts.join(", ")}
 			trailing={
@@ -541,7 +551,7 @@ function InviteDialog({
 					placeholder="Email addresses, separated by commas"
 					disabled={sending}
 					autoComplete="off"
-					className="focus-ring w-full rounded-panel bg-list px-4 py-3.5 text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground"
+					className="focus-ring w-full rounded-xl border border-settings-card-border bg-settings-card px-4 py-3.5 text-[13px] text-foreground leading-5 outline-none placeholder:text-muted-foreground"
 				/>
 				<SettingsGroup note={workspaceRoleDescription(role)}>
 					<SettingsRow

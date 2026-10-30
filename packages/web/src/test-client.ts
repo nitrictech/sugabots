@@ -100,6 +100,9 @@ export const client = {
 			remove: vi.fn(),
 			test: vi.fn(),
 		},
+		sandboxProviders: {
+			access: vi.fn(),
+		},
 		connections: {
 			list: vi.fn(),
 			create: vi.fn(),

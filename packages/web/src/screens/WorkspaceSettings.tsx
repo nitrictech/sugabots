@@ -1,8 +1,15 @@
-import { USER_NAME_MAX_LENGTH, type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
+import {
+	type Agent,
+	type Pod,
+	USER_NAME_MAX_LENGTH,
+	type WorkspaceRole,
+	workspaceRoleLabel,
+} from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
@@ -14,7 +21,7 @@ import {
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
-import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
+import type { PodSettingsPage, WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -28,33 +35,34 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
-import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
 import { WorkspacePodsSettings } from "./WorkspacePodsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
-	selectedAgentId,
+	selectedAgent,
 	selectedPodId,
+	podPage,
 	selectedConnectionId,
 	connectionSignInError,
 	selectedProviderId,
 	modelChoice,
 	selectedMemberId,
-	selectedRoutineId,
-	newRoutine,
 }: {
 	section: WorkspaceSettingSection;
-	selectedAgentId?: string;
+	/** A bot open on its own page, in place of its pod's. */
+	selectedAgent?: { agent: Agent; pod: Pod };
 	selectedPodId?: string;
+	/** Which of the selected pod's pages is open. */
+	podPage?: PodSettingsPage;
 	/** The connection of the selected pod open on its own page. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
@@ -64,10 +72,6 @@ export function WorkspaceSettings({
 	modelChoice?: "default" | "system";
 	/** The membership open on the Members page. */
 	selectedMemberId?: string;
-	/** The routine open on the Routines page. */
-	selectedRoutineId?: string;
-	/** A routine being made on the Routines page, for the bot chosen already, if one is. */
-	newRoutine?: { agentId: string | undefined };
 }) {
 	const { workspace, isPending } = useWorkspace();
 	const session = useSession();
@@ -89,20 +93,19 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : section === "agents" ? (
-				<WorkspaceAgentsSettings selectedAgentId={selectedAgentId} />
+			) : selectedAgent ? (
+				<AgentSettingsPage
+					key={selectedAgent.agent.id}
+					agent={selectedAgent.agent}
+					pod={selectedAgent.pod}
+				/>
 			) : section === "pods" ? (
 				<WorkspacePodsSettings
 					selectedPodId={selectedPodId}
+					podPage={podPage}
 					selectedConnectionId={selectedConnectionId}
 					connectionSignInError={connectionSignInError}
 					canCreatePods={may.createPods}
-				/>
-			) : section === "routines" ? (
-				<WorkspaceRoutinesSettings
-					workspaceId={workspace.id}
-					selectedRoutineId={selectedRoutineId}
-					newRoutine={newRoutine}
 				/>
 			) : (
 				<>
@@ -126,7 +129,10 @@ export function WorkspaceSettings({
 						/>
 					)}
 					{section === "search" && (
-						<SettingsPage title="Web search" description="How bots look things up online.">
+						<SettingsPage
+							title="Web search"
+							description="Lets bots look things up and cite the pages they used."
+						>
 							{may.manageProviders ? (
 								<WebSearchSettings />
 							) : (
@@ -135,11 +141,14 @@ export function WorkspaceSettings({
 						</SettingsPage>
 					)}
 					{section === "sandboxes" && (
-						<SettingsPage title="Sandboxes" description="Where bots run commands and edit files.">
+						<SettingsPage
+							title="Computers"
+							description="Give bots their own computer to run commands, browse and edit files."
+						>
 							{may.manageProviders ? (
 								<SandboxSettings />
 							) : (
-								<Alert>Only workspace administrators can manage sandboxes.</Alert>
+								<Alert>Only workspace administrators can manage computers.</Alert>
 							)}
 						</SettingsPage>
 					)}
@@ -162,6 +171,16 @@ export function WorkspaceSettings({
 	);
 }
 
+/** What General says the workspace holds, once both counts have loaded. */
+function workspaceSummary(
+	people: number | undefined,
+	pods: number | undefined,
+): string | undefined {
+	if (people === undefined || pods === undefined) return undefined;
+	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+	return `Workspace with ${plural(people, "member")} and ${plural(pods, "pod")}`;
+}
+
 function GeneralSettings({
 	role,
 	canUpdate,
@@ -173,6 +192,7 @@ function GeneralSettings({
 }) {
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const { data: pods } = usePods();
 	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
 	// Loaded with the page, so the dialog opens with its routines note already in place.
 	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
@@ -180,7 +200,6 @@ function GeneralSettings({
 	const deleteWorkspace = useDeleteWorkspace();
 	const navigate = useNavigate();
 	if (!workspace) return null;
-	const people = members?.length;
 
 	async function confirmDelete(workspaceId: string) {
 		try {
@@ -192,24 +211,12 @@ function GeneralSettings({
 	}
 
 	return (
-		<SettingsPage
-			hero={
-				<span
-					aria-hidden
-					className="grid size-[88px] place-items-center rounded-[26px] bg-foreground font-extrabold text-[34px] text-background"
-				>
-					{workspace.name.trim().charAt(0).toUpperCase()}
-				</span>
-			}
-			title={workspace.name}
-			description={
-				people === undefined ? undefined : `${people} ${people === 1 ? "member" : "members"}`
-			}
-		>
-			<SettingsGroup label="Workspace">
+		<SettingsPage title="General" description={workspaceSummary(members?.length, pods?.length)}>
+			<SettingsGroup>
 				<SettingsRow label="Name" trailing={<SettingsValue>{workspace.name}</SettingsValue>} />
 				<SettingsRow
 					label="Time zone"
+					sub="Routines run on this clock"
 					trailing={<SettingsValue>{workspace.timeZone}</SettingsValue>}
 					chevron={canUpdate}
 					onClick={canUpdate ? () => setChoosingTimeZone(true) : undefined}
@@ -227,14 +234,14 @@ function GeneralSettings({
 					onOpenChange={setChoosingTimeZone}
 				/>
 			)}
-			<SettingsGroup label="Appearance">
-				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
-			</SettingsGroup>
 			{canDelete && (
 				<>
-					<SettingsDanger onClick={() => setConfirmingDelete(true)}>
-						Delete workspace
-					</SettingsDanger>
+					<SettingsDanger
+						label="Delete workspace"
+						description={`Removes every pod, bot and thread in ${workspace.name}.`}
+						action="Delete"
+						onClick={() => setConfirmingDelete(true)}
+					/>
 					<DeleteDialog
 						open={confirmingDelete}
 						onOpenChange={setConfirmingDelete}
@@ -270,7 +277,7 @@ function ProfileSettings() {
 
 	return (
 		<SettingsPage
-			hero={<PersonAvatar person={user} size={88} />}
+			hero={<PersonAvatar person={user} size={44} />}
 			title={user.name}
 			description={user.email}
 		>
@@ -284,8 +291,16 @@ function ProfileSettings() {
 				/>
 				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
 			</SettingsGroup>
+			<SettingsGroup label="Appearance">
+				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
+			</SettingsGroup>
 			<ReferralLinkSettings />
-			<SettingsDanger onClick={() => void signOut()}>Sign out</SettingsDanger>
+			<SettingsDanger
+				label="Sign out"
+				description="Signs you out on this device."
+				action="Sign out"
+				onClick={() => void signOut()}
+			/>
 		</SettingsPage>
 	);
 }
@@ -328,7 +343,7 @@ function ReferralLinkSettings() {
 							setCopied(false);
 							reset.mutate();
 						}}
-						className="rounded-md px-1 py-0.5 text-sm"
+						className="rounded-md px-1 py-0.5 text-xs"
 					>
 						<RotateCcw aria-hidden />
 						{reset.isPending ? "Resetting…" : "Reset link"}
@@ -337,13 +352,13 @@ function ReferralLinkSettings() {
 			}
 		>
 			<div className="flex flex-col gap-1">
-				<h3 className="m-0 font-semibold text-[15px] text-foreground">Share your invite link</h3>
-				<p className="m-0 text-muted-foreground text-sm">
+				<h3 className="m-0 font-medium text-[14px] text-foreground">Share your invite link</h3>
+				<p className="m-0 text-muted-foreground text-xs">
 					Anyone with it can sign up and get a workspace of their own.
 				</p>
 			</div>
-			<div className="flex min-w-0 items-center gap-3 rounded-[12px] bg-background py-1.5 pr-1.5 pl-3.5">
-				<span className="min-w-0 flex-1 truncate font-mono text-[14px] text-foreground">
+			<div className="flex h-11 min-w-0 items-center gap-2.5 rounded-lg border border-settings-card-border bg-background pr-1.5 pl-3.5">
+				<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
 					{withoutScheme(link)}
 				</span>
 				<Button

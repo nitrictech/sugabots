@@ -6,7 +6,7 @@ import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import { useActivityFeed, useAttentionCounts, useMarkChatsRead } from "@/lib/chats.ts";
 import { activityThreadLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { usePaneWidth } from "@/lib/pane-width.ts";
+import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { usePods } from "@/lib/pods.ts";
 import {
 	type ActivityState,
@@ -27,9 +27,6 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-
-/** How narrow the list can be dragged, in pixels. */
-const LIST_MIN_WIDTH_PX = 280;
 
 /** A kind of item in the feed, which the filter can narrow Inbox to. */
 type Kind = ActivityItem["kind"];

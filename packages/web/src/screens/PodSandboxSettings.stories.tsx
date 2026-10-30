@@ -140,7 +140,7 @@ export const NoneYet = meta.story({
 		msw.use(answers({ sandbox: { kind: "none" }, providerEnabled: true, canManage: true }));
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("No sandbox yet")).toBeVisible();
+		await expect(await canvas.findByText("No computer yet")).toBeVisible();
 	},
 });
 

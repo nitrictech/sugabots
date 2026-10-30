@@ -52,14 +52,14 @@ export function TextEntryRow({
 
 	return (
 		<div className="flex min-h-12 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label htmlFor={id} className="w-[82px] shrink-0 text-[14.5px] text-foreground">
+			<label htmlFor={id} className="w-[82px] shrink-0 text-[13px] text-foreground">
 				{label}
 			</label>
 			{showingSecret ? (
 				<>
 					<span
 						id={id}
-						className="min-w-0 flex-1 truncate font-mono text-[13.5px] text-muted-foreground"
+						className="min-w-0 flex-1 truncate font-mono text-[13px] text-muted-foreground"
 					>
 						{savedKeyMask}
 					</span>
@@ -100,7 +100,7 @@ export function TextEntryRow({
 							setReplacing(false);
 						}
 					}}
-					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			)}
 		</div>

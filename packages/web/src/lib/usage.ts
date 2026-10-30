@@ -1,14 +1,20 @@
 import { DEFAULT_TIME_ZONE, timeZoneSchema, type UsageMonth } from "@sugabots/contracts";
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
 import { Effect, Schema } from "effect";
 import { client } from "@/api.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
-/** What the workspace's models cost over `month`, with the month and its days in the workspace's time zone. */
+/**
+ * What the workspace's models cost over `month`, with the month and its days
+ * in the workspace's time zone. While another month loads, the one before it
+ * stays as `data`, with `isPlaceholderData` set, so stepping between months
+ * never empties the page.
+ */
 export function useWorkspaceUsage(month: UsageMonth | undefined) {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["usage", workspaceId, month],
+		placeholderData: keepPreviousData,
 		queryFn:
 			workspaceId && month
 				? ({ signal }) =>

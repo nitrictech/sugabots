@@ -2,7 +2,7 @@ import type { ConnectionTool, Routine } from "@sugabots/contracts";
 import type { TestConnection } from "@sugabots/contracts/testing";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import {
@@ -150,33 +150,48 @@ const meta = preview.meta({
 });
 
 /**
- * The list of bots beside Growth Desk's contact card: its face, with the pencil
- * that changes its look, and the way to message it, about, tools and routines.
+ * Growth Desk's contact card, a page of its own under its pod's Bots: its
+ * face, with the pencil that changes its look, and the way to message it,
+ * about, tools and routines.
  */
 export const ContactCard = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("navigation", { name: "Workspace bots" })).toBeInTheDocument();
-		await expect(canvas.getByRole("link", { name: "Message" })).toHaveAttribute(
-			"href",
-			expect.stringMatching(new RegExp(`/agents/${growthDesk.handle}$`)),
+		const trail = canvas.getByRole("navigation", { name: "Breadcrumb" });
+		await expect(within(trail).getByRole("link", { name: "Bots" })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Built-in tools" })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: /^Inherited from / })).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(growthDesk.name);
+		await expect(canvas.getByRole("textbox", { name: "Description" })).toBeInTheDocument();
+		// No computers are set up for the workspace, so the bot's is off and can't be turned on.
+		await waitFor(() =>
+			expect(canvas.getByRole("switch", { name: "Turn on Computer" })).toBeDisabled(),
 		);
-		await expect(canvas.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
+		const computer = canvas.getByRole("switch", { name: "Turn on Computer" });
+		await expect(computer).toHaveAttribute("aria-checked", "false");
+		await userEvent.hover(computer);
+		// Said under its name, and again by the switch when pointed at.
+		await waitFor(() => expect(screen.getAllByText(/^Computers are off for /)).toHaveLength(2));
 	},
 });
 
-/** Look opens from the pencil on the bot's face: colour, shape and eyes, with Shuffle, Cancel and Save, which waits for a change. */
+/**
+ * The look, opened by clicking the bot's face: the bot on a faint tint of its
+ * colour, its shape, eyes and colour beside it, and Save, which waits for a
+ * change.
+ */
 export const Look = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Change look" }, { timeout: 10_000 }),
 		);
-		const dialog = await within(document.body).findByRole("dialog", { name: "Look" });
-		await expect(within(dialog).getByRole("group", { name: "Shape" })).toBeInTheDocument();
-		await expect(within(dialog).getByRole("button", { name: "Shuffle" })).toBeInTheDocument();
-		await expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: `${growthDesk.name}'s look`,
+		});
+		await expect(within(dialog).getByRole("tab", { name: "Shape" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("group", { name: "Colour" })).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 });
@@ -245,7 +260,7 @@ export const InstructionsPage = meta.story({
 	},
 });
 
-/** A bot with its pod's connections, and two routines: one on a schedule, one paused webhook. */
+/** A bot with the connections it inherits from its pod, shown but not changed here, and its two routines counted, with the way to its Routines page. */
 export const ToolsAndRoutines = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -254,11 +269,16 @@ export const ToolsAndRoutines = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: /HubSpot/ }, { timeout: 10_000 }),
-		).toBeInTheDocument();
-		await expect(await canvas.findByText("Overnight outbound")).toBeInTheDocument();
-		await expect(canvas.getByText("Inbound lead")).toBeInTheDocument();
+		const inherited = await canvas.findByRole(
+			"region",
+			{ name: /^Inherited from / },
+			{ timeout: 10_000 },
+		);
+		await expect(await within(inherited).findByText("HubSpot")).toBeInTheDocument();
+		await expect(within(inherited).queryByRole("switch")).toBeNull();
+		const routinesRow = canvas.getByRole("link", { name: /^Routines/ });
+		await waitFor(() => expect(within(routinesRow).getByText("2")).toBeInTheDocument());
+		await expect(routinesRow).toHaveAttribute("href", expect.stringMatching(/\/routines\?bot=/));
 	},
 });
 

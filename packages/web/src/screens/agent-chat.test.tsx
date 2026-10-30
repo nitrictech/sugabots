@@ -1056,6 +1056,19 @@ describe("ongoing agent Chat", () => {
 		expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
 	});
 
+	/**
+	 * The way back to the Chat a settings page was opened from: the Back above
+	 * the page on a phone. Wide, the trail and the sidebar go back instead, so
+	 * the bar is hidden there by style, which the test DOM does not apply.
+	 */
+	async function backToChat() {
+		const [back] = await within(await screen.findByRole("main")).findAllByRole("link", {
+			name: "Chat",
+		});
+		if (!back) throw new Error("No way back to the Chat");
+		return back;
+	}
+
 	it("leads from its bot's settings back to the Chat they were opened from", async () => {
 		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
 		const router = mount(chat);
@@ -1064,7 +1077,7 @@ describe("ongoing agent Chat", () => {
 
 		fireEvent.click(within(details).getByRole("link", { name: "Bot settings" }));
 		await screen.findByRole("heading", { name: linear.name });
-		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
+		fireEvent.click(await backToChat());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
@@ -1080,7 +1093,7 @@ describe("ongoing agent Chat", () => {
 				"/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1",
 			),
 		);
-		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
+		fireEvent.click(await backToChat());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
@@ -1097,7 +1110,7 @@ describe("ongoing agent Chat", () => {
 		expect(router.state.location.pathname).toBe(
 			`/suga/settings/pods/suga-team/agents/${linear.handle}`,
 		);
-		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
+		fireEvent.click(await backToChat());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
@@ -1194,6 +1207,15 @@ describe("a message opened from Activity", () => {
 		);
 		expect(screen.getByRole("link", { name: "Open thread" }).getAttribute("href")).toBe(
 			conversationPage,
+		);
+	});
+
+	it("opens a run's routine on its pod's Routines page, where it is changed, from the run's header", async () => {
+		mount(`/suga/activity/suga-team/${chat.id}?threadPage=${routineId}`);
+
+		const settings = await screen.findByRole("link", { name: "Routine settings" });
+		expect(settings.getAttribute("href")).toBe(
+			`/suga/pods/suga-team/routines/${routineExecution.routineId}`,
 		);
 	});
 

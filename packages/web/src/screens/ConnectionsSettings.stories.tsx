@@ -14,7 +14,7 @@ import { appHandlers, connectionHandlers, StoryApp, storyPods } from "../story-a
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const podPath = `/nitric/settings/pods/${revenue.slug}`;
+const podPath = `/nitric/settings/pods/${revenue.slug}/connections`;
 
 /** A connection whose tools are all at `access`. */
 function connection(
@@ -155,23 +155,18 @@ export const States = meta.story({
 		await expect(
 			within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off"),
 		).toBeInTheDocument();
+		// What its tools may do is said, and set inside the connection, not here.
+		await expect(within(github).queryByRole("button")).toBeNull();
 		await expect(
-			within(github).getByRole("button", { name: "GitHub, all tools: Custom" }),
+			within(canvas.getByRole("article", { name: "Linear" })).getByText(
+				"Every tool runs without asking",
+			),
 		).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("article", { name: "Linear" })).getByRole("button", {
-				name: "Linear, all tools: Allow",
-			}),
+			within(canvas.getByRole("article", { name: "Sentry" })).getByText("Every tool asks first"),
 		).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("article", { name: "Sentry" })).getByRole("button", {
-				name: "Sentry, all tools: Ask",
-			}),
-		).toBeInTheDocument();
-		await expect(
-			within(canvas.getByRole("article", { name: "Team wiki" })).getByRole("button", {
-				name: "Team wiki, all tools: Off",
-			}),
+			within(canvas.getByRole("article", { name: "Team wiki" })).getByText("Off for every bot"),
 		).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("article", { name: "Stripe" })).getByRole("button", { name: "Fix" }),
@@ -182,17 +177,6 @@ export const States = meta.story({
 			}),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
-	},
-});
-
-/** A row's menu: Allow, Ask or Off for every tool, or Custom to open the connection and set each. */
-export const RowMenu = meta.story({
-	play: async ({ canvas }) => {
-		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
-		await userEvent.click(
-			within(github).getByRole("button", { name: "GitHub, all tools: Custom" }),
-		);
-		await expect(await screen.findByRole("menuitemradio", { name: "Custom" })).toBeChecked();
 	},
 });
 

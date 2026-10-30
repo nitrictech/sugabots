@@ -68,9 +68,20 @@ export function RoutinePanel({
 	const actions = useRoutineActions();
 	const navigate = useNavigate();
 	const [dialog, setDialog] = useState<PanelDialog>();
+	// Pausing and Run now go through the thread's own controls, so why they failed is kept here.
+	const [controlFailure, setControlFailure] = useState<unknown>();
 	const mayManage = pod.permissions.manageRoutines;
 	const active = standing.state === "enabled";
 	const close = () => setDialog(undefined);
+
+	async function control(work: () => Promise<unknown>) {
+		setControlFailure(undefined);
+		try {
+			await work();
+		} catch (error) {
+			setControlFailure(error);
+		}
+	}
 
 	async function duplicate(original: Routine) {
 		const siblingNames = (routines ?? []).map(({ name }) => name);
@@ -115,6 +126,7 @@ export function RoutinePanel({
 				<div className="flex flex-col gap-3 px-4 pt-1 pb-6">
 					{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 					{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
+					{controlFailure !== undefined && <Alert>{failureMessage(controlFailure)}</Alert>}
 					<PanelCard className="flex h-12 items-center gap-2.5 px-3.5">
 						<span
 							aria-hidden
@@ -135,7 +147,7 @@ export function RoutinePanel({
 							tooltip={active ? "Pause routine" : "Resume routine"}
 							checked={active}
 							disabled={!mayManage || controls.pending}
-							onChange={(on) => void controls.setPaused(!on)}
+							onChange={(on) => void control(() => controls.setPaused(!on))}
 						/>
 					</PanelCard>
 					{routine && (
@@ -189,7 +201,7 @@ export function RoutinePanel({
 						<Button
 							variant="outline"
 							disabled={controls.pending}
-							onClick={() => void controls.runAgain()}
+							onClick={() => void control(() => controls.runAgain())}
 						>
 							<Play aria-hidden size={12} strokeWidth={2} fill="currentColor" />
 							Run now

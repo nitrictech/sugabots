@@ -366,7 +366,10 @@ export const Empty = meta.story({
 	},
 });
 
-/** A bot that runs no routines yet: its page says how one is made, by asking it. */
+/**
+ * A bot that runs no routines yet: its list stays, with the + in its header
+ * as Inbox has its controls, and the space beside it says how one is made.
+ */
 export const BotWithNone = meta.story({
 	render: () => (
 		<StoryApp
@@ -384,5 +387,8 @@ export const BotWithNone = meta.story({
 		await expect(
 			canvas.getByRole("heading", { name: `${leadResearcher.name}'s routines` }),
 		).toBeVisible();
+		const list = canvas.getByRole("region", { name: "Routines" });
+		await expect(within(list).getByText("No routines yet.")).toBeVisible();
+		await expect(within(list).getByRole("link", { name: "New routine" })).toBeVisible();
 	},
 });

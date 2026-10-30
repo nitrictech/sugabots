@@ -26,8 +26,19 @@
 	--stage: light-dark(#f1f1f3, #0f0f11);
 	/* A card among the messages, such as an approval request. */
 	--card: light-dark(#f7f7f8, #111113);
-	/* A raised panel: a dialog, a settings card, the composer's input. */
+	/* A raised panel: a dialog, the composer's input. */
 	--panel: light-dark(#ffffff, #111113);
+	/*
+	 * A settings card: barely lifted off the page in dark, held by its border
+	 * rather than its fill, so a page of them stays calm.
+	 */
+	--settings-card: light-dark(#ffffff, #0c0c0e);
+	--settings-card-border: light-dark(#e4e4e7, #1f1f23);
+	/* Usage's bar for a day gone by, and today's, picked out as the one still adding up. */
+	--usage-bar: light-dark(oklch(0.75 0.09 258), oklch(0.52 0.11 258));
+	--usage-bar-today: light-dark(oklch(0.55 0.15 258), oklch(0.72 0.12 255));
+	/* A settings row under the pointer, a step up from its card. */
+	--settings-row-hover: light-dark(#f7f7f8, #111113);
 	/* A chip, a secondary button, the search pill. */
 	--chip: light-dark(#f1f1f3, #17171a);
 	--hover: light-dark(#e4e4e7, #1f1f23);
@@ -99,8 +110,10 @@
 	 * shade darker than the design's #d6384e so it passes AA on a chip.
 	 */
 	--destructive-text: light-dark(#c42d45, #f08a94);
-	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
-	/* A routine's failed run: its card, its edge, its heading, and why it failed. */
+	--destructive-hover: light-dark(
+		#fde8ea,
+		#2a1a1e
+	); /* A routine's failed run: its card, its edge, its heading, and why it failed. */
 	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
 	--failed-card-border: light-dark(#f3c4cc, oklch(0.36 0.09 20));
 	--failed-card-heading: light-dark(#8e1f31, #fbd5da);
@@ -150,6 +163,11 @@
 	--color-rail: var(--rail);
 	--color-list: var(--list);
 	--color-panel: var(--panel);
+	--color-settings-card: var(--settings-card);
+	--color-settings-card-border: var(--settings-card-border);
+	--color-settings-row-hover: var(--settings-row-hover);
+	--color-usage-bar: var(--usage-bar);
+	--color-usage-bar-today: var(--usage-bar-today);
 	--color-card: var(--card);
 	--color-aside: var(--aside);
 	--color-stage: var(--stage);

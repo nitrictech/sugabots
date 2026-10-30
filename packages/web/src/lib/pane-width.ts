@@ -3,6 +3,12 @@ import { useState } from "react";
 const STORAGE_KEY_PREFIX = "sugabots-pane-width:";
 
 /**
+ * How narrow a list beside the open page may be, in pixels: Inbox's at its
+ * narrowest, and the settings navigation, which matches it.
+ */
+export const LIST_MIN_WIDTH_PX = 280;
+
+/**
  * How wide the viewer last dragged a pane, in pixels, remembered by `name` on
  * this device, and the way to change it; undefined until they first do.
  */

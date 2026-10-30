@@ -230,19 +230,16 @@ const meta = preview.meta({
 	],
 });
 
-/** The models new bots and the system bots use, then each provider with how many models are on and the bots using them. */
+/** The models new bots and the system bots use, then the popular providers, Connected or with Connect, and any other connected one. */
 export const Overview = meta.story({
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: /New bots use/ })).toHaveTextContent(
-			"Claude Sonnet",
-		);
-		await expect(canvas.getByRole("link", { name: /System agents use/ })).toHaveTextContent(
-			"Claude Haiku",
-		);
-		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent(
-			"2 of 3 models on",
-		);
-		await expect(canvas.getByRole("button", { name: "Add provider" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("link", { name: /Default for new bots/ }),
+		).toHaveTextContent("Claude Sonnet");
+		await expect(canvas.getByRole("link", { name: /Summaries/ })).toHaveTextContent("Claude Haiku");
+		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
+		await expect(canvas.getAllByRole("button", { name: "Connect" }).length).toBeGreaterThan(0);
+		await expect(canvas.getByRole("button", { name: /^Add a provider/ })).toBeInTheDocument();
 	},
 });
 
@@ -380,7 +377,7 @@ export const ChatgptSignedIn = meta.story({
 export const SystemAgents = meta.story({
 	render: () => <SystemModelSettings />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "System agents" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Summaries" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Opus" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},
@@ -390,7 +387,9 @@ export const SystemAgents = meta.story({
 export const NewBots = meta.story({
 	render: () => <DefaultModelSettings />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "New bots" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Default for new bots" }),
+		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Sonnet" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},

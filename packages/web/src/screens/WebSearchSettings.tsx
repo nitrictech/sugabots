@@ -7,14 +7,20 @@ import {
 	searchProviderCatalog,
 	searchProviderPreset,
 } from "@sugabots/contracts";
-import { Check } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provider.ts";
 import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
+import {
+	SETTINGS_CARD,
+	SETTINGS_RADIO_ROW,
+	SettingsGroup,
+	SettingsRadioMark,
+	SettingsRow,
+	SettingsRowIcon,
+} from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
@@ -67,6 +73,17 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 		}
 	}
 
+	/**
+	 * Swaps the provider, keeping the switch as it was unless the new one needs a
+	 * key: a new provider starts without one, and the web can't be on with a
+	 * provider that can't search, so it goes off until the key is added.
+	 */
+	function choose(next: SearchProviderPresetId) {
+		if (next === chosen) return;
+		const nextEnabled = enabled && !searchProviderPreset(next).requiresApiKey;
+		void act(() => actions.replace.mutateAsync({ preset: next, enabled: nextEnabled }));
+	}
+
 	/** Changes the provider's settings, setting the default provider up first when there is none. */
 	function configure(change: SearchProviderUpdate) {
 		return act(() =>
@@ -94,6 +111,7 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 							checked={enabled}
 							disabled={needsKey || pending}
 							label="Bots can use the web"
+							tooltip={needsKey ? `${preset.name} requires an API key` : undefined}
 							onChange={(next) => configure({ enabled: next })}
 						/>
 					}
@@ -112,11 +130,7 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 				</Button>
 				{advancedOpen && (
 					<div id={advancedId} className="flex flex-col gap-7">
-						<ProviderChoice
-							chosen={chosen}
-							disabled={pending}
-							onChoose={(next) => act(() => actions.replace.mutateAsync({ preset: next, enabled }))}
-						/>
+						<ProviderChoice chosen={chosen} disabled={pending} onChoose={choose} />
 						<ProviderSettings
 							key={chosen}
 							chosen={chosen}
@@ -147,13 +161,12 @@ function ProviderChoice({
 	const name = useId();
 	return (
 		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-1 pb-2 font-medium text-sm text-subtle-foreground">Provider</legend>
-			<div className="overflow-hidden rounded-panel bg-list">
+			<legend className="px-0.5 pb-2.5 font-medium text-[13px] text-muted-foreground">
+				Provider
+			</legend>
+			<div className={SETTINGS_CARD}>
 				{searchProviderCatalog.map((candidate) => (
-					<label
-						key={candidate.id}
-						className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-panel has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default"
-					>
+					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
 						<input
 							type="radio"
 							name={name}
@@ -163,17 +176,15 @@ function ProviderChoice({
 							className="sr-only"
 						/>
 						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
-						<span className="flex min-w-0 flex-1 flex-col gap-px">
-							<span className="truncate font-medium text-[14.5px] text-foreground">
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
+							<span className="truncate font-medium text-[13px] text-foreground">
 								{candidate.name}
 							</span>
-							<span className="truncate text-muted-foreground text-sm">
+							<span className="text-pretty text-subtle-foreground text-xs">
 								{providerDescriptions[candidate.id]}
 							</span>
 						</span>
-						{candidate.id === chosen && (
-							<Check aria-hidden size={16} strokeWidth={2.4} className="shrink-0 text-link" />
-						)}
+						<SettingsRadioMark checked={candidate.id === chosen} />
 					</label>
 				))}
 			</div>

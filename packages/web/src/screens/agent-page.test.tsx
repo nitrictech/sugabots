@@ -1,7 +1,6 @@
-import type { ConnectionAccess, Routine } from "@sugabots/contracts";
+import type { Routine } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
-import type { TestConnection } from "@sugabots/contracts/testing";
-import { routineTriggers } from "@sugabots/contracts/testing";
+import { routineTriggers, type TestConnection } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -9,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	agents,
 	apiAnswers,
-	compaction,
 	linear,
 	MODELS,
 	mount,
@@ -107,33 +105,13 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	};
 }
 
-/** A read, an additive change, and an overwriting one, as Linear describes them, each set as `access`. */
-function readsAndWrites(
-	access: [ConnectionAccess, ConnectionAccess, ConnectionAccess],
-): TestConnection["tools"] {
-	return [
-		{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
-		{ name: "create_issue_label", description: null, readOnly: false, destructive: false },
-		{ name: "save_issue", description: null, readOnly: false, destructive: true },
-	].map((tool, index) => ({ ...tool, access: access[index] as ConnectionAccess }));
+/** Opens the bot's look by clicking its face, as a person would. */
+async function openLook() {
+	fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
+	return screen.findByRole("dialog", { name: `${linear.name}'s look` });
 }
 
 describe("what everybody sees", () => {
-	it("lists every bot beside the open one, each under its pod", async () => {
-		mount(page);
-
-		const main = await screen.findByRole("main");
-		const list = await within(main).findByRole("link", { name: new RegExp(triager.name) });
-		expect(list.textContent).toContain(suga.name);
-		expect(
-			within(main)
-				.getByRole("link", { name: new RegExp(linear.name) })
-				.getAttribute("aria-current"),
-		).toBe("page");
-		// A system bot is in no pod, so it is not on the list of bots.
-		expect(within(main).queryByRole("link", { name: new RegExp(compaction.name) })).toBeNull();
-	});
-
 	it("shows the bot as a contact card: its face, name and pod first", async () => {
 		mount(page);
 
@@ -142,13 +120,45 @@ describe("what everybody sees", () => {
 		expect(screen.queryByRole("tab")).toBeNull();
 	});
 
-	it("offers the tools it shares with its pod, and the pod's own settings for them", async () => {
+	it("says who added it", async () => {
 		mount(page);
 
-		const shared = await screen.findByRole("link", { name: new RegExp(`Tools from ${suga.name}`) });
-		expect(shared.getAttribute("href")).toBe(`/suga/settings/pods/${suga.slug}`);
-		expect(screen.getByText("Read web pages")).toBeDefined();
-		expect(screen.getByText("Search the web")).toBeDefined();
+		const profile = await screen.findByRole("region", { name: "Profile" });
+		await waitFor(() => expect(within(profile).getByText("Sam")).toBeDefined());
+		expect(within(profile).getByText("Added by")).toBeDefined();
+	});
+
+	it("says a bot nobody added was made with the workspace", async () => {
+		rosterAnswers({ createdById: null });
+		mount(page);
+
+		const profile = await screen.findByRole("region", { name: "Profile" });
+		expect(await within(profile).findByText("With the workspace")).toBeDefined();
+	});
+
+	it("lists its own tools, each a switch", async () => {
+		mount(page);
+
+		const tools = await screen.findByRole("region", { name: "Built-in tools" });
+		expect(within(tools).getByText("Computer")).toBeDefined();
+		expect(within(tools).getByRole("switch", { name: "Turn off Web search" })).toBeDefined();
+	});
+
+	it("shows the tools it inherits from its pod, to be changed only on the pod", async () => {
+		serveConnections(
+			linearConnection(),
+			linearConnection({ id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Wiki", tools: [] }),
+		);
+		mount(page);
+
+		const inherited = await screen.findByRole("region", { name: `Inherited from ${suga.name}` });
+		expect(await within(inherited).findByText("Linear")).toBeDefined();
+		expect(within(inherited).getByText("Inherited")).toBeDefined();
+		// A connection that gives the bot no tools gives it nothing to list.
+		expect(within(inherited).queryByText("Wiki")).toBeNull();
+		expect(within(inherited).queryByRole("switch")).toBeNull();
+		const edit = within(inherited).getByRole("link", { name: `Edit in ${suga.name}` });
+		expect(edit.getAttribute("href")).toBe(`/suga/settings/pods/${suga.slug}/connections`);
 	});
 });
 
@@ -157,11 +167,13 @@ describe("a member", () => {
 		apiAnswers({ role: "member" });
 	});
 
-	it("says to ask an admin while the workspace has no web access", async () => {
+	it("says web search is off while the workspace has none", async () => {
 		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
 		mount(page);
 
-		expect(await screen.findByText(/Ask a workspace admin to turn it on/)).toBeTruthy();
+		expect(await screen.findByText(/^Web search is off for /)).toBeTruthy();
+		const tools = screen.getByRole("region", { name: "Built-in tools" });
+		expect(within(tools).queryByRole("link", { name: /^Web search/ })).toBeNull();
 	});
 
 	it("edits the model and the instructions, which a member of the pod may do", async () => {
@@ -174,42 +186,11 @@ describe("a member", () => {
 		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(false);
 	});
 
-	it("lists the connections inherited from the pod, leaving out those turned off", async () => {
-		serveConnections(
-			linearConnection(),
-			linearConnection({
-				id: "0199a3a0-0000-7000-8000-0000000000f9",
-				name: "Wiki",
-				tools: readsAndWrites(["off", "off", "off"]),
-			}),
-		);
-		mount(page);
-
-		expect(await screen.findByRole("link", { name: /Linear.*1 tool/ })).toBeDefined();
-		expect(screen.queryByRole("link", { name: /Wiki/ })).toBeNull();
-	});
-
-	it("opens a connection's own page from its row, with the way back to the bot", async () => {
-		const connection = linearConnection({ tools: readsAndWrites(["allow", "ask", "off"]) });
-		serveConnections(connection);
-		const router = mount(page);
-
-		fireEvent.click(await screen.findByRole("link", { name: /Linear.*2 tools/ }));
-
-		await screen.findByRole("heading", { name: "Linear", level: 2 });
-		expect(router.state.location.pathname).toBe(
-			`/suga/settings/pods/${suga.slug}/connections/${connection.id}`,
-		);
-		const back = document.querySelector<HTMLElement>("[data-page-back] a");
-		expect(back?.textContent).toBe(linear.name);
-		if (back) fireEvent.click(back);
-		await waitFor(() => expect(router.state.location.pathname).toBe(page));
-	});
-
-	it("may rename it but not delete it", async () => {
+	it("may edit it but not delete it", async () => {
 		mount(page);
 
 		expect(await screen.findByRole("textbox", { name: "Name" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
 });
@@ -234,46 +215,21 @@ describe("a viewer", () => {
 		mount(page);
 
 		await screen.findByRole("heading", { name: linear.name });
+		expect(screen.queryByRole("button", { name: "Change look" })).toBeNull();
 		expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
-		expect(screen.queryByRole("group", { name: "Colour" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
 });
 
 describe("an admin", () => {
-	it("opens a directly linked Routine definition with its routines", async () => {
-		mount(`${page}?tab=routines`);
-
-		expect(await screen.findByRole("button", { name: "New routine" })).toBeDefined();
-	});
-
-	it("starts a new routine on this bot", async () => {
-		const router = mount(page);
-
-		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
-
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/routines/new"));
-		expect(router.state.location.search).toEqual({ agent: linear.id });
-	});
-
-	it("shows scheduled Routines in plain language, each opening its page", async () => {
-		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine]));
+	it("leads to its Routines page to set them up, saying how many it has", async () => {
+		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine, webhookRoutine]));
 		mount(page);
 
-		const row = await screen.findByRole("link", { name: /^Morning brief/ });
-		expect(within(row).getByText("Weekdays at 9:00")).toBeDefined();
-		expect(row.getAttribute("href")).toBe(`/suga/settings/routines/${scheduledRoutine.id}`);
-		expect(screen.queryByText("0 9 * * 1-5")).toBeNull();
-	});
-
-	it("marks a paused Routine", async () => {
-		client.api.routines.list.mockReturnValue(
-			Effect.succeed([{ ...webhookRoutine, state: "paused" as const }]),
-		);
-		mount(page);
-
-		const row = await screen.findByRole("link", { name: /^Triage intake/ });
-		expect(within(row).getByText("Paused")).toBeDefined();
+		const row = await screen.findByRole("link", { name: /^Routines/ });
+		await waitFor(() => expect(within(row).getByText("2")).toBeDefined());
+		expect(row.getAttribute("href")).toBe(`/suga/pods/${suga.slug}/routines?bot=${linear.handle}`);
+		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
 	});
 
 	it("discards the previous bot's draft instructions when another bot is opened", async () => {
@@ -293,20 +249,19 @@ describe("an admin", () => {
 	});
 
 	it("renames the bot when you leave its name", async () => {
-		const renamed = { ...linear, name: "Linear Steward" };
-		answers({ name: renamed.name });
+		answers({ name: "Linear Steward" });
 		mount(page);
 
 		const name = await screen.findByRole("textbox", { name: "Name" });
-		fireEvent.change(name, { target: { value: `  ${renamed.name}  ` } });
+		fireEvent.change(name, { target: { value: "  Linear Steward  " } });
 		fireEvent.blur(name);
 
-		await waitFor(() => {
+		await waitFor(() =>
 			expect(client.api.agents.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id },
-				payload: { name: renamed.name },
-			});
-		});
+				payload: { name: "Linear Steward" },
+			}),
+		);
 	});
 
 	it("puts the name back and says why when a rename is refused", async () => {
@@ -323,80 +278,73 @@ describe("an admin", () => {
 		await waitFor(() => expect((name as HTMLInputElement).value).toBe(linear.name));
 	});
 
-	it("writes the description when you leave the field", async () => {
-		answers({ description: "Digs through calls." });
+	it("puts a blank name back rather than saving it", async () => {
 		mount(page);
 
-		const description = await screen.findByLabelText("Description");
-		fireEvent.change(description, { target: { value: "Digs through calls." } });
-		fireEvent.blur(description);
+		const name = await screen.findByRole("textbox", { name: "Name" });
+		fireEvent.change(name, { target: { value: "   " } });
+		fireEvent.blur(name);
 
-		await waitFor(() => {
-			expect(client.api.agents.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id },
-				payload: { description: "Digs through calls." },
-			});
-		});
-	});
-
-	it("does not write a description that did not change", async () => {
-		mount(page);
-
-		fireEvent.blur(await screen.findByLabelText("Description"));
-
+		expect((name as HTMLInputElement).value).toBe(linear.name);
 		expect(client.api.agents.update).not.toHaveBeenCalled();
 	});
 
-	it("writes the description once while a save is pending", async () => {
+	it("writes the description when you leave it, once while a save is pending", async () => {
 		const update = pendingAnswer();
 		client.api.agents.update.mockReturnValue(update.effect);
 		mount(page);
-		const description = await screen.findByLabelText("Description");
-		fireEvent.change(description, { target: { value: "Pending description" } });
-		fireEvent.blur(description);
-		await waitFor(() => expect(client.api.agents.update).toHaveBeenCalledOnce());
 
+		const description = await screen.findByRole("textbox", { name: "Description" });
+		fireEvent.blur(description);
+		expect(client.api.agents.update).not.toHaveBeenCalled();
+
+		fireEvent.change(description, { target: { value: "Digs through calls. " } });
+		fireEvent.blur(description);
+		await waitFor(() =>
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { description: "Digs through calls." },
+			}),
+		);
+		fireEvent.change(description, { target: { value: "Something else" } });
 		fireEvent.blur(description);
 		expect(client.api.agents.update).toHaveBeenCalledOnce();
-
-		update.answer(Effect.fail(new InternalServerError({ message: userText`Unavailable` })));
-		expect(await screen.findByRole("alert")).toBeDefined();
 	});
 
-	it("saves the bot's colour, shape and eyes from its face's pencil together, on Save", async () => {
+	it("saves its colour, shape and eyes together from its face, on Save", async () => {
 		answers({ color: "rose", face: "wink", shape: "star" });
 		mount(page);
 
-		expect(screen.queryByRole("radio", { name: "rose" })).toBeNull();
-		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
-		const save = await screen.findByRole("button", { name: "Save" });
+		const look = await openLook();
+		const save = within(look).getByRole("button", { name: "Save" });
 		expect(save.hasAttribute("disabled")).toBe(true);
-		fireEvent.click(screen.getByRole("radio", { name: "rose" }));
-		fireEvent.click(screen.getByRole("radio", { name: "wink" }));
-		fireEvent.click(screen.getByRole("radio", { name: "star" }));
+		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(look).getByRole("radio", { name: "star" }));
+		fireEvent.click(within(look).getByRole("tab", { name: "Eyes" }));
+		fireEvent.click(within(look).getByRole("radio", { name: "wink" }));
 		expect(client.api.agents.update).not.toHaveBeenCalled();
 
 		fireEvent.click(save);
 		await waitFor(() =>
 			expect(client.api.agents.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id },
-				payload: { color: "rose", face: "wink", shape: "star" },
+				payload: { color: "rose", shape: "star", face: "wink" },
 			}),
 		);
 		expect(client.api.agents.update).toHaveBeenCalledOnce();
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Look" })).toBeNull());
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("drops the look's picks when it is closed without saving", async () => {
 		mount(page);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
-		fireEvent.click(await screen.findByRole("radio", { name: "rose" }));
-		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Look" })).toBeNull());
+		let look = await openLook();
+		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(look).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-		fireEvent.click(screen.getByRole("button", { name: "Change look" }));
-		const color = await screen.findByRole("radio", { name: linear.color });
+		look = await openLook();
+		const color = within(look).getByRole("radio", { name: linear.color });
 		expect((color as HTMLInputElement).checked).toBe(true);
 		expect(client.api.agents.update).not.toHaveBeenCalled();
 	});
@@ -407,13 +355,12 @@ describe("an admin", () => {
 		);
 		mount(page);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
-		fireEvent.click(await screen.findByRole("radio", { name: "rose" }));
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const look = await openLook();
+		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(look).getByRole("button", { name: "Save" }));
 
-		const dialog = await screen.findByRole("dialog", { name: "Look" });
-		expect(await within(dialog).findByRole("alert")).toBeDefined();
-		expect((within(dialog).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
+		expect(await within(look).findByRole("alert")).toBeDefined();
+		expect((within(look).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
 			true,
 		);
 	});
@@ -500,21 +447,21 @@ describe("an admin", () => {
 		expect(screen.getByRole("button", { name: MODELS[1] })).toBeDefined();
 	});
 
-	it("switches a built-in tool off for the bot, and back on", async () => {
+	it("switches web search off for the bot, reading pages with it, and back on", async () => {
 		mount(page);
 
-		const search = await screen.findByRole("switch", { name: "Turn off Search the web" });
+		const search = await screen.findByRole("switch", { name: "Turn off Web search" });
 		expect(search.getAttribute("aria-checked")).toBe("true");
-		rosterAnswers({ disabledTools: ["web_search"] });
+		rosterAnswers({ disabledTools: ["web_fetch", "web_search"] });
 		fireEvent.click(search);
 
 		await waitFor(() => {
 			expect(client.api.agents.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id },
-				payload: { disabledTools: ["web_search"] },
+				payload: { disabledTools: ["web_fetch", "web_search"] },
 			});
 		});
-		const off = await screen.findByRole("switch", { name: "Turn on Search the web" });
+		const off = await screen.findByRole("switch", { name: "Turn on Web search" });
 		expect(off.getAttribute("aria-checked")).toBe("false");
 
 		rosterAnswers({ disabledTools: [] });
@@ -527,24 +474,27 @@ describe("an admin", () => {
 		});
 	});
 
-	it("shows the web tools off, and holds them off, while the workspace has no web access", async () => {
+	it("holds web search off while the workspace has none, leaving the other tools", async () => {
 		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
 		mount(page);
 
-		for (const name of ["Search the web", "Read web pages"]) {
-			const tool = await screen.findByRole("switch", { name: `Turn on ${name}` });
-			expect(tool.getAttribute("aria-checked")).toBe("false");
-			expect(tool.hasAttribute("disabled")).toBe(true);
-		}
+		await waitFor(() =>
+			expect(screen.getByRole("switch", { name: "Turn on Web search" })).toHaveProperty(
+				"disabled",
+				true,
+			),
+		);
+		expect(
+			screen.getByRole("switch", { name: "Turn on Web search" }).getAttribute("aria-checked"),
+		).toBe("false");
+		const tools = screen.getByRole("region", { name: "Built-in tools" });
+		expect(within(tools).queryByRole("link", { name: /^Web search/ })).toBeNull();
 		const routines = screen.getByRole("switch", { name: "Turn off Manage its routines" });
 		expect(routines.getAttribute("aria-checked")).toBe("true");
 		expect(routines.hasAttribute("disabled")).toBe(false);
-		expect(
-			screen.getByRole("link", { name: "Turn it on in Web search" }).getAttribute("href"),
-		).toMatch(/\/settings\/search$/);
 	});
 
-	it("deletes the bot after asking, and returns to the list", async () => {
+	it("deletes the bot after asking, and returns to its pod's bots", async () => {
 		client.api.agents.remove.mockReturnValue(Effect.void);
 		const router = mount(page);
 
@@ -557,6 +507,8 @@ describe("an admin", () => {
 				params: { agentId: linear.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/agents"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.slug}/bots`),
+		);
 	});
 });

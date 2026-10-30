@@ -1,37 +1,36 @@
+import { botColors } from "@sugabots/avatars";
 import {
 	type Agent,
 	type AgentUpdate,
-	agentColors,
-	agentFaces,
-	agentShapes,
+	type BuiltInToolKey,
 	builtInToolCatalog,
 	connectionMarkFor,
+	DESCRIPTION_MAX_LENGTH,
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { MessageCircle, Pencil, RefreshCw } from "lucide-react";
-import { useId, useRef, useState } from "react";
-import { useAgents, useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
+import { cn } from "cn";
+import { ArrowUpRight, Pencil } from "lucide-react";
+import { type FormEvent, useId, useState } from "react";
+import { useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
+import { podSettingsPageLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useWorkspacePermissions } from "@/lib/workspace.ts";
+import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { LookSections } from "@/shell/LookPicker.tsx";
-import { PodTile } from "@/shell/PodTile.tsx";
+import { type Look, LookStep, type Part } from "@/shell/NewAgent.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { Button, buttonStyles } from "@/ui/button.tsx";
+import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
 import {
 	PageBackLink,
-	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -40,7 +39,7 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { AgentModelPicker } from "./AgentModelPicker.tsx";
-import { AgentRoutines } from "./RoutinesSettings.tsx";
+import { AgentRoutines } from "./RoutineEditing.tsx";
 
 /*
  * One bot, as its contact card: its face and colour first, then what it is,
@@ -72,7 +71,12 @@ export function AgentSettingsPage({
 
 	if (page === "model") {
 		return (
-			<SettingsPage back={back} title="Model" description={`What ${agent.name} thinks with.`}>
+			<SettingsPage
+				back={back}
+				backOnWide
+				title="Model"
+				description={`What ${agent.name} thinks with.`}
+			>
 				{failure && <Alert>{failure}</Alert>}
 				<AgentModelPicker
 					agentName={agent.name}
@@ -131,6 +135,7 @@ function ContactCard({
 }) {
 	const may = pod.permissions;
 	const modelName = useModelName(agent.model);
+	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
 	const navigate = useNavigate();
@@ -141,68 +146,73 @@ function ContactCard({
 		} catch {
 			return;
 		}
-		await navigate({
-			from: "/$workspace",
-			to: "./settings/$section",
-			params: { section: "agents" },
-		});
+		await navigate(podSettingsPageLink(pod, "bots"));
 	}
 
 	return (
 		<SettingsPage
 			hero={
 				may.updateAgents ? (
-					<EditableLook agent={agent} save={save} />
+					<EditableFace agent={agent} save={save} savePending={savePending} />
 				) : (
-					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={88} />
+					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={44} />
 				)
 			}
 			title={agent.name}
-			description={pod.name}
-			headerAction={
-				<Link {...agentChatLink({ pod, agent })} className={buttonStyles({ size: "sm" })}>
-					<MessageCircle aria-hidden />
-					Message
-				</Link>
-			}
+			description={agent.description || undefined}
 		>
 			{failure && <Alert>{failure}</Alert>}
-			<SettingsGroup label="About">
-				<TextRow
+			<SettingsGroup label="Profile">
+				<ProfileField
 					label="Name"
 					value={agent.name}
+					maxLength={AGENT_NAME_MAX_LENGTH}
+					required
 					editable={may.updateAgents}
 					savePending={savePending}
-					maxLength={64}
-					required
 					onCommit={(name) => save({ name })}
 				/>
-				<TextRow
+				<ProfileField
 					label="Description"
 					value={agent.description ?? ""}
-					placeholder="One line on what this bot is for."
+					placeholder="One line on what it's for"
+					maxLength={DESCRIPTION_MAX_LENGTH}
+					wide
 					editable={may.updateAgents}
 					savePending={savePending}
-					maxLength={280}
 					onCommit={(description) => save({ description })}
 				/>
 				<SettingsRow
 					label="Model"
+					sub={`From the models set up for ${workspaceName}`}
 					trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
 					chevron
 					onClick={onOpenModel}
 				/>
 				<SettingsRow
 					label="Instructions"
-					trailing={<SettingsValue>{may.updateAgents ? "Edit" : "View"}</SettingsValue>}
+					sub="How it should behave and what to focus on"
 					chevron
 					onClick={onOpenInstructions}
 				/>
+				<AddedByRow agent={agent} />
 			</SettingsGroup>
-			<Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />
+			<BuiltInTools
+				agent={agent}
+				pod={pod}
+				workspaceName={workspaceName}
+				canChange={may.updateAgents}
+				save={save}
+			/>
+			<InheritedTools agent={agent} pod={pod} />
 			<AgentRoutines agent={agent} pod={pod} />
 			{may.deleteAgents && (
-				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete bot</SettingsDanger>
+				<SettingsDanger
+					label="Delete bot"
+					description="Its chat, routines and settings go with it."
+					action="Delete"
+					onClick={() => setConfirmingDelete(true)}
+				/>
 			)}
 			<DeleteDialog
 				open={confirmingDelete}
@@ -218,121 +228,202 @@ function ContactCard({
 }
 
 /**
- * The bot's face, with a pencil on its corner that opens its colour, shape and
- * eyes. Each is saved the moment it is picked; Shuffle picks all three at
- * random, and Revert puts back the look it had when the dialog opened.
+ * The bot's face, which opens its look when clicked, as the pencil on its
+ * corner says. A face nobody may change is only a picture.
  */
-/**
- * The bot's face, with a pencil that opens its Look. Choices there change a
- * draft the dialog's own face shows, and only Save sends it; leaving any other
- * way, by Cancel, Escape or a click outside, drops it.
- */
-function EditableLook({ agent, save }: { agent: Agent; save: Save }) {
-	const [opened, setOpened] = useState(false);
-	const current: Look = { color: agent.color, shape: agent.shape, face: agent.face };
-	// Kept once the dialog closes, so it still shows the draft as it animates away.
-	const [draft, setDraft] = useState<Look>(current);
-	const [saving, setSaving] = useState(false);
-	const [failure, setFailure] = useState<string>();
-	// Cancel takes focus on opening, rather than Shuffle, the first control, whose tooltip would show.
-	const cancel = useRef<HTMLButtonElement>(null);
-	const changed =
-		draft.color !== current.color || draft.shape !== current.shape || draft.face !== current.face;
-
-	const open = () => {
-		setFailure(undefined);
-		setDraft(current);
-		setOpened(true);
-	};
-	const close = () => setOpened(false);
-	const change = (look: Partial<Look>) => setDraft((was) => ({ ...was, ...look }));
-	const saveDraft = async () => {
-		setSaving(true);
-		setFailure(undefined);
-		try {
-			await save(draft);
-			close();
-		} catch (error) {
-			setFailure(failureMessage(error));
-		} finally {
-			setSaving(false);
-		}
-	};
-
+function EditableFace({
+	agent,
+	save,
+	savePending,
+}: {
+	agent: Agent;
+	save: Save;
+	savePending: boolean;
+}) {
+	const [editing, setEditing] = useState(false);
 	return (
-		<div className="relative">
-			<AgentAvatar {...current} size={88} />
-			<IconButton
-				label="Change look"
-				variant="round"
-				onClick={open}
-				// The ring cutting it out of the face is a border rather than a shadow: the button's fill runs under its own border, so no hairline of the face shows between them.
-				className="absolute -right-[7px] -bottom-[7px] size-[35px] border-[3px] border-background"
+		<>
+			<button
+				type="button"
+				aria-label="Change look"
+				onClick={() => setEditing(true)}
+				className="focus-ring group/face relative shrink-0 rounded-full"
 			>
-				<Pencil aria-hidden />
-			</IconButton>
-			<Dialog open={opened} onOpenChange={(isOpen) => !isOpen && close()}>
-				<DialogContent
-					sheetOnPhone
-					showCloseButton={false}
-					initialFocus={cancel}
-					className="gap-5 sm:max-w-md"
+				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={44} />
+				<span
+					aria-hidden
+					// Cut out of the face by a ring of the page's own colour.
+					className="absolute -right-1.5 -bottom-1.5 grid size-[22px] place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
 				>
-					<div className="flex items-center gap-3">
-						<AgentAvatar {...draft} size={36} />
-						<DialogTitle className="flex-1">Look</DialogTitle>
-						<IconButton label="Shuffle" variant="round" onClick={() => change(randomLook())}>
-							<RefreshCw aria-hidden />
-						</IconButton>
-					</div>
-					<LookSections
-						{...draft}
-						onColorChange={(color) => change({ color })}
-						onShapeChange={(shape) => change({ shape })}
-						onFaceChange={(face) => change({ face })}
+					<Pencil size={11} strokeWidth={2.2} />
+				</span>
+			</button>
+			<Dialog open={editing} onOpenChange={setEditing}>
+				{editing && (
+					<LookEditor
+						agent={agent}
+						save={save}
+						savePending={savePending}
+						done={() => setEditing(false)}
 					/>
-					{failure && <Alert>{failure}</Alert>}
-					<div className="flex justify-end gap-2">
-						<Button ref={cancel} variant="secondary" onClick={close}>
-							Cancel
-						</Button>
-						<Button disabled={!changed || saving} onClick={() => void saveDraft()}>
-							Save
-						</Button>
-					</div>
-				</DialogContent>
+				)}
 			</Dialog>
-		</div>
+		</>
 	);
 }
 
-type Look = Pick<Agent, "color" | "shape" | "face">;
+/**
+ * The bot's look, laid out as New bot's is but quieter: the bot on a faint
+ * tint of its colour, and its shape, eyes and colour beside it. Nothing is
+ * saved until Save; Cancel, Escape or a click outside leaves it as it was.
+ */
+function LookEditor({
+	agent,
+	save,
+	savePending,
+	done,
+}: {
+	agent: Agent;
+	save: Save;
+	savePending: boolean;
+	done: () => void;
+}) {
+	const [look, setLook] = useState<Look>({
+		color: agent.color,
+		shape: agent.shape,
+		face: agent.face,
+	});
+	const [part, setPart] = useState<Part>("shape");
+	const [failure, setFailure] = useState<string>();
+	const change: AgentUpdate = {
+		...(look.color !== agent.color && { color: look.color }),
+		...(look.shape !== agent.shape && { shape: look.shape }),
+		...(look.face !== agent.face && { face: look.face }),
+	};
+	const changed = Object.keys(change).length > 0;
 
-const pick = <Option,>(options: readonly Option[]): Option =>
-	options[Math.floor(Math.random() * options.length)] as Option;
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!changed) return;
+		setFailure(undefined);
+		try {
+			await save(change);
+			done();
+		} catch (error) {
+			setFailure(failureMessage(error));
+		}
+	}
 
-function randomLook(): Look {
-	return { color: pick(agentColors), shape: pick(agentShapes), face: pick(agentFaces) };
+	return (
+		<DialogContent
+			sheetOnPhone
+			showCloseButton={false}
+			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[680px]"
+		>
+			<DialogTitle className="sr-only">{agent.name}'s look</DialogTitle>
+			<form
+				onSubmit={submit}
+				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-[460px] md:flex-row"
+			>
+				<div
+					className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-[260px]"
+					// A fainter tint than New bot's, so the bot is in its own light without shouting.
+					style={{
+						background: `color-mix(in oklab, ${botColors[look.color].face} 5%, var(--list))`,
+					}}
+				>
+					<div className="grid flex-1 place-items-center py-2">
+						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
+					</div>
+					{failure && <Alert>{failure}</Alert>}
+					<div className="flex justify-end gap-2">
+						<Button type="button" variant="secondary" size="sm" onClick={done}>
+							Cancel
+						</Button>
+						<Button type="submit" size="sm" disabled={!changed || savePending}>
+							{savePending ? "Saving…" : "Save"}
+						</Button>
+					</div>
+				</div>
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border bg-panel max-md:border-t md:border-l">
+					<LookStep
+						part={part}
+						look={look}
+						onPartChange={setPart}
+						onChange={(parts) => setLook((was) => ({ ...was, ...parts }))}
+					/>
+				</div>
+			</form>
+		</DialogContent>
+	);
 }
 
-/** A labelled line of text that saves when you leave it, or reads as a value when it cannot change. */
-function TextRow({
+/**
+ * Who added the bot, with their face, and when. Somebody since gone from the
+ * workspace is named as such rather than left blank; a bot nobody added was
+ * made with the workspace.
+ */
+function AddedByRow({ agent }: { agent: Agent }) {
+	const { data: members } = useWorkspaceMembers(agent.workspaceId);
+	const adder = members?.find((member) => member.user.id === agent.createdById)?.user;
+	const when = new Date(agent.createdAt).toLocaleDateString(undefined, {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	});
+	// Said once the roster has answered, rather than guessed before it.
+	const who =
+		agent.createdById === null
+			? "With the workspace"
+			: adder
+				? adder.name
+				: members
+					? "Someone no longer here"
+					: undefined;
+	return (
+		<SettingsRow
+			label="Added by"
+			sub={when}
+			trailing={
+				who !== undefined && (
+					<span className="flex min-w-0 items-center gap-2">
+						{adder && <PersonAvatar person={adder} size={20} />}
+						<SettingsValue>{who}</SettingsValue>
+					</span>
+				)
+			}
+		/>
+	);
+}
+
+/** How long a name may be, as New bot holds it. */
+const AGENT_NAME_MAX_LENGTH = 64;
+
+/**
+ * A line of the bot's profile in a field at the row's end, which saves trimmed
+ * when you leave it or press Enter. Escape, or leaving it unchanged, or blank
+ * when it is `required`, puts it back; so does a save that fails. `wide`
+ * gives the field the rest of the row, for a line longer than a name.
+ */
+function ProfileField({
 	label,
 	value,
 	placeholder,
-	editable,
-	savePending,
 	maxLength,
 	required = false,
+	wide = false,
+	editable,
+	savePending,
 	onCommit,
 }: {
 	label: string;
 	value: string;
 	placeholder?: string;
-	editable: boolean;
-	savePending: boolean;
 	maxLength: number;
 	required?: boolean;
+	wide?: boolean;
+	editable: boolean;
+	savePending: boolean;
 	onCommit: (value: string) => Promise<unknown>;
 }) {
 	const [draft, setDraft] = useState(value);
@@ -344,11 +435,18 @@ function TextRow({
 			setDraft(value);
 			return;
 		}
+		setDraft(next);
 		void onCommit(next).catch(() => setDraft(value));
 	}
 
 	return (
-		<SettingsControlRow label={label} htmlFor={id}>
+		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
+			<label
+				htmlFor={id}
+				className={cn("text-[13px] text-foreground", wide ? "w-24 shrink-0" : "flex-1")}
+			>
+				{label}
+			</label>
 			{editable ? (
 				<input
 					id={id}
@@ -361,14 +459,17 @@ function TextRow({
 					}}
 					placeholder={placeholder}
 					maxLength={maxLength}
-					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className={cn(
+						"h-8 min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-[13px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring",
+						wide ? "flex-1" : "w-60 max-w-[50%]",
+					)}
 				/>
 			) : (
-				<span id={id} className="min-w-0 flex-1 text-[14.5px] text-soft-foreground">
-					{value || <span className="text-subtle-foreground">None yet</span>}
+				<span id={id} className={cn("min-w-0 text-[13px] text-muted-foreground", wide && "flex-1")}>
+					{value || "None yet"}
 				</span>
 			)}
-		</SettingsControlRow>
+		</div>
 	);
 }
 
@@ -396,6 +497,7 @@ function Instructions({
 	return (
 		<SettingsPage
 			back={back}
+			backOnWide
 			title="Instructions"
 			description={`How ${agent.name} should work. It follows these in every chat.`}
 		>
@@ -418,7 +520,7 @@ function Instructions({
 					readOnly={!editable}
 					maxLength={PROMPT_MAX_LENGTH}
 					placeholder="No instructions yet."
-					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[14.5px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[13px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsGroup>
 			{editable && (
@@ -435,73 +537,46 @@ function Instructions({
 	);
 }
 
+/** The tools that reach the web, which one switch turns on and off together: Web search. */
+const WEB_TOOLS: readonly BuiltInToolKey[] = builtInToolCatalog
+	.filter((entry) => entry.usesWeb)
+	.map((entry) => entry.key);
+
 /**
- * Tools lists what `agent` can reach: the pod's connections, which every bot in
- * `pod` shares and which are managed on the pod, then the built-in tools, each
- * of which can be switched off for `agent`. Every built-in tool reaches the
- * web, so while the workspace has web access off they show as off and
- * disabled, and the group's note says how to turn web access on.
+ * The tools `agent` has from its pod's connections, which every bot in the pod
+ * shares. They are only shown here: what each allows is set on the pod, which
+ * Edit beside the heading leads to. A connection whose tools are all off gives
+ * the bot nothing, so it is left out.
  */
-function Tools({
-	agent,
-	pod,
-	canChange,
-	save,
-}: {
-	agent: Agent;
-	pod: Pod;
-	canChange: boolean;
-	save: Save;
-}) {
+function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
 	const backToAgent = useBackToHere(agent.name);
 	const connections = useConnections(pod.id);
-	const { agents } = useAgents();
-	const webOff = useWebAccess().data?.enabled === false;
-	const sandboxOff = useSandboxAccess().data?.enabled === false;
-	const sandboxOn = agent.usesSandbox && !sandboxOff;
-	const mayManageProviders = useWorkspacePermissions().manageProviders;
-	const podBots =
-		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
-	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
-
+	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0);
 	return (
 		<SettingsGroup
-			label="Tools"
-			note={
-				webOff && (
-					<>
-						Bots can't read or search the web while it's off for the workspace.{" "}
-						{mayManageProviders ? (
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "search" }}
-								state={backToAgent}
-								className="focus-ring rounded-sm font-medium text-link"
-							>
-								Turn it on in Web search
-							</Link>
-						) : (
-							"Ask a workspace admin to turn it on."
-						)}
-					</>
-				)
+			label={`Inherited from ${pod.name}`}
+			action={
+				<Link
+					{...podSettingsPageLink(pod, "connections")}
+					state={backToAgent}
+					className="focus-ring flex items-center gap-0.5 rounded-sm text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+				>
+					Edit in {pod.name}
+					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
+				</Link>
 			}
+			note={`Every bot in ${pod.name} shares these. What each connection allows is set on the pod.`}
 		>
-			<SettingsRow
-				icon={<PodTile bots={podBots} color={pod.color} size={30} />}
-				label={`Tools from ${pod.name}`}
-				sub="Every bot in the pod shares these"
-				trailing={<span className="shrink-0 font-medium text-[13.5px] text-link">Edit</span>}
-				render={<Link {...podSettingsLink(pod)} state={backToAgent} />}
-			/>
 			{connections.isError && (
-				<div className="border-border border-b px-4 py-3">
+				<div className="px-4 py-3">
 					<Alert>{failureMessage(connections.error)}</Alert>
 				</div>
 			)}
-			{reachable.map((connection) => {
-				const available = usableToolCount(connection);
+			{reachable?.length === 0 && (
+				<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />
+			)}
+			{reachable?.map((connection) => {
+				const tools = usableToolCount(connection);
 				return (
 					<SettingsRow
 						key={connection.id}
@@ -509,93 +584,134 @@ function Tools({
 							<ConnectionMark
 								presetId={connectionMarkFor(connection)}
 								name={connection.name}
-								size="sm"
+								size="md"
 							/>
 						}
 						label={connection.name}
-						sub={`${available} ${available === 1 ? "tool" : "tools"}`}
-						chevron
-						render={<Link {...connectionSettingsLink(pod, connection)} state={backToAgent} />}
+						sub={`${tools} ${tools === 1 ? "tool" : "tools"}`}
+						trailing={<SettingsValue>Inherited</SettingsValue>}
 					/>
 				);
 			})}
-			{builtInToolCatalog.map((entry) => {
-				const blocked = webOff && entry.usesWeb;
-				const on = !blocked && !agent.disabledTools.includes(entry.key);
-				return (
-					<SettingsRow
+		</SettingsGroup>
+	);
+}
+
+/**
+ * The tools `agent` has of its own, rather than from its pod's connections:
+ * its computer, the web, and the rest of the catalog, each of which can be
+ * switched off for it. The computer and the web are set up for the workspace
+ * first; until they are, each says so and leads to where an admin sets it up.
+ */
+function BuiltInTools({
+	agent,
+	pod,
+	workspaceName,
+	canChange,
+	save,
+}: {
+	agent: Agent;
+	pod: Pod;
+	workspaceName: string;
+	canChange: boolean;
+	save: Save;
+}) {
+	const webOff = useWebAccess().data?.enabled === false;
+	const computersOff = useSandboxAccess().data?.enabled === false;
+	const isOn = (keys: readonly BuiltInToolKey[]) =>
+		keys.some((key) => !agent.disabledTools.includes(key));
+	const setTools = (keys: readonly BuiltInToolKey[], on: boolean) =>
+		save({
+			disabledTools: on
+				? agent.disabledTools.filter((key) => !(keys as readonly string[]).includes(key))
+				: [...new Set([...agent.disabledTools, ...keys])],
+		}).catch(() => {});
+
+	return (
+		<SettingsGroup label="Built-in tools">
+			<ToolRow
+				label="Computer"
+				sub={
+					computersOff
+						? `Computers are off for ${workspaceName}`
+						: "Run commands, browse and edit files on the pod's computer"
+				}
+				on={agent.usesSandbox && !computersOff}
+				canChange={pod.permissions.manageSandbox}
+				offReason={computersOff ? `Computers are off for ${workspaceName}` : undefined}
+				onChange={(next) => save({ usesSandbox: next }).catch(() => {})}
+			/>
+			{/* How it uses its computer's browser, so only while it has one. */}
+			{agent.usesSandbox && !computersOff && (
+				<ToolRow
+					label="Natural browsing"
+					sub="Show a cursor, scroll smoothly and type at a typing pace, so people watching can follow along. Slower."
+					on={agent.naturalBrowsing}
+					canChange={canChange}
+					onChange={(next) => save({ naturalBrowsing: next }).catch(() => {})}
+				/>
+			)}
+			<ToolRow
+				label="Web search"
+				sub={webOff ? `Web search is off for ${workspaceName}` : "Look things up and cite pages"}
+				on={isOn(WEB_TOOLS) && !webOff}
+				canChange={canChange}
+				offReason={webOff ? `Web search is off for ${workspaceName}` : undefined}
+				onChange={(next) => setTools(WEB_TOOLS, next)}
+			/>
+			{builtInToolCatalog
+				.filter((entry) => !entry.usesWeb)
+				.map((entry) => (
+					<ToolRow
 						key={entry.key}
 						label={entry.name}
 						sub={entry.description}
-						trailing={
-							canChange ? (
-								<Toggle
-									checked={on}
-									disabled={blocked}
-									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
-									tooltip={
-										blocked
-											? mayManageProviders
-												? "Disabled while web access is off for the workspace. Turn it on in Web search settings."
-												: "Disabled while web access is off for the workspace. Ask a workspace admin to enable it."
-											: `Toggle to ${on ? "disable" : "enable"} ${entry.name} for ${agent.name}`
-									}
-									onChange={(next) =>
-										save({
-											disabledTools: next
-												? agent.disabledTools.filter((key) => key !== entry.key)
-												: [...agent.disabledTools, entry.key],
-										}).catch(() => {})
-									}
-								/>
-							) : (
-								<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
-							)
-						}
+						on={isOn([entry.key])}
+						canChange={canChange}
+						onChange={(next) => setTools([entry.key], next)}
 					/>
-				);
-			})}
-			<SettingsRow
-				label="Use the sandbox"
-				sub="Run commands and edit files on the pod's Linux machine. Experimental."
-				trailing={
-					pod.permissions.manageSandbox ? (
-						<Toggle
-							checked={sandboxOn}
-							disabled={sandboxOff}
-							label={`${agent.usesSandbox ? "Turn off" : "Turn on"} the sandbox`}
-							tooltip={
-								sandboxOff
-									? mayManageProviders
-										? "Disabled until the workspace has a sandbox provider. Set one up in Sandboxes settings."
-										: "Disabled until the workspace has a sandbox provider. Ask a workspace admin to set one up."
-									: `Toggle to ${agent.usesSandbox ? "stop" : "let"} ${agent.name} use the sandbox`
-							}
-							onChange={(next) => save({ usesSandbox: next }).catch(() => {})}
-						/>
-					) : (
-						<SettingsValue>{sandboxOn ? "On" : "Off"}</SettingsValue>
-					)
-				}
-			/>
-			{sandboxOn ? (
-				<SettingsRow
-					label="Natural browsing"
-					sub="Show a cursor, scroll smoothly and type at a typing pace, so people watching can follow along. Slower."
-					trailing={
-						canChange ? (
-							<Toggle
-								checked={agent.naturalBrowsing}
-								label={`${agent.naturalBrowsing ? "Turn off" : "Turn on"} natural browsing`}
-								tooltip={`Toggle to ${agent.naturalBrowsing ? "stop" : "let"} ${agent.name} browse naturally`}
-								onChange={(next) => save({ naturalBrowsing: next }).catch(() => {})}
-							/>
-						) : (
-							<SettingsValue>{agent.naturalBrowsing ? "On" : "Off"}</SettingsValue>
-						)
-					}
-				/>
-			) : null}
+				))}
 		</SettingsGroup>
+	);
+}
+
+/**
+ * A tool the bot may have, with its switch, or whether it is on for someone
+ * who can't change it. Given `offReason`, the switch is held off and disabled,
+ * and says why when pointed at.
+ */
+function ToolRow({
+	label,
+	sub,
+	on,
+	canChange,
+	offReason,
+	onChange,
+}: {
+	label: string;
+	sub: string;
+	on: boolean;
+	canChange: boolean;
+	offReason?: string;
+	onChange: (on: boolean) => void;
+}) {
+	return (
+		<SettingsRow
+			label={offReason ? <span className="text-muted-foreground">{label}</span> : label}
+			sub={sub}
+			trailing={
+				canChange ? (
+					<Toggle
+						checked={on}
+						disabled={offReason !== undefined}
+						tooltip={offReason}
+						label={`${on ? "Turn off" : "Turn on"} ${label}`}
+						onChange={onChange}
+					/>
+				) : (
+					<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
+				)
+			}
+		/>
 	);
 }

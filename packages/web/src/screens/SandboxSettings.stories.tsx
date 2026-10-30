@@ -3,26 +3,23 @@ import type {
 	SandboxProvider,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
-import { type ReactNode, useEffect, useState } from "react";
-import { expect, fn, waitFor } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { SettingsPage } from "@/ui/settings-page.tsx";
-import { SandboxSettings } from "./SandboxSettings.tsx";
+import { appHandlers, StoryApp, storyBots, storyWorkspace } from "../story-app.tsx";
 
-const workspace = {
-	id: "0199a3a0-0000-7000-8000-000000000001",
-	name: "Suga Workspace",
-	slug: "suga",
-	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
-	createdAt: "2026-09-01T00:00:00.000Z",
-};
+/*
+ * Computers, as the app shows them in settings: the switch for whether bots
+ * get one, the provider and its account, what the computers may reach, and
+ * the bots using one.
+ */
+
+const computers = `/${storyWorkspace.slug}/settings/sandboxes`;
+const api = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
 const openSandbox: SandboxProvider = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	workspaceId: workspace.id,
+	workspaceId: storyWorkspace.id,
 	preset: "opensandbox",
 	name: "OpenSandbox",
 	settings: { preset: "opensandbox", serverUrl: "http://localhost:8090" },
@@ -34,7 +31,8 @@ const openSandbox: SandboxProvider = {
 	createdAt: "2026-10-01T00:00:00.000Z",
 };
 
-const providersUrl = `${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-providers`;
+const providersUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-providers`);
+const networkUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-network`);
 
 const network: SandboxNetworkSettings = {
 	mode: "open",
@@ -47,49 +45,20 @@ const network: SandboxNetworkSettings = {
 const answers = (providers: readonly SandboxProvider[]) =>
 	http.get(providersUrl, () => HttpResponse.json(providers));
 
-function SettingsPreview({ children }: { children: ReactNode }) {
-	const [queryClient] = useState(
-		() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }),
-	);
-	useEffect(() => () => queryClient.clear(), [queryClient]);
-	return (
-		<QueryClientProvider client={queryClient}>
-			<div className="flex min-h-screen flex-col bg-background">
-				<SettingsPage title="Sandboxes" description="Where bots run commands and edit files.">
-					{children}
-				</SettingsPage>
-			</div>
-		</QueryClientProvider>
-	);
-}
-
 const meta = preview.meta({
-	title: "Views/SandboxSettings",
-	component: SandboxSettings,
+	title: "Views/Computers",
 	tags: ["ai-generated"],
-	parameters: {
-		layout: "fullscreen",
-		// Inline docs examples share MSW handlers; separate frames keep their responses independent.
-		docs: { story: { inline: false, height: "820px" } },
-	},
-	decorators: [
-		(Story, context) => (
-			<SettingsPreview key={context.id}>
-				<Story />
-			</SettingsPreview>
-		),
-	],
+	parameters: { layout: "fullscreen" },
+	render: () => <StoryApp path={computers} />,
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${import.meta.env.VITE_API_URL}/workspaces`, () => HttpResponse.json([workspace])),
+			...appHandlers(),
 			answers([]),
-			http.get(`${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-network`, () =>
-				HttpResponse.json(network),
-			),
+			http.get(networkUrl, () => HttpResponse.json(network)),
 			http.get(`${providersUrl}/:providerId/template`, () => HttpResponse.json({ state: "ready" })),
 			http.all(`${providersUrl}*`, () =>
 				HttpResponse.json(
-					{ _tag: "InternalServerError", message: "This preview does not save sandbox settings." },
+					{ _tag: "InternalServerError", message: "This preview does not save computer settings." },
 					{ status: 500 },
 				),
 			),
@@ -97,13 +66,56 @@ const meta = preview.meta({
 	},
 });
 
-/** A workspace with no provider yet: the switch waits for OpenSandbox's key. */
+/**
+ * A workspace with no provider yet: the experimental notice, the switch
+ * waiting for OpenSandbox's key, and no bot using a computer yet.
+ */
 export const Off = meta.story({
 	play: async ({ canvas }) => {
-		const power = await canvas.findByRole("switch", { name: "Bots can use a sandbox" });
+		const power = await canvas.findByRole(
+			"switch",
+			{ name: "Bots can use a computer" },
+			{ timeout: 10_000 },
+		);
 		await expect(power).toBeDisabled();
+		await expect(canvas.getByText(/Computers are experimental/)).toBeInTheDocument();
+		await expect(
+			canvas.getByText("OpenSandbox needs an API key first. Add it below."),
+		).toBeVisible();
 		await expect(canvas.getByRole("radio", { name: /OpenSandbox/ })).toBeChecked();
 		await expect(canvas.getByPlaceholderText("Paste your key")).toBeInTheDocument();
+		const using = canvas.getByRole("region", { name: "Bots using a computer" });
+		await expect(within(using).getByText("None yet")).toBeInTheDocument();
+	},
+});
+
+/** The bots with their computer on, each under its pod's name and opening its own settings. */
+export const BotsUsingAComputer = meta.story({
+	beforeEach({ msw }) {
+		const [first, second] = storyBots;
+		msw.use(
+			...appHandlers({
+				bots: storyBots.map((bot) =>
+					bot.id === first?.id || bot.id === second?.id ? { ...bot, usesSandbox: true } : bot,
+				),
+			}),
+			answers([{ ...openSandbox, enabled: true, hasApiKey: true, status: "connected" }]),
+			http.get(networkUrl, () => HttpResponse.json(network)),
+		);
+	},
+	play: async ({ canvas }) => {
+		const using = await canvas.findByRole(
+			"region",
+			{ name: "Bots using a computer" },
+			{ timeout: 10_000 },
+		);
+		const [first] = storyBots;
+		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
+		await expect(row).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/pods\/.+\/agents\//),
+		);
+		await expect(within(using).getAllByRole("link")).toHaveLength(2);
 	},
 });
 
@@ -124,11 +136,11 @@ export const InUse = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("switch", { name: "Bots can use a sandbox" }),
+			await canvas.findByRole("switch", { name: "Bots can use a computer" }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(canvas.getByText("The last test connected.")).toBeInTheDocument();
 		await expect(canvas.getByText("In use")).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "Open" })).toBeChecked();
+		await expect(await canvas.findByRole("radio", { name: "Open" })).toBeChecked();
 	},
 });
 
@@ -150,9 +162,7 @@ export const OpenNetwork = meta.story({
 		};
 		msw.use(
 			answers([provider]),
-			http.get(`${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-network`, () =>
-				HttpResponse.json({ ...network, mode: "open" }),
-			),
+			http.get(networkUrl, () => HttpResponse.json({ ...network, mode: "open" })),
 			http.patch(`${providersUrl}/:providerId`, async ({ request }) => {
 				const changes = (await request.json()) as SandboxProviderUpdate;
 				savedChanges(changes);
@@ -162,9 +172,7 @@ export const OpenNetwork = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await expect(await canvas.findByRole("radio", { name: "Open" })).toBeChecked();
-		await expect(
-			await canvas.findByText(/Any host but the blocked ones below/),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(/Any host but the blocked ones/)).toBeInTheDocument();
 
 		await userEvent.click(canvas.getByRole("radio", { name: "Allowlist" }));
 		await waitFor(() =>
@@ -181,7 +189,7 @@ export const OpenNetwork = meta.story({
 
 /**
  * E2B chosen while OpenSandbox is in use: its fields include E2B Embed's two
- * addresses, and turning it on says pods get new sandboxes.
+ * addresses, and turning it on says pods get new computers.
  */
 export const SwitchingProvider = meta.story({
 	beforeEach({ msw }) {
@@ -206,9 +214,9 @@ export const SwitchingProvider = meta.story({
 			"placeholder",
 			"sugabots-sandbox",
 		);
-		await expect(canvas.getByLabelText("Sandbox URL")).toBeInTheDocument();
-		await expect(canvas.getByText(/moves sandboxes from OpenSandbox to E2B/)).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "Open" })).toBeChecked();
+		await expect(canvas.getByLabelText("Computer URL")).toBeInTheDocument();
+		await expect(canvas.getByText(/moves computers from OpenSandbox to E2B/)).toBeInTheDocument();
+		await expect(await canvas.findByRole("radio", { name: "Open" })).toBeChecked();
 	},
 });
 

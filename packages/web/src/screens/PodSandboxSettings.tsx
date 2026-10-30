@@ -51,9 +51,9 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 
 	if (sandbox.kind === "none") {
 		return (
-			<SettingsGroup label="Sandbox">
+			<SettingsGroup label="Computer">
 				<SettingsRow
-					label="No sandbox yet"
+					label="No computer yet"
 					sub="One is made the first time a bot here runs a command or uses its browser."
 				/>
 			</SettingsGroup>
@@ -71,7 +71,7 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 
 	return (
 		<SettingsGroup
-			label="Sandbox"
+			label="Computer"
 			note={failure ? failureMessage(failure) : stateNote(sandbox.state)}
 		>
 			<SettingsRow

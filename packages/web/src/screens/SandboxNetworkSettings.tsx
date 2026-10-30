@@ -4,7 +4,7 @@ import type {
 	SandboxNetworkSettings,
 } from "@sugabots/contracts";
 import { X } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSandboxNetwork } from "@/lib/sandbox-providers.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -12,19 +12,21 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
- * What every pod's sandbox may connect to. On the allowlist, the trusted
- * hosts every workspace has, and the ones this workspace added, and each pod
+ * What every pod's computer may connect to. On the allowlist, the trusted
+ * hosts every workspace has, and the ones this workspace allowed, and each pod
  * adds its own in its settings; open, every host. The workspace's blocked
- * hosts are out of every pod's reach, unless the sandboxes are open at a
- * provider that can't block hosts.
+ * hosts are out of every pod's reach, unless the computers are open at a
+ * provider that can't block hosts. `modeRow` leads the Network group: the
+ * switch between open and the allowlist, which is the provider's.
  */
-export function SandboxNetworkSection() {
+export function SandboxNetworkSection({ modeRow }: { modeRow?: ReactNode }) {
 	const { settings, addHost, removeHost, blockHost, unblockHost } = useSandboxNetwork();
 	if (settings.isPending) return null;
 	if (settings.isError) return <Alert>{failureMessage(settings.error)}</Alert>;
 	const changes = [addHost, removeHost, blockHost, unblockHost];
 	return (
 		<SandboxNetworkGroups
+			modeRow={modeRow}
 			settings={settings.data}
 			pending={changes.some((change) => change.isPending)}
 			error={changes.find((change) => change.error)?.error ?? undefined}
@@ -37,6 +39,7 @@ export function SandboxNetworkSection() {
 }
 
 export function SandboxNetworkGroups({
+	modeRow,
 	settings,
 	pending,
 	error,
@@ -45,6 +48,8 @@ export function SandboxNetworkGroups({
 	onBlock,
 	onUnblock,
 }: {
+	/** The switch between open and the allowlist, leading the Network group. */
+	modeRow?: ReactNode;
 	settings: SandboxNetworkSettings;
 	pending: boolean;
 	error?: unknown;
@@ -62,20 +67,23 @@ export function SandboxNetworkGroups({
 					label="Network"
 					note={
 						settings.blocking
-							? "Set under the provider. The allowed hosts are kept, and apply again if it goes back to the allowlist."
-							: "Set under the provider, which can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to the allowlist."
+							? "Switching to an allowlist keeps your blocked hosts, and the hosts allowed apply again."
+							: "This provider can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to the allowlist."
 					}
 				>
-					<SettingsRow
-						label="Open"
-						sub={settings.blocking ? "Any host but the blocked ones below" : "Any host"}
-					/>
+					{modeRow ?? (
+						<SettingsRow
+							label="Open"
+							sub={settings.blocking ? "Any host but the blocked ones below" : "Any host"}
+						/>
+					)}
 				</SettingsGroup>
 			) : (
 				<SettingsGroup
 					label="Network"
-					note="Every pod's sandbox connects to these hosts, and each pod adds its own under Sandbox in its settings. When a bot needs another, it asks in its thread, and the pod decides."
+					note="Every pod's computer connects to these hosts, and each pod adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in its thread, and the pod decides."
 				>
+					{modeRow}
 					{settings.addedHosts.map((added) => (
 						<AddedHostRow
 							key={added.host}
@@ -84,7 +92,7 @@ export function SandboxNetworkGroups({
 							onRemove={() => onRemove(added.host)}
 						/>
 					))}
-					<AddHostRow label="Add host" action="Add" disabled={pending} onAdd={onAdd} />
+					<AddHostRow label="Allow host" action="Allow" disabled={pending} onAdd={onAdd} />
 					<SettingsRow
 						label="Trusted hosts"
 						sub={
@@ -102,8 +110,8 @@ export function SandboxNetworkGroups({
 					label="Blocked hosts"
 					note={
 						open
-							? "No pod's sandbox connects to these, or to their subdomains."
-							: "No pod's sandbox connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
+							? "No pod's computer connects to these, or to their subdomains."
+							: "No pod's computer connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
 					}
 				>
 					{settings.blockedHosts.map((blocked) => (
@@ -140,7 +148,7 @@ export function AddedHostRow({
 	const by = added.addedByName ?? "someone who has left";
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13.5px]">{added.host}</span>}
+			label={<span className="font-mono text-[13px]">{added.host}</span>}
 			sub={
 				blockedBy ? `Blocked for the workspace by ${blockedBy}. Added by ${by}` : `Added by ${by}`
 			}
@@ -166,7 +174,7 @@ function BlockedHostRow({
 }) {
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13.5px]">{blocked.host}</span>}
+			label={<span className="font-mono text-[13px]">{blocked.host}</span>}
 			sub={`Blocked by ${blocked.blockedByName ?? "someone who has left"}`}
 			trailing={
 				<IconButton label={`Unblock ${blocked.host}`} disabled={disabled} onClick={onUnblock}>
@@ -210,12 +218,12 @@ export function AddHostRow({
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
 					placeholder="api.example.com or *.example.com"
-					className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+					className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
 				/>
 				<button
 					type="submit"
 					disabled={disabled || draft.trim() === ""}
-					className="focus-ring shrink-0 rounded-md font-medium text-link text-sm disabled:opacity-50"
+					className="focus-ring shrink-0 rounded-md font-medium text-[13px] text-link disabled:opacity-50"
 				>
 					{action}
 				</button>

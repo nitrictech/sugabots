@@ -11,7 +11,7 @@ import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { outcomeOf, RunStatus } from "@/screens/RoutineRun.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { ListTime, Page, PageHeader } from "@/shell/Page.tsx";
+import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
@@ -25,12 +25,15 @@ export function RoutinesPage({
 	pod,
 	selectedRoutineId,
 	botHandle,
+	making = false,
 	children,
 }: {
 	pod: Pod;
 	selectedRoutineId: string | undefined;
 	/** The bot whose routines these are, by its handle, when none of them is open. */
 	botHandle?: string;
+	/** Whether a routine is being made beside the list, which on a phone covers it as an open one does. */
+	making?: boolean;
 	children: ReactNode;
 }) {
 	const list = useChatList(pod.slug);
@@ -47,33 +50,27 @@ export function RoutinesPage({
 			: agents?.find((agent) => agent.podId === pod.id && agent.handle === botHandle));
 	const routines = bot ? all.filter((row) => row.agent.id === bot.id) : all;
 	const title = bot ? `${bot.name}'s routines` : "Routines";
-	const chosen = selectedRoutineId !== undefined;
+	const chosen = selectedRoutineId !== undefined || making;
 	const newRoutine = pod.permissions.manageRoutines && (
-		<IconButton label="New routine" variant="bar" render={<Link {...newRoutineLink(bot)} />}>
-			<Plus size={15} strokeWidth={2} />
+		<IconButton
+			label="New routine"
+			variant="bar"
+			// A link, so it says it is the page open rather than pressed.
+			aria-current={making ? "page" : undefined}
+			render={<Link {...newRoutineLink(pod, bot)} />}
+			className="aria-[current=page]:bg-chip aria-[current=page]:text-foreground"
+		>
+			<Plus size={16} strokeWidth={1.75} />
 		</IconButton>
 	);
-	if (list.isSuccess && routines.length === 0) {
-		return (
-			<Page title={title} actions={newRoutine}>
-				<div className="flex h-full pb-[10%]">
-					<EmptyState
-						title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
-						icon={<RefreshCcw strokeWidth={1.75} />}
-					>
-						Ask {bot ? bot.name : "a bot"} to do something on a schedule and it sets one up. Each
-						routine gets its own thread for its runs.
-					</EmptyState>
-				</div>
-			</Page>
-		);
-	}
+	// With none yet, the list stays, with its + where it always is, and the space beside it says how one is made.
+	const none = list.isSuccess && routines.length === 0;
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<section
 				aria-label="Routines"
 				className={cn(
-					"flex min-h-0 flex-col border-border border-r max-md:flex-1 md:w-[220px] lg:w-[280px]",
+					"flex min-h-0 flex-col border-border border-r max-md:flex-1 md:w-[280px] md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
@@ -82,6 +79,11 @@ export function RoutinesPage({
 					{list.isError && (
 						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">
 							Routines could not be loaded.
+						</li>
+					)}
+					{none && (
+						<li className="py-16 text-center text-[13px] text-subtle-foreground">
+							No routines yet.
 						</li>
 					)}
 					{routines.map((row) => (
@@ -97,7 +99,19 @@ export function RoutinesPage({
 				</ul>
 			</section>
 			<div className={cn("flex min-w-0 flex-1 flex-col", !chosen && "max-md:hidden")}>
-				{children}
+				{none && !chosen ? (
+					<div className="flex h-full pb-[10%]">
+						<EmptyState
+							title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
+							icon={<RefreshCcw strokeWidth={1.75} />}
+						>
+							Ask {bot ? bot.name : "a bot"} to do something on a schedule and it sets one up, or
+							make one with the +. Each routine gets its own thread for its runs.
+						</EmptyState>
+					</div>
+				) : (
+					children
+				)}
 			</div>
 		</div>
 	);
