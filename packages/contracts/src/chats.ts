@@ -420,6 +420,11 @@ export const chatMessageItemSchema = Schema.Union([
 		replies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		/** When its newest message was written; null until it has one. */
 		lastReplyAt: Schema.NullOr(isoTimestampSchema),
+		/**
+		 * Whether a bot is answering in it or about to. A thread opened from a
+		 * message asks no bot anything, so it can be quiet with no replies.
+		 */
+		working: Schema.Boolean,
 		createdAt: isoTimestampSchema,
 	}),
 ]);

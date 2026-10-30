@@ -1193,6 +1193,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 						sql<Date | null>`(
 							select max(${message.createdAt}) from ${message} where ${message.threadId} = ${row.id}
 						)`.mapWith(message.createdAt),
+					working: (row) => Turns.busyIn(sql`${row.id}`),
 				},
 				with: { hostAgent: agentColumns },
 			},
@@ -1273,6 +1274,7 @@ function toMainPage(row: MainPage, limit: number) {
 				agent: opened.hostAgent && { kind: "agent", ...opened.hostAgent },
 				replies: opened.replies,
 				lastReplyAt: opened.lastReplyAt?.toISOString() ?? null,
+				working: opened.working,
 				createdAt: opened.createdAt.toISOString(),
 			}),
 		})),

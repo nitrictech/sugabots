@@ -344,6 +344,11 @@ async function applyWorkspaceEvent(
 	} else if (update.type === "thread.changed") {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-history"] }),
+			// A reply, or its bot starting or stopping, changes how the thread's line in a chat reads.
+			queries.invalidateQueries({
+				queryKey: ["chat-messages"],
+				predicate: (query) => linksThread(query.state.data, update.threadId),
+			}),
 			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
 			refreshAfterThreadChange(queries, workspaceId),
 		]);

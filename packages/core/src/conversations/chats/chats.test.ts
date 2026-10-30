@@ -292,6 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					agent: expect.objectContaining({ id: agentId }),
 					replies: 0,
 					lastReplyAt: null,
+					working: true,
 				}),
 			]),
 		);
@@ -519,8 +520,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			hostAgentId: agentId,
 			title: "Northwind's renewal is due Friday.",
 		});
+		// Nobody has asked the bot anything in it yet, so it is not shown at work.
 		expect((await view.messages(channel.id))?.items).toContainEqual(
-			expect.objectContaining({ kind: "thread", threadId: first.id, originMessageId: said.id }),
+			expect.objectContaining({
+				kind: "thread",
+				threadId: first.id,
+				originMessageId: said.id,
+				replies: 0,
+				working: false,
+			}),
 		);
 		await chats.post({
 			conversationId: first.id,
@@ -528,6 +536,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			content: "Draft the reminder to them.",
 		});
 		expect(await runOnPostgres(runningTurns(first.id))).toHaveLength(1);
+		expect((await view.messages(channel.id))?.items).toContainEqual(
+			expect.objectContaining({ kind: "thread", threadId: first.id, working: true }),
+		);
 	});
 
 	it("lists a pod by its slug as by its id, as an address names it", async () => {
