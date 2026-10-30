@@ -18,7 +18,7 @@ import { buttonStyles } from "@/ui/button.tsx";
  */
 
 /** Who the reader has to ask, when they cannot choose the model themselves. */
-const AN_ADMINISTRATOR_CHOOSES = "A workspace administrator chooses its model.";
+const AN_ADMINISTRATOR_CHOOSES = "A workspace administrator chooses their model.";
 
 /** Whether the reader may choose the models the built-in agents run on. */
 function useCanConfigureBuiltInAgents(): boolean {
@@ -42,16 +42,16 @@ function SystemModelLink({ children }: { children: ReactNode }) {
 
 /**
  * The summary panels' empty state when the workspace has chosen no model for
- * its Scribe. Says what is not happening, not merely that something is unset.
+ * its system agents. Says what is not happening, not merely that something is unset.
  */
-export function ScribeNotSetUp() {
+export function SystemAgentsNotSetUp() {
 	const mayConfigure = useCanConfigureBuiltInAgents();
 	return (
 		<p className="m-0 pt-3 text-muted-foreground text-base leading-relaxed">
-			The Scribe writes these, and it has no model yet.{" "}
+			The system agents write these, and they have no model yet.{" "}
 			{mayConfigure ? (
 				<>
-					<SystemModelLink>Set up the Scribe</SystemModelLink>.
+					<SystemModelLink>Choose their model</SystemModelLink>.
 				</>
 			) : (
 				AN_ADMINISTRATOR_CHOOSES

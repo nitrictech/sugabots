@@ -232,10 +232,10 @@ export const CloseOnAPhone = meta.story({
 	},
 });
 
-/** Before the Scribe has a model there is no summary, and it says so rather than staying blank. */
-export const ScribeNotSetUp = meta.story({
+/** Before the system agents have a model there is no summary, and it says so rather than staying blank. */
+export const SystemAgentsNotSetUp = meta.story({
 	parameters: { scribeHasModel: false },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/The Scribe writes these/)).toBeVisible();
+		await expect(canvas.getByText(/The system agents write these/)).toBeVisible();
 	},
 });

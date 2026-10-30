@@ -1678,15 +1678,15 @@ describe("the Chat's summary", () => {
 		return screen.findByRole("complementary", { name: "Details" });
 	}
 
-	it("says the Scribe has no model, and where to set it up", async () => {
+	it("says the system agents have no model, and where to choose one", async () => {
 		scribeWithoutModel();
 		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 
-		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
+		expect(await within(sidebar).findByText(/The system agents write these/)).toBeDefined();
 		expect(
-			within(sidebar).getByRole("link", { name: "Set up the Scribe" }).getAttribute("href"),
+			within(sidebar).getByRole("link", { name: "Choose their model" }).getAttribute("href"),
 		).toBe("/suga/settings/providers/system");
 	});
 
@@ -1698,11 +1698,11 @@ describe("the Chat's summary", () => {
 		mount(chatPage);
 		const sidebar = await openDetails();
 
-		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
+		expect(await within(sidebar).findByText(/The system agents write these/)).toBeDefined();
+		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
 	});
 
-	it("says nothing about setting the Scribe up before the built-in agents have loaded", async () => {
+	it("says nothing about choosing the system agents' model before the built-in agents have loaded", async () => {
 		client.api.systemAgents.list.mockReturnValue(Effect.never);
 		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
@@ -1711,7 +1711,7 @@ describe("the Chat's summary", () => {
 		expect(
 			await within(sidebar).findByText("A summary will appear after the first reply."),
 		).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
+		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
 	});
 
 	it("shows a new summary once the thread says it changed", async () => {
