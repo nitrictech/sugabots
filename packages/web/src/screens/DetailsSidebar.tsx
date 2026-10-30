@@ -26,7 +26,7 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { ScribeNotSetUp } from "./BuiltInAgentSetup.tsx";
+import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 
@@ -260,7 +260,7 @@ function Summary({
 	if (scribeHasModel === false) {
 		return (
 			<SidebarSection title="Summary">
-				<ScribeNotSetUp />
+				<SystemAgentsNotSetUp />
 			</SidebarSection>
 		);
 	}
