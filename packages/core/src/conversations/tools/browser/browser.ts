@@ -14,7 +14,8 @@ import playwrightTools from "./playwright-tools.json" with { type: "json" };
 /**
  * The browser tools: Playwright MCP's, run in the pod's sandbox by a browser
  * of the agent's own in each thread, on the agent's own desktop there, so
- * people watching see what it does. The tools are offered from the list the
+ * people watching see what it does. Its browsers share its logins, which the
+ * sandbox syncs between them. The tools are offered from the list the
  * image's server was built with; the browser starts on the first call.
  */
 

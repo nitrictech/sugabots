@@ -90,8 +90,9 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 # name behind the CDN's own (Cloudflare's cloudflare-ech.com).
 COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
 
-COPY sugabots-desktop /usr/local/bin/sugabots-desktop
+COPY sugabots-desktop sugabots-browser-logins /usr/local/bin/
 
-RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop /usr/local/bin/sugabots-desktop-look
+RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop /usr/local/bin/sugabots-desktop-look \
+	/usr/local/bin/sugabots-browser-logins
 
 WORKDIR /workspace

@@ -34,8 +34,12 @@
 # sandbox it runs in allows user namespaces, with its profile under `profile`
 # and its downloads and screenshots in `output`. It lives until the desktop
 # stops, across the MCP sessions that drive it, and the dock's Browser starts
-# it if the agent hasn't. Programs that stopped, as they do when a paused
-# sandbox comes back, start again on the same display.
+# it if the agent hasn't. The agent's browsers, one in each thread, share its
+# logins: sugabots-browser-logins syncs each one's cookies with the agent's
+# own when it starts, when the agent next uses it, and every half minute
+# between, which catches a person logging in on the desktop. Programs that
+# stopped, as they do when a paused sandbox comes back, start again on the
+# same display.
 #
 # Display N is served to VNC viewers over a WebSocket on port 5900+N, which
 # `watch` reports too. It takes two passwords, made when the desktop starts:
@@ -277,6 +281,28 @@ set_browser_preferences() {
 	mv "$preferences.new" "$preferences"
 }
 
+# The agent's logins, which its browsers in every thread sync with.
+LOGINS="$HOME/.config/sugabots/browser-logins.json"
+LOGINS_INTERVAL_SECONDS=30
+
+# Syncs display N's browser's cookies with the agent's logins once. Its
+# browsers take turns with the store.
+sync_logins() {
+	local n="$1" profile
+	{ read -r profile; read -r _; } <"$state/$n.browser-dirs"
+	mkdir -p "$(dirname "$LOGINS")"
+	flock "$LOGINS.lock" sugabots-browser-logins $((9230 + n)) "$LOGINS" "$profile/sugabots-logins-base.json" ||
+		echo "The browser's logins couldn't be synced." >&2
+}
+
+# Syncs display N's browser's logins every half minute while it runs.
+# Separate from the browser, so a sync failing never restarts the browser.
+keep_logins_synced() {
+	local n="$1"
+	(while sleep "$LOGINS_INTERVAL_SECONDS"; do sync_logins "$n"; done) >>"$state/$n.log" 2>&1 &
+	echo $! >"$state/$n.logins.pids"
+}
+
 browser() {
 	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
 	local devtools=$((9230 + n))
@@ -302,6 +328,9 @@ browser() {
 		curl -sf -o /dev/null "http://127.0.0.1:$devtools/json/version" && break
 		sleep 0.1
 	done
+	# Before the agent's first page, which may need them.
+	sync_logins "$n" >>"$log" 2>&1
+	keep_logins_synced "$n"
 	playwright-mcp --host 0.0.0.0 --port $((8930 + n)) --allowed-hosts '*' \
 		--cdp-endpoint "http://127.0.0.1:$devtools" \
 		--output-dir "$output" --file-paths absolute >>"$log" 2>&1 &
@@ -321,6 +350,7 @@ stop_part() {
 
 stop() {
 	local n="${1:?which display}"
+	stop_part "$n" logins
 	stop_part "$n" browser
 	stop_part "$n" desktop
 }
@@ -356,7 +386,12 @@ session() {
 	desktop_options "${@:4}"
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
 	local started=no
-	if ! running "$n" browser; then
+	if running "$n" browser; then
+		# Logins made in the agent's other threads since its last sync.
+		sync_logins "$n" >>"$state/$n.log" 2>&1
+		running "$n" logins || keep_logins_synced "$n"
+	else
+		stop_part "$n" logins
 		stop_part "$n" browser
 		browser "$n" "$2" "$3"
 		started=yes
@@ -416,6 +451,7 @@ open() {
 			# The same profile reaches the running browser, which opens the window.
 			XDG_CONFIG_HOME="$profile" exec chromium $(chromium_sandbox_flags) --new-window
 		fi
+		stop_part "$n" logins
 		stop_part "$n" browser
 		browser "$n" "$profile" "$output"
 		;;

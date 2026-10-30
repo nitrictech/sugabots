@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+// Shares an agent's logins between its browsers, one in each thread, which
+// can't share a profile: Chromium lets only one browser use a profile at a
+// time. Each browser keeps its own profile, and its cookies are synced with
+// the agent's store.
+//
+//   sugabots-browser-logins devtools-port store base
+//
+// Syncs once, with the browser whose DevTools are on `devtools-port`, and
+// exits. `store` holds the agent's cookies; the caller holds its lock.
+// `base` holds the cookies the browser and the store last agreed on, kept
+// with the browser's profile, which tells a cookie this browser changed
+// since from one another browser changed. A cookie only this browser changed,
+// added or removed goes to the store; any other the store changed comes to
+// the browser. A cookie both changed takes this browser's, the newer.
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { createRequire } = require("node:module");
+
+// Playwright as Playwright MCP has it, rather than a copy of our own.
+const { chromium } = createRequire("/usr/local/lib/node_modules/@playwright/mcp/")("playwright-core");
+
+const [port, storePath, basePath] = process.argv.slice(2);
+if (!port || !storePath || !basePath) {
+	console.error("usage: sugabots-browser-logins devtools-port store base");
+	process.exit(2);
+}
+
+/** A cookie's identity: another with the same replaces it. */
+function keyOf(cookie) {
+	return JSON.stringify([cookie.name, cookie.domain, cookie.path, cookie.partitionKey ?? null]);
+}
+
+function same(a, b) {
+	return a === undefined || b === undefined ? a === b : JSON.stringify(a) === JSON.stringify(b);
+}
+
+function hasExpired(cookie, nowSeconds) {
+	return cookie.expires !== -1 && cookie.expires <= nowSeconds;
+}
+
+function readCookies(file) {
+	let cookies;
+	try {
+		cookies = JSON.parse(fs.readFileSync(file, "utf8")).cookies;
+	} catch (error) {
+		if (error.code === "ENOENT") return new Map();
+		throw error;
+	}
+	const nowSeconds = Date.now() / 1000;
+	return new Map(cookies.filter((cookie) => !hasExpired(cookie, nowSeconds)).map((cookie) => [keyOf(cookie), cookie]));
+}
+
+/** Writes the cookies whole or not at all, readable by the agent alone: they are its logins. */
+function writeCookies(file, cookies) {
+	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	const written = `${file}.${process.pid}.new`;
+	fs.writeFileSync(written, JSON.stringify({ cookies: [...cookies.values()] }), { mode: 0o600 });
+	fs.renameSync(written, file);
+}
+
+/**
+ * What the store and the browser should each hold, from what they hold now
+ * and what they last agreed on: the store's cookies, and the browser's
+ * cookies to set and to clear.
+ */
+function merge(browser, base, store) {
+	const merged = new Map();
+	const toSet = [];
+	const toClear = [];
+	for (const key of new Set([...browser.keys(), ...base.keys(), ...store.keys()])) {
+		const inBrowser = browser.get(key);
+		const inStore = store.get(key);
+		if (!same(inBrowser, base.get(key))) {
+			if (inBrowser) merged.set(key, inBrowser);
+			continue;
+		}
+		if (inStore) merged.set(key, inStore);
+		if (same(inBrowser, inStore)) continue;
+		if (inStore) toSet.push(inStore);
+		else toClear.push(inBrowser);
+	}
+	return { merged, toSet, toClear };
+}
+
+async function sync() {
+	// Connecting to a browser started elsewhere, Playwright lets go of it on
+	// close, as Playwright MCP does at the end of every turn.
+	const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+	try {
+		const [context] = browser.contexts();
+		const inBrowser = new Map((await context.cookies()).map((cookie) => [keyOf(cookie), cookie]));
+		const { merged, toSet, toClear } = merge(inBrowser, readCookies(basePath), readCookies(storePath));
+		if (toSet.length > 0) await context.addCookies(toSet);
+		for (const { name, domain, path } of toClear) await context.clearCookies({ name, domain, path });
+		writeCookies(storePath, merged);
+		writeCookies(basePath, merged);
+	} finally {
+		await browser.close();
+	}
+}
+
+sync().catch((error) => {
+	console.error(error);
+	process.exit(1);
+});
