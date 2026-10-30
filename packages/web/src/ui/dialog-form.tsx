@@ -2,11 +2,14 @@ import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { Button } from "@/ui/button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 
 const widths = {
 	compact: "max-w-[420px] sm:max-w-[420px]",
 	default: "max-w-[460px] sm:max-w-[460px]",
+	/** For writing at length, such as a routine's instructions. */
+	wide: "max-w-[640px] sm:max-w-[640px]",
 } as const;
 
 /** DialogForm renders a modal form inside Dialog. Start it with a DialogFormHeader and end it with a DialogFormFooter. */
@@ -74,16 +77,20 @@ export function DialogFormStep({
 
 /**
  * The dialog's title. `onBack` puts Back beside it, for a step inside the
- * dialog; `backDisabled` holds it while the step is saving.
+ * dialog; `backDisabled` holds it while the step is saving. `onClose` puts a
+ * close button in the corner, for a step with no footer, such as one that
+ * only picks where to go next.
  */
 export function DialogFormHeader({
 	title,
 	onBack,
 	backDisabled = false,
+	onClose,
 }: {
 	title: string;
 	onBack?: () => void;
 	backDisabled?: boolean;
+	onClose?: () => void;
 }) {
 	return (
 		<header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-[18px] pt-4 pb-3">
@@ -104,7 +111,9 @@ export function DialogFormHeader({
 			<DialogTitle className="text-center font-semibold text-[15px] text-foreground">
 				{title}
 			</DialogTitle>
-			<span />
+			<span className="flex justify-self-end">
+				{onClose && <CloseButton onClick={onClose} className="-mr-1.5" />}
+			</span>
 		</header>
 	);
 }

@@ -90,7 +90,12 @@ export function useRoutineSecret({
 /** Each change names the bot its routine belongs to, since routines are addressed through their bot. */
 export function useRoutineActions() {
 	const queries = useQueryClient();
-	const refresh = () => queries.invalidateQueries({ queryKey: [ROUTINES_KEY] });
+	const refresh = () =>
+		Promise.all([
+			queries.invalidateQueries({ queryKey: [ROUTINES_KEY] }),
+			// A pod's chat list holds its routines, by name and how they stand.
+			queries.invalidateQueries({ queryKey: ["chat-list"] }),
+		]);
 	const keepSecret = (triggerId: string, current: RoutineCurrentSecret) =>
 		queries.setQueryData([SECRET_KEY, triggerId], current);
 	const written = (result: RoutineWriteResult) => {

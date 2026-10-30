@@ -7,6 +7,7 @@ import {
 	type NewMessage,
 	type NewThread,
 	type Pod,
+	type RoutineUpdate,
 	type SessionUser,
 	type StartedThread,
 	type ThreadDetails,
@@ -658,7 +659,8 @@ export function useSetDone(conversationId: string) {
 
 /**
  * What a routine's own thread does with its routine: run it again, which
- * turns on one that paused itself after failing, and pause or resume it.
+ * turns on one that paused itself after failing, pause or resume it, and
+ * rename it.
  * `pending` is shared by every control of the routine on screen, so none
  * starts another change while one is on its way. The thread, its page and
  * the pod's list are fetched again after each.
@@ -683,15 +685,16 @@ export function useRoutineControls(
 		mutationFn: () => actions.run.mutateAsync(scope),
 		onSuccess: refresh,
 	});
-	const setPaused = useMutation({
+	const update = useMutation({
 		mutationKey,
-		mutationFn: (paused: boolean) =>
-			actions.update.mutateAsync({ ...scope, json: { state: paused ? "paused" : "enabled" } }),
+		mutationFn: (json: RoutineUpdate) => actions.update.mutateAsync({ ...scope, json }),
 		onSuccess: refresh,
 	});
 	return {
 		runAgain: () => runAgain.mutateAsync(),
-		setPaused: (paused: boolean) => setPaused.mutateAsync(paused),
+		setPaused: (paused: boolean) => update.mutateAsync({ state: paused ? "paused" : "enabled" }),
+		/** Renames the routine, and its thread with it. */
+		rename: (name: string) => update.mutateAsync({ name }),
 		pending: useIsMutating({ mutationKey }) > 0,
 	};
 }
