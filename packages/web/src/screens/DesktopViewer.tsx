@@ -139,7 +139,12 @@ function ComputerScreen({
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
 			<div className="@container-[size] flex min-h-0 w-full flex-1 items-center justify-center">
 				<div className="w-[min(100cqw,calc(100cqh*4/3))]">
-					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+					<DesktopScreen
+						threadId={threadId}
+						agentId={agent.id}
+						viewOnly={!inControl}
+						offersReconnect
+					/>
 				</div>
 			</div>
 			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
@@ -202,7 +207,8 @@ export function LiveDesktopCard({
 			className="overflow-hidden rounded-[12px] border border-border bg-panel"
 		>
 			<div className="relative">
-				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly />
+				{/* Covered by the button that opens the desktop, which reconnects there. */}
+				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly offersReconnect={false} />
 				<button
 					type="button"
 					onClick={onOpen}
@@ -241,11 +247,14 @@ export function DesktopScreen({
 	threadId,
 	agentId,
 	viewOnly,
+	offersReconnect,
 }: {
 	threadId: string;
 	agentId: string;
 	/** Shows the desktop without sending input. The API enforces it either way. */
 	viewOnly: boolean;
+	/** Shows a Reconnect button once disconnected, for a screen nothing else covers. */
+	offersReconnect: boolean;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
@@ -301,9 +310,25 @@ export function DesktopScreen({
 		};
 		element.addEventListener("keydown", keepPasteShortcut, { capture: true });
 		document.addEventListener("paste", pasteIntoDesktop);
+		// A hidden page's connection may be closed, and only reported closed once the page is shown.
+		let hiddenWhileConnected = document.hidden;
+		let droppedWhileHidden = false;
+		const unusedTooLong = () =>
+			!agentUsingNow.current && Date.now() - lastUsedAt.current >= IDLE_TIMEOUT_MINUTES * 60_000;
+		// Waking the sandbox after a long absence is left to the Reconnect button.
+		const reconnect = () =>
+			unusedTooLong() ? setStanding("idle") : setAttempt((count) => count + 1);
+		const reconnectWhenShown = () => {
+			if (document.hidden) {
+				hiddenWhileConnected = true;
+				return;
+			}
+			if (droppedWhileHidden) reconnect();
+		};
+		document.addEventListener("visibilitychange", reconnectWhenShown);
 		const idleCheck = setInterval(() => {
 			if (agentUsingNow.current) used();
-			if (!viewer || Date.now() - lastUsedAt.current < IDLE_TIMEOUT_MINUTES * 60_000) return;
+			if (!viewer || !unusedTooLong()) return;
 			const idleViewer = viewer;
 			viewer = undefined;
 			setStanding("idle");
@@ -320,7 +345,13 @@ export function DesktopScreen({
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => setStanding("connected"));
 			opened.addEventListener("disconnect", () => {
-				if (viewer === opened) setStanding("ended");
+				if (viewer !== opened) return;
+				viewer = undefined;
+				connected.current = undefined;
+				if (!hiddenWhileConnected) return setStanding("ended");
+				if (!document.hidden) return reconnect();
+				droppedWhileHidden = true;
+				setStanding("connecting");
 			});
 		});
 		return () => {
@@ -329,7 +360,10 @@ export function DesktopScreen({
 			for (const event of INPUT_EVENTS) element.removeEventListener(event, used, { capture: true });
 			element.removeEventListener("keydown", keepPasteShortcut, { capture: true });
 			document.removeEventListener("paste", pasteIntoDesktop);
-			viewer?.disconnect();
+			document.removeEventListener("visibilitychange", reconnectWhenShown);
+			const closing = viewer;
+			viewer = undefined;
+			closing?.disconnect();
 			connected.current = undefined;
 		};
 	}, [threadId, agentId, attempt]);
@@ -340,7 +374,7 @@ export function DesktopScreen({
 			{standing !== "connected" && (
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-sm">
 					<p>{STANDING_TEXT[standing]}</p>
-					{standing === "idle" && (
+					{offersReconnect && (standing === "idle" || standing === "ended") && (
 						<Button variant="outline" onClick={() => setAttempt((count) => count + 1)}>
 							Reconnect
 						</Button>
@@ -363,7 +397,7 @@ function isPasteShortcut(event: KeyboardEvent): boolean {
 
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
 	connecting: "Starting the desktop…",
-	ended: "The desktop couldn't be reached. Close it and open it again to retry.",
+	ended: "The desktop couldn't be reached.",
 	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the sandbox can pause.`,
 };
 
