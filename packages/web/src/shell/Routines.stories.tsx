@@ -272,7 +272,8 @@ const meta = preview.meta({
  * A routine chosen: its bot's routines down the left, under the bot's name,
  * this one's latest run failed, and beside them its thread, run by run: one that
  * said what it did, one whose result was talked over, then one that failed.
- * Beside the thread, the routine: its switch, its facts and Run now.
+ * Beside the thread, the routine, set up in place: its switch, its
+ * instructions, its triggers, where its result goes, and Run now.
  */
 export const Default = meta.story({
 	play: async ({ canvas, userEvent }) => {
@@ -303,6 +304,37 @@ export const Default = meta.story({
 			"aria-current",
 			"page",
 		);
+	},
+});
+
+/** The routine's instructions, opened from the panel to change them in a dialog with room to write. */
+export const EditingInstructions = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 }),
+		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Edit instructions" }));
+		const dialog = await within(document.body).findByRole("dialog", { name: "Instructions" });
+		const field = within(dialog).getByRole("textbox", { name: "Instructions" });
+		await expect(field).toHaveValue(outboundRoutine.instructions);
+		// Nothing to save until the instructions change.
+		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+		await userEvent.type(field, " Skip weekends.");
+		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled();
+	},
+});
+
+/** Add trigger, under the routine's schedule in the panel, starts by choosing the kind. */
+export const AddingTrigger = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 }),
+		);
+		const triggers = await canvas.findByRole("region", { name: "Triggers" });
+		await expect(within(triggers).getByRole("button", { name: /^Schedule/ })).toBeVisible();
+		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
+		const dialog = await within(document.body).findByRole("dialog", { name: "Add a trigger" });
+		await expect(within(dialog).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 	},
 });
 

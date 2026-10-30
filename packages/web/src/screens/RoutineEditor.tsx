@@ -433,7 +433,7 @@ function RoutineMenu({
  * sender made has to be pasted into it again. A repository copy runs on the
  * same repository and events.
  */
-function copyOf(routine: Routine, siblingNames: readonly string[]): NewRoutine {
+export function copyOf(routine: Routine, siblingNames: readonly string[]): NewRoutine {
 	const fields = {
 		name: copyName(routine.name, siblingNames),
 		instructions: routine.instructions,
@@ -667,6 +667,11 @@ function RoutineInstructions({ placed, back }: { placed: PlacedRoutine; back: Re
 
 const countFormat = new Intl.NumberFormat("en");
 
+/** The note under a routine's instructions while they are written: what to say, and how much room is left. */
+export function instructionsNote(instructions: string): string {
+	return `Say what to look at, what to do, and what a good result looks like. ${countFormat.format(instructions.length)} of ${countFormat.format(MAX_ROUTINE_INSTRUCTIONS_CHARACTERS)} characters.`;
+}
+
 /** What a routine tells its bot each time it runs, on a page of its own with room to write. */
 function InstructionsPage({
 	back,
@@ -694,14 +699,7 @@ function InstructionsPage({
 			description={`What ${botName ?? "the bot"} does each time this runs.`}
 		>
 			{error && <Alert>{error}</Alert>}
-			<SettingsGroup
-				className="p-1"
-				note={
-					editable
-						? `Say what to look at, what to do, and what a good result looks like. ${countFormat.format(value.length)} of ${countFormat.format(MAX_ROUTINE_INSTRUCTIONS_CHARACTERS)} characters.`
-						: undefined
-				}
-			>
+			<SettingsGroup className="p-1" note={editable ? instructionsNote(value) : undefined}>
 				<label htmlFor={id} className="sr-only">
 					Instructions
 				</label>
@@ -752,7 +750,7 @@ function ResultsRow({
  * Which of the pod's chats a routine's results go to, offered once the pod
  * has more than one: its first, which a null `chatId` stands for, or another.
  */
-function ChatRow({
+export function ChatRow({
 	pod,
 	chatId,
 	onChange,
@@ -820,7 +818,7 @@ function SwitchRow({
 	);
 }
 
-function DeleteRoutine({
+export function DeleteRoutine({
 	placed,
 	open,
 	onOpenChange,

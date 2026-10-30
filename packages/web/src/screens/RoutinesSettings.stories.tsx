@@ -415,7 +415,7 @@ export const AddTrigger = meta.story({
 		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
-		await expect(within(step).getByRole("link", { name: /^Connect more in/ })).toBeVisible();
+		await expect(within(step).getByRole("link", { name: /^Connect another app/ })).toBeVisible();
 		await userEvent.type(within(step).getByRole("searchbox", { name: "Search triggers" }), "sched");
 		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await expect(within(step).queryByRole("button", { name: /^Webhook/ })).toBeNull();
