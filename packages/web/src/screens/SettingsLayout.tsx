@@ -90,7 +90,10 @@ export function SettingsLayout({
 				 * to need one, so a long page, such as Usage, centres its column where
 				 * a short one does.
 				 */}
-				<main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable] max-md:[scrollbar-gutter:auto]">
+				<main
+					data-scroll-restoration-id="settings"
+					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable] max-md:[scrollbar-gutter:auto]"
+				>
 					{!index && (
 						<CompactPageBackBar
 							parent={phone ? phoneParentPage(pathname, pods) : parentPage(pathname)}
@@ -155,9 +158,9 @@ function parentPage(pathname: string): BackTarget {
 }
 
 /**
- * The page `pathname` sits under on a phone, whose settings are listed in You:
- * a pod's own pages sit under the pod's page there, and what would sit under
- * the list of settings sits under You.
+ * The page `pathname` sits under on a phone, whose settings are listed in its
+ * You tab: a pod's own pages sit under the pod's page there, Notifications
+ * under your profile, and what would sit under the list of settings under the tab.
  */
 function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): BackTarget {
 	const [, sectionId, item, , detail] = pathname.split("/").filter(Boolean);
@@ -167,9 +170,16 @@ function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): Ba
 			render: <Link from="/$workspace" to="./you/pods/$pod" params={{ pod: item }} />,
 		};
 	}
+	// Opened from a row on your profile.
+	if (sectionId === "notifications") {
+		return {
+			label: "You",
+			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />,
+		};
+	}
 	const parent = parentPage(pathname);
 	if (parent !== settingsList) return parent;
-	return { label: "You", render: <Link from="/$workspace" to="./you" /> };
+	return { label: "Settings", render: <Link from="/$workspace" to="./you" /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */
@@ -499,21 +509,25 @@ function CompactSettingsList() {
 /**
  * The groups of the list of settings: you, the workspace's sections, and its
  * pods. A phone's You tab lists them too, with `linkState` saying where each
- * page's Back returns, and its pods opening `podLink` rather than their General.
+ * page's Back returns, its pods opening `podLink` rather than their General,
+ * and `you` in place of your own rows.
  */
 export function SettingsListGroups({
 	linkState,
 	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
+	you,
 }: {
 	linkState?: (state: HistoryState) => HistoryState;
 	podLink?: (pod: Pod) => ReactElement;
+	you?: ReactNode;
 }) {
 	const { sections, counts } = useWorkspaceSections();
 	const { shared, personal } = useListedPods();
 	const session = useSession();
 	return (
 		<>
-			{session.user && (
+			{you}
+			{!you && session.user && (
 				<SettingsGroup>
 					<SettingsRow
 						icon={<PersonAvatar person={session.user} size={36} />}

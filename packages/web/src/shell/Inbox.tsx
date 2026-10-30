@@ -128,7 +128,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 						</>
 					}
 				/>
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
+				<ul className="tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
 					{feed.isError && (
 						<li className="px-3 py-3 text-[13px] text-muted-foreground">
 							Inbox could not be loaded.

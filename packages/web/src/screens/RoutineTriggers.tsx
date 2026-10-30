@@ -275,7 +275,7 @@ export function TriggerDialog({
 					backDisabled={pending}
 				/>
 				<DialogFormBody>
-					<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1">
+					<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 						{settings ?? <DraftGroups pod={pod} draft={draft} onChange={setDraft} />}
 					</div>
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}

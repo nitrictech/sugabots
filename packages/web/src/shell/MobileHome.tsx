@@ -47,7 +47,7 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 						/>
 					</Link>
 				</header>
-				<div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-2 pb-4 pl-1.5">
+				<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-2 pb-4 pl-1.5">
 					<Link
 						{...artifactsLink(pod)}
 						className="focus-ring flex h-11 shrink-0 items-center gap-3 rounded-[10px] px-3 text-[16px] text-muted-foreground active:bg-row-selected"
@@ -80,7 +80,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 	return (
 		<nav
 			aria-label="Pods"
-			className="flex w-[68px] shrink-0 flex-col items-center gap-2.5 overflow-y-auto pt-1.5 pb-4"
+			className="tab-bar-clearance flex w-[68px] shrink-0 flex-col items-center gap-2.5 overflow-y-auto pt-1.5 pb-4"
 		>
 			{sorted.map((pod) => {
 				const marker = markers?.pods[pod.id];

@@ -2112,47 +2112,66 @@ describe("workspace settings", () => {
 });
 
 describe("settings on a phone", () => {
-	it("opens You, which lists you first, then the workspace's sections", async () => {
+	it("opens the You tab's Settings: you first, then the workspace's sections", async () => {
 		mount("/suga/settings");
 
-		// The sidebar is drawn too, if hidden on a phone, so these look inside You.
-		const you = await screen.findByRole("region", { name: "You" });
+		// The sidebar is drawn too, if hidden on a phone, so these look inside the tab's page.
+		const settings = await screen.findByRole("region", { name: "Settings" });
 		expect(
-			(await within(you).findByRole("link", { name: new RegExp(sam.name) })).getAttribute("href"),
+			(await within(settings).findByRole("link", { name: new RegExp(sam.name) })).getAttribute(
+				"href",
+			),
 		).toBe("/suga/settings/profile");
-		expect(within(you).getByRole("link", { name: "Notifications" }).getAttribute("href")).toBe(
-			"/suga/settings/notifications",
-		);
-		expect(within(you).getByRole("link", { name: "General" }).getAttribute("href")).toBe(
+		expect(within(settings).getByRole("link", { name: "General" }).getAttribute("href")).toBe(
 			"/suga/settings/general",
 		);
 		expect(
-			within(you)
+			within(settings)
 				.getByRole("link", { name: /^People/ })
 				.getAttribute("href"),
 		).toBe("/suga/settings/members");
 	});
 
+	it("lists Notifications under your profile, and leads from it back there", async () => {
+		mount("/suga/settings/profile");
+
+		const profile = await screen.findByRole("main");
+		expect(
+			(await within(profile).findByRole("link", { name: "Notifications" })).getAttribute("href"),
+		).toBe("/suga/settings/notifications");
+		expect(within(profile).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+			"/suga/you",
+		);
+		cleanup();
+
+		mount("/suga/settings/notifications");
+		const notifications = await screen.findByRole("main");
+		expect(
+			(await within(notifications).findByRole("link", { name: "You" })).getAttribute("href"),
+		).toBe("/suga/settings/profile");
+	});
+
 	it("opens a pod on a page of its parts, each a page of its own", async () => {
 		mount("/suga/you");
 
-		const you = await screen.findByRole("region", { name: "You" });
-		fireEvent.click(await within(you).findByRole("link", { name: pods[0]?.name }));
+		const settings = await screen.findByRole("region", { name: "Settings" });
+		fireEvent.click(await within(settings).findByRole("link", { name: pods[0]?.name }));
 		const pod = await screen.findByRole("region", { name: pods[0]?.name });
-		expect(within(pod).getByRole("link", { name: "Back to You" }).getAttribute("href")).toBe(
-			"/suga/you",
-		);
+		// Opened from Settings, so plainly Back, which returns there.
+		expect(within(pod).getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/suga/you");
 		expect(within(pod).getByRole("link", { name: /^Bots/ }).getAttribute("href")).toBe(
 			`/suga/settings/pods/${pods[0]?.slug}/bots`,
 		);
 	});
 
-	it("opens General by name, with the way back to You", async () => {
+	it("opens General by name, with the way back to Settings", async () => {
 		mount("/suga/settings/general");
 
 		expect(await screen.findByText("Time zone")).toBeDefined();
 		const page = screen.getByRole("main");
-		expect(within(page).getByRole("link", { name: "You" }).getAttribute("href")).toBe("/suga/you");
+		expect(within(page).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+			"/suga/you",
+		);
 	});
 
 	it("leads from one of a pod's pages back to the pod's page in You", async () => {

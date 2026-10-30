@@ -341,7 +341,7 @@ function BotRow({
 				type="button"
 				aria-expanded={open}
 				onClick={() => setOpen(!open)}
-				className="focus-ring flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-settings-row-hover"
+				className="focus-ring flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-settings-row-hover active:bg-row-selected"
 			>
 				<SettingsFieldLabel>Bot</SettingsFieldLabel>
 				{summary}

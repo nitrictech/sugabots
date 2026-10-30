@@ -144,8 +144,9 @@ function ImageViewer({ file, url, drawable }: { file: FilePart; url: string; dra
 		<DialogContent
 			initialFocus={picture}
 			showCloseButton={false}
-			// On a phone, the picture alone on black across the whole screen, as a phone's own photos open.
-			className="inset-4 flex w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
+			// Stretched to its insets, rather than as tall as the picture: on a phone, the picture
+			// alone on black across the whole screen, as a phone's own photos open.
+			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
 		>
 			{/* On a phone, × at the left and Download at the right, the name between them. */}
 			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">

@@ -456,6 +456,28 @@
 }
 
 /*
+ * How much of the foot of a phone's page its tabs cover, while they show: the
+ * bar, and the inset under it. They float over the page, so what scrolls
+ * leaves this much room after its end to come clear of them.
+ */
+@media (width < 48rem) {
+	:root:has([data-tab-bar]) {
+		/* The bar's 60px and 8px of room above it, over its inset. */
+		--tab-bar-space: calc(68px + max(12px, env(safe-area-inset-bottom)));
+	}
+}
+
+/* Room after the end of what scrolls, for it to come clear of a phone's tabs. */
+@utility tab-bar-clearance {
+	&::after {
+		content: "";
+		display: block;
+		flex-shrink: 0;
+		height: var(--tab-bar-space, 0px);
+	}
+}
+
+/*
  * A line cut short at its end by fading out rather than an ellipsis, which
  * reads badly after a dash or a space. A line that fits never reaches the fade.
  */

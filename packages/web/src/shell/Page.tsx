@@ -31,7 +31,7 @@ export function Page({
 	return (
 		<section aria-label={title} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
 			<PageHeader title={title} place={place} actions={actions} />
-			<div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+			<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">{children}</div>
 		</section>
 	);
 }

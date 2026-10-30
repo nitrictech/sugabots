@@ -2,8 +2,9 @@ import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE } from "@/ui/back-button.tsx";
+import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
@@ -19,6 +20,16 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
  */
 const PANEL_BACK_BAR =
 	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur max-md:bg-transparent max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2 max-md:backdrop-blur-none";
+
+/**
+ * Where a page's add button goes on a phone: across from Back at the top,
+ * where a phone's page keeps its actions. It follows the Back bar above it,
+ * pulled up level with Back (the bar's 44px Back and 8px under it), and sticks
+ * where Back sticks, so the two move together, as when a bar above the page
+ * pushes it down. It takes no room of its own.
+ */
+const PHONE_ACTION_ROW =
+	"pointer-events-none sticky top-[max(12px,env(safe-area-inset-top))] z-20 -mt-[52px] flex h-[52px] shrink-0 justify-end px-4";
 
 const PANEL_BACK_LINK =
 	"focus-ring inline-flex min-h-[30px] min-w-0 items-center gap-1 rounded-md font-medium text-[14px] text-link";
@@ -54,6 +65,8 @@ export function SettingsPage({
 	children: ReactNode;
 	className?: string;
 }) {
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const besideTitle = headerAction && !phone && <div className="shrink-0">{headerAction}</div>;
 	return (
 		<>
 			{back && (
@@ -65,6 +78,11 @@ export function SettingsPage({
 					className={cn(PANEL_BACK_BAR, backOnWide ? "lg:pt-2 lg:pb-0" : "lg:hidden")}
 				>
 					{back}
+				</div>
+			)}
+			{headerAction && phone && (
+				<div className={PHONE_ACTION_ROW}>
+					<span className="pointer-events-auto">{headerAction}</span>
 				</div>
 			)}
 			<div
@@ -86,7 +104,7 @@ export function SettingsPage({
 								<p className="m-0 text-[13px] text-muted-foreground">{description}</p>
 							)}
 						</div>
-						{headerAction && <div className="shrink-0">{headerAction}</div>}
+						{besideTitle}
 					</div>
 				) : (
 					(title || description) && (
@@ -100,7 +118,7 @@ export function SettingsPage({
 									</p>
 								)}
 							</div>
-							{headerAction && <div className="shrink-0">{headerAction}</div>}
+							{besideTitle}
 						</div>
 					)
 				)}
@@ -134,12 +152,15 @@ export function SettingsAddButton({
 			type: render ? undefined : "button",
 			onClick,
 			disabled,
-			className:
+			className: cn(
 				"focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border-strong pr-3 pl-2.5 font-medium text-[13px] text-foreground transition-colors hover:border-border-dashed hover:bg-row-hover disabled:cursor-default disabled:opacity-50",
+				// On a phone, the round + a phone's page has at its top right.
+				"max-md:glass max-md:size-11 max-md:justify-center max-md:rounded-full max-md:border-0 max-md:p-0 max-md:active:bg-hover-strong",
+			),
 			children: (
 				<>
-					<Plus aria-hidden size={14} strokeWidth={2} />
-					{children}
+					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-[22px]" />
+					<span className="max-md:sr-only">{children}</span>
 				</>
 			),
 		},
@@ -187,13 +208,13 @@ export function SettingsGroup({
 				</div>
 			)}
 			{description && (
-				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal">
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-md:text-[13px]">
 					{description}
 				</p>
 			)}
 			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal">
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-md:text-[13px]">
 					{note}
 				</div>
 			)}
@@ -240,15 +261,21 @@ export function SettingsRow({
 			onClick,
 			className: cn(
 				`${SETTINGS_ROW} w-full min-w-0 py-3 text-left`,
-				interactive && "focus-ring cursor-pointer transition-colors hover:bg-settings-row-hover",
+				// Shaded under a finger as under a pointer, so a tap shows it landed.
+				interactive &&
+					"focus-ring cursor-pointer transition-colors hover:bg-settings-row-hover active:bg-row-selected",
 				className,
 			),
 			children: (
 				<>
 					{icon}
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-						<span className="truncate text-[13px] text-foreground">{label}</span>
-						{sub && <span className="text-pretty text-subtle-foreground text-xs">{sub}</span>}
+						<span className="truncate text-[13px] text-foreground max-md:text-[16px]">{label}</span>
+						{sub && (
+							<span className="text-pretty text-subtle-foreground text-xs max-md:text-[13px]">
+								{sub}
+							</span>
+						)}
 					</span>
 					{trailing}
 					{chevron && (
@@ -438,7 +465,8 @@ export function SettingsFieldLabel({
 	htmlFor?: string;
 	children: ReactNode;
 }) {
-	const className = "min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground";
+	const className =
+		"min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground max-md:text-[16px]";
 	return htmlFor ? (
 		<label htmlFor={htmlFor} className={className}>
 			{children}
@@ -451,7 +479,9 @@ export function SettingsFieldLabel({
 /** The value at a row's end, in the muted colour. */
 export function SettingsValue({ children }: { children: ReactNode }) {
 	return (
-		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground">{children}</span>
+		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground max-md:text-[15px]">
+			{children}
+		</span>
 	);
 }
 
@@ -470,7 +500,7 @@ export function SettingsRowButton({
 			type="button"
 			onClick={onClick}
 			disabled={disabled}
-			className="focus-ring h-[30px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-[13px] text-foreground transition-colors hover:bg-row-hover disabled:cursor-default disabled:opacity-50"
+			className="focus-ring h-[30px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-[13px] text-foreground transition-colors hover:bg-row-hover active:bg-row-selected disabled:cursor-default disabled:opacity-50"
 		>
 			{children}
 		</button>
@@ -494,7 +524,7 @@ export function SettingsRadioMark({ checked }: { checked: boolean }) {
 
 /** A pick-one row's look, for a `<label>` around a hidden radio: the row lifts under the pointer and rings when focused. */
 export const SETTINGS_RADIO_ROW =
-	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
+	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
 
 /** How a Test went, as a dot and a line cut short to fit, given whole when pointed at. */
 export function SettingsTestOutcome({ good, children }: { good: boolean; children: string }) {
@@ -555,7 +585,7 @@ export function SettingsAddRow({ label, onClick }: { label: string; onClick: () 
 			onClick={onClick}
 			className={cn(
 				SETTINGS_ROW,
-				"focus-ring w-full border-t py-3 text-left transition-colors first:border-t-0 hover:bg-settings-row-hover",
+				"focus-ring w-full border-t py-3 text-left transition-colors first:border-t-0 hover:bg-settings-row-hover active:bg-row-selected",
 			)}
 		>
 			<SettingsAddMark />
@@ -599,8 +629,8 @@ export function SettingsDanger({
 			)}
 		>
 			<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5 leading-[1.4]">
-				<span className="text-[13px] text-foreground">{label}</span>
-				<span className="text-pretty text-subtle-foreground text-xs">
+				<span className="text-[13px] text-foreground max-md:text-[16px]">{label}</span>
+				<span className="text-pretty text-subtle-foreground text-xs max-md:text-[13px]">
 					{disabledReason ?? description}
 				</span>
 			</div>
@@ -625,8 +655,9 @@ export interface BackTarget {
 
 /** The small Back link above a page's title, for `SettingsPage`'s `back`; a phone's round Back there. */
 export function PageBackLink({ label, render }: BackTarget) {
+	const backLink = usePhoneBack(render);
 	return useRender({
-		render,
+		render: backLink,
 		props: {
 			className: cn(PANEL_BACK_LINK, BACK_ON_PHONE),
 			children: (
@@ -646,8 +677,9 @@ export function PageBackLink({ label, render }: BackTarget) {
  * `md:hidden`.
  */
 export function CompactBackBar({ label, render, className }: BackTarget & { className: string }) {
+	const backLink = usePhoneBack(render);
 	const link = useRender({
-		render,
+		render: backLink,
 		props: {
 			className: cn(
 				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link",

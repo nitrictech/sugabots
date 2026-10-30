@@ -31,7 +31,7 @@ export function Approvals() {
 
 	return (
 		<Page title="Approvals" place={{ kind: "tab" }}>
-			<div className="flex flex-col gap-3 px-6 pt-6 pb-12 max-md:px-4 max-md:pt-2">
+			<div className="flex flex-col gap-3 px-6 pt-6 pb-12 max-md:px-4 max-md:pt-1.5">
 				{inbox.isError && (
 					<p className="m-0 px-1 text-muted-foreground">Approvals could not be loaded.</p>
 				)}
@@ -83,7 +83,8 @@ export function Approvals() {
 /** In place of the waiting requests while there are none: a card saying so, and what would come here. */
 function NothingWaiting() {
 	return (
-		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:rounded-[14px]">
+		// On a phone, as tall as the card at the top of the next tab's Settings, so moving between them is still.
+		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:mb-3 max-md:min-h-[98px] max-md:rounded-[14px] max-md:py-0">
 			<span
 				aria-hidden
 				className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-chip text-muted-foreground"
@@ -102,8 +103,17 @@ function NothingWaiting() {
 	);
 }
 
+/**
+ * A section's quiet heading. On a phone it is set as Settings' group headings
+ * are, the next tab's, at the same size and inset and as far from what it
+ * heads (with the list's 12px gap, 10px), so moving between them is still.
+ */
 function SectionHeading({ children }: { children: string }) {
-	return <h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs">{children}</h2>;
+	return (
+		<h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs max-md:-mb-0.5 max-md:px-0.5 max-md:text-[13px] max-md:text-muted-foreground max-md:leading-normal">
+			{children}
+		</h2>
+	);
 }
 
 /** A request's own page, with every field of it. */

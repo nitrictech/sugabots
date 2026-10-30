@@ -29,13 +29,15 @@ export function MobileTabBar({ className }: { className?: string }) {
 	return (
 		<nav
 			aria-label="Tabs"
+			data-tab-bar=""
 			className={cn(
-				// Named apart from the page, so it stays still while a page slides past.
-				"shrink-0 px-4 pt-1 pb-[max(12px,env(safe-area-inset-bottom))] [view-transition-name:tabs] md:hidden",
+				// Named apart from the page, so it stays still while a page slides past. It floats
+				// over the page, which scrolls on under it; only the bar itself takes a tap.
+				"pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] [view-transition-name:tabs] md:hidden",
 				className,
 			)}
 		>
-			<div className="glass relative grid grid-cols-4 gap-0.5 rounded-[32px] p-[5px]">
+			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-[32px] p-[5px]">
 				{/*
 				 * The highlight behind the open tab, one for the bar, so it slides
 				 * from tab to tab rather than one going dark as another lights.

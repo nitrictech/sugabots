@@ -1,7 +1,7 @@
 import { cn } from "cn";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
-import { BACK_BUTTON, BackChevron, useReturnToOpener } from "@/ui/back-button.tsx";
+import { BACK_BUTTON, BackChevron, useLeave } from "@/ui/back-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
@@ -36,7 +36,7 @@ export function Stage({
 	onClose: CloseStage;
 	children: ReactNode;
 }) {
-	const { goBack } = useReturnToOpener();
+	const { leave } = useLeave();
 	return (
 		<section
 			aria-label={label}
@@ -52,7 +52,7 @@ export function Stage({
 					aria-label="Back"
 					onClick={() => {
 						// Opened first, it is replaced, so Back from what shows does not return to it.
-						if (!goBack()) onClose({ replace: true });
+						leave(() => onClose({ replace: true }));
 					}}
 					className={cn(BACK_BUTTON, "md:hidden")}
 				>
@@ -70,7 +70,7 @@ export function Stage({
 					<X size={16} strokeWidth={1.75} />
 				</IconButton>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-3">
+			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-[calc(var(--tab-bar-space,0px)+0.75rem)]">
 				{children}
 			</div>
 		</section>

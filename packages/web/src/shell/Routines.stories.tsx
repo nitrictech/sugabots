@@ -388,7 +388,13 @@ export const BotWithNone = meta.story({
 			canvas.getByRole("heading", { name: `${leadResearcher.name}'s routines` }),
 		).toBeVisible();
 		const list = canvas.getByRole("region", { name: "Routines" });
-		await expect(within(list).getByText("No routines yet.")).toBeVisible();
-		await expect(within(list).getByRole("link", { name: "New routine" })).toBeVisible();
+		await expect(within(list).getByText("No routines yet")).toBeVisible();
+		await expect(
+			canvas.getByText(`Ask ${leadResearcher.name} to set some up for you.`),
+		).toBeVisible();
+		// The + in the header, and New routine under No routines yet, both make one.
+		const making = within(list).getAllByRole("link", { name: "New routine" });
+		await expect(making).toHaveLength(2);
+		for (const link of making) await expect(link).toBeVisible();
 	},
 });

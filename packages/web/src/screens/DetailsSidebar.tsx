@@ -67,7 +67,7 @@ export function DetailsSidebar({
 	const modelName = useModelName(agent.model);
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
+			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
 				{/* On a phone, the bot large in the middle, its name under it, then what can be done with it. */}
 				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
 					<AgentAvatar
@@ -175,7 +175,7 @@ export function PeopleDetails({
 }) {
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
+			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
 				<InThisThread participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
@@ -209,7 +209,7 @@ export function ChannelDetails({
 }) {
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
+			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
 				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
 					<span
 						aria-hidden

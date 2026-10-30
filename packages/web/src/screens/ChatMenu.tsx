@@ -1,10 +1,11 @@
 import type { Pod } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { Archive, Ellipsis, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useArchiveChat, useRenameChat } from "@/lib/chats.ts";
 import { podLink } from "@/lib/links.ts";
 import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -80,7 +81,8 @@ export function ChannelActions({
 }) {
 	const rename = useRenameChat(conversationId);
 	const archive = useArchiveChat(conversationId);
-	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	const [renaming, setRenaming] = useState(false);
 	const [archiving, setArchiving] = useState(false);
 
@@ -91,7 +93,8 @@ export function ChannelActions({
 			return;
 		}
 		setArchiving(false);
-		await navigate(podLink(pod));
+		// Back to Home, or Home in the archived channel's place, so Back never returns to it.
+		leaveForPage(router.buildLocation(podLink(pod)).href);
 	}
 
 	return (

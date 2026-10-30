@@ -229,7 +229,7 @@ function AddRepositoryDialog({
 					</label>
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 					{reached.error && <Alert>{failureMessage(reached.error)}</Alert>}
-					<div className="-mx-1 max-h-[min(420px,55vh)] overflow-y-auto px-1">
+					<div className="-mx-1 max-h-[min(420px,55vh)] overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 						{shown.length > 0 ? (
 							<SettingsGroup>
 								{shown.map((choice) => (

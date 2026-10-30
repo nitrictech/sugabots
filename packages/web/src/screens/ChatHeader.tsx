@@ -1,5 +1,5 @@
 import type { Agent, Pod } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
 	CircleCheck,
@@ -10,13 +10,13 @@ import {
 	RefreshCcw,
 	RotateCcw,
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { activityLink, agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { BACK_BUTTON, BackChevron, useReturnToOpener } from "@/ui/back-button.tsx";
+import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -135,7 +135,7 @@ export function ChatHeader({
 						<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
 						<DoneButton {...done} />
 					</span>
-					<ThreadMenu done={done} onOpenDesktop={openComputer} />
+					<ThreadMenu done={done} back={back} onOpenDesktop={openComputer} />
 				</>
 			) : (
 				<ChatSandbox agent={agent} threadId={conversationId} onOpen={openComputer} />
@@ -161,7 +161,22 @@ export function ChatHeader({
 }
 
 /** On a phone, the ⋯ beside a thread's title: its bot's computer, and marking it done or reopening it. */
-function ThreadMenu({ done, onOpenDesktop }: { done: DoneToggle; onOpenDesktop: () => void }) {
+function ThreadMenu({
+	done,
+	back,
+	onOpenDesktop,
+}: {
+	done: DoneToggle;
+	/** Where the thread is left for once it is done. */
+	back: BackTo;
+	onOpenDesktop: () => void;
+}) {
+	const place = useBackPlace(back);
+	// Done with, it is left as Back leaves it, rather than stayed in; once saved, so a failure
+	// is seen on the thread it was for.
+	const markDone = async () => {
+		if (await done.onChange(true)) place.leave();
+	};
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
@@ -180,7 +195,9 @@ function ThreadMenu({ done, onOpenDesktop }: { done: DoneToggle; onOpenDesktop: 
 					<Monitor aria-hidden size={16} />
 					Computer
 				</DropdownMenuItem>
-				<DropdownMenuItem onClick={() => done.onChange(!done.isDone)}>
+				<DropdownMenuItem
+					onClick={done.isDone ? () => void done.onChange(false) : () => void markDone()}
+				>
 					{done.isDone ? (
 						<RotateCcw aria-hidden size={16} />
 					) : (
@@ -401,7 +418,8 @@ export function PeopleChatHeader({
 /** Whether a thread is done, and what marks it done or reopens it. */
 export interface DoneToggle {
 	isDone: boolean;
-	onChange: (done: boolean) => void;
+	/** Saves the change, resolving to whether it saved; a failure is shown where the thread is. */
+	onChange: (done: boolean) => Promise<boolean>;
 }
 
 /**
@@ -413,7 +431,7 @@ function DoneButton({ isDone, onChange }: DoneToggle) {
 		<IconButton
 			label={isDone ? "Reopen" : "Mark done"}
 			variant="bar"
-			onClick={() => onChange(!isDone)}
+			onClick={() => void onChange(!isDone)}
 			className={HEADER_ICON_CLASS_NAME}
 		>
 			{isDone ? (
@@ -440,13 +458,8 @@ export const HEADER_ICON_CLASS_NAME = cn(
  */
 export function HeaderBack({ back }: { back: BackTo }) {
 	const { unreadInInbox } = useAttentionCounts();
-	const { goBack, label: backLabel } = useReturnToOpener();
+	const { label: backLabel } = useLeave();
 	const className = cn(BACK_BUTTON, "md:hidden", unreadInInbox > 0 && "px-2");
-	// `back` is where to go only when this page was the first one opened, and it takes this
-	// page's place, so its own Back does not return here.
-	const returnToOpener = (event: MouseEvent) => {
-		if (goBack()) event.preventDefault();
-	};
 	const content = (
 		<>
 			<BackChevron />
@@ -460,54 +473,57 @@ export function HeaderBack({ back }: { back: BackTo }) {
 			)}
 		</>
 	);
+	const place = useBackPlace(back);
+	return (
+		<a
+			href={place.href}
+			aria-label={backLabel(place.name)}
+			className={className}
+			onClick={(event) => {
+				if (!isPlainClick(event)) return;
+				event.preventDefault();
+				place.leave();
+			}}
+		>
+			{content}
+		</a>
+	);
+}
+
+/**
+ * Where `back` goes, by its address and name, and leaving for it as a phone's
+ * Back does: to the page this one was opened from, or, when this page was
+ * the first one opened, to `back` in this page's place, so its own Back does
+ * not return here.
+ */
+function useBackPlace(back: BackTo) {
+	const router = useRouter();
+	const { leave } = useLeave();
+	const { href, name } = backAddress(router, back);
+	return {
+		href,
+		name,
+		leave: () => leave(() => void router.navigate({ href, replace: true })),
+	};
+}
+
+function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 	switch (back.to) {
 		case "pod":
-			return (
-				<Link
-					{...podLink(back.pod)}
-					aria-label={backLabel(back.pod.name)}
-					className={className}
-					onClick={returnToOpener}
-					replace
-				>
-					{content}
-				</Link>
-			);
+			return { href: router.buildLocation(podLink(back.pod)).href, name: back.pod.name };
 		case "bot":
-			return (
-				<Link
-					{...agentChatLink({ pod: back.pod, agent: back.agent })}
-					aria-label={backLabel(back.agent.name)}
-					className={className}
-					onClick={returnToOpener}
-					replace
-				>
-					{content}
-				</Link>
-			);
+			return {
+				href: router.buildLocation(agentChatLink({ pod: back.pod, agent: back.agent })).href,
+				name: back.agent.name,
+			};
 		case "channel":
-			return (
-				<Link
-					{...conversationLink({ pod: back.pod, conversationId: back.conversationId })}
-					aria-label={backLabel(back.name)}
-					className={className}
-					onClick={returnToOpener}
-					replace
-				>
-					{content}
-				</Link>
-			);
+			return {
+				href: router.buildLocation(
+					conversationLink({ pod: back.pod, conversationId: back.conversationId }),
+				).href,
+				name: back.name,
+			};
 		case "activity":
-			return (
-				<Link
-					{...activityLink()}
-					aria-label={backLabel("Inbox")}
-					className={className}
-					onClick={returnToOpener}
-					replace
-				>
-					{content}
-				</Link>
-			);
+			return { href: router.buildLocation(activityLink()).href, name: "Inbox" };
 	}
 }

@@ -5,13 +5,15 @@ import {
 	type WorkspaceRole,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -272,6 +274,8 @@ function ProfileSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const backToProfile = useBackToHere("You");
 	const user = session.user;
 	if (!user) return null;
 
@@ -294,6 +298,23 @@ function ProfileSettings() {
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
 			</SettingsGroup>
+			{/* A phone opens your settings from here alone, without the list beside them that has it. */}
+			{phone && (
+				<SettingsGroup>
+					<SettingsRow
+						label="Notifications"
+						chevron
+						render={
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "notifications" }}
+								state={backToProfile}
+							/>
+						}
+					/>
+				</SettingsGroup>
+			)}
 			<ReferralLinkSettings />
 			<SettingsDanger
 				label="Sign out"

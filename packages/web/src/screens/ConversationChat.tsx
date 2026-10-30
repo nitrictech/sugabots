@@ -14,7 +14,7 @@ import {
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Pause } from "lucide-react";
 import {
@@ -66,6 +66,7 @@ import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
@@ -109,6 +110,9 @@ import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
  * a small nudge up is not taken as scrolling away.
  */
 const LATEST_IN_VIEW_TOLERANCE_PX = 48;
+
+/** Shown when marking a thread done, or reopening it, did not save. */
+const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try again.";
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
@@ -161,6 +165,8 @@ export function ConversationChat({
 	const setDone = useSetDone(conversationId);
 	const threadFrom = useThreadFrom(conversationId);
 	const navigate = useNavigate();
+	const { pathname } = useLocation();
+	const { leaveFor } = useLeave();
 	const [startError, setStartError] = useState<string>();
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
@@ -414,7 +420,14 @@ export function ConversationChat({
 	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
 		details?.thread.type === "conversation" && !ongoing
-			? { isDone: details.thread.doneAt !== null, onChange: (to: boolean) => setDone.mutate(to) }
+			? {
+					isDone: details.thread.doneAt !== null,
+					onChange: (to: boolean) =>
+						setDone.mutateAsync(to).then(
+							() => true,
+							() => false,
+						),
+				}
 			: undefined;
 	// Back from a thread returns to where it lives: its bot's chat, or the channel it was started from.
 	const parentChannelId = details?.thread.parentThreadId;
@@ -692,7 +705,7 @@ export function ConversationChat({
 							<ThreadNotices notices={notices} />
 						</div>
 					</div>
-					<div className="shrink-0 px-4 md:px-5">
+					<div className="shrink-0 px-4 max-md:pb-[var(--tab-bar-space,0px)] md:px-5">
 						{agent?.model === null ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
@@ -704,7 +717,14 @@ export function ConversationChat({
 								onSubmit={submit}
 								submitLabel="Send message"
 								sending={send.isPending || threads.isPending}
-								error={startError ?? (send.isError ? sendFailureMessage(send.error) : undefined)}
+								error={
+									startError ??
+									(send.isError
+										? sendFailureMessage(send.error)
+										: setDone.isError
+											? DONE_FAILURE_MESSAGE
+											: undefined)
+								}
 								className="w-full"
 								mentionable={composerMentionable}
 								replyingTo={
@@ -735,7 +755,15 @@ export function ConversationChat({
 					artifactId={staged.artifactId}
 					version={staged.version}
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
-					onClose={(how) => onStagedChange(undefined, how)}
+					// Leaving in its place, as a deleted one is left, goes back to the chat when that is behind.
+					onClose={(how) =>
+						how?.replace
+							? leaveFor(
+									(page) => page.pathname === pathname && page.search.artifact === undefined,
+									() => onStagedChange(undefined, how),
+								)
+							: onStagedChange(undefined)
+					}
 				/>
 			) : staged?.kind === "desktop" && agent ? (
 				<DesktopStage

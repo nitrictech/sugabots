@@ -9,6 +9,7 @@ import {
 	storyChatActivity,
 	storyChatDetails,
 	storyConversationFor,
+	storyUser,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
@@ -85,15 +86,18 @@ export const Approvals = meta.story({
 });
 
 /**
- * You, as the settings menu: your profile, the workspace's sections, then
- * each pod, which opens a page of its own.
+ * The You tab's Settings: you on a card that opens your own settings, the
+ * workspace's sections, then each pod, which opens a page of its own.
  */
 export const You = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: "Notifications" }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { level: 1, name: "Settings" }, { timeout: 10_000 }),
 		).toBeVisible();
+		await expect(
+			await canvas.findByRole("link", { name: new RegExp(storyUser.name) }),
+		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/profile`);
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/sandboxes`,
@@ -106,12 +110,26 @@ export const You = meta.story({
 	},
 });
 
-/** A pod opened from You: its General, Connections, People and Bots, and Back to You. */
+/** Your profile, opened from your card: your account and appearance, then Notifications. */
+export const Profile = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/profile`} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: storyUser.name }, { timeout: 10_000 }),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
+			"href",
+			`/${storyWorkspace.slug}/settings/notifications`,
+		);
+	},
+});
+
+/** A pod opened from Settings: its General, Connections, People and Bots, and Back to Settings. */
 export const YouPod = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: "Back to You" }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Back to Settings" }, { timeout: 10_000 }),
 		).toHaveAttribute("href", `/${storyWorkspace.slug}/you`);
 		await expect(canvas.getByRole("link", { name: /^Connections/ })).toHaveAttribute(
 			"href",

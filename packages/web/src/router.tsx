@@ -15,6 +15,7 @@ import {
 	Outlet,
 	RouterProvider,
 	redirect,
+	useLocation,
 	useMatch,
 	useMatchRoute,
 	useNavigate,
@@ -34,6 +35,7 @@ import {
 	useOpenRoutineFeed,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
+import { followTrail, historyIndex } from "@/lib/history-trail.ts";
 import {
 	conversationLink,
 	podChatLink,
@@ -68,6 +70,7 @@ import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { You, YouPod } from "@/shell/You.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -965,6 +968,9 @@ const activityChatRoute = createRoute({
 	component: () => {
 		const { pod, conversation } = activityChatRoute.useParams();
 		const navigate = activityChatRoute.useNavigate();
+		const changeThread = useThreadChange((thread, replace) =>
+			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		);
 		const search = activityChatRoute.useSearch();
 		return (
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
@@ -980,9 +986,7 @@ const activityChatRoute = createRoute({
 						onThreadPageChange={(threadPage) =>
 							void navigate({ search: (previous) => ({ ...previous, threadPage }) })
 						}
-						onThreadChange={(thread) =>
-							void navigate({ search: (previous) => ({ ...previous, thread }) })
-						}
+						onThreadChange={changeThread}
 						staged={stagedOf(search)}
 						onStagedChange={(staged, how) =>
 							void navigate({
@@ -1302,6 +1306,9 @@ const routineThreadRoute = createRoute({
 function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
 	const opened = useOpenRoutineFeed(pod, routineId);
 	const navigate = routineThreadRoute.useNavigate();
+	const changeThread = useThreadChange((thread, replace) =>
+		navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+	);
 	const search = routineThreadRoute.useSearch();
 	if (opened.isError) {
 		return (
@@ -1321,9 +1328,7 @@ function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
 					conversationId={conversationId}
 					user={user}
 					threadId={search.thread}
-					onThreadChange={(thread) =>
-						void navigate({ search: (previous) => ({ ...previous, thread }) })
-					}
+					onThreadChange={changeThread}
 					staged={stagedOf(search)}
 					onStagedChange={(staged, how) =>
 						void navigate({
@@ -1458,6 +1463,9 @@ const conversationRoute = createRoute({
 	component: () => {
 		const { pod, conversation } = conversationRoute.useParams();
 		const navigate = conversationRoute.useNavigate();
+		const changeThread = useThreadChange((thread, replace) =>
+			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		);
 		const search = conversationRoute.useSearch();
 		return (
 			<PodConversationScreen podSlug={pod} conversationId={conversation}>
@@ -1468,9 +1476,7 @@ const conversationRoute = createRoute({
 						conversationId={conversation}
 						user={user}
 						threadId={search.thread}
-						onThreadChange={(thread) =>
-							void navigate({ search: (previous) => ({ ...previous, thread }) })
-						}
+						onThreadChange={changeThread}
 						staged={stagedOf(search)}
 						onStagedChange={(staged, how) =>
 							void navigate({
@@ -1630,10 +1636,11 @@ function phoneSlide({
 	if (!fromLocation || !hrefChanged || matchesMedia(SIDE_BY_SIDE)) return false;
 	const fromIndex = historyIndex(fromLocation);
 	const toIndex = historyIndex(toLocation);
-	// A page that sends on to its own address, as a bot's chat does, replaces itself in place.
-	if (toIndex === fromIndex) return false;
 	const from = locationDepth(fromLocation);
 	const to = locationDepth(toLocation);
+	// In place: a page that sends on to its own address, as a bot's chat does, doesn't
+	// slide, but Back from a page opened first, which goes up in its place, does.
+	if (toIndex === fromIndex) return to < from ? ["back"] : false;
 	if (to !== from) return [to > from ? "forward" : "back"];
 	// A tab for another tab.
 	if (to === 0) return false;
@@ -1642,9 +1649,33 @@ function phoneSlide({
 	return [toIndex > fromIndex ? "forward" : "back"];
 }
 
-/** Where `location` is in the browser's history, counted from the app's first page. */
-function historyIndex(location: ParsedLocation): number {
-	return (location.state as { __TSR_index?: number }).__TSR_index ?? 0;
+/**
+ * Opens a thread over a chat, or closes it, with `go`, which names it in the
+ * address. On a phone a thread covers its chat as a page of its own, so
+ * closing one shows its chat: back to it when the chat is the page behind,
+ * else the chat in the thread's place, as when the thread was opened from
+ * Inbox. Opening the chat as a page after the thread would have the chat's
+ * own Back return to the thread.
+ */
+function useThreadChange(go: (thread: string | undefined, replace: boolean) => void) {
+	const { leaveFor } = useLeave();
+	const { pathname } = useLocation();
+	return (thread: string | undefined) => {
+		if (thread !== undefined || matchesMedia(SIDE_BY_SIDE)) {
+			go(thread, false);
+			return;
+		}
+		leaveFor(
+			(page) => page.pathname === pathname && page.search.thread === undefined,
+			() => go(undefined, true),
+		);
+	};
+}
+
+/** Whether `pathname` is one of the settings, or a phone's You tab, which lists them. */
+function isSettingsPath(pathname: string): boolean {
+	const [section] = pathname.split("/").filter(Boolean).slice(1);
+	return section === "settings" || section === "you";
 }
 
 /**
@@ -1689,13 +1720,16 @@ function pageDepth(pathname: string): number {
 }
 
 export function createAppRouter(options?: { history?: RouterHistory }) {
-	return createRouter({
+	const router = createRouter({
 		routeTree,
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
 		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
 		defaultViewTransition: { types: phoneSlide },
+		// Back to a list of settings returns to where it was left, not its top. Only settings:
+		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.
+		scrollRestoration: ({ location }) => isSettingsPath(location.pathname),
 		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,
@@ -1703,6 +1737,9 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// and search params are exercised rather than mocked around.
 		...options,
 	});
+	// So Back can tell where going back would land.
+	followTrail(router);
+	return router;
 }
 
 /** The app's routes, signed in as `session`: guards read who you are from it, and so do components. */

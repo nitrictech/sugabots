@@ -21,6 +21,7 @@ import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { Page } from "@/shell/Page.tsx";
 import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
 	DropdownMenu,
@@ -51,6 +52,8 @@ export function ArtifactsPage({
 }) {
 	const { data, isError } = useArtifacts(pod.id);
 	const navigate = useNavigate();
+	const router = useRouter();
+	const { leaveForPage } = useLeave();
 	return (
 		<ArtifactListView
 			pod={pod}
@@ -65,7 +68,12 @@ export function ArtifactsPage({
 					artifactId={selectedId}
 					version={version}
 					onVersionChange={(version) => void navigate(artifactLink(pod, selectedId, { version }))}
-					onClose={(how) => void navigate({ ...artifactsLink(pod), ...how })}
+					// Leaving in its place, as a deleted one is left, goes back to the list when that is behind.
+					onClose={(how) =>
+						how?.replace
+							? leaveForPage(router.buildLocation(artifactsLink(pod)).href)
+							: void navigate(artifactsLink(pod))
+					}
 				/>
 			)}
 		</ArtifactListView>
@@ -94,7 +102,8 @@ export function ArtifactListView({
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<Page title="Artifacts" place={{ kind: "pod", pod }}>
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
-					<div className="flex h-full pb-[10%]">
+					// As tall as the page leaves above the tabs, so there is nothing to scroll.
+					<div className="flex h-[calc(100%-var(--tab-bar-space,0px))] pb-[10%]">
 						<EmptyState
 							title={`No artifacts in ${pod.name} yet`}
 							icon={<FileText strokeWidth={1.75} />}
@@ -225,7 +234,8 @@ export function ArtifactStage({
 		} catch {
 			return;
 		}
-		onClose();
+		// In the deleted artifact's place, so Back doesn't return to it.
+		onClose({ replace: true });
 	}
 	return (
 		<ArtifactStageView

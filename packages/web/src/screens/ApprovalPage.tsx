@@ -11,7 +11,7 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
 import { toolTitle, wordsFromKey } from "@/lib/tool-names.ts";
-import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE } from "@/ui/back-button.tsx";
+import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { Answer, fieldsOf, RequestValue } from "./ToolApprovalCard.tsx";
@@ -64,25 +64,28 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const fields = fieldsOf(call.input) ?? [];
 	// A phone answers with two wide buttons, as Approvals does.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const backToApprovals = usePhoneBack(
+		<Link
+			from="/$workspace"
+			to="./approvals"
+			aria-label="Back to Approvals"
+			className={cn(
+				"focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm",
+				BACK_ON_PHONE,
+			)}
+		>
+			<ChevronLeft aria-hidden size={16} className="max-md:size-[22px]" />
+			<span className={BACK_LABEL_ON_PHONE}>Approvals</span>
+		</Link>,
+	);
 
 	return (
-		<div className="min-h-0 flex-1 overflow-y-auto">
+		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
 			<article
 				aria-label={`Approval request: ${toolTitle(call.tool)}`}
 				className="mx-auto flex w-full max-w-[880px] flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))]"
 			>
-				<Link
-					from="/$workspace"
-					to="./approvals"
-					aria-label="Back to Approvals"
-					className={cn(
-						"focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm",
-						BACK_ON_PHONE,
-					)}
-				>
-					<ChevronLeft aria-hidden size={16} className="max-md:size-[22px]" />
-					<span className={BACK_LABEL_ON_PHONE}>Approvals</span>
-				</Link>
+				{backToApprovals}
 				<header className="flex flex-col gap-3">
 					<div className="flex items-center gap-3">
 						<span aria-hidden className="flex shrink-0">

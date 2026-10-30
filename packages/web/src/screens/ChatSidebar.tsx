@@ -64,7 +64,8 @@ export function ChatSidebar({
 					"flex min-h-0 w-[380px] shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
 					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-[min(400px,100%)] md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					sheet
-						? "max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[82%] max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
+						? // Over the floating tabs, as a phone's sheet covers its tab bar.
+							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-[82%] max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
 						: "max-md:inset-0",
 					className,
 				)}
