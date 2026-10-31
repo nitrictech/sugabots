@@ -59,8 +59,7 @@ export function FilterGroup({
 			{filter.map((condition, index) =>
 				editing === index ? (
 					<ConditionEditor
-						// biome-ignore lint/suspicious/noArrayIndexKey: conditions cannot be removed or reordered while an editor holds a draft.
-						key={index}
+						key={JSON.stringify(condition)}
 						condition={condition}
 						pending={pending}
 						onSave={(next) => void save(filter.map((saved, at) => (at === index ? next : saved)))}
@@ -68,7 +67,7 @@ export function FilterGroup({
 					/>
 				) : (
 					<SettingsRow
-						// biome-ignore lint/suspicious/noArrayIndexKey: conditions cannot be removed or reordered while an editor holds a draft.
+						// biome-ignore lint/suspicious/noArrayIndexKey: saved rows hold no drafts; the active editor is keyed by its condition.
 						key={index}
 						label={<span className="font-mono">{condition.path}</span>}
 						sub={condition.oneOf.map((value) => JSON.stringify(value)).join(", ")}
