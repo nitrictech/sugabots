@@ -77,19 +77,14 @@ export const fromOpenSandbox = (
 	};
 	const unavailable = (cause: unknown) =>
 		new Sandboxes.Unavailable({ provider: "opensandbox", cause });
-	/**
-	 * The server answered but made no sandbox. It names the image the server
-	 * couldn't use, the likeliest reason, since what it says varies with what
-	 * it runs on.
-	 */
-	const refusedToCreate = (cause: unknown) =>
+	const creationFailed = (cause: unknown) =>
 		cause instanceof SandboxApiException &&
 		cause.statusCode !== undefined &&
 		!REFUSED_KEY.has(cause.statusCode)
 			? new Sandboxes.Unavailable({
 					provider: "opensandbox",
 					cause,
-					reason: userText`OpenSandbox couldn't make a sandbox from ${DisplayName.fromRecord(connection.image)}. Check that the image's name is right in the workspace's sandbox settings, and that the OpenSandbox server can download it.`,
+					reason: userText`OpenSandbox couldn't create a sandbox using image ${DisplayName.fromRecord(connection.image)}. Check the OpenSandbox server logs for the cause.`,
 				})
 			: unavailable(cause);
 	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
@@ -135,7 +130,7 @@ export const fromOpenSandbox = (
 							},
 						],
 					}),
-				catch: refusedToCreate,
+				catch: creationFailed,
 			}).pipe(
 				Effect.flatMap((sandbox) =>
 					Effect.tryPromise({

@@ -103,8 +103,7 @@ export const SANDBOX_NETWORK_MODE_DEFAULT: SandboxNetworkMode = "open";
  * An image's name as `docker pull` takes it, such as
  * `ghcr.io/nitrictech/sugabots-sandbox:edge`. This only catches what people
  * paste by mistake, a whole command or a web address, rather than every rule
- * of Docker's: the provider says when it can't use an image, and names it.
-
+ * of Docker's.
  */
 const imageSchema = Schema.Trim.check(
 	Schema.isMaxLength(512),
@@ -117,13 +116,13 @@ const imageSchema = Schema.Trim.check(
 	}),
 );
 
-/** A provider's settings, by preset, with `image` checked as `imageSchema` says. */
-function settingsSchemaWith(image: Schema.Codec<string, string>) {
+function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 	return Schema.Union([
 		Schema.Struct({
 			preset: Schema.Literal("opensandbox"),
 			serverUrl: Schema.optional(providerUrlSchema),
 			image: Schema.optional(image),
+			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
 		Schema.Struct({
@@ -135,6 +134,7 @@ function settingsSchemaWith(image: Schema.Codec<string, string>) {
 			/** What the template is built with, so every sandbox made from it has. */
 			cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
 			memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
 	]);
@@ -146,14 +146,13 @@ function settingsSchemaWith(image: Schema.Codec<string, string>) {
  * has. An image, template or size left out follows the default, so a new
  * default reaches every provider not set to something else.
  */
-export const sandboxProviderSettingsSchema = settingsSchemaWith(imageSchema);
+export const sandboxProviderSettingsSchema = providerSettingsWithImageSchema(imageSchema);
 
 /**
  * Settings as they are read back. An image saved before images' names were
  * checked is shown as it is, so the page that would correct it still loads.
  */
-const savedSandboxProviderSettingsSchema = settingsSchemaWith(nameSchema);
-
+const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema);
 
 export type SandboxProviderSettings = typeof sandboxProviderSettingsSchema.Type;
 
