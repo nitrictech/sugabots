@@ -1,139 +1,214 @@
-import { type WebhookCondition, webhookConditionSchema } from "@sugabots/contracts";
+import {
+	MAX_WEBHOOK_FILTER_CONDITIONS,
+	MAX_WEBHOOK_FILTER_TEXT_CHARACTERS,
+	MAX_WEBHOOK_FILTER_VALUES,
+	type WebhookCondition,
+	webhookConditionSchema,
+} from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import { Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
+import { failureMessage } from "@/lib/failure.ts";
+import { Alert } from "@/ui/alert.tsx";
+import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsAddRow, SettingsGroup } from "@/ui/settings-page.tsx";
+import { SettingsAddRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
+import { Textarea } from "@/ui/textarea.tsx";
 
-/*
- * What a webhook requires of a call before it starts a run: a list of
- * conditions, each a path into the call's JSON body and the values it may
- * have. With none, every call runs.
- */
+const decodeCondition = Schema.decodeOption(webhookConditionSchema);
 
-const FILTER_NOTE =
-	"A call runs the routine only if it meets every condition. A path joins keys with dots, such as data.labels.name. Separate values with commas to accept any of them.";
-
-const decodeCondition = Schema.decodeUnknownOption(webhookConditionSchema);
-
-/** The condition typed as `path` and comma-separated `values`, if it is complete and allowed. */
-function conditionOf(path: string, values: string): WebhookCondition | undefined {
-	const oneOf = values
-		.split(",")
-		.map((value) => value.trim())
-		.filter((value) => value !== "");
-	return Option.getOrUndefined(decodeCondition({ path, oneOf }));
-}
-
-const keyOf = (condition: WebhookCondition) => `${condition.path}=${condition.oneOf.join(",")}`;
-
-/** `filter` without a condition that repeats an earlier one, which would also share its row's key. */
-const withoutRepeats = (filter: WebhookCondition[]) =>
-	filter.filter(
-		(condition, at) => filter.findIndex((one) => keyOf(one) === keyOf(condition)) === at,
-	);
-
-/** A webhook's filter, which saves through `onChange` as each condition is completed, changed or removed. */
 export function FilterGroup({
 	filter,
 	onChange,
+	onEditingChange,
 }: {
 	filter: readonly WebhookCondition[];
-	onChange: (filter: WebhookCondition[]) => void;
+	onChange: (filter: WebhookCondition[]) => Promise<unknown>;
+	onEditingChange?: (editing: boolean) => void;
 }) {
-	const [adding, setAdding] = useState(false);
+	const [editing, setEditing] = useState<number | "new">();
+	const [pending, setPending] = useState(false);
+	const [error, setError] = useState<unknown>();
+	async function save(next: WebhookCondition[]) {
+		setPending(true);
+		setError(undefined);
+		try {
+			await onChange(next);
+			setEditing(undefined);
+			onEditingChange?.(false);
+		} catch (cause) {
+			setError(cause);
+		} finally {
+			setPending(false);
+		}
+	}
+	function beginEditing(target: number | "new") {
+		setEditing(target);
+		onEditingChange?.(true);
+	}
+	function cancel() {
+		setEditing(undefined);
+		onEditingChange?.(false);
+		setError(undefined);
+	}
 	return (
-		<SettingsGroup label="Filter" note={FILTER_NOTE}>
-			{filter.map((condition, index) => (
-				<ConditionRow
-					// The condition is its own key, so a row changed elsewhere starts again from what was saved.
-					key={keyOf(condition)}
-					label={String(index + 1)}
-					condition={condition}
-					onCommit={(next) =>
-						onChange(withoutRepeats(filter.map((one, at) => (at === index ? next : one))))
-					}
-					onRemove={() => onChange(filter.filter((_, at) => at !== index))}
-				/>
-			))}
-			{adding ? (
-				<ConditionRow
-					label={String(filter.length + 1)}
-					onCommit={(next) => {
-						setAdding(false);
-						onChange(withoutRepeats([...filter, next]));
-					}}
-					onRemove={() => setAdding(false)}
-				/>
-			) : (
-				<SettingsAddRow label="Add condition" onClick={() => setAdding(true)} />
+		<SettingsGroup
+			label="Filter"
+			note="Every condition must match. Paths join JSON keys with dots, such as data.labels.name. Each value is a separate alternative; commas and whitespace are matched literally."
+		>
+			{filter.map((condition, index) =>
+				editing === index ? (
+					<ConditionEditor
+						// biome-ignore lint/suspicious/noArrayIndexKey: conditions cannot be removed or reordered while an editor holds a draft.
+						key={index}
+						condition={condition}
+						pending={pending}
+						onSave={(next) => void save(filter.map((saved, at) => (at === index ? next : saved)))}
+						onCancel={cancel}
+					/>
+				) : (
+					<SettingsRow
+						// biome-ignore lint/suspicious/noArrayIndexKey: conditions cannot be removed or reordered while an editor holds a draft.
+						key={index}
+						label={<span className="font-mono">{condition.path}</span>}
+						sub={condition.oneOf.map((value) => JSON.stringify(value)).join(", ")}
+						trailing={
+							<div className="flex items-center gap-2">
+								<Button
+									type="button"
+									variant="secondary"
+									size="sm"
+									aria-label={`Edit condition ${index + 1}`}
+									disabled={pending || editing !== undefined}
+									onClick={() => beginEditing(index)}
+								>
+									Edit
+								</Button>
+								<IconButton
+									label={`Remove condition ${index + 1}`}
+									disabled={pending || editing !== undefined}
+									onClick={() => void save(filter.filter((_, at) => at !== index))}
+								>
+									<Trash2 />
+								</IconButton>
+							</div>
+						}
+					/>
+				),
 			)}
+			{editing === "new" ? (
+				<ConditionEditor
+					pending={pending}
+					onSave={(next) => void save([...filter, next])}
+					onCancel={cancel}
+				/>
+			) : editing === undefined && !pending && filter.length < MAX_WEBHOOK_FILTER_CONDITIONS ? (
+				<SettingsAddRow label="Add condition" onClick={() => beginEditing("new")} />
+			) : null}
+			{filter.length >= MAX_WEBHOOK_FILTER_CONDITIONS && (
+				<p className="m-0 px-4 py-3 text-muted-foreground text-sm">
+					At most {MAX_WEBHOOK_FILTER_CONDITIONS} conditions.
+				</p>
+			)}
+			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 		</SettingsGroup>
 	);
 }
 
-/**
- * One condition's path and values. It saves once both are filled in and
- * focus leaves the row, and a saved one that is emptied or made invalid goes
- * back to what was saved.
- */
-function ConditionRow({
-	label,
+function ConditionEditor({
 	condition,
-	onCommit,
-	onRemove,
+	pending,
+	onSave,
+	onCancel,
 }: {
-	label: string;
 	condition?: WebhookCondition;
-	onCommit: (condition: WebhookCondition) => void;
-	onRemove: () => void;
+	pending: boolean;
+	onSave: (condition: WebhookCondition) => void;
+	onCancel: () => void;
 }) {
-	const savedValues = condition?.oneOf.join(", ") ?? "";
+	const pathId = useId();
 	const [path, setPath] = useState(condition?.path ?? "");
-	const [values, setValues] = useState(savedValues);
-
-	function commit() {
-		const next = conditionOf(path, values);
-		if (next) {
-			if (next.path !== condition?.path || next.oneOf.join(", ") !== savedValues) onCommit(next);
-		} else if (condition) {
-			setPath(condition.path);
-			setValues(savedValues);
-		}
-	}
-
-	const input =
-		"min-w-0 rounded-md bg-transparent px-2 py-1 font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)";
+	const [values, setValues] = useState(() =>
+		(condition?.oneOf ?? [""]).map((text) => ({ id: crypto.randomUUID(), text })),
+	);
+	const decoded = decodeCondition({ path, oneOf: values.map((value) => value.text) });
 	return (
 		<fieldset
-			aria-label={`Condition ${label}`}
-			onBlur={(event) => {
-				// Moving between this row's fields isn't leaving it.
-				if (!event.currentTarget.contains(event.relatedTarget)) commit();
+			disabled={pending}
+			className="m-0 flex min-w-0 flex-col gap-3 border-border border-b p-4 last:border-b-0"
+			onKeyDown={(event) => {
+				if (event.key === "Enter" && event.target instanceof HTMLInputElement)
+					event.preventDefault();
 			}}
-			className="m-0 flex min-h-[46px] min-w-0 items-center gap-2 border-border border-b px-4 py-2.5 last:border-b-0"
 		>
+			<legend className="sr-only">{condition ? "Edit condition" : "New condition"}</legend>
+			<label htmlFor={pathId} className="text-foreground text-sm">
+				JSON path
+			</label>
 			<input
-				aria-label={`Path ${label}`}
+				id={pathId}
 				value={path}
 				onChange={(event) => setPath(event.target.value)}
+				maxLength={MAX_WEBHOOK_FILTER_TEXT_CHARACTERS}
+				autoComplete="off"
+				spellCheck={false}
 				placeholder="data.labels.name"
-				autoComplete="off"
-				spellCheck={false}
-				className={`${input} flex-1`}
+				className="focus-ring min-w-0 rounded-md border border-border bg-list px-3 py-2 font-mono text-foreground text-sm"
 			/>
-			<input
-				aria-label={`Values ${label}`}
-				value={values}
-				onChange={(event) => setValues(event.target.value)}
-				placeholder="10x"
-				autoComplete="off"
-				spellCheck={false}
-				className={`${input} flex-1`}
-			/>
-			<IconButton label={`Remove condition ${label}`} size="lg" onClick={onRemove}>
-				<Trash2 />
-			</IconButton>
+			{values.map((value, index) => (
+				<div key={value.id} className="flex items-start gap-2">
+					<Textarea
+						aria-label={`Accepted value ${index + 1}`}
+						value={value.text}
+						rows={1}
+						maxLength={MAX_WEBHOOK_FILTER_TEXT_CHARACTERS}
+						spellCheck={false}
+						onChange={(event) =>
+							setValues(
+								values.map((saved, at) =>
+									at === index ? { ...saved, text: event.target.value } : saved,
+								),
+							)
+						}
+						className="min-h-10 rounded-md border-border px-3 py-2 font-mono text-sm"
+					/>
+					<IconButton
+						label={`Remove value ${index + 1}`}
+						disabled={pending || values.length === 1}
+						onClick={() => setValues(values.filter((_, at) => at !== index))}
+					>
+						<Trash2 />
+					</IconButton>
+				</div>
+			))}
+			{values.length < MAX_WEBHOOK_FILTER_VALUES && (
+				<Button
+					type="button"
+					variant="secondary"
+					size="sm"
+					className="self-start"
+					onClick={() => setValues([...values, { id: crypto.randomUUID(), text: "" }])}
+				>
+					Add value
+				</Button>
+			)}
+			<p className="m-0 text-muted-foreground text-sm">
+				Any accepted value may match. An empty value matches an empty string.
+			</p>
+			<div className="flex justify-end gap-2">
+				<Button type="button" variant="secondary" onClick={onCancel}>
+					Cancel condition
+				</Button>
+				<Button
+					type="button"
+					disabled={pending || Option.isNone(decoded)}
+					onClick={() => {
+						if (Option.isSome(decoded)) onSave(decoded.value);
+					}}
+				>
+					Save condition
+				</Button>
+			</div>
 		</fieldset>
 	);
 }

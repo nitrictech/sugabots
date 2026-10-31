@@ -182,10 +182,12 @@ export function NewWebhookGroups({
 	draft,
 	note,
 	onChange,
+	onFilterEditingChange,
 }: {
 	draft: WebhookDraft;
 	note: ReactNode;
 	onChange: (draft: WebhookDraft) => void;
+	onFilterEditingChange?: (editing: boolean) => void;
 }) {
 	const changeAuth = (auth: WebhookAuth) => onChange({ ...draft, auth });
 	return (
@@ -209,7 +211,11 @@ export function NewWebhookGroups({
 					onChange={(secret) => onChange({ ...draft, secret })}
 				/>
 			</SettingsGroup>
-			<FilterGroup filter={draft.filter} onChange={(filter) => onChange({ ...draft, filter })} />
+			<FilterGroup
+				filter={draft.filter}
+				onEditingChange={onFilterEditingChange}
+				onChange={async (filter) => onChange({ ...draft, filter })}
+			/>
 		</>
 	);
 }
@@ -218,7 +224,7 @@ export function NewWebhookGroups({
  * An existing webhook trigger's groups: its address and where it comes from,
  * then its auth and delivery id header, which save as they change, and its secret, under a note of
  * what a caller must send, or, while it has no secret, that nothing is asked
- * of them, and its filter, which saves as it changes.
+ * of them, and its filter, whose conditions are saved explicitly.
  */
 export function WebhookGroups({
 	placed,
@@ -237,7 +243,7 @@ export function WebhookGroups({
 	onChangeAuth: (auth: WebhookAuth) => void;
 	deliveryIdHeader: string | null | undefined;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
-	onChangeFilter: (filter: WebhookCondition[]) => void;
+	onChangeFilter: (filter: WebhookCondition[]) => Promise<unknown>;
 }) {
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;

@@ -550,18 +550,13 @@ describe("a pod's routines", () => {
 		expect(screen.queryByLabelText("Delivery ID header")).toBeNull();
 	});
 
-	it("saves a webhook's filter as conditions are added, changed and removed", async () => {
-		const labelled = { path: "data.labels.name", oneOf: ["10x", "bug"] };
+	it("saves a webhook filter only after confirmation, and removes conditions", async () => {
+		const labelled = { path: "data.labels.name", oneOf: ["10x, bug"] };
 		let webhook = withTrigger(morningBrief, {
 			kind: "webhook",
 			auth: { kind: "linear" },
 			filter: [{ path: "type", oneOf: ["Issue"] }],
 		});
-		const first = webhook;
-		client.api.routines.listInWorkspace.mockImplementation(() =>
-			Effect.succeed({ items: [webhook] }),
-		);
-		// The server keeps what was saved, so the list read after a save has it.
 		client.api.routines.updateTrigger.mockImplementation(({ payload }) => {
 			webhook = withTrigger(morningBrief, {
 				kind: "webhook",
@@ -570,36 +565,44 @@ describe("a pod's routines", () => {
 			});
 			return Effect.succeed({ routine: webhook.routine, secrets: [] });
 		});
-		const saved = (filter: unknown) =>
-			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
-				params: onlyTrigger(first),
-				payload: { kind: "webhook", filter },
-			});
-		mount(routinePage(first));
+		await openPanel(webhook);
+		client.api.routines.list.mockImplementation(() => Effect.succeed([webhook.routine]));
+		client.api.routines.listInWorkspace.mockImplementation(() =>
+			Effect.succeed({ items: [webhook] }),
+		);
 		await openTrigger(/^Webhook/);
-
 		fireEvent.click(await screen.findByRole("button", { name: "Add condition" }));
-		fireEvent.change(screen.getByLabelText("Path 2"), { target: { value: " data.labels.name " } });
-		fireEvent.blur(screen.getByLabelText("Path 2"));
+		fireEvent.change(screen.getByLabelText("JSON path"), {
+			target: { value: " data.labels.name " },
+		});
+		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x, bug" } });
+		fireEvent.blur(screen.getByLabelText("Accepted value 1"));
 		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
-		fireEvent.change(screen.getByLabelText("Values 2"), { target: { value: "10x, bug," } });
-		fireEvent.blur(screen.getByLabelText("Values 2"));
-		await waitFor(() => saved([{ path: "type", oneOf: ["Issue"] }, labelled]));
-
-		fireEvent.change(screen.getByLabelText("Values 1"), { target: { value: "" } });
-		fireEvent.blur(screen.getByLabelText("Values 1"));
-		expect((screen.getByLabelText("Values 1") as HTMLInputElement).value).toBe("Issue");
-		expect(client.api.routines.updateTrigger).toHaveBeenCalledTimes(1);
-
+		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", filter: [{ path: "type", oneOf: ["Issue"] }, labelled] },
+			}),
+		);
+		fireEvent.click(await screen.findByRole("button", { name: "Edit condition 1" }));
+		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "" } });
+		expect(screen.getByRole("button", { name: "Save condition" })).toHaveProperty("disabled", true);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel condition" }));
 		fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
-		await waitFor(() => saved([labelled]));
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", filter: [labelled] },
+			}),
+		);
 	});
 
 	it("makes a webhook with the filter written for it", async () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
-		mount("/suga/settings/routines/new");
+		mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), {
 			target: { value: "Labelled issues" },
 		});
@@ -610,10 +613,11 @@ describe("a pod's routines", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
 		await addTrigger("Webhook");
 		fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
-		fireEvent.change(screen.getByLabelText("Path 1"), { target: { value: "data.labels.name" } });
-		fireEvent.change(screen.getByLabelText("Values 1"), { target: { value: "10x" } });
-		fireEvent.blur(screen.getByLabelText("Values 1"));
-		expect(await screen.findByRole("group", { name: "Condition 1" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Add trigger" })).toHaveProperty("disabled", true);
+		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "data.labels.name" } });
+		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x" } });
+		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
+		expect(await screen.findByRole("button", { name: "Edit condition 1" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
 		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
@@ -645,9 +649,9 @@ describe("a pod's routines", () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 
-		fireEvent.click(await screen.findByRole("button", { name: "More" }));
+		fireEvent.click(await screen.findByRole("button", { name: "More for Morning brief" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
 
 		await waitFor(() =>
