@@ -35,6 +35,13 @@ describe("a webhook trigger's filter", () => {
 		expect(meetsFilter(newIssueLabelled10x, payload)).toBe(false);
 	});
 
+	it("matches deeply nested JSON arrays without exhausting the call stack", () => {
+		let payload: unknown = { name: "10x" };
+		for (let depth = 0; depth < 10_000; depth++) payload = [payload];
+		expect(meetsFilter([{ path: "name", oneOf: ["10x"] }], payload)).toBe(true);
+		expect(meetsFilter([{ path: "name", oneOf: ["bug"] }], payload)).toBe(false);
+	});
+
 	it("accepts any one of a condition's values", () => {
 		const filter = [{ path: "action", oneOf: ["create", "update"] }];
 		expect(meetsFilter(filter, { action: "update" })).toBe(true);

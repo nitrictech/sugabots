@@ -54,17 +54,17 @@ export const makeWebhooks = Effect.gen(function* () {
 					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
 					const challenge = slackChallengeOf(found.auth, delivery.payload);
 					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
-					if (!meetsFilter(found.filter, delivery.payload)) return { kind: "ignored" as const };
-					const idempotencyKey = deliveryIdOf(found.auth, found.deliveryIdHeader, delivery);
-					if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
-						return yield* new RoutineDeliveryIdTooLong();
-					}
 					return yield* transaction(
 						Effect.gen(function* () {
 							yield* lockTriggers(found.routineId);
 							// How callers are checked may have changed while this one was.
 							const current = yield* enabledWebhook(triggerId);
 							if (!current || !sameCheck(current, found)) return undefined;
+							if (!meetsFilter(current.filter, delivery.payload))
+								return { kind: "ignored" as const };
+							const idempotencyKey = deliveryIdOf(current.auth, current.deliveryIdHeader, delivery);
+							if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS)
+								return yield* new RoutineDeliveryIdTooLong();
 							const execution = yield* acceptTrigger({
 								workspaceId: found.workspaceId,
 								agentId: found.agentId,
