@@ -105,10 +105,48 @@ A sender that signs, such as Sentry, needs no custom headers. Choose **Generic**
 **HMAC**, SHA-256 and hex, set the **Header** to `Sentry-Hook-Signature`, and
 paste the integration's client secret as the secret.
 
+Some senders call about everything, such as every change to every issue. In the
+webhook trigger's **Filter** group, choose **Add condition** to run the routine
+only for calls you want. Without conditions, every authenticated call can run it.
+
+Each condition has a **JSON path**, with keys joined by dots, and one or more
+**Accepted value** fields. Choose **Add value** for another alternative, then
+**Save condition**. Every condition must match, but any accepted value within a
+condition is enough. **Cancel condition** discards that edit. If a save fails,
+the draft stays available to retry. When adding a webhook trigger, save or cancel
+its condition before choosing **Add trigger**.
+
+Values match exactly: commas, spaces and line breaks belong to the value rather
+than separating alternatives. An empty value matches an empty string. Numbers
+and booleans are compared as text, such as `2` and `false`. A missing path, an
+object or `null` doesn't match a value.
+
+Where a path crosses a list, any matching item counts. For example,
+`data.labels.name` with the accepted value `10x` matches an issue that has that
+label among others. Each condition searches the list independently.
+
+For example, to run only when Linear creates an issue labelled `10x`, save these
+three conditions:
+
+- **JSON path** `type`, **Accepted value** `Issue`
+- **JSON path** `action`, **Accepted value** `create`
+- **JSON path** `data.labels.name`, **Accepted value** `10x`
+
+Linear sends `update` when a label is added to an existing issue, so these
+conditions don't match it. Accepting `update` would also match other changes to
+an issue that already has the label; these conditions don't test what changed.
+
+A filter allows at most 10 conditions, each with at most 20 accepted values.
+Paths and values can each be at most 200 characters. Remove every condition to
+stop filtering calls. Changing authentication or the delivery ID header keeps
+the filter, and a copied routine keeps its filter too.
+
 A call is answered with `202` and an `executionId` as soon as the run is queued,
 without waiting for the bot. Otherwise:
 
 - `401` if the secret or signature is wrong, or the webhook is off or gone.
+- `200` with `{"ignored": true}` if the call is genuine but its filter turns it away. No run
+  starts, and the call isn't recorded.
 - `400` if the body isn't JSON or the delivery id is over 200 characters.
 - `413` if the body is over 64 KiB.
 
