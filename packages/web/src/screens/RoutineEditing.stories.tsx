@@ -522,8 +522,9 @@ export const DeliveryIdHeader = meta.story({
 				deliveryIdHeader: "Idempotency-Key",
 			})),
 		};
+		const item = { ...incidentIntake, routine };
 		msw.use(
-			...routinesAnswer([{ ...incidentIntake, routine }]),
+			...routinesAnswer([item]),
 			http.put(
 				`${API}/agents/:agentId/routines/:routineId/triggers/:triggerId`,
 				async ({ request, params }) => {
@@ -537,6 +538,7 @@ export const DeliveryIdHeader = meta.story({
 								: trigger,
 						),
 					};
+					item.routine = routine;
 					return HttpResponse.json({ routine, secrets: [] });
 				},
 			),
@@ -545,15 +547,24 @@ export const DeliveryIdHeader = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
+		await dialog.findByLabelText("Signing secret");
 		const field = await dialog.findByLabelText("Delivery ID header");
 		await expect(field).toHaveValue("Idempotency-Key");
 		await userEvent.clear(field);
 		await userEvent.type(field, "X-Request-Id{Enter}");
-		await expect(await dialog.findByLabelText("Delivery ID header")).toHaveValue("X-Request-Id");
-		await userEvent.clear(dialog.getByLabelText("Delivery ID header"));
+		await userEvent.keyboard("{Escape}");
+		const updated = within(await openFirstTrigger(canvas));
+		await updated.findByLabelText("Signing secret");
+		await waitFor(() =>
+			expect(updated.getByLabelText("Delivery ID header")).toHaveValue("X-Request-Id"),
+		);
+		await userEvent.clear(updated.getByLabelText("Delivery ID header"));
 		await userEvent.tab();
-		await expect(await dialog.findByLabelText("Delivery ID header")).toHaveValue("");
-		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await expect(updated.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await userEvent.keyboard("{Escape}");
+		const reopened = within(await openFirstTrigger(canvas));
+		await reopened.findByLabelText("Signing secret");
+		await waitFor(() => expect(reopened.getByLabelText("Delivery ID header")).toHaveValue(""));
 	},
 });
 
