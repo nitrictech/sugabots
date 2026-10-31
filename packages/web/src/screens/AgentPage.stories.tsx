@@ -26,7 +26,7 @@ import {
 /*
  * A bot's chat as the app shows it: the sidebar with the pod's chats and bots beside it, the
  * header across the top, and the thread with its composer. On a phone the chat
- * takes the screen, its header centred, with Back to the list.
+ * takes the screen, under a compact header with Back to the list.
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
@@ -548,7 +548,7 @@ export const FirstMessage = meta.story({
 	},
 });
 
-/** On a phone: the chat alone, its header centred, and Back to the pod's list. */
+/** On a phone: the chat alone, with Back to the pod's list beside the bot's face, name and model. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
@@ -993,7 +993,7 @@ export const SandboxInUse = meta.story({
 	},
 });
 
-/** The same on a phone: the pulse and a screen, at the right of the centred header. */
+/** The same on a phone: the pulse and a screen, at the right of the header. */
 export const SandboxInUseOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	beforeEach({ msw }) {

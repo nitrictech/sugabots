@@ -11,6 +11,7 @@ import {
 	RotateCcw,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { useModelName } from "@/lib/agents.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { activityLink, agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
@@ -87,6 +88,7 @@ export function ChatHeader({
 	onOpenDesktop: () => void;
 }) {
 	const name = title ?? agent.name;
+	const modelName = useModelName(agent.model);
 	const openDetails = details && (() => details.onChange(!details.open));
 	// A phone shows the computer in a sheet first, from which it opens full screen.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -108,26 +110,38 @@ export function ChatHeader({
 							/>
 						}
 						name={agent.name}
+						detail={modelName ?? undefined}
 						onClick={openDetails}
 					/>
 				) : (
-					<ThreadBadge title={title} within={agent.name} onClick={openDetails} />
+					<ThreadBadge
+						title={title}
+						within={modelName ? `${agent.name} · ${modelName}` : agent.name}
+						onClick={openDetails}
+					/>
 				)
 			}
 		>
-			<h1 className={TITLE_CLASS_NAME}>
-				{details ? (
-					<button
-						type="button"
-						onClick={() => details.onChange(!details.open)}
-						className="focus-ring block max-w-full truncate rounded-md text-left"
-					>
-						{name}
-					</button>
-				) : (
-					name
+			<div className="flex min-w-0 flex-1 items-baseline gap-2 max-md:sr-only">
+				<h1 className="m-0 min-w-0 truncate font-medium text-[14px] text-foreground">
+					{details ? (
+						<button
+							type="button"
+							onClick={() => details.onChange(!details.open)}
+							className="focus-ring block max-w-full truncate rounded-md text-left"
+						>
+							{name}
+						</button>
+					) : (
+						name
+					)}
+				</h1>
+				{modelName && (
+					<span className="shrink-0 whitespace-nowrap text-[12.5px] text-muted-foreground">
+						{modelName}
+					</span>
 				)}
-			</h1>
+			</div>
 			{done ? (
 				<>
 					{/* A phone has room for one control beside a thread's title, which holds both. */}
@@ -217,13 +231,14 @@ function ThreadMenu({
 const TITLE_CLASS_NAME =
 	"m-0 min-w-0 flex-1 truncate font-medium text-[14px] text-foreground max-md:sr-only";
 
-/** How big a chat's face is in the middle of a phone's header, in pixels. */
-const PHONE_FACE_SIZE_PX = 60;
+/** How big a chat's face is beside its name in a phone's header, in pixels. */
+const PHONE_FACE_SIZE_PX = 32;
 
 /**
  * The bar across the top of a chat: the same height and inset as a page's.
- * On a phone, Back floats at its left, `badge` says whose chat it is in the
- * middle, and its controls float at its right.
+ * On a phone each piece floats on its own glass: Back at its left, then
+ * `badge` saying whose chat it is, and its controls at its right, with the
+ * messages scrolling under them faded out above them.
  */
 function HeaderBar({
 	back,
@@ -231,22 +246,17 @@ function HeaderBar({
 	children,
 }: {
 	back: BackTo;
-	/** What a phone shows in the middle: a `FaceBadge` or a `ThreadBadge`. */
+	/** What a phone shows after Back: a `FaceBadge` or a `ThreadBadge`. */
 	badge: ReactNode;
 	children: ReactNode;
 }) {
 	return (
-		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:min-h-[88px] max-md:items-start max-md:gap-2 max-md:border-b-0 max-md:px-4 max-md:pt-3 max-md:pb-2">
-			{/*
-			 * On a phone, Back and the controls grow alike from nothing, so the
-			 * badge between them is centred while it fits, and otherwise shrinks
-			 * to the room they leave rather than running under them.
-			 */}
-			<div className="flex flex-1 basis-0 md:hidden">
+		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
+			<div className="flex shrink-0 md:hidden">
 				<HeaderBack back={back} />
 			</div>
-			<div className="flex min-w-0 shrink justify-center md:hidden">{badge}</div>
-			<div className="contents max-md:flex max-md:flex-1 max-md:basis-0 max-md:justify-end max-md:gap-1.5">
+			<div className="flex min-w-0 flex-1 md:hidden">{badge}</div>
+			<div className="contents max-md:flex max-md:shrink-0 max-md:items-center max-md:gap-2">
 				{children}
 			</div>
 		</header>
@@ -254,39 +264,42 @@ function HeaderBar({
 }
 
 /**
- * Whose chat it is, in the middle of a phone's header: its face, over a pill
- * with its name, which opens its Details where it has them.
+ * Whose chat it is, in a phone's header: its face beside its name, and under
+ * the name `detail`, such as a bot's model. It opens its Details where it has them.
  */
 function FaceBadge({
 	face,
 	name,
+	detail,
 	onClick,
 }: {
 	face: ReactNode;
 	name: string;
+	detail?: string;
 	onClick?: () => void;
 }) {
 	const content = (
 		<>
 			{face}
-			<span
-				className={cn(
-					"-mt-2 flex h-8 max-w-[220px] items-center gap-0.5 rounded-full px-3.5 font-semibold text-[15px] text-foreground",
-					"glass",
+			<span className="flex min-w-0 flex-col items-start text-left leading-tight">
+				<span className="max-w-full truncate font-semibold text-[16px] text-foreground">
+					{name}
+				</span>
+				{detail && (
+					<span className="max-w-full truncate text-[12px] text-muted-foreground">{detail}</span>
 				)}
-			>
-				<span className="truncate">{name}</span>
 			</span>
 		</>
 	);
-	const className = "flex min-w-0 max-w-full flex-col items-center";
+	const className =
+		"glass flex h-11 min-w-0 max-w-full items-center gap-2 rounded-full pr-4 pl-1.5";
 	return onClick ? (
 		<button
 			type="button"
 			aria-hidden
 			tabIndex={-1}
 			onClick={onClick}
-			className={cn(className, "rounded-xl")}
+			className={cn(className, "focus-ring active:bg-hover-strong")}
 		>
 			{content}
 		</button>
@@ -305,9 +318,9 @@ function ChannelFace({ mark }: { mark: ChatMark }) {
 			style={{ width: PHONE_FACE_SIZE_PX, height: PHONE_FACE_SIZE_PX }}
 		>
 			{mark === "routine" ? (
-				<RefreshCcw size={24} strokeWidth={2} />
+				<RefreshCcw size={16} strokeWidth={2} />
 			) : (
-				<Hash size={26} strokeWidth={2} />
+				<Hash size={18} strokeWidth={2} />
 			)}
 		</span>
 	);
@@ -317,9 +330,8 @@ function ChannelFace({ mark }: { mark: ChatMark }) {
 type ChatMark = "channel" | "routine";
 
 /**
- * A thread's name in the middle of a phone's header, as one pill: its title,
- * and under it where it is, a bot or a channel. Any thread has the same pill,
- * no wider than leaves the header room, however long its name.
+ * A thread's name in a phone's header: its title, and under it where it is,
+ * a bot or a channel, each cut short to the room the header leaves.
  */
 function ThreadBadge({
 	title,
@@ -338,12 +350,9 @@ function ThreadBadge({
 			tabIndex={-1}
 			onClick={onClick}
 			disabled={!onClick}
-			className={cn(
-				"flex h-11 min-w-0 max-w-[240px] flex-col items-center justify-center rounded-full px-[18px] text-foreground",
-				"glass",
-			)}
+			className="glass flex h-11 min-w-0 max-w-full flex-col items-start justify-center rounded-full px-4 text-left text-foreground active:bg-hover-strong"
 		>
-			<span className="max-w-full truncate font-medium text-[15px] leading-tight">{title}</span>
+			<span className="max-w-full truncate font-semibold text-[16px] leading-tight">{title}</span>
 			{within && (
 				<span className="max-w-full truncate text-[12px] text-muted-foreground leading-tight">
 					in {within}
