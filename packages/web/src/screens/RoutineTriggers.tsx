@@ -85,6 +85,7 @@ export function triggerDraftOf(trigger: RoutineTriggerInput): TriggerDraft {
 					auth: trigger.auth ?? NEW_WEBHOOK.auth,
 					deliveryIdHeader: trigger.deliveryIdHeader,
 					secret: trigger.secret ?? "",
+					filter: trigger.filter ?? [],
 				},
 			};
 		case "github":
@@ -114,7 +115,7 @@ export function triggerInputOf(
 					}
 				: { notReady: PICK_A_DAY_NOTE };
 		case "webhook": {
-			const { auth, deliveryIdHeader, secret } = draft.webhook;
+			const { auth, deliveryIdHeader, secret, filter } = draft.webhook;
 			if (!secretReady(auth, secret)) return { notReady: SECRET_TOO_SHORT_NOTE };
 			const trimmed = secret.trim();
 			return {
@@ -123,6 +124,7 @@ export function triggerInputOf(
 					auth,
 					deliveryIdHeader,
 					secret: trimmed === "" ? null : trimmed,
+					...(filter.length > 0 ? { filter } : {}),
 				},
 			};
 		}
@@ -242,6 +244,7 @@ export function TriggerDialog({
 	done: () => void;
 }) {
 	const [draft, setDraft] = useState(editing);
+	const [filterEditing, setFilterEditing] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<unknown>();
 
@@ -276,18 +279,33 @@ export function TriggerDialog({
 			<DialogFormStep
 				onSubmit={(event) => {
 					event.preventDefault();
-					if (saving && "input" in written) void settle(() => onSave(written.input));
+					if (saving && !filterEditing && "input" in written)
+						void settle(() => onSave(written.input));
 					else if (!saving) done();
 				}}
 			>
 				<DialogFormHeader
 					title={choice.label}
-					onBack={editing ? undefined : () => setDraft(undefined)}
+					onBack={
+						editing
+							? undefined
+							: () => {
+									setDraft(undefined);
+									setFilterEditing(false);
+								}
+					}
 					backDisabled={pending}
 				/>
 				<DialogFormBody>
 					<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
-						{settings ?? <DraftGroups pod={pod} draft={draft} onChange={setDraft} />}
+						{settings ?? (
+							<DraftGroups
+								pod={pod}
+								draft={draft}
+								onChange={setDraft}
+								onFilterEditingChange={setFilterEditing}
+							/>
+						)}
 					</div>
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 				</DialogFormBody>
@@ -309,7 +327,7 @@ export function TriggerDialog({
 					cancel={saving}
 					cancelDisabled={pending}
 					action={saving ? (editing ? "Save" : "Add trigger") : "Done"}
-					actionDisabled={pending || (saving && !("input" in written))}
+					actionDisabled={pending || (saving && (filterEditing || !("input" in written)))}
 				/>
 			</DialogFormStep>
 		</DialogFormFrame>
@@ -321,10 +339,12 @@ function DraftGroups({
 	pod,
 	draft,
 	onChange,
+	onFilterEditingChange,
 }: {
 	pod: Pod | undefined;
 	draft: TriggerDraft;
 	onChange: (draft: TriggerDraft) => void;
+	onFilterEditingChange: (editing: boolean) => void;
 }) {
 	const written = triggerInputOf(draft);
 	const notReady = "notReady" in written ? written.notReady : undefined;
@@ -341,6 +361,7 @@ function DraftGroups({
 			return (
 				<NewWebhookGroups
 					draft={draft.webhook}
+					onFilterEditingChange={onFilterEditingChange}
 					note={
 						notReady ??
 						(draft.webhook.secret.trim() === "" ? NO_SECRET_NOTE : authNote(draft.webhook.auth))

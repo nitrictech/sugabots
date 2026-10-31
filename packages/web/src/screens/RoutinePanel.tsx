@@ -480,6 +480,14 @@ function RoutineTriggerDialog({
 							placed={placed}
 							triggerId={editing.id}
 							auth={editing.auth}
+							filter={editing.filter ?? []}
+							onChangeFilter={(filter) =>
+								actions.updateTrigger.mutateAsync({
+									...addressed,
+									triggerId: editing.id,
+									json: { kind: "webhook", filter },
+								})
+							}
 							deliveryIdHeader={editing.deliveryIdHeader}
 							onChangeDeliveryIdHeader={(deliveryIdHeader) =>
 								actions.updateTrigger.mutate({

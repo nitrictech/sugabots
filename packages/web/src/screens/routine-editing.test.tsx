@@ -550,6 +550,121 @@ describe("a pod's routines", () => {
 		expect(screen.queryByLabelText("Delivery ID header")).toBeNull();
 	});
 
+	it("saves a webhook filter only after confirmation, and removes conditions", async () => {
+		const labelled = { path: "data.labels.name", oneOf: ["10x, bug"] };
+		let webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "linear" },
+			filter: [{ path: "type", oneOf: ["Issue"] }],
+		});
+		client.api.routines.updateTrigger.mockImplementation(({ payload }) => {
+			webhook = withTrigger(morningBrief, {
+				kind: "webhook",
+				auth: { kind: "linear" },
+				filter: "filter" in payload ? payload.filter : undefined,
+			});
+			return Effect.succeed({ routine: webhook.routine, secrets: [] });
+		});
+		await openPanel(webhook);
+		client.api.routines.list.mockImplementation(() => Effect.succeed([webhook.routine]));
+		client.api.routines.listInWorkspace.mockImplementation(() =>
+			Effect.succeed({ items: [webhook] }),
+		);
+		await openTrigger(/^Webhook/);
+		fireEvent.click(await screen.findByRole("button", { name: "Add condition" }));
+		fireEvent.change(screen.getByLabelText("JSON path"), {
+			target: { value: " data.labels.name " },
+		});
+		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x, bug" } });
+		fireEvent.blur(screen.getByLabelText("Accepted value 1"));
+		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
+		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", filter: [{ path: "type", oneOf: ["Issue"] }, labelled] },
+			}),
+		);
+		fireEvent.click(await screen.findByRole("button", { name: "Edit condition 1" }));
+		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "" } });
+		expect(screen.getByRole("button", { name: "Save condition" })).toHaveProperty("disabled", true);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel condition" }));
+		fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", filter: [labelled] },
+			}),
+		);
+	});
+
+	it("makes a webhook with the filter written for it", async () => {
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
+		);
+		mount(newPage);
+		fireEvent.change(await screen.findByLabelText("Name"), {
+			target: { value: "Labelled issues" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
+			target: { value: "Fix what you can." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		await addTrigger("Webhook");
+		fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+		expect(screen.getByRole("button", { name: "Add trigger" })).toHaveProperty("disabled", true);
+		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "data.labels.name" } });
+		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x" } });
+		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
+		expect(await screen.findByRole("button", { name: "Edit condition 1" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						triggers: [
+							expect.objectContaining({
+								kind: "webhook",
+								filter: [{ path: "data.labels.name", oneOf: ["10x"] }],
+							}),
+						],
+					}),
+				}),
+			),
+		);
+	});
+
+	it("keeps a webhook's filter in a copy of its routine", async () => {
+		const filter = [{ path: "type", oneOf: ["Issue"] }];
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "linear" },
+			filter,
+		});
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: webhook.routine, secrets: [] }),
+		);
+		await openPanel(webhook);
+
+		fireEvent.click(await screen.findByRole("button", { name: "More for Morning brief" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						triggers: [{ kind: "webhook", auth: { kind: "linear" }, filter }],
+					}),
+				}),
+			),
+		);
+	});
+
 	it("leaves a webhook without a secret when its secret is cleared", async () => {
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
