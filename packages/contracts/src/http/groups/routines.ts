@@ -3,6 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	acceptedRoutineExecutionSchema,
 	acceptedRoutineWebhookSchema,
+	ignoredRoutineWebhookSchema,
 	manualRoutineRunSchema,
 	newRoutineSchema,
 	routineCurrentSecretSchema,
@@ -27,6 +28,13 @@ import { Session } from "../middleware.ts";
 const agent = { agentId: uuidSchema };
 const routine = { agentId: uuidSchema, routineId: Schema.String };
 const trigger = { ...routine, triggerId: uuidSchema };
+
+/** A run queued, a call its trigger's filter turned away, or Slack's address check. */
+const webhookAnswers = [
+	acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
+	ignoredRoutineWebhookSchema,
+	routineWebhookChallengeSchema,
+];
 
 /**
  * The webhook is the one endpoint here without a session: it is called by
@@ -123,10 +131,7 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 	HttpApiEndpoint.post("webhook", "/hooks/triggers/:triggerId", {
 		params: { triggerId: Schema.String },
 		payload: Schema.Json,
-		success: [
-			acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
-			routineWebhookChallengeSchema,
-		],
+		success: webhookAnswers,
 		error: [BadRequest, Unauthorized, Conflict],
 	}),
 	// The address a webhook had when a routine had only one trigger: a
@@ -134,10 +139,7 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 	HttpApiEndpoint.post("routineWebhook", "/hooks/routines/:routineId", {
 		params: { routineId: Schema.String },
 		payload: Schema.Json,
-		success: [
-			acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
-			routineWebhookChallengeSchema,
-		],
+		success: webhookAnswers,
 		error: [BadRequest, Unauthorized, Conflict],
 	}),
 ) {}

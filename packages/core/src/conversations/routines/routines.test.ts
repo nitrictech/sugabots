@@ -320,6 +320,52 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(await view.list({ agentId })).toHaveLength(2);
 	});
 
+	it("runs only the calls meeting a webhook's filter, which a later write keeps unless it brings another", async () => {
+		const filter = [{ path: "data.labels.name", oneOf: ["10x"] }];
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Labelled issues",
+				instructions: "Pick up the issue.",
+				triggers: [{ kind: "webhook", filter }],
+			},
+		);
+		expect(created.routine.triggers).toMatchObject([{ kind: "webhook", filter }]);
+		const { addressed, secret } = firstTriggerOf(created);
+		const { triggerId } = addressed;
+		const send = (payload: unknown) =>
+			webhooks.accept({ triggerId, delivery: bearerDelivery(secret ?? "", payload) });
+		const labelled = { data: { labels: [{ name: "10x" }] } };
+		const unlabelled = { data: { labels: [{ name: "bug" }] } };
+
+		expect(await send(labelled)).toMatchObject({ kind: "run" });
+		expect(await send(unlabelled)).toEqual({ kind: "ignored" });
+
+		await routines.updateTrigger(addressed, { kind: "webhook", auth: { kind: "bearer" } });
+		expect(await send(unlabelled)).toEqual({ kind: "ignored" });
+
+		const cleared = await routines.updateTrigger(addressed, { kind: "webhook", filter: [] });
+		expect(cleared.routine.triggers[0]).not.toHaveProperty("filter");
+		expect(await send(unlabelled)).toMatchObject({ kind: "run" });
+	});
+
+	it("answers a call with the wrong secret the same whether or not its filter would turn it away", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Filtered and secret",
+				instructions: "Handle it.",
+				triggers: [{ kind: "webhook", filter: [{ path: "action", oneOf: ["create"] }] }],
+			},
+		);
+		const { triggerId } = firstTriggerOf(created).addressed;
+		for (const payload of [{ action: "create" }, { action: "remove" }]) {
+			expect(
+				await webhooks.accept({ triggerId, delivery: bearerDelivery("incorrect", payload) }),
+			).toBeUndefined();
+		}
+	});
+
 	it("checks a signing routine's callers by signature, with the secret its sender made", async () => {
 		const linearSecret = "lin_wh_9f2c1e5a7b3d4f60";
 		const created = await routines.create(

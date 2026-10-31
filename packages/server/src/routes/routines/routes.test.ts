@@ -27,16 +27,17 @@ const GOOD_AUTHORIZATION = "Bearer good-secret";
 
 /**
  * The app with a webhook double that admits deliveries to `TRIGGER_ID` with
- * the good authorization, answers a `challenge` body with it, and refuses a
- * `tooLong` one's id.
+ * the good authorization, answers a `challenge` body with it, turns away an
+ * `ignore` one, and refuses a `tooLong` one's id.
  */
 function webhookApp() {
 	const accept = vi.fn<Routines.WebhooksInterface["accept"]>(({ triggerId, delivery }) => {
 		if (triggerId !== TRIGGER_ID || delivery.headers.authorization !== GOOD_AUTHORIZATION) {
 			return Effect.succeed(undefined);
 		}
-		const payload = delivery.payload as { challenge?: string; tooLong?: boolean };
+		const payload = delivery.payload as { challenge?: string; tooLong?: boolean; ignore?: boolean };
 		if (payload.tooLong) return Effect.fail(new RoutineDeliveryIdTooLong());
+		if (payload.ignore) return Effect.succeed({ kind: "ignored" as const });
 		if (payload.challenge) {
 			return Effect.succeed({ kind: "challenge" as const, challenge: payload.challenge });
 		}
@@ -114,6 +115,18 @@ describe("Routine webhooks", () => {
 		expect(await response.json()).toEqual({
 			challenge: "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P",
 		});
+	});
+
+	it("answers a call the trigger's filter turned away with 200, so its sender does not retry", async () => {
+		const { app } = webhookApp();
+
+		const response = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
+			body: JSON.stringify({ ignore: true }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ ignored: true });
 	});
 
 	it("does not reveal whether a Routine exists when authentication fails", async () => {
