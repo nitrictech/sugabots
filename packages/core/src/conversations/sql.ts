@@ -384,7 +384,8 @@ export const threadParticipant = pgTable(
 /**
  * Why an agent was given a turn: a person mentioned it, it was the default,
  * it was asked to collaborate, a routine ran, or a collaboration answer
- * resumed it, or it opened its setup interview.
+ * resumed it, it opened its setup interview, or a bot started its thread
+ * for a person and briefed it.
  */
 export type TurnReason =
 	| "mention"
@@ -392,7 +393,8 @@ export type TurnReason =
 	| "collaboration"
 	| "routine"
 	| "resume"
-	| "interview";
+	| "interview"
+	| "brief";
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 

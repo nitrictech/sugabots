@@ -79,6 +79,12 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return step("Looked for tools to", name(input.query), "Looked for tools");
 		case "search_history":
 			return step("Searched the thread for", name(input.query), "Read back through the thread");
+		case "list_threads":
+			return step("Looked for threads about", name(input.title), "Listed the pod's threads");
+		case "read_thread":
+			return input.query === undefined
+				? step("Read", name(asRecord(output.thread).title), "Read another thread")
+				: step("Searched another thread for", name(input.query), "Searched another thread");
 		case "read_docs":
 			return step("Read the docs on", name(input.page), "Read the docs");
 		case "artifact_list":
@@ -97,6 +103,10 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return step("Set up the routine", name(input.name), "Set up a routine");
 		case "update_routine":
 			return step("Changed the routine", name(input.name), "Changed a routine");
+		case "mark_done":
+			return { action: "Marked the thread done" };
+		case "start_thread":
+			return step("Started the thread", name(input.title), "Started a thread");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
 		case "request_network_access":

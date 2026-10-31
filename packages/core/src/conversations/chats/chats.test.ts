@@ -51,6 +51,7 @@ import {
 	TurnExecution,
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
+import { BotThreads } from "./bot-threads.ts";
 import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
@@ -367,6 +368,142 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect.objectContaining({ id: messageId, threadId: podChat.id }),
 		]);
 		expect(prepared.context.askedBy).toBe(userId);
+	});
+
+	describe("threads a bot starts for the person it is answering", () => {
+		const botThreads = () => onPostgres(Context.get(conversations, BotThreads.Service));
+		const handleOf = async (id: string) => {
+			const [row] = await onDatabase((db) =>
+				db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, id)),
+			);
+			if (!row) throw new Error("fixture");
+			return row.handle;
+		};
+
+		it("starts it with the bot asked for, briefed by the starting bot, and asks that bot to work", async () => {
+			const started = await botThreads().start(
+				{ agentId, workspaceId, podId, askedBy: userId },
+				{
+					title: "March refunds",
+					brief: "Pull the refunds issued in March.",
+					withHandle: `@${await handleOf(recipientAgentId)}`,
+				},
+			);
+			expect(started).toEqual({
+				id: expect.any(String),
+				title: "March refunds",
+				with: "Impersonal Agent",
+			});
+			const participants = await onDatabase((db) =>
+				db
+					.select({ userId: threadParticipant.userId, agentId: threadParticipant.agentId })
+					.from(threadParticipant)
+					.where(eq(threadParticipant.threadId, started.id)),
+			);
+			expect(participants).toEqual(
+				expect.arrayContaining([
+					{ userId, agentId: null },
+					{ userId: null, agentId: recipientAgentId },
+				]),
+			);
+			expect(participants).toHaveLength(2);
+			const [run] = await runOnPostgres(runningTurns(started.id));
+			if (!run) throw new Error("The thread's bot was not asked");
+
+			const prepared = await prepareRunnable(
+				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+				run,
+			);
+
+			expect(prepared.context.agent.id).toBe(recipientAgentId);
+			// It acts for the person the thread was started for, though a bot wrote its brief.
+			expect(prepared.context.askedBy).toBe(userId);
+			expect(prepared.context.messages).toEqual([
+				expect.objectContaining({
+					content: "Pull the refunds issued in March.",
+					author: expect.objectContaining({ kind: "agent", id: agentId }),
+				}),
+			]);
+		});
+
+		it("starts it with the starting bot itself when no other bot is named", async () => {
+			const started = await botThreads().start(
+				{ agentId, workspaceId, podId, askedBy: userId },
+				{ title: "Follow-up", brief: "Draft the follow-up email." },
+			);
+			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
+			const [run] = await runOnPostgres(runningTurns(started.id));
+			if (!run) throw new Error("The thread's bot was not asked");
+
+			const prepared = await prepareRunnable(
+				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+				run,
+			);
+
+			expect(prepared.context.agent.id).toBe(agentId);
+			expect(prepared.context.askedBy).toBe(userId);
+		});
+
+		it("marks the thread it is in done for the person who asked, but never a channel or a pod's chat", async () => {
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const { conversation: opened } = await chats.startThread({
+				conversationId: podChat.id,
+				messageId: crypto.randomUUID(),
+				content: "Can you check the renewal numbers?",
+				hostAgentId: agentId,
+			});
+			const bot = { agentId, workspaceId, podId, askedBy: userId };
+			const doneAt = async (threadId: string) => {
+				const [row] = await onDatabase((db) =>
+					db.select({ doneAt: thread.doneAt }).from(thread).where(eq(thread.id, threadId)),
+				);
+				return row?.doneAt ?? null;
+			};
+
+			await botThreads().markDone(bot, opened.id);
+
+			expect(await doneAt(opened.id)).toBeInstanceOf(Date);
+			const channel = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			for (const notAThread of [podChat.id, channel.id]) {
+				await expect(botThreads().markDone(bot, notAThread)).rejects.toMatchObject({
+					_tag: "NotAThread",
+				});
+			}
+			await expect(
+				botThreads().markDone({ ...bot, askedBy: null }, opened.id),
+			).rejects.toMatchObject({ _tag: "NobodyAsked" });
+		});
+
+		it("refuses when nobody asked, the bot is not in the pod, or the person can't reach the pod", async () => {
+			const [outsider] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: "Outside the pod", email: `outsider-${crypto.randomUUID()}@example.com` })
+					.returning(),
+			);
+			if (!outsider) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: outsider.id, role: "member" }),
+			);
+			const brief = { title: "Elsewhere", brief: "Do it." };
+
+			await expect(
+				botThreads().start({ agentId, workspaceId, podId, askedBy: null }, brief),
+			).rejects.toMatchObject({ _tag: "NobodyAsked" });
+			await expect(
+				botThreads().start(
+					{ agentId, workspaceId, podId, askedBy: userId },
+					{ ...brief, withHandle: "@nobody-here" },
+				),
+			).rejects.toMatchObject({ _tag: "BotNotInPod" });
+			await expect(
+				botThreads().start({ agentId, workspaceId, podId, askedBy: outsider.id }, brief),
+			).rejects.toMatchObject({ _tag: "HostNotCrew" });
+		});
 	});
 
 	it("lists a pod's routines by name, each with its thread once it has run", async () => {

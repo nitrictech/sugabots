@@ -8,6 +8,7 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../threads/message-text.ts";
+import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { ROUTINES_KEY, spokenTimeZone } from "../tools/routines/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
@@ -245,6 +246,7 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 	);
 	return [
 		`[Turn] In the thread now: ${participants}. ${whyYou(context)}`,
+		`You can read the rest of this pod: its other threads, its bots' channels and its pod chats. Find them with ${LIST_THREADS_TOOL} and read them with ${READ_THREAD_TOOL}, rather than asking another agent what was said there or saying you can't see it.`,
 		context.crew.length > 0
 			? [
 					"Other agents in this pod, and what each one knows:",
@@ -376,6 +378,8 @@ function whyYou(context: TurnContext): string {
 			return "It is your turn because another agent asked you to collaborate.";
 		case "resume":
 			return "It is your turn because an answer you were waiting on has arrived.";
+		case "brief":
+			return "It is your turn because a bot started this thread for the person in it, and its first message is your brief. Start on the work it describes now.";
 		case "routine":
 			return "It is your turn because this Routine was triggered.";
 		default:

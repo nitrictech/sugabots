@@ -200,7 +200,7 @@ export const make = Effect.gen(function* () {
 								workspaceName: loaded.workspace.name,
 								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
-								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
+								askedBy: askerOf(trigger, request.reason, loaded.initiatorUserId),
 								crew: loaded.pod.agents
 									.filter(({ id }) => id !== speaker.id)
 									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
@@ -310,7 +310,8 @@ export interface TurnContext {
 	workspaceTimeZone: string;
 	/**
 	 * The person whose message this turn answers, who the agent acts for when
-	 * it changes something on their behalf. None when it answers an agent or a
+	 * it changes something on their behalf; on a bot's brief, the person it
+	 * started the thread for. None when it otherwise answers an agent, or a
 	 * routine's trigger.
 	 */
 	askedBy: string | null;
@@ -359,6 +360,21 @@ function notRunnable(reason: string, ended?: Ended): NotRunnable {
 }
 
 /**
+ * The person a turn acts for: whoever wrote the message it answers or, on a
+ * bot's brief, the person the bot started the thread for, who signed in to
+ * ask for it.
+ */
+function askerOf(
+	trigger: Message | undefined,
+	reason: TurnReason | undefined,
+	threadInitiatorUserId: string | null,
+): string | null {
+	if (trigger?.author.kind === "person") return trigger.author.id;
+	if (reason === "brief") return threadInitiatorUserId;
+	return null;
+}
+
+/**
  * Everything the model is told about the thread, in one statement: the
  * thread with its workspace, its pod and the crew placed there, the people and
  * agents in it, its compaction, the message in a pod's chat it was started
@@ -378,6 +394,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			parentThreadId: true,
 			title: true,
 			type: true,
+			initiatorUserId: true,
 		},
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },

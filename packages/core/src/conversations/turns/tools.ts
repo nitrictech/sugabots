@@ -7,6 +7,7 @@ import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import type { BotThreads } from "../chats/bot-threads.ts";
 import type { BotRoutines } from "../routines/bot-routines.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
@@ -15,6 +16,8 @@ import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { MARK_DONE_TOOL, markDoneTool } from "../tools/mark-done/tool.ts";
+import { podThreadTools } from "../tools/pod-threads/tool.ts";
 import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import {
@@ -27,6 +30,7 @@ import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/sandbox/tools.ts";
 import type { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
+import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
@@ -77,6 +81,8 @@ export interface ToolDependencies {
 	webAppUrl: string;
 	/** The agent's own routines, read and changed for the person it is answering. */
 	routines: BotRoutines.Interface;
+	/** Threads the agent starts in its pod for the person it is answering. */
+	threads: Pick<BotThreads.Interface, "start" | "markDone">;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
@@ -230,6 +236,14 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		}),
 		recording,
 	);
+	const podThreads = podThreadTools({
+		podId: prepared.context.agent.podId,
+		threadId: prepared.context.thread.id,
+		run: deps.run,
+	});
+	for (const [key, tool] of Object.entries(podThreads)) {
+		tools[key] = recorded(key, tool, recording);
+	}
 	tools[READ_THREAD_FILE_TOOL] = recorded(
 		READ_THREAD_FILE_TOOL,
 		readThreadFileTool({
@@ -251,6 +265,30 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		tools[key] = routinesOff
 			? refused(key, ownRoutines[key], TOOL_UNAVAILABLE, recording)
 			: recorded(key, ownRoutines[key], { ...recording, mutating: ROUTINE_TOOL_MUTATES[key] });
+	}
+	const threadsBot: BotThreads.Bot = {
+		agentId: prepared.context.agent.id,
+		workspaceId: prepared.context.thread.workspaceId,
+		podId: prepared.context.agent.podId,
+		askedBy: prepared.context.askedBy,
+	};
+	tools[START_THREAD_TOOL] = recorded(
+		START_THREAD_TOOL,
+		startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
+		{ ...recording, mutating: true },
+	);
+	// Only a thread is ever done; a channel, a pod's chat or a routine's thread is not.
+	if (prepared.context.thread.type === "conversation") {
+		tools[MARK_DONE_TOOL] = recorded(
+			MARK_DONE_TOOL,
+			markDoneTool({
+				bot: threadsBot,
+				threadId: prepared.context.thread.id,
+				threads: deps.threads,
+				run: deps.run,
+			}),
+			{ ...recording, mutating: true },
+		);
 	}
 	tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
 		SAVE_INSTRUCTIONS_TOOL,
