@@ -630,7 +630,11 @@ export const appJwt = (app: AppIdentity) =>
 
 const ErrorBody = Schema.Struct({
 	message: Schema.String,
-	errors: Schema.optional(Schema.Array(Schema.Struct({ message: Schema.optional(Schema.String) }))),
+	errors: Schema.optional(
+		Schema.Array(
+			Schema.Union([Schema.String, Schema.Struct({ message: Schema.optional(Schema.String) })]),
+		),
+	),
 });
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
@@ -671,7 +675,12 @@ function answerOf(response: Response) {
 		const failure = Schema.decodeUnknownOption(ErrorBody)(body);
 		const reason =
 			failure._tag === "Some"
-				? [failure.value.message, ...(failure.value.errors ?? []).flatMap((e) => e.message ?? [])]
+				? [
+						failure.value.message,
+						...(failure.value.errors ?? []).flatMap((error) =>
+							typeof error === "string" ? error : (error.message ?? []),
+						),
+					]
 						.filter(Boolean)
 						.join(": ")
 				: response.statusText || `HTTP ${response.status}`;
