@@ -1,6 +1,5 @@
 import {
 	type Agent,
-	deliveryIdHeaderOf,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
 	type NewRoutine,
@@ -264,7 +263,7 @@ function copiedTrigger(trigger: RoutineTrigger): RoutineTriggerInput {
 		case "cron":
 			return { kind: "cron", schedule: trigger.schedule, timezone: trigger.timezone };
 		case "webhook":
-			return { kind: "webhook", auth: trigger.auth, deliveryIdHeader: deliveryIdHeaderOf(trigger) };
+			return { kind: "webhook", auth: trigger.auth, deliveryIdHeader: trigger.deliveryIdHeader };
 		case "github":
 			return {
 				kind: "github",

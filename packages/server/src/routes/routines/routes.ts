@@ -127,4 +127,5 @@ const routineErrors = {
 	RoutineTriggerRejected: BadRequest,
 	TooManyRoutineTriggers: Conflict,
 	WebhookSecretTooShort: BadRequest,
+	WebhookDeliveryIdHeaderRejected: BadRequest,
 };

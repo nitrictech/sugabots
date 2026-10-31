@@ -124,8 +124,16 @@ with `409`. Where the id comes from depends on the **Source**:
   until you change it. Clear it, and every call starts a run.
 
 With no id, or when the header is missing, every call starts a run. A generic
-webhook reads nothing else, so a sender that names its deliveries another way, such
-as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its header named here.
+webhook with an explicit header reads nothing else, so a sender that names its
+deliveries another way, such as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its
+header named here. Authentication headers cannot be used as delivery IDs.
+
+Existing webhooks and API-created webhooks without a delivery ID setting retain
+**Automatic detection**: the first nonempty `Idempotency-Key`, `Linear-Delivery`,
+`X-GitHub-Delivery`, `X-Shopify-Webhook-Id`, `Svix-Id`, or `Webhook-Id`, then the
+body’s `event_id` or a Stripe event’s `id`. A header carrying the API key is
+skipped. Unrelated edits keep this behavior until you choose a header or
+**Every call runs**.
 
 <Careful title="Sentry retries aren't deduplicated">
 

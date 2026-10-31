@@ -105,29 +105,11 @@ export const webhookAuthSchema = Schema.Union([
 export type WebhookAuth = typeof webhookAuthSchema.Type;
 export type WebhookAuthKind = WebhookAuth["kind"];
 
-/**
- * The header a generic webhook's delivery id is read from until somebody
- * chooses another, and for triggers made before it could be chosen.
- */
+/** The delivery ID header selected for new generic webhooks in the editor. */
 export const DEFAULT_DELIVERY_ID_HEADER = "Idempotency-Key";
 
-/**
- * The header a generic webhook trigger reads its delivery id from, so a
- * retry lands on the first delivery's run: a name, or null for none, when
- * every call starts a run. A trigger that never had one set uses
- * `DEFAULT_DELIVERY_ID_HEADER`. A known source names its deliveries its own
- * way, and ignores this.
- */
+/** A header name, null to disable deduplication, or absent to retain automatic detection. */
 const webhookDeliveryIdHeaderSchema = Schema.optional(Schema.NullOr(webhookHeaderSchema));
-
-/** The header `trigger` reads its delivery id from, or null for none. */
-export function deliveryIdHeaderOf(trigger: {
-	readonly deliveryIdHeader?: string | null;
-}): string | null {
-	return trigger.deliveryIdHeader === undefined
-		? DEFAULT_DELIVERY_ID_HEADER
-		: trigger.deliveryIdHeader;
-}
 
 /**
  * What marks the secrets made for each kind, so people can tell them apart.
@@ -306,8 +288,8 @@ export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
  * token and a changed one keeps how it checks callers. A null `secret` leaves
  * it without one, so its address alone runs the routine. Without `secret`,
  * one is made when it first needs one or its auth kind changes, and is
- * returned then. Without `deliveryIdHeader`, a new one reads
- * `DEFAULT_DELIVERY_ID_HEADER` and a changed one keeps its own.
+ * returned then. Without `deliveryIdHeader`, a new trigger detects delivery
+ * IDs automatically and an edited trigger keeps its current setting.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),

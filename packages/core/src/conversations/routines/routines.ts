@@ -16,11 +16,7 @@ import type {
 	WebhookAuth,
 	WorkspaceRoutine,
 } from "@sugabots/contracts";
-import {
-	deliveryIdHeaderOf,
-	MAX_ROUTINE_TRIGGERS,
-	webhookSecretLongEnough,
-} from "@sugabots/contracts";
+import { MAX_ROUTINE_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { Context, DateTime, Effect, Layer } from "effect";
@@ -55,6 +51,7 @@ import {
 	TooManyRoutineTriggers,
 	toRoutine,
 	triggersOf,
+	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./routine.ts";
 import { type InvalidRoutineExecutionCursor, makeView } from "./routine-view.ts";
@@ -87,6 +84,7 @@ export interface Interface {
 		| RoutineChatNotFound
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -117,6 +115,7 @@ export interface Interface {
 		| TooManyRoutineTriggers
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -135,6 +134,7 @@ export interface Interface {
 		| RoutineTriggerKindChanged
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -296,7 +296,10 @@ export const make = Effect.gen(function* () {
 		state: RoutineState,
 	): Effect.Effect<
 		Written,
-		InvalidRoutineSchedule | WebhookSecretTooShort | RoutineRepositoryNotInPod,
+		| InvalidRoutineSchedule
+		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
+		| RoutineRepositoryNotInPod,
 		Database
 	> =>
 		Effect.gen(function* () {
@@ -741,19 +744,26 @@ function webhookCheck(
 ): Effect.Effect<
 	{
 		auth: WebhookAuth;
-		deliveryIdHeader: string | null;
+		deliveryIdHeader: string | null | undefined;
 		secretEncrypted: string | null;
 		secretDigest: string | null;
 		secret: string | null;
 	},
-	WebhookSecretTooShort
+	WebhookSecretTooShort | WebhookDeliveryIdHeaderRejected
 > {
 	const currentSettings = current?.settings.kind === "webhook" ? current.settings : undefined;
 	const auth = input.auth ?? currentSettings?.auth ?? DEFAULT_WEBHOOK_AUTH;
 	const deliveryIdHeader =
 		input.deliveryIdHeader !== undefined
 			? input.deliveryIdHeader
-			: deliveryIdHeaderOf(currentSettings ?? {});
+			: currentSettings?.deliveryIdHeader;
+	const deliveryHeader = deliveryIdHeader?.toLowerCase();
+	if (
+		deliveryHeader === "authorization" ||
+		(auth.kind === "api_key" && deliveryHeader === auth.header.toLowerCase())
+	) {
+		return Effect.fail(new WebhookDeliveryIdHeaderRejected());
+	}
 	if (typeof input.secret === "string" && !webhookSecretLongEnough(auth.kind, input.secret)) {
 		return Effect.fail(new WebhookSecretTooShort());
 	}

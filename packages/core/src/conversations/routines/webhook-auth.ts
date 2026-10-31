@@ -106,18 +106,39 @@ export function presentedSecret(
 	}
 }
 
+const AUTOMATIC_DELIVERY_ID_HEADERS = [
+	"idempotency-key",
+	"linear-delivery",
+	"x-github-delivery",
+	"x-shopify-webhook-id",
+	"svix-id",
+	"webhook-id",
+];
+
 /**
  * What the delivery calls itself, if anything, so a retry lands on the first
  * delivery's run. A known source names it its own way: GitHub's and Linear's
  * header, Slack's `event_id`, or the `id` of a Stripe event. Any other
  * sender's is in the header `deliveryIdHeader` names, with none to read when
- * that is null or the header is missing or empty.
+ * that is null or the header is missing or empty. An undefined setting
+ * preserves automatic header and body detection for existing triggers.
  */
 export function deliveryIdOf(
 	auth: WebhookAuth,
-	deliveryIdHeader: string | null,
+	deliveryIdHeader: string | null | undefined,
 	{ headers, payload }: Delivery,
 ): string | null {
+	if (deliveryIdHeader === undefined) {
+		for (const header of AUTOMATIC_DELIVERY_ID_HEADERS) {
+			if (auth.kind === "api_key" && header === auth.header.toLowerCase()) continue;
+			const value = headerValue(headers, header);
+			if (value) return value;
+		}
+		return (
+			bodyString(payload, "event_id") ??
+			(bodyString(payload, "object") === "event" ? bodyString(payload, "id") : null)
+		);
+	}
 	switch (auth.kind) {
 		case "github":
 			return headerValue(headers, "x-github-delivery");

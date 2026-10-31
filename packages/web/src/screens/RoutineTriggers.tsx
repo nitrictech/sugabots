@@ -1,9 +1,4 @@
-import {
-	deliveryIdHeaderOf,
-	type Pod,
-	type RoutineTrigger,
-	type RoutineTriggerInput,
-} from "@sugabots/contracts";
+import type { Pod, RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -88,7 +83,7 @@ export function triggerDraftOf(trigger: RoutineTriggerInput): TriggerDraft {
 				kind: "webhook",
 				webhook: {
 					auth: trigger.auth ?? NEW_WEBHOOK.auth,
-					deliveryIdHeader: deliveryIdHeaderOf(trigger),
+					deliveryIdHeader: trigger.deliveryIdHeader,
 					secret: trigger.secret ?? "",
 				},
 			};

@@ -1,10 +1,6 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import {
-	deliveryIdHeaderOf,
-	MAX_IDEMPOTENCY_KEY_CHARACTERS,
-	type WebhookAuth,
-} from "@sugabots/contracts";
+import { MAX_IDEMPOTENCY_KEY_CHARACTERS, type WebhookAuth } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -91,7 +87,7 @@ interface EnabledWebhook {
 	routineId: string;
 	auth: WebhookAuth;
 	/** Where a generic webhook's delivery id is, if anywhere. */
-	deliveryIdHeader: string | null;
+	deliveryIdHeader: string | null | undefined;
 	/** Sealed with `Credentials`. */
 	secret: string | null;
 	/** The hash of a bearer secret made before secrets were sealed. */
@@ -128,7 +124,7 @@ const enabledWebhook = (triggerId: string) =>
 			return {
 				...rest,
 				auth: settings.auth,
-				deliveryIdHeader: deliveryIdHeaderOf(settings),
+				deliveryIdHeader: settings.deliveryIdHeader,
 			};
 		},
 	);

@@ -497,16 +497,27 @@ describe("a pod's routines", () => {
 		);
 	});
 
-	it("saves the header a webhook's delivery id is read from, and none when it is cleared", async () => {
+	it("shows automatic detection without rewriting an existing webhook", async () => {
 		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
+		await openPanel(webhook);
+		await openTrigger(/^Webhook/);
+		expect(screen.getByRole("button", { name: "Delivery ID: Automatic detection" })).toBeDefined();
+		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
+	});
+
+	it("saves the header a webhook's delivery id is read from, and none when it is cleared", async () => {
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "bearer" },
+			deliveryIdHeader: "Idempotency-Key",
+		});
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.routines.updateTrigger.mockReturnValue(
 			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
-		// A webhook made before the header could be set reads Idempotency-Key.
 		const field = () => screen.getByLabelText("Delivery ID header");
 		await screen.findByLabelText("Delivery ID header");
 		expect((field() as HTMLInputElement).value).toBe("Idempotency-Key");
@@ -532,7 +543,7 @@ describe("a pod's routines", () => {
 	it("asks a known source for no delivery id header", async () => {
 		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "github" } });
 		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
-		mount(routinePage(webhook));
+		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
 		expect(await screen.findByRole("button", { name: "Source: GitHub" })).toBeDefined();
