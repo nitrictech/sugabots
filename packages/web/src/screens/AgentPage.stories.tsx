@@ -559,6 +559,34 @@ export const Phone = meta.story({
 });
 
 /**
+ * On a phone, a chat whose details arrive after its messages still shows the
+ * messages once they do, rather than staying blank.
+ */
+export const PhoneDetailsAfterMessages = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(
+			// Answered by the app's own handler after the wait, once the messages are in.
+			http.get(`${API}/threads/:threadId`, async () => {
+				await delay(DETAILS_DELAY_MS);
+			}),
+			...appHandlers({ messages: { [growthDesk.id]: conversation } }),
+		);
+	},
+	play: async ({ canvas }) => {
+		const message = await canvas.findByText(
+			"Drafted both. They're in your outbox for a last look.",
+			{},
+			{ timeout: 10_000 },
+		);
+		await waitFor(() => expect(message).toBeVisible(), { timeout: 5_000 });
+	},
+});
+
+/** How long the API takes to answer a chat's details, well after its messages. */
+const DETAILS_DELAY_MS = 600;
+
+/**
  * Reply on a message's hover toolbar starts a reply: the composer names the
  * message it answers, and the message is sent quoting it.
  */

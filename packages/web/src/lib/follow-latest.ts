@@ -63,15 +63,23 @@ export function useSettledAtLatest(
 		if (settled || !ready) return;
 		let framesLeft = SETTLE_FRAMES;
 		let frame = requestAnimationFrame(function check() {
+			if (framesLeft === 0 || !following.current) {
+				setSettled(true);
+				return;
+			}
+			framesLeft -= 1;
+			// Not mounted yet, as while the rest of the chat loads: wait for it rather
+			// than stopping, which would leave the log hidden for good.
 			const element = viewport.current;
-			if (!element) return;
-			const atLatest = element.scrollHeight - element.scrollTop - element.clientHeight < 1;
-			if (atLatest || !following.current || framesLeft === 0) {
+			if (!element) {
+				frame = requestAnimationFrame(check);
+				return;
+			}
+			if (element.scrollHeight - element.scrollTop - element.clientHeight < 1) {
 				setSettled(true);
 				return;
 			}
 			element.scrollTop = element.scrollHeight;
-			framesLeft -= 1;
 			frame = requestAnimationFrame(check);
 		});
 		return () => cancelAnimationFrame(frame);
