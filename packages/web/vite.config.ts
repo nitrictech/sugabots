@@ -2,8 +2,12 @@ import { fileURLToPath } from "node:url";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, normalizePath, type Plugin } from "vite";
+import { defineConfig, loadEnv, normalizePath, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+
+// A worktree's `bun run db:branch` points API_URL at its own API. Vite reads
+// .env for the app, not into process.env for this file.
+const { API_URL } = loadEnv("", fileURLToPath(new URL("../..", import.meta.url)), "API_URL");
 
 export default defineConfig({
 	plugins: [
@@ -45,7 +49,7 @@ export default defineConfig({
 		// without which Portless routes the request straight back here.
 		proxy: {
 			"/api": {
-				target: process.env.API_URL || "https://api.sugabots.localhost",
+				target: API_URL || "https://api.sugabots.localhost",
 				changeOrigin: true,
 				// The desktop viewer's WebSocket goes to the API too.
 				ws: true,
