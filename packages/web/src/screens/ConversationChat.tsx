@@ -550,9 +550,9 @@ export function ConversationChat({
 					/>
 				)}
 				{/*
-				 * On a phone, the header's glass controls float over the messages,
-				 * which scroll on under them, so the chat has the whole height. Only
-				 * the controls take a tap; anywhere else reaches the message beneath.
+				 * On a phone the header's glass pieces float over the messages, as the
+				 * tabs do at the foot, and they scroll on under them. Only the pieces
+				 * take a tap; anywhere else reaches the message beneath.
 				 */}
 				<div className="max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto">
 					{header}
@@ -575,7 +575,7 @@ export function ConversationChat({
 							lastScrollTop.current = element.scrollTop;
 							setLatestInView(atFoot);
 						}}
-						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-[124px]"
+						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-[calc(max(12px,env(safe-area-inset-top))+64px)]"
 					>
 						{/* Anchored to the bottom, so a short chat sits just above the composer. */}
 						<div
