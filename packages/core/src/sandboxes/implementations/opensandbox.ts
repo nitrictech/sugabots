@@ -108,6 +108,10 @@ export const fromOpenSandbox = (
 					OpenSandbox.create({
 						connectionConfig: connectionConfig(),
 						image: connection.image,
+						resource: {
+							cpu: String(connection.size.cpuCount),
+							memory: `${connection.size.memoryGiB}Gi`,
+						},
 						// Kept until Sugabots destroys it: a pod's sandbox outlives any one turn.
 						timeoutSeconds: null,
 						metadata: { ...spec.labels, [WORK_VOLUME_KEY]: workVolume(spec.workName) },

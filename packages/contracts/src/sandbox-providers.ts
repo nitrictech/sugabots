@@ -25,20 +25,21 @@ export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
 
 /**
- * The size of an E2B workspace's sandboxes unless it sets another: room to
- * install a repository's dependencies and run its checks. E2B's own default,
- * 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
+ * The size of a workspace's sandboxes unless it sets another: room to install
+ * a repository's dependencies and run its checks. The providers' own defaults,
+ * 1 GiB on E2B and 2 GiB on OpenSandbox, run out doing that, and the sandbox
+ * stalls rather than failing.
  */
-export const SANDBOX_E2B_DEFAULT_SIZE = { cpuCount: 2, memoryGiB: 4 } as const;
+export const SANDBOX_DEFAULT_SIZE = { cpuCount: 2, memoryGiB: 4 } as const;
 
 /**
- * Bounds for an E2B sandbox's size. The account's plan sets the real limit,
- * which E2B enforces when the template is built.
+ * Bounds for a sandbox's size. The real limit is the E2B account's plan, or
+ * what OpenSandbox's hosts have room for.
  */
-export const sandboxE2bCpuCountSchema = Schema.Int.check(
+export const sandboxCpuCountSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
-export const sandboxE2bMemoryGiBSchema = Schema.Int.check(
+export const sandboxMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
 
@@ -122,6 +123,9 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			preset: Schema.Literal("opensandbox"),
 			serverUrl: Schema.optional(providerUrlSchema),
 			image: Schema.optional(image),
+			/** The most each sandbox may use. */
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
@@ -132,8 +136,8 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			sandboxUrl: Schema.optional(providerUrlSchema),
 			template: Schema.optional(nameSchema),
 			/** What the template is built with, so every sandbox made from it has. */
-			cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
-			memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),

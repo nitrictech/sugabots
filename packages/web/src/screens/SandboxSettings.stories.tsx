@@ -269,6 +269,26 @@ export const E2bTemplateReady = meta.story({
 	},
 });
 
+/** OpenSandbox sized beyond its default. */
+export const OpenSandboxCustomSize = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			answers([
+				{
+					...openSandbox,
+					settings: { ...openSandbox.settings, preset: "opensandbox", cpuCount: 4, memoryGiB: 8 },
+					hasApiKey: true,
+					status: "connected",
+				},
+			]),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByLabelText("vCPUs")).toHaveValue("4");
+		await expect(canvas.getByLabelText("Memory")).toHaveValue("8 GiB");
+	},
+});
+
 /** E2B sized beyond its default; a size that isn't a whole number is refused before it's saved. */
 export const E2bCustomSize = meta.story({
 	beforeEach({ msw }) {

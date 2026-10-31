@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { SANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -35,6 +36,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		baseUrl: env.OPENSANDBOX_URL ?? "",
 		apiKey: Redacted.make(env.OPENSANDBOX_API_KEY ?? ""),
 		image: IMAGE,
+		size: SANDBOX_DEFAULT_SIZE,
 		networkMode: "allowlist",
 	};
 	let podSandboxes: PodSandboxes.Interface;
