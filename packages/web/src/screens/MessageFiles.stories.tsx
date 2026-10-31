@@ -119,6 +119,36 @@ export const ImagesSteppedThrough = meta.story({
 
 		await userEvent.keyboard("{ArrowLeft}");
 		await expect(within(viewer).getByRole("img", { name: "acme-email.png" })).toBeVisible();
+		await userEvent.keyboard("{ArrowRight}");
+		await expect(within(viewer).getByRole("img", { name: "pricing-page-old.png" })).toBeVisible();
+	},
+});
+
+/** The phone viewer keeps its fullscreen layout and large controls while stepping through images. */
+export const ImagesSteppedThroughOnAPhone = meta.story({
+	...ImagesSteppedThrough.input,
+	globals: { viewport: { value: "iphone12", isRotated: false }, theme: "light" },
+});
+
+/** Images without a URL are skipped, and a failed image does not hide the next picture. */
+export const UnavailableImages = meta.story({
+	args: {
+		files: [oldPricing, holidayPhoto, newPricing],
+		urlOf: (fileId) => (fileId === oldPricing.id ? undefined : urlOf(fileId)),
+	},
+	play: async ({ canvas, canvasElement }) => {
+		await expect(canvas.queryByRole("button", { name: "Open pricing-page-old.png" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Open holiday.heic" }));
+		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(await within(viewer).findByText(/can't be shown here/)).toBeVisible();
+		await expect(within(viewer).getByText("1 of 2")).toBeVisible();
+		await userEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
+		await expect(within(viewer).getByRole("img", { name: "pricing-page-new.png" })).toBeVisible();
+		await expect(
+			within(viewer).getByRole("link", { name: "Download pricing-page-new.png" }),
+		).toHaveAttribute("download", "pricing-page-new.png");
+		await userEvent.click(within(viewer).getByRole("button", { name: "Previous image" }));
+		await expect(await within(viewer).findByText(/can't be shown here/)).toBeVisible();
 	},
 });
 

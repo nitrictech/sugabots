@@ -52,12 +52,10 @@ function lookOf(file: FilePart): FileLook {
 /**
  * One image in a 4:3 frame up to 360 by 270, two side by side, or three to a
  * row, each tile 4:3 and the grid no wider than the chat it is in. Every image
- * is shown: the viewer opens one at a time, so one hidden behind a count could
- * not be opened. Tiles keep their size before their images load, so the
- * thread doesn't move as they arrive.
+ * is shown. Tiles keep their size before their images load, so the thread
+ * doesn't move as they arrive.
  */
 function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {
-	// The viewer steps through the images that are served, in the order shown.
 	const served = images.flatMap((file) => {
 		const url = urlOf(file.id);
 		return url ? [{ file, url }] : [];
@@ -189,19 +187,21 @@ function ImageViewer({
 			onKeyDown={stepWithArrowKeys}
 			// Stretched to its insets, rather than as tall as the picture: on a phone, the picture
 			// alone on black across the whole screen, as a phone's own photos open.
-			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
-
+			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:scheme-dark max-md:px-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-[max(16px,env(safe-area-inset-bottom))]"
 		>
 			{/* On a phone, × at the left and Download at the right, the name between them. */}
 			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">
-				<DialogTitle className="min-w-0 flex-1 max-md:order-2 max-md:text-center max-md:text-[15px]">
-					<MiddleTruncated text={file.name} className="max-md:justify-center" />
+				<DialogTitle className="flex min-w-0 flex-1 items-center gap-2 max-md:order-2 max-md:flex-col max-md:gap-0.5 max-md:text-center max-md:text-[15px]">
+					<MiddleTruncated
+						text={file.name}
+						className="flex-1 max-md:max-w-full max-md:justify-center"
+					/>
+					{images.length > 1 && (
+						<span className="shrink-0 font-normal text-muted-foreground text-sm tabular-nums">
+							{index + 1} of {images.length}
+						</span>
+					)}
 				</DialogTitle>
-				{images.length > 1 && (
-					<span className="shrink-0 text-muted-foreground tabular-nums max-md:hidden">
-						{index + 1} of {images.length}
-					</span>
-				)}
 				<DownloadButton
 					file={file}
 					url={url}
@@ -209,18 +209,11 @@ function ImageViewer({
 					className={cn(FLOATING_ON_PHONE, "max-md:order-3")}
 				/>
 				<CloseButton render={<DialogClose />} className="max-md:order-1" />
-
 			</div>
-			{images.length > 1 && (
-				<span className="pt-2 text-center text-muted-foreground text-sm tabular-nums md:hidden">
-					{index + 1} of {images.length}
-				</span>
-			)}
 			<div
 				ref={picture}
 				tabIndex={-1}
 				className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-stage outline-none max-md:mt-3 max-md:rounded-none max-md:bg-transparent"
-
 			>
 				{/* Keyed so an image that couldn't be drawn doesn't mark the next one. */}
 				<ViewerPicture key={file.id} file={file} url={url} />
