@@ -84,7 +84,7 @@ export function sandboxProviderPreset(id: SandboxProviderPresetId): SandboxProvi
 }
 
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
-const imageSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512));
+const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512));
 
 /**
  * How a provider's sandboxes reach the internet: `allowlist`, only the
@@ -100,32 +100,59 @@ export type SandboxNetworkMode = typeof sandboxNetworkModeSchema.Type;
 export const SANDBOX_NETWORK_MODE_DEFAULT: SandboxNetworkMode = "open";
 
 /**
- * A provider's settings, by preset. A provider may be saved before it has
- * every address it needs; it can't be enabled until it has. An image,
- * template or size left out follows the default, so a new default reaches
- * every provider not set to something else.
+ * An image's name as `docker pull` takes it, such as
+ * `ghcr.io/nitrictech/sugabots-sandbox:edge`. This only catches what people
+ * paste by mistake, a whole command or a web address, rather than every rule
+ * of Docker's.
  */
-export const sandboxProviderSettingsSchema = Schema.Union([
-	Schema.Struct({
-		preset: Schema.Literal("opensandbox"),
-		serverUrl: Schema.optional(providerUrlSchema),
-		image: Schema.optional(imageSchema),
-		/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
-		networkMode: Schema.optional(sandboxNetworkModeSchema),
+const imageSchema = Schema.Trim.check(
+	Schema.isMaxLength(512),
+	Schema.isPattern(/^\S+$/, {
+		message: "Enter just the image's name, such as ghcr.io/nitrictech/sugabots-sandbox:latest",
 	}),
-	Schema.Struct({
-		preset: Schema.Literal("e2b"),
-		/** E2B Embed's API and its address for reaching sandboxes; both left out for E2B Cloud. */
-		apiUrl: Schema.optional(providerUrlSchema),
-		sandboxUrl: Schema.optional(providerUrlSchema),
-		template: Schema.optional(imageSchema),
-		/** What the template is built with, so every sandbox made from it has. */
-		cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
-		memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
-		/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
-		networkMode: Schema.optional(sandboxNetworkModeSchema),
+	Schema.isPattern(/^(?![a-z]+:\/\/)/i, {
+		message:
+			"Enter the image's name rather than a web address, such as ghcr.io/nitrictech/sugabots-sandbox:latest",
 	}),
-]);
+);
+
+function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
+	return Schema.Union([
+		Schema.Struct({
+			preset: Schema.Literal("opensandbox"),
+			serverUrl: Schema.optional(providerUrlSchema),
+			image: Schema.optional(image),
+			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
+			networkMode: Schema.optional(sandboxNetworkModeSchema),
+		}),
+		Schema.Struct({
+			preset: Schema.Literal("e2b"),
+			/** E2B Embed's API and its address for reaching sandboxes; both left out for E2B Cloud. */
+			apiUrl: Schema.optional(providerUrlSchema),
+			sandboxUrl: Schema.optional(providerUrlSchema),
+			template: Schema.optional(nameSchema),
+			/** What the template is built with, so every sandbox made from it has. */
+			cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
+			networkMode: Schema.optional(sandboxNetworkModeSchema),
+		}),
+	]);
+}
+
+/**
+ * A provider's settings, by preset, as they are saved. A provider may be
+ * saved before it has every address it needs; it can't be enabled until it
+ * has. An image, template or size left out follows the default, so a new
+ * default reaches every provider not set to something else.
+ */
+export const sandboxProviderSettingsSchema = providerSettingsWithImageSchema(imageSchema);
+
+/**
+ * Settings as they are read back. An image saved before images' names were
+ * checked is shown as it is, so the page that would correct it still loads.
+ */
+const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema);
 
 export type SandboxProviderSettings = typeof sandboxProviderSettingsSchema.Type;
 
@@ -134,7 +161,7 @@ export const sandboxProviderSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	preset: sandboxProviderPresetIdSchema,
 	name: Schema.String,
-	settings: sandboxProviderSettingsSchema,
+	settings: savedSandboxProviderSettingsSchema,
 	/** Whether this provider makes the workspace's sandboxes. At most one is. */
 	enabled: Schema.Boolean,
 	status: providerStatusSchema,

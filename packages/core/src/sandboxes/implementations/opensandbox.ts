@@ -9,7 +9,7 @@ import {
 	SandboxManager,
 } from "@alibaba-group/opensandbox";
 import { createLifecycleClient } from "@alibaba-group/opensandbox/internal";
-import { userText } from "@sugabots/errors";
+import { DisplayName, userText } from "@sugabots/errors";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
 import { Sandboxes } from "../sandboxes.ts";
@@ -77,6 +77,16 @@ export const fromOpenSandbox = (
 	};
 	const unavailable = (cause: unknown) =>
 		new Sandboxes.Unavailable({ provider: "opensandbox", cause });
+	const creationFailed = (cause: unknown) =>
+		cause instanceof SandboxApiException &&
+		cause.statusCode !== undefined &&
+		!REFUSED_KEY.has(cause.statusCode)
+			? new Sandboxes.Unavailable({
+					provider: "opensandbox",
+					cause,
+					reason: userText`OpenSandbox couldn't create a sandbox using image ${DisplayName.fromRecord(connection.image)}. Check the OpenSandbox server logs for the cause.`,
+				})
+			: unavailable(cause);
 	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
 	const missingOr = (id: Sandboxes.SandboxId) => (cause: unknown) =>
 		isNotFound(cause)
@@ -94,8 +104,8 @@ export const fromOpenSandbox = (
 		}).pipe(Effect.asVoid),
 		create: (spec) =>
 			Effect.tryPromise({
-				try: async () => {
-					const sandbox = await OpenSandbox.create({
+				try: () =>
+					OpenSandbox.create({
 						connectionConfig: connectionConfig(),
 						image: connection.image,
 						// Kept until Sugabots destroys it: a pod's sandbox outlives any one turn.
@@ -119,12 +129,19 @@ export const fromOpenSandbox = (
 								mountPath: Sandboxes.WORKSPACE_DIRECTORY,
 							},
 						],
-					});
-					await prepareAgentUser(sandbox);
-					return toSandbox(sandbox);
-				},
-				catch: unavailable,
-			}),
+					}),
+				catch: creationFailed,
+			}).pipe(
+				Effect.flatMap((sandbox) =>
+					Effect.tryPromise({
+						try: async () => {
+							await prepareAgentUser(sandbox);
+							return toSandbox(sandbox);
+						},
+						catch: unavailable,
+					}),
+				),
+			),
 		open: (id) =>
 			Effect.tryPromise({
 				try: async () => {
@@ -454,6 +471,9 @@ async function prepareAgentUser(sandbox: OpenSandbox) {
 		throw new Error(`Could not prepare the agents' user: ${stderr}`);
 	}
 }
+
+/** What the server answers for a missing or wrong API key, which is the key's fault, not the image's. */
+const REFUSED_KEY = new Set([401, 403]);
 
 function isNotFound(cause: unknown) {
 	return cause instanceof SandboxApiException && cause.statusCode === 404;
