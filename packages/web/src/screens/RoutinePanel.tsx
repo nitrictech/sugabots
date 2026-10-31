@@ -472,18 +472,31 @@ function RoutineTriggerDialog({
 			editing={editing && triggerDraftOf(editing)}
 			settings={
 				editing?.kind === "webhook" ? (
-					<WebhookGroups
-						placed={placed}
-						triggerId={editing.id}
-						auth={editing.auth}
-						onChangeAuth={(auth) =>
-							actions.updateTrigger.mutate({
-								...addressed,
-								triggerId: editing.id,
-								json: { kind: "webhook", auth },
-							})
-						}
-					/>
+					<>
+						{actions.updateTrigger.error && (
+							<Alert>{failureMessage(actions.updateTrigger.error)}</Alert>
+						)}
+						<WebhookGroups
+							placed={placed}
+							triggerId={editing.id}
+							auth={editing.auth}
+							deliveryIdHeader={editing.deliveryIdHeader}
+							onChangeDeliveryIdHeader={(deliveryIdHeader) =>
+								actions.updateTrigger.mutate({
+									...addressed,
+									triggerId: editing.id,
+									json: { kind: "webhook", deliveryIdHeader },
+								})
+							}
+							onChangeAuth={(auth) =>
+								actions.updateTrigger.mutate({
+									...addressed,
+									triggerId: editing.id,
+									json: { kind: "webhook", auth },
+								})
+							}
+						/>
+					</>
 				) : undefined
 			}
 			onSave={(json) =>

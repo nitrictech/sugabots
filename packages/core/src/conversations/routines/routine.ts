@@ -154,6 +154,15 @@ export class WebhookSecretTooShort
 	}
 }
 
+export class WebhookDeliveryIdHeaderRejected
+	extends Data.TaggedError("WebhookDeliveryIdHeaderRejected")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`The delivery ID header must be different from an authentication header`;
+	}
+}
+
 export class RoutineDeliveryIdTooLong
 	extends Data.TaggedError("RoutineDeliveryIdTooLong")
 	implements UserFacing

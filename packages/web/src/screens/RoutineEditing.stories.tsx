@@ -1,4 +1,11 @@
-import type { Agent, ChatList, Pod, Routine, WorkspaceRoutine } from "@sugabots/contracts";
+import type {
+	Agent,
+	ChatList,
+	Pod,
+	Routine,
+	RoutineTriggerInput,
+	WorkspaceRoutine,
+} from "@sugabots/contracts";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
@@ -289,9 +296,15 @@ type Canvas = ReturnType<typeof within>;
 
 /** The routine's panel, opened with Details if the page didn't open it already. */
 async function openPanel(canvas: Canvas) {
-	const details = await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 });
-	if (!canvas.queryByRole("complementary", { name: "Routine" })) await userEvent.click(details);
-	return within(await canvas.findByRole("complementary", { name: "Routine" }));
+	return waitFor(
+		async () => {
+			const existing = canvas.queryByRole("complementary", { name: "Routine" });
+			if (existing) return within(existing);
+			await userEvent.click(canvas.getByRole("button", { name: "Details" }));
+			throw new Error("The routine panel has not opened yet");
+		},
+		{ timeout: 10_000 },
+	);
 }
 
 /** The rows of the panel's Triggers, once the routine has loaded. */
@@ -488,11 +501,78 @@ export const Webhook = meta.story({
 			await dialog.findByText(new RegExp(`/hooks/triggers/${incidentIntake.routine.id}$`)),
 		).toBeInTheDocument();
 		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await expect(
+			dialog.getByRole("button", { name: "Delivery ID: Automatic detection" }),
+		).toBeInTheDocument();
 		await expect(dialog.getByLabelText("Header")).toHaveValue("X-Signature");
 		const secret = await dialog.findByLabelText("Signing secret");
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
 		await expect(secret).toHaveAttribute("type", "password");
 		await expect(dialog.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
+	},
+});
+
+/** A delivery header is saved independently of auth; clearing it lets every call run. */
+export const DeliveryIdHeader = meta.story({
+	beforeEach({ msw }) {
+		let routine: Routine = {
+			...incidentIntake.routine,
+			triggers: incidentIntake.routine.triggers.map((trigger) => ({
+				...trigger,
+				deliveryIdHeader: "Idempotency-Key",
+			})),
+		};
+		msw.use(
+			...routinesAnswer([{ ...incidentIntake, routine }]),
+			http.put(
+				`${API}/agents/:agentId/routines/:routineId/triggers/:triggerId`,
+				async ({ request, params }) => {
+					const input = (await request.json()) as RoutineTriggerInput;
+					if (input.kind !== "webhook") return HttpResponse.json({}, { status: 400 });
+					routine = {
+						...routine,
+						triggers: routine.triggers.map((trigger) =>
+							trigger.kind === "webhook" && trigger.id === params.triggerId
+								? { ...trigger, ...input }
+								: trigger,
+						),
+					};
+					return HttpResponse.json({ routine, secrets: [] });
+				},
+			),
+		);
+	},
+	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	play: async ({ canvas, userEvent }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		const field = await dialog.findByLabelText("Delivery ID header");
+		await expect(field).toHaveValue("Idempotency-Key");
+		await userEvent.clear(field);
+		await userEvent.type(field, "X-Request-Id{Enter}");
+		await expect(await dialog.findByLabelText("Delivery ID header")).toHaveValue("X-Request-Id");
+		await userEvent.clear(dialog.getByLabelText("Delivery ID header"));
+		await userEvent.tab();
+		await expect(await dialog.findByLabelText("Delivery ID header")).toHaveValue("");
+		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+	},
+});
+
+/** The delivery header stays usable in the compact phone trigger editor. */
+export const DeliveryIdHeaderOnAPhone = meta.story({
+	...DeliveryIdHeader.input,
+	globals: { ...PHONE, theme: "light" },
+	play: async (context) => {
+		await waitFor(
+			async () => {
+				if (context.canvas.queryByRole("complementary", { name: "Routine" })) return;
+				await userEvent.click(
+					context.canvas.getByText("Incident intake", { selector: "button > span > span" }),
+				);
+				throw new Error("The routine panel has not opened yet");
+			},
+			{ timeout: 10_000 },
+		);
+		await DeliveryIdHeader.input.play?.(context);
 	},
 });
 
@@ -544,6 +624,7 @@ export const NewWebhook = meta.story({
 		const dialog = within(await screen.findByRole("dialog", { name: "Webhook" }));
 		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
 		await expect(dialog.getByLabelText("Signing secret")).toHaveValue("");
+		await expect(dialog.getByLabelText("Delivery ID header")).toHaveValue("Idempotency-Key");
 		await expect(
 			dialog.getByText(/^With no secret, anyone who has the address can run it\./),
 		).toBeInTheDocument();

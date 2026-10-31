@@ -400,6 +400,7 @@ describe("a pod's routines", () => {
 							{
 								kind: "webhook",
 								auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+								deliveryIdHeader: "Idempotency-Key",
 								secret: "whsec_0123456789abcdefghijklmnop",
 							},
 						],
@@ -449,7 +450,14 @@ describe("a pod's routines", () => {
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						triggers: [{ kind: "webhook", auth: { kind: "stripe" }, secret: "whsec_short" }],
+						triggers: [
+							{
+								kind: "webhook",
+								auth: { kind: "stripe" },
+								deliveryIdHeader: "Idempotency-Key",
+								secret: "whsec_short",
+							},
+						],
 					}),
 				}),
 			),
@@ -487,6 +495,59 @@ describe("a pod's routines", () => {
 				payload: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
 			}),
 		);
+	});
+
+	it("shows automatic detection without rewriting an existing webhook", async () => {
+		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
+		await openPanel(webhook);
+		await openTrigger(/^Webhook/);
+		expect(screen.getByRole("button", { name: "Delivery ID: Automatic detection" })).toBeDefined();
+		expect(client.api.routines.updateTrigger).not.toHaveBeenCalled();
+	});
+
+	it("saves the header a webhook's delivery id is read from, and none when it is cleared", async () => {
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			auth: { kind: "bearer" },
+			deliveryIdHeader: "Idempotency-Key",
+		});
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		client.api.routines.updateTrigger.mockReturnValue(
+			Effect.succeed({ routine: webhook.routine, secrets: [] }),
+		);
+		await openPanel(webhook);
+		await openTrigger(/^Webhook/);
+
+		const field = () => screen.getByLabelText("Delivery ID header");
+		await screen.findByLabelText("Delivery ID header");
+		expect((field() as HTMLInputElement).value).toBe("Idempotency-Key");
+		fireEvent.change(field(), { target: { value: " X-Request-Id " } });
+		fireEvent.blur(field());
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", deliveryIdHeader: "X-Request-Id" },
+			}),
+		);
+
+		fireEvent.change(field(), { target: { value: "" } });
+		fireEvent.blur(field());
+		await waitFor(() =>
+			expect(client.api.routines.updateTrigger).toHaveBeenLastCalledWith({
+				params: onlyTrigger(webhook),
+				payload: { kind: "webhook", deliveryIdHeader: null },
+			}),
+		);
+	});
+
+	it("asks a known source for no delivery id header", async () => {
+		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "github" } });
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		await openPanel(webhook);
+		await openTrigger(/^Webhook/);
+
+		expect(await screen.findByRole("button", { name: "Source: GitHub" })).toBeDefined();
+		expect(screen.queryByLabelText("Delivery ID header")).toBeNull();
 	});
 
 	it("leaves a webhook without a secret when its secret is cleared", async () => {
@@ -722,6 +783,7 @@ describe("a pod's routines", () => {
 				payload: {
 					kind: "webhook",
 					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+					deliveryIdHeader: "Idempotency-Key",
 					secret: null,
 				},
 			}),

@@ -5,6 +5,7 @@ import {
 	RoutineDeliveryIdTooLong,
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
+	WebhookDeliveryIdHeaderRejected,
 } from "@sugabots/core/conversations/routines/routine";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
@@ -309,6 +310,17 @@ describe("a Routine's triggers", () => {
 			body: JSON.stringify({ kind: "webhook" }),
 		});
 
+		expect(response.status).toBe(400);
+	});
+
+	it("answers a delivery ID header conflicting with auth as a bad request", async () => {
+		const response = await appAs({
+			routines: { updateTrigger: () => Effect.fail(new WebhookDeliveryIdHeaderRejected()) },
+		}).request(triggerPath, {
+			method: "PUT",
+			headers: session,
+			body: JSON.stringify({ kind: "webhook", deliveryIdHeader: "Authorization" }),
+		});
 		expect(response.status).toBe(400);
 	});
 

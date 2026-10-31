@@ -1,4 +1,5 @@
 import {
+	DEFAULT_DELIVERY_ID_HEADER,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 	WEBHOOK_SECRET_PREFIXES,
 	WEBHOOK_SOURCES,
@@ -117,11 +118,17 @@ function secretLabel(auth: WebhookAuth): string {
 /** A webhook routine being made: how it will check callers, and its secret. */
 export interface WebhookDraft {
 	auth: WebhookAuth;
+	/** Where a generic webhook's delivery id is, or null for none. */
+	deliveryIdHeader: string | null | undefined;
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
 }
 
-export const NEW_WEBHOOK: WebhookDraft = { auth: DEFAULT_WEBHOOK_AUTH, secret: "" };
+export const NEW_WEBHOOK: WebhookDraft = {
+	auth: DEFAULT_WEBHOOK_AUTH,
+	deliveryIdHeader: DEFAULT_DELIVERY_ID_HEADER,
+	secret: "",
+};
 
 /**
  * Whether a secret can be saved for `auth`: a source's, however long its
@@ -185,7 +192,12 @@ export function NewWebhookGroups({
 				<SourceRow auth={draft.auth} onChange={changeAuth} />
 			</SettingsGroup>
 			<SettingsGroup note={note}>
-				<AuthRows auth={draft.auth} onChange={changeAuth} />
+				<AuthRows
+					auth={draft.auth}
+					onChange={changeAuth}
+					deliveryIdHeader={draft.deliveryIdHeader}
+					onChangeDeliveryIdHeader={(deliveryIdHeader) => onChange({ ...draft, deliveryIdHeader })}
+				/>
 				<SecretField
 					auth={draft.auth}
 					value={draft.secret}
@@ -198,7 +210,7 @@ export function NewWebhookGroups({
 
 /**
  * An existing webhook trigger's groups: its address and where it comes from,
- * then its auth, which saves as it changes, and its secret, under a note of
+ * then its auth and delivery id header, which save as they change, and its secret, under a note of
  * what a caller must send, or, while it has no secret, that nothing is asked
  * of them.
  */
@@ -207,11 +219,15 @@ export function WebhookGroups({
 	triggerId,
 	auth,
 	onChangeAuth,
+	deliveryIdHeader,
+	onChangeDeliveryIdHeader,
 }: {
 	placed: PlacedRoutine;
 	triggerId: string;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
+	deliveryIdHeader: string | null | undefined;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 }) {
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;
@@ -236,12 +252,19 @@ export function WebhookGroups({
 					address={address}
 					auth={auth}
 					onChangeAuth={onChangeAuth}
+					deliveryIdHeader={deliveryIdHeader}
+					onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 					hasSecret={saved.kind !== "none"}
 					savedSecret={saved.kind === "set" ? saved.secret : ""}
 				/>
 			) : (
 				<SettingsGroup note={authNote(auth)}>
-					<AuthRows auth={auth} onChange={onChangeAuth} />
+					<AuthRows
+						auth={auth}
+						onChange={onChangeAuth}
+						deliveryIdHeader={deliveryIdHeader}
+						onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
+					/>
 					<SettingsControlRow label={secretLabel(auth)}>
 						{!canManage && (
 							<span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">
@@ -259,13 +282,20 @@ function webhookAddress(triggerId: string): string {
 	return `${apiBaseUrl}/hooks/triggers/${triggerId}`;
 }
 
-/** For a generic webhook, the auth to ask callers for and what it needs. */
+/**
+ * For a generic webhook, the auth to ask callers for and what it needs, then
+ * the header that names each delivery, which a known source needs no say in.
+ */
 function AuthRows({
 	auth,
 	onChange,
+	deliveryIdHeader,
+	onChangeDeliveryIdHeader,
 }: {
 	auth: WebhookAuth;
 	onChange: (auth: WebhookAuth) => void;
+	deliveryIdHeader: string | null | undefined;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 }) {
 	return (
 		<>
@@ -311,6 +341,31 @@ function AuthRows({
 					onCommit={(username) => onChange({ ...auth, username })}
 				/>
 			)}
+			{!isSource(auth.kind) &&
+				(deliveryIdHeader === undefined ? (
+					<MenuRow
+						label="Delivery ID"
+						value="automatic"
+						options={[
+							{ value: "automatic", label: "Automatic detection" },
+							{ value: "header", label: "Use a header" },
+							{ value: "none", label: "Every call runs" },
+						]}
+						onChange={(choice) => {
+							if (choice === "header") onChangeDeliveryIdHeader(DEFAULT_DELIVERY_ID_HEADER);
+							if (choice === "none") onChangeDeliveryIdHeader(null);
+						}}
+					/>
+				) : (
+					<CommittedFieldRow
+						key={deliveryIdHeader}
+						label="Delivery ID header"
+						value={deliveryIdHeader ?? ""}
+						placeholder="None: every call runs"
+						allowEmpty
+						onCommit={(header) => onChangeDeliveryIdHeader(header === "" ? null : header)}
+					/>
+				))}
 		</>
 	);
 }
@@ -413,7 +468,8 @@ function labelOf<Value extends string>(
 
 /**
  * A short field, such as a header's name, that commits trimmed when you leave
- * it or press Enter. Escape, or leaving it blank or unchanged, puts it back.
+ * it or press Enter. Escape, or leaving it unchanged, puts it back, as does
+ * leaving it blank unless `allowEmpty`.
  * Keyed by its value where it is used, so a value changed elsewhere replaces
  * what was typed.
  */
@@ -421,11 +477,13 @@ function CommittedFieldRow({
 	label,
 	value,
 	placeholder,
+	allowEmpty = false,
 	onCommit,
 }: {
 	label: string;
 	value: string;
 	placeholder: string;
+	allowEmpty?: boolean;
 	onCommit: (value: string) => void;
 }) {
 	const [draft, setDraft] = useState(value);
@@ -433,7 +491,7 @@ function CommittedFieldRow({
 
 	function commit() {
 		const next = draft.trim();
-		if (next === "" || next === value) {
+		if ((next === "" && !allowEmpty) || next === value) {
 			setDraft(value);
 			return;
 		}
@@ -477,12 +535,16 @@ function SecretGroup({
 	address,
 	auth,
 	onChangeAuth,
+	deliveryIdHeader,
+	onChangeDeliveryIdHeader,
 	hasSecret,
 	savedSecret,
 }: {
 	address: TriggerAddress;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
+	deliveryIdHeader: string | null | undefined;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 	hasSecret: boolean;
 	/** Blank when the routine has none, or has only a hash of one. */
 	savedSecret: string;
@@ -498,7 +560,12 @@ function SecretGroup({
 
 	return (
 		<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
-			<AuthRows auth={auth} onChange={onChangeAuth} />
+			<AuthRows
+				auth={auth}
+				onChange={onChangeAuth}
+				deliveryIdHeader={deliveryIdHeader}
+				onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
+			/>
 			<SecretField
 				auth={auth}
 				value={draft}

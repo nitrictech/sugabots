@@ -160,7 +160,7 @@ describe("Slack's signatures", () => {
 
 	it("names the delivery by its event", () => {
 		const body = JSON.stringify({ type: "event_callback", event_id: "Ev08MFMKH6" });
-		expect(deliveryIdOf(fromSlack(NOW_SECONDS, body))).toBe("Ev08MFMKH6");
+		expect(deliveryIdOf(slack, null, fromSlack(NOW_SECONDS, body))).toBe("Ev08MFMKH6");
 	});
 });
 
@@ -195,23 +195,82 @@ describe("Stripe's signatures", () => {
 			object: "event",
 			type: "invoice.paid",
 		});
-		expect(deliveryIdOf(fromStripe(NOW_SECONDS, [SECRET], body))).toBe(
+		expect(deliveryIdOf(stripe, null, fromStripe(NOW_SECONDS, [SECRET], body))).toBe(
 			"evt_1NG8Du2eZvKYlo2CUI79vXWy",
 		);
 	});
 });
 
 describe("delivery ids", () => {
-	it.each([
-		["Idempotency-Key", "delivery-1"],
-		["Linear-Delivery", "234d1a4e-b617-4388-90fe-adc3633d6b72"],
-		["X-GitHub-Delivery", "72d3162e-cc78-11e3-81ab-4c9367dc0958"],
-	])("names a delivery by its %s header", (header, id) => {
-		expect(deliveryIdOf(delivery({ [header]: id }))).toBe(id);
+	const bearer: WebhookAuth = { kind: "bearer" };
+
+	it("preserves automatic detection for triggers without an explicit setting", () => {
+		for (const header of [
+			"Idempotency-Key",
+			"Linear-Delivery",
+			"X-GitHub-Delivery",
+			"X-Shopify-Webhook-Id",
+			"Svix-Id",
+			"Webhook-Id",
+		]) {
+			expect(deliveryIdOf(bearer, undefined, delivery({ [header]: "delivery-1" }))).toBe(
+				"delivery-1",
+			);
+		}
+		expect(deliveryIdOf(bearer, undefined, delivery({}, '{"event_id":"event-1"}'))).toBe("event-1");
+		expect(
+			deliveryIdOf(bearer, undefined, delivery({}, '{"object":"event","id":"stripe-1"}')),
+		).toBe("stripe-1");
 	});
 
-	it("leaves a delivery without one unnamed, whatever ids its body holds", () => {
-		expect(deliveryIdOf(delivery({}))).toBeNull();
+	it("does not automatically store an API key as a delivery ID", () => {
+		expect(
+			deliveryIdOf(
+				{ kind: "api_key", header: "SVIX-ID" },
+				undefined,
+				delivery({ "Svix-Id": SECRET, "Webhook-Id": "delivery-1" }),
+			),
+		).toBe("delivery-1");
+	});
+
+	it("reads a generic webhook's from the header it names, in any case", () => {
+		expect(deliveryIdOf(bearer, "X-Request-Id", delivery({ "x-request-id": "req-1" }))).toBe(
+			"req-1",
+		);
+		expect(deliveryIdOf(bearer, "x-request-id", delivery({ "X-Request-ID": " req-2 " }))).toBe(
+			"req-2",
+		);
+	});
+
+	it("leaves a generic webhook's unnamed without a header to read, or when it is missing or empty", () => {
+		const sent = delivery({ "Idempotency-Key": "delivery-1" });
+		expect(deliveryIdOf(bearer, null, sent)).toBeNull();
+		expect(deliveryIdOf(bearer, "X-Request-Id", sent)).toBeNull();
+		expect(
+			deliveryIdOf(bearer, "Idempotency-Key", delivery({ "Idempotency-Key": " " })),
+		).toBeNull();
+	});
+
+	it("ignores the ids other senders use and the body's, for a generic webhook", () => {
+		const sent = delivery(
+			{ "Svix-Id": "msg_1", "Webhook-Id": "wh_1", "X-GitHub-Delivery": "gh-1" },
+			JSON.stringify({ event_id: "Ev1", object: "event", id: "evt_1" }),
+		);
+		expect(deliveryIdOf(bearer, "Idempotency-Key", sent)).toBeNull();
+	});
+
+	it("reads GitHub's and Linear's from their own header, whatever header is named", () => {
+		const sent = delivery({
+			"X-GitHub-Delivery": "72d3162e-cc78-11e3-81ab-4c9367dc0958",
+			"Linear-Delivery": "234d1a4e-b617-4388-90fe-adc3633d6b72",
+			"X-Request-Id": "req-1",
+		});
+		expect(deliveryIdOf({ kind: "github" }, "X-Request-Id", sent)).toBe(
+			"72d3162e-cc78-11e3-81ab-4c9367dc0958",
+		);
+		expect(deliveryIdOf({ kind: "linear" }, "X-Request-Id", sent)).toBe(
+			"234d1a4e-b617-4388-90fe-adc3633d6b72",
+		);
 	});
 });
 

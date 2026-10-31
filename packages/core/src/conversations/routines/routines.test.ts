@@ -49,6 +49,7 @@ import {
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
 	TooManyRoutineTriggers,
+	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./routine.ts";
 import { RoutineRunner } from "./routine-runner.ts";
@@ -275,7 +276,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		expect(webhook.routine.triggers).toEqual([
-			{ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } },
+			{
+				id: expect.any(String),
+				kind: "webhook",
+				auth: { kind: "bearer" },
+			},
 		]);
 		const { addressed, secret } = firstTriggerOf(webhook);
 		if (secret === null) throw new Error("A new webhook gets a secret");
@@ -443,7 +448,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 		const withWebhook = await routines.addTrigger(addressed, { kind: "webhook" });
 		const webhook = withWebhook.routine.triggers.find((trigger) => trigger.kind === "webhook");
-		expect(webhook).toEqual({ id: expect.any(String), kind: "webhook", auth: { kind: "bearer" } });
+		expect(webhook).toEqual({
+			id: expect.any(String),
+			kind: "webhook",
+			auth: { kind: "bearer" },
+		});
 		expect(withWebhook.secrets).toEqual([
 			{ triggerId: webhook?.id, secret: expect.stringMatching(/^rtb_/) },
 		]);
@@ -552,6 +561,128 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			WebhookSecretTooShort,
 		);
 		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
+	});
+
+	it.each([
+		{ auth: { kind: "bearer" } as const, deliveryIdHeader: "AUTHORIZATION" },
+		{ auth: { kind: "basic", username: "alerts" } as const, deliveryIdHeader: "Authorization" },
+		{ auth: { kind: "api_key", header: "X-Secret" } as const, deliveryIdHeader: "x-secret" },
+	])(
+		"refuses authentication headers as delivery IDs for $auth.kind",
+		async ({ auth, deliveryIdHeader }) => {
+			await expect(
+				routines.create(
+					{ agentId },
+					{
+						name: "Incoming",
+						instructions: "Handle it.",
+						triggers: [{ kind: "webhook", auth, deliveryIdHeader }],
+					},
+				),
+			).rejects.toThrow(WebhookDeliveryIdHeaderRejected);
+			const created = await routines.create(
+				{ agentId },
+				{
+					name: "Incoming",
+					instructions: "Handle it.",
+					triggers: [{ kind: "webhook", auth }],
+				},
+			);
+			await expect(
+				routines.updateTrigger(firstTriggerOf(created).addressed, {
+					kind: "webhook",
+					deliveryIdHeader,
+				}),
+			).rejects.toThrow(WebhookDeliveryIdHeaderRejected);
+		},
+	);
+
+	it("refuses an auth change that makes the saved delivery header carry the API key", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Incoming",
+				instructions: "Handle it.",
+				triggers: [{ kind: "webhook", deliveryIdHeader: "X-Secret" }],
+			},
+		);
+		await expect(
+			routines.updateTrigger(firstTriggerOf(created).addressed, {
+				kind: "webhook",
+				auth: { kind: "api_key", header: "x-secret" },
+			}),
+		).rejects.toThrow(WebhookDeliveryIdHeaderRejected);
+	});
+
+	it("dedupes a generic webhook's retries by the delivery id header it is set to", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Sentry alerts",
+				instructions: "Triage the alert.",
+				triggers: [{ kind: "webhook", deliveryIdHeader: "X-Request-Id" }],
+			},
+		);
+		const { addressed, secret } = firstTriggerOf(created);
+		const { triggerId } = addressed;
+		const send = (headers: Record<string, string>) =>
+			webhooks.accept({ triggerId, delivery: bearerDelivery(secret ?? "", {}, headers) });
+		const executionIdOf = (accepted: Awaited<ReturnType<typeof send>>) =>
+			accepted?.kind === "run" ? accepted.execution.executionId : undefined;
+
+		const first = await send({ "x-request-id": "req-1", "idempotency-key": "a" });
+		const retry = await send({ "x-request-id": "req-1", "idempotency-key": "b" });
+		const other = await send({ "x-request-id": "req-2", "idempotency-key": "a" });
+		expect(first).toMatchObject({ kind: "run", execution: { duplicate: false } });
+		expect(retry).toMatchObject({
+			kind: "run",
+			execution: { duplicate: true, executionId: executionIdOf(first) },
+		});
+		expect(other).toMatchObject({ kind: "run", execution: { duplicate: false } });
+
+		// Changing the auth keeps the header; none at all starts a run for every call.
+		await routines.updateTrigger(addressed, { kind: "webhook", auth: { kind: "bearer" } });
+		expect(await send({ "x-request-id": "req-1" })).toMatchObject({
+			execution: { duplicate: true },
+		});
+		const unset = await routines.updateTrigger(addressed, {
+			kind: "webhook",
+			deliveryIdHeader: null,
+		});
+		expect(unset.routine.triggers[0]).toMatchObject({ deliveryIdHeader: null });
+		const again = await send({ "x-request-id": "req-1" });
+		expect(again).toMatchObject({ execution: { duplicate: false } });
+		expect(executionIdOf(again)).not.toBe(executionIdOf(first));
+	});
+
+	it("keeps automatic deduplication when an existing webhook is edited", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
+		);
+		const { addressed, secret } = firstTriggerOf(created);
+		await onDatabase((db) =>
+			db
+				.update(routineTrigger)
+				.set({ settings: { kind: "webhook", auth: { kind: "bearer" } } })
+				.where(eq(routineTrigger.id, addressed.triggerId)),
+		);
+		await routines.updateTrigger(addressed, { kind: "webhook", auth: { kind: "bearer" } });
+		for (const [headers, payload] of [
+			[{ "idempotency-key": "order-1" }, {}],
+			[{ "svix-id": "message-1" }, {}],
+			[{ "x-shopify-webhook-id": "shopify-1" }, {}],
+			[{}, { event_id: "event-1" }],
+			[{}, { object: "event", id: "stripe-1" }],
+		] as const) {
+			const send = () =>
+				webhooks.accept({
+					triggerId: addressed.triggerId,
+					delivery: bearerDelivery(secret ?? "", payload, headers),
+				});
+			expect(await send()).toMatchObject({ execution: { duplicate: false } });
+			expect(await send()).toMatchObject({ execution: { duplicate: true } });
+		}
 	});
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {

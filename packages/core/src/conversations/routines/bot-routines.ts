@@ -23,6 +23,7 @@ import type {
 	RoutineRepositoryNotInPod,
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
+	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./routine.ts";
 import { Routines } from "./routines.ts";
@@ -267,6 +268,7 @@ export type Refused =
 	| RoutineRepository.RoutineNameTaken
 	| InvalidRoutineSchedule
 	| WebhookSecretTooShort
+	| WebhookDeliveryIdHeaderRejected
 	| RoutineRepositoryNotInPod
 	| RoutineTriggerNotFound
 	| RoutineTriggerKindChanged;

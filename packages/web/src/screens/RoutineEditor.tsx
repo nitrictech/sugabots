@@ -241,6 +241,7 @@ interface DraftedTrigger {
 }
 
 /**
+
  * A copy of the routine on the same bot, paused so the two don't both run.
  * A webhook copy has its own address and a new secret, so a secret its
  * sender made has to be pasted into it again. A repository copy runs on the
@@ -262,7 +263,7 @@ function copiedTrigger(trigger: RoutineTrigger): RoutineTriggerInput {
 		case "cron":
 			return { kind: "cron", schedule: trigger.schedule, timezone: trigger.timezone };
 		case "webhook":
-			return { kind: "webhook", auth: trigger.auth };
+			return { kind: "webhook", auth: trigger.auth, deliveryIdHeader: trigger.deliveryIdHeader };
 		case "github":
 			return {
 				kind: "github",

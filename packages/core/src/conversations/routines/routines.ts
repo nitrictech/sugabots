@@ -18,6 +18,7 @@ import type {
 } from "@sugabots/contracts";
 import { MAX_ROUTINE_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
+
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -50,6 +51,7 @@ import {
 	TooManyRoutineTriggers,
 	toRoutine,
 	triggersOf,
+	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./routine.ts";
 import { type InvalidRoutineExecutionCursor, makeView } from "./routine-view.ts";
@@ -82,6 +84,7 @@ export interface Interface {
 		| RoutineChatNotFound
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -112,6 +115,7 @@ export interface Interface {
 		| TooManyRoutineTriggers
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -130,6 +134,7 @@ export interface Interface {
 		| RoutineTriggerKindChanged
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
 		| RoutineRepositoryNotInPod,
 		CurrentActor.Service
 	>;
@@ -291,7 +296,10 @@ export const make = Effect.gen(function* () {
 		state: RoutineState,
 	): Effect.Effect<
 		Written,
-		InvalidRoutineSchedule | WebhookSecretTooShort | RoutineRepositoryNotInPod,
+		| InvalidRoutineSchedule
+		| WebhookSecretTooShort
+		| WebhookDeliveryIdHeaderRejected
+		| RoutineRepositoryNotInPod,
 		Database
 	> =>
 		Effect.gen(function* () {
@@ -320,7 +328,11 @@ export const make = Effect.gen(function* () {
 					);
 					return {
 						values: {
-							settings: { kind: "webhook", auth: checked.auth },
+							settings: {
+								kind: "webhook",
+								auth: checked.auth,
+								deliveryIdHeader: checked.deliveryIdHeader,
+							},
 							secretEncrypted: checked.secretEncrypted,
 							secretDigest: checked.secretDigest,
 							nextScheduledAt: null,
@@ -716,7 +728,8 @@ const DEFAULT_WEBHOOK_AUTH: WebhookAuth = { kind: "bearer" };
 
 /**
  * How a webhook trigger written as `input` checks its callers, given how it
- * did before (`current`, absent for a new one). The secret, or the lack of
+ * did before (`current`, absent for a new one), and where it reads its
+ * delivery id. The secret, or the lack of
  * one, is kept whatever the auth becomes, unless one is brought; a null one
  * leaves it without. A new webhook without one brought gets one made, which
  * is returned, and so does one leaving bearer auth with only the hash of a
@@ -731,14 +744,26 @@ function webhookCheck(
 ): Effect.Effect<
 	{
 		auth: WebhookAuth;
+		deliveryIdHeader: string | null | undefined;
 		secretEncrypted: string | null;
 		secretDigest: string | null;
 		secret: string | null;
 	},
-	WebhookSecretTooShort
+	WebhookSecretTooShort | WebhookDeliveryIdHeaderRejected
 > {
-	const currentAuth = current?.settings.kind === "webhook" ? current.settings.auth : undefined;
-	const auth = input.auth ?? currentAuth ?? DEFAULT_WEBHOOK_AUTH;
+	const currentSettings = current?.settings.kind === "webhook" ? current.settings : undefined;
+	const auth = input.auth ?? currentSettings?.auth ?? DEFAULT_WEBHOOK_AUTH;
+	const deliveryIdHeader =
+		input.deliveryIdHeader !== undefined
+			? input.deliveryIdHeader
+			: currentSettings?.deliveryIdHeader;
+	const deliveryHeader = deliveryIdHeader?.toLowerCase();
+	if (
+		deliveryHeader === "authorization" ||
+		(auth.kind === "api_key" && deliveryHeader === auth.header.toLowerCase())
+	) {
+		return Effect.fail(new WebhookDeliveryIdHeaderRejected());
+	}
 	if (typeof input.secret === "string" && !webhookSecretLongEnough(auth.kind, input.secret)) {
 		return Effect.fail(new WebhookSecretTooShort());
 	}
@@ -746,17 +771,25 @@ function webhookCheck(
 	if (current && !hashOnly && input.secret === undefined) {
 		return Effect.succeed({
 			auth,
+			deliveryIdHeader,
 			secretEncrypted: current.secretEncrypted,
 			secretDigest: current.secretDigest,
 			secret: null,
 		});
 	}
 	if (input.secret === null) {
-		return Effect.succeed({ auth, secretEncrypted: null, secretDigest: null, secret: null });
+		return Effect.succeed({
+			auth,
+			deliveryIdHeader,
+			secretEncrypted: null,
+			secretDigest: null,
+			secret: null,
+		});
 	}
 	const secret = input.secret ?? generateSecret(auth.kind);
 	return Effect.succeed({
 		auth,
+		deliveryIdHeader,
 		secretEncrypted: credentials.encrypt(secret),
 		secretDigest: null,
 		secret,
