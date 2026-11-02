@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAge, formatListTime } from "./list-time.ts";
+import { formatAge, formatListTime, formatListTimeInSentence } from "./list-time.ts";
 
 const now = new Date(2026, 8, 25, 18, 30);
 
@@ -19,6 +19,13 @@ describe("a conversation list's times", () => {
 
 	it("adds the year only for another year", () => {
 		expect(formatListTime(new Date(2025, 11, 3, 9, 0), now, "en-AU")).toBe("3 Dec 2025");
+	});
+
+	it("lowers yesterday inside a sentence, but keeps weekday and month names' capitals", () => {
+		const inSentence = (at: Date) => formatListTimeInSentence(at, now, "en-AU");
+		expect(inSentence(new Date(2026, 8, 24, 9, 0))).toBe("yesterday");
+		expect(inSentence(new Date(2026, 8, 22, 9, 0))).toBe("Tue");
+		expect(inSentence(new Date(2026, 8, 12, 9, 0))).toBe("12 Sept");
 	});
 });
 
