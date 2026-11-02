@@ -1913,8 +1913,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					atOffset: 0,
 				}),
 			);
-			// A collaboration's thread opens with its brief.
-			await botWrites(child.id, "Compare the launch plans");
 			return child.id;
 		};
 
@@ -2164,37 +2162,56 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				),
 			);
 
-		it("reads only the routine run opened, leaving the routine's other runs unread", async () => {
+		it("reads the routine's thread up to the run opened, leaving later runs unread", async () => {
 			const created = await routines.create(
 				{ agentId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const runRoutine = () =>
 				routines.run({ agentId, routineId: created.routine.id, requestId: crypto.randomUUID() });
+			const earlier = await runRoutine();
 			const opened = await runRoutine();
-			const other = await runRoutine();
+			const later = await runRoutine();
 
 			await chats.markItemRead(opened.threadId);
 
 			const unread = await itemsUnread();
+			expect(unread.get(earlier.threadId)).toBe(false);
 			expect(unread.get(opened.threadId)).toBe(false);
-			expect(unread.get(other.threadId)).toBe(true);
+			expect(unread.get(later.threadId)).toBe(true);
 		});
 
-		it("reads only the collaboration opened, leaving the conversation's others unread", async () => {
+		it("reads the conversation up to the collaboration opened, leaving later ones unread", async () => {
 			const current = await chats.openBotChannel({
 				workspace: workspaceId,
 				podId,
 				hostAgentId: agentId,
 			});
+			const earlier = await collaborate(current.id, current.id);
 			const opened = await collaborate(current.id, current.id);
-			const other = await collaborate(current.id, current.id);
+			const later = await collaborate(current.id, current.id);
 
 			await chats.markItemRead(opened);
 
 			const unread = await itemsUnread();
+			expect(unread.get(earlier)).toBe(false);
 			expect(unread.get(opened)).toBe(false);
-			expect(unread.get(other)).toBe(true);
+			expect(unread.get(later)).toBe(true);
+		});
+
+		it("never moves the person back by opening an older item", async () => {
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			const earlier = await collaborate(current.id, current.id);
+			const later = await collaborate(current.id, current.id);
+
+			await chats.markItemRead(later);
+			await chats.markItemRead(earlier);
+
+			expect((await itemsUnread()).get(later)).toBe(false);
 		});
 
 		it("reads no conversation as an item of its own", async () => {

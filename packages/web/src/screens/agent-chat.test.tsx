@@ -1219,7 +1219,7 @@ describe("a message opened from Activity", () => {
 		);
 	});
 
-	it("reads the routine run chosen in Inbox, and not the rest of its chat", async () => {
+	it("reads up to the routine run chosen in Inbox, and not the rest of its chat", async () => {
 		mount(`/suga/activity/suga-team/${chat.id}?threadPage=${routineId}`);
 
 		await waitFor(() =>

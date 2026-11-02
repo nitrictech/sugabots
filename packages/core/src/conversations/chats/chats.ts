@@ -156,9 +156,10 @@ export interface Interface {
 		conversationId: string,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
-	 * Records that the actor has read one routine run or collaboration, by its
-	 * thread `threadId`, leaving the rest of its conversation as it was. Other
-	 * threads are hidden from this.
+	 * Records that the actor has read the conversation a routine run or
+	 * collaboration is in up to that item, by its thread `threadId`: the item
+	 * and everything before it, leaving what came after unread. Other threads
+	 * are hidden from this.
 	 */
 	readonly markItemRead: (
 		threadId: string,
@@ -489,7 +490,7 @@ export const make = Effect.gen(function* () {
 							return yield* new ResourceHidden({ resource: "thread" });
 						}
 						const { userId } = yield* CurrentActor.Service;
-						yield* threads.markRead(userId, thread.id);
+						yield* threads.markReadThroughItem(userId, thread.id);
 					}),
 				),
 			),
