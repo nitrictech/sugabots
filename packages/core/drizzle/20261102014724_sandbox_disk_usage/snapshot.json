@@ -1,0 +1,111 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "760e7a69-acfa-49ba-952a-7af92b9a3995",
+  "prevIds": [
+    "3f69a137-b4d2-45bb-9479-d4df358cc1c4"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "sandbox",
+        "disk_usage"
+      ],
+      "writes": [
+        "s|col|public.sandbox.disk_usage",
+        "n|col|public.sandbox.disk_usage",
+        "e|col|public.sandbox.disk_usage"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "sandbox",
+        "disk_measured_at"
+      ],
+      "writes": [
+        "s|col|public.sandbox.disk_measured_at",
+        "n|col|public.sandbox.disk_measured_at",
+        "e|col|public.sandbox.disk_measured_at"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "sandbox"
+      ],
+      "writes": [
+        "s|ck|public.sandbox.sandbox_disk_measured_check",
+        "n|ck|public.sandbox.sandbox_disk_measured_check",
+        "e|ck|public.sandbox.sandbox_disk_measured_check",
+        "n|con|public.sandbox.sandbox_disk_measured_check"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "n|col|public.sandbox.disk_usage",
+        "n|col|public.sandbox.disk_measured_at"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "disk_usage",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "disk_measured_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "sandbox_disk_measured_check",
+        "value": "(\"disk_usage\" is null) = (\"disk_measured_at\" is null)",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

@@ -1,24 +1,38 @@
-import type { PodSandbox } from "@sugabots/contracts";
+import {
+	type Agent,
+	formatDiskSize,
+	type PodSandbox,
+	type SandboxDisk,
+	type SandboxDiskFolder,
+	sandboxDiskLevel,
+} from "@sugabots/contracts";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatListTimeInSentence } from "@/lib/list-time.ts";
 import { usePodSandbox, usePodSandboxActions } from "@/lib/pod-sandbox.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { PodSandboxNetworkSettings } from "./PodSandboxNetwork.tsx";
+import { DiskMeter, DiskPercent, diskSummary } from "./SandboxDisk.tsx";
+import { formatFullTimestamp } from "./ThreadConversation.tsx";
 
 /*
  * The pod's sandbox, experimental: how it stands for anyone who can see the
- * pod, starting it afresh or moving its work to the current image for those
- * who may change the pod, and the hosts it may reach. Hidden while the
- * workspace has no sandboxes.
+ * pod, how full its disk is and what fills it, starting it afresh or moving
+ * its work to the current image for those who may change the pod, and the
+ * hosts it may reach. Hidden while the workspace has no sandboxes.
  */
 export function PodSandboxSettings({
 	podId,
+	bots,
 	canManageNetwork,
 }: {
 	podId: string;
+	/** The pod's bots, whose homes the disk's folders are named by. */
+	bots: readonly Agent[];
 	/** Whether the person may change the hosts the pod's sandbox reaches. */
 	canManageNetwork: boolean;
 }) {
@@ -30,6 +44,7 @@ export function PodSandboxSettings({
 	return (
 		<>
 			<SandboxGroup podId={podId} shown={shown} />
+			{shown.sandbox.kind === "present" && <DiskGroup disk={shown.sandbox.disk} bots={bots} />}
 			<PodSandboxNetworkSettings podId={podId} canManage={canManageNetwork} />
 		</>
 	);
@@ -146,5 +161,107 @@ function stateNote(state: keyof typeof STATE_WORDS): string | undefined {
 			return "The sandbox provider isn't answering, so this may be out of date.";
 		case "running":
 			return undefined;
+	}
+}
+
+const DISK_NOTES = {
+	normal: undefined,
+	warning:
+		"Nearly full. Bots' commands fail once it fills, for every bot in the pod. Ask them to clear caches and clones they've finished with, or reset the computer.",
+	critical:
+		"Almost full: commands that install, clone or build are about to fail. Ask a bot to clear what it no longer needs, or reset the computer.",
+} as const;
+
+/**
+ * How full the sandbox's disk was when last measured, and what of it each
+ * bot's home, the threads' folders and /tmp take, largest first, so whoever
+ * looks after the pod can see what to clear before it fills.
+ */
+function DiskGroup({ disk, bots }: { disk: SandboxDisk | null; bots: readonly Agent[] }) {
+	if (!disk) {
+		return (
+			<SettingsGroup label="Disk">
+				<SettingsRow
+					label="Not measured yet"
+					sub="It's measured every few minutes while the computer is on."
+				/>
+			</SettingsGroup>
+		);
+	}
+	const botById = new Map(bots.map((bot) => [bot.id, bot]));
+	return (
+		<SettingsGroup label="Disk" note={DISK_NOTES[sandboxDiskLevel(disk)]}>
+			<SettingsRow
+				label={`${diskSummary(disk)} used`}
+				sub={
+					<>
+						<DiskMeter disk={disk} label="Disk used" />
+						Measured{" "}
+						<Tooltip label={formatFullTimestamp(disk.measuredAt)} side="top">
+							<time dateTime={disk.measuredAt} className="hover:underline">
+								{formatListTimeInSentence(new Date(disk.measuredAt), new Date())}
+							</time>
+						</Tooltip>
+					</>
+				}
+				trailing={<DiskPercent disk={disk} />}
+			/>
+			{disk.folders?.map((folder) => {
+				const agent = folder.kind === "home" ? botById.get(folder.agentId) : undefined;
+				return (
+					<SettingsRow
+						key={folder.kind === "home" ? folder.agentId : folder.kind}
+						icon={
+							agent && (
+								<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />
+							)
+						}
+						label={folderLabel(folder, agent?.name)}
+						sub={FOLDER_DESCRIPTIONS[folder.kind]}
+						trailing={<SettingsValue>{formatDiskSize(folder.bytes)}</SettingsValue>}
+					/>
+				);
+			})}
+			<UnsizedRemainder disk={disk} />
+		</SettingsGroup>
+	);
+}
+
+/** What the folders listed above don't account for, or that they couldn't be sized. */
+function UnsizedRemainder({ disk }: { disk: SandboxDisk }) {
+	if (disk.folders === null) {
+		return (
+			<SettingsRow
+				label="Folders not sized"
+				sub="They couldn't be sized this time, often because there are too many files. They're tried again at the next measurement."
+			/>
+		);
+	}
+	const elsewhereBytes =
+		disk.usedBytes - disk.folders.reduce((sum, folder) => sum + folder.bytes, 0);
+	if (elsewhereBytes <= 0) return null;
+	return (
+		<SettingsRow
+			label="Everything else"
+			sub="The system, and programs installed outside the workspace"
+			trailing={<SettingsValue>{formatDiskSize(elsewhereBytes)}</SettingsValue>}
+		/>
+	);
+}
+
+const FOLDER_DESCRIPTIONS = {
+	home: "Home: its tools, settings and caches, in every thread",
+	threads: "Where the bots clone, install and build",
+	temporary: "/tmp",
+} as const;
+
+function folderLabel(folder: SandboxDiskFolder, agentName: string | undefined) {
+	switch (folder.kind) {
+		case "home":
+			return agentName ?? "A removed bot";
+		case "threads":
+			return "Thread folders";
+		case "temporary":
+			return "Temporary files";
 	}
 }

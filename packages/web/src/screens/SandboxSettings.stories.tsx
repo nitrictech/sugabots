@@ -1,4 +1,5 @@
 import type {
+	PodSandboxDisk,
 	SandboxNetworkSettings,
 	SandboxProvider,
 	SandboxProviderUpdate,
@@ -6,7 +7,7 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyBots, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyBots, storyPods, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Computers, as the app shows them in settings: the switch for whether bots
@@ -33,6 +34,7 @@ const openSandbox: SandboxProvider = {
 
 const providersUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-providers`);
 const networkUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-network`);
+const disksUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-disks`);
 
 const network: SandboxNetworkSettings = {
 	mode: "open",
@@ -55,6 +57,7 @@ const meta = preview.meta({
 			...appHandlers(),
 			answers([]),
 			http.get(networkUrl, () => HttpResponse.json(network)),
+			http.get(disksUrl, () => HttpResponse.json([])),
 			http.get(`${providersUrl}/:providerId/template`, () => HttpResponse.json({ state: "ready" })),
 			http.all(`${providersUrl}*`, () =>
 				HttpResponse.json(
@@ -294,5 +297,48 @@ export const E2bCustomSize = meta.story({
 		await userEvent.clear(vcpus);
 		await userEvent.type(vcpus, "2.5{Enter}");
 		await expect(await canvas.findByText(/whole number of vCPUs/)).toBeVisible();
+	},
+});
+
+const GB = 1024 ** 3;
+
+/** A pod's 20 GB disk with `usedGB` of it used. */
+const podDisk = (podId: string, usedGB: number): PodSandboxDisk => ({
+	podId,
+	disk: {
+		usedBytes: Math.round(usedGB * GB),
+		totalBytes: 20 * GB,
+		measuredAt: "2026-10-02T05:38:00.000Z",
+		folders: null,
+	},
+});
+
+/** How full each pod's computer's disk is, fullest first, each opening the pod's Computer page. */
+export const DiskUseByPod = meta.story({
+	beforeEach({ msw }) {
+		const [first, second] = storyPods;
+		msw.use(
+			answers([{ ...openSandbox, enabled: true, hasApiKey: true, status: "connected" }]),
+			http.get(disksUrl, () =>
+				HttpResponse.json([podDisk(first?.id ?? "", 4.1), podDisk(second?.id ?? "", 18.6)]),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		const disks = await canvas.findByRole(
+			"region",
+			{ name: "Disk use by pod" },
+			{ timeout: 10_000 },
+		);
+		const [first, second] = storyPods;
+		const rows = within(disks).getAllByRole("link");
+		await expect(rows).toHaveLength(2);
+		await expect(rows[0]).toHaveTextContent(second?.name ?? "");
+		await expect(rows[0]).toHaveTextContent("93%");
+		await expect(rows[1]).toHaveTextContent(first?.name ?? "");
+		await expect(rows[0]).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/pods\/.+\/computer$/),
+		);
 	},
 });

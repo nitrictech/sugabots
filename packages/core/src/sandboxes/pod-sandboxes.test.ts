@@ -350,6 +350,61 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		SLOW,
 	);
 
+	const measuredDisk = () => runOnPostgres(podSandboxes.diskOf(thePod));
+
+	it(
+		"measures a running sandbox's disk, and what each bot's home, the threads and /tmp take of it",
+		async () => {
+			const agentId = crypto.randomUUID();
+			const { sandbox: opened } = await open();
+			await exec(
+				opened,
+				[
+					`mkdir -p agents/${agentId} threads/t1`,
+					`head -c 3000000 /dev/zero > agents/${agentId}/cache`,
+					"head -c 2000000 /dev/zero > threads/t1/clone",
+					"head -c 1000000 /dev/zero > /tmp/download",
+				].join(" && "),
+			);
+
+			await runOnPostgres(podSandboxes.measureDisks);
+
+			const disk = await measuredDisk();
+			expect(disk?.usedBytes).toBeGreaterThan(0);
+			expect(disk?.totalBytes).toBeGreaterThanOrEqual(disk?.usedBytes ?? 0);
+			const sized = (kind: string) => disk?.folders?.find((folder) => folder.kind === kind);
+			expect(sized("home")).toMatchObject({ agentId, bytes: expect.any(Number) });
+			expect(sized("home")?.bytes).toBeGreaterThanOrEqual(3_000_000);
+			expect(sized("threads")?.bytes).toBeGreaterThanOrEqual(2_000_000);
+			expect(sized("temporary")?.bytes).toBeGreaterThanOrEqual(1_000_000);
+		},
+		SLOW,
+	);
+
+	it(
+		"leaves a paused sandbox paused, with its last measurement",
+		async () => {
+			await open();
+			await runOnPostgres(podSandboxes.measureDisks);
+			const before = await measuredDisk();
+			await runOnPostgres(podSandboxes.release(HOLDER));
+			await idleForAnHour();
+			await runOnPostgres(podSandboxes.pauseIdle);
+			await onDatabase((db) =>
+				db
+					.update(sandbox)
+					.set({ diskMeasuredAt: new Date(Date.now() - 60 * 60 * 1000) })
+					.where(eq(sandbox.podId, thePod.podId)),
+			);
+
+			await runOnPostgres(podSandboxes.measureDisks);
+
+			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect((await measuredDisk())?.usedBytes).toBe(before?.usedBytes);
+		},
+		SLOW,
+	);
+
 	it(
 		"treats a lease that wasn't renewed as let go",
 		async () => {

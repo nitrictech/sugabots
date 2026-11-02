@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { pod, user, workspace } from "../workspaces/sql.ts";
+import type { DiskUsage } from "./sandbox-disk.ts";
 import type { Sandboxes } from "./sandboxes.ts";
 
 /**
@@ -87,6 +88,9 @@ export const sandbox = pgTable(
 		pausedAt: timestamp("paused_at", { withTimezone: true }),
 		/** When a turn last let go of it, which is when its idle time starts. */
 		lastUsedAt: stamp("last_used_at"),
+		/** How full its disk was at `diskMeasuredAt`; null until it is measured, and again once it is replaced. */
+		diskUsage: jsonb("disk_usage").$type<DiskUsage>(),
+		diskMeasuredAt: timestamp("disk_measured_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -101,6 +105,10 @@ export const sandbox = pgTable(
 			name: "sandbox_provider_workspace_fkey",
 		}).onDelete("cascade"),
 		uniqueIndex("sandbox_pod_id_idx").on(table.podId),
+		check(
+			"sandbox_disk_measured_check",
+			sql`(${table.diskUsage} is null) = (${table.diskMeasuredAt} is null)`,
+		),
 	],
 );
 
