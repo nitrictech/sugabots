@@ -214,7 +214,8 @@ export const FoldingSections = meta.story({
 /**
  * Personal open: each of its bots opens its channel with you, and shows its
  * Routines and threads under it while it is open, as a shared pod's do, bold
- * while something there is new.
+ * while something there is new. Its name says only you see into it, and
+ * with the pointer over that, that admins don't either.
  */
 export const PersonalPod = meta.story({
 	args: {
@@ -253,13 +254,22 @@ export const PersonalPod = meta.story({
 		);
 		return () => localStorage.removeItem("sugabots-folded");
 	},
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
 		const personalPod = canvas.getByRole("group", { name: "Personal" });
 		await expect(within(personalPod).getByRole("link", { name: growthDesk.name })).toBeVisible();
 		// The bot's row comes first, before its conversation, which goes by its name too.
 		const [channel] = within(personalPod).getAllByRole("link", { name: leadResearcher.name });
 		await expect(channel).toHaveAttribute("aria-current", "page");
 		await expect(within(personalPod).getByRole("link", { name: /^Routines/ })).toBeVisible();
+
+		const toggle = within(personalPod).getByRole("button", { name: "Personal Only you" });
+		await expect(toggle).toHaveAccessibleDescription(
+			"Only you can see into this pod. Nobody else can, workspace admins included.",
+		);
+		await userEvent.hover(within(toggle).getByText("Only you"));
+		await expect(
+			await screen.findByText("Nobody else can, workspace admins included."),
+		).toBeVisible();
 	},
 });
 

@@ -2,12 +2,13 @@ import type { NotificationSettings, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, User } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { podSettingsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { NESTED_INDENT } from "@/shell/ConversationList.tsx";
+import { Locked, OnlyYou, PERSONAL_POD_PRIVACY_IN_FULL } from "@/shell/PersonalPrivacy.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
@@ -28,7 +29,8 @@ export interface PodStanding {
  * it, while open, `children`. Under the pointer or on focus, a caret takes
  * the place of the pod's mark and its settings come in at the end. Folded, it
  * says how much is new in it, and is shaded while it holds the page open.
- * Right-clicked, it offers its notifications.
+ * Right-clicked, it offers its notifications. A Personal pod's name says that
+ * only you see into it.
  */
 export function SidebarPod({
 	standing,
@@ -52,6 +54,8 @@ export function SidebarPod({
 }) {
 	const { pod } = standing;
 	const notificationPlace = { kind: "pod", id: pod.id } as const;
+	const personal = pod.kind === "personal";
+	const privacyId = useId();
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: a pod's part of a sidebar holds links, not form controls, so a fieldset is wrong.
 		<div role="group" aria-label={pod.name} className="flex flex-col">
@@ -65,6 +69,7 @@ export function SidebarPod({
 					<button
 						type="button"
 						aria-expanded={open}
+						aria-describedby={personal ? privacyId : undefined}
 						onClick={onToggle}
 						className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left"
 					>
@@ -83,19 +88,27 @@ export function SidebarPod({
 								)}
 							/>
 						</span>
-						<span
-							className={cn(
-								"min-w-0 flex-1 truncate text-[14px]",
-								// Grey like the rows under it; bright when folded over something new.
-								!open && hasNews(standing)
-									? "font-semibold text-foreground"
-									: "font-medium text-muted-foreground group-hover/pod:text-foreground",
-							)}
-						>
-							{pod.name}
+						<span className="flex min-w-0 flex-1 items-center gap-1.5">
+							<span
+								className={cn(
+									"min-w-0 truncate text-[14px]",
+									// Grey like the rows under it; bright when folded over something new.
+									!open && hasNews(standing)
+										? "font-semibold text-foreground"
+										: "font-medium text-muted-foreground group-hover/pod:text-foreground",
+								)}
+							>
+								{pod.name}
+							</span>
+							{personal && <OnlyYou className="text-[12px] text-subtle-foreground" />}
 						</span>
 						<MutedMark settings={notificationSettings} place={notificationPlace} />
 					</button>
+					{personal && (
+						<span id={privacyId} hidden>
+							{PERSONAL_POD_PRIVACY_IN_FULL}
+						</span>
+					)}
 					{!open && <PodNews standing={standing} />}
 					<IconButton
 						label={`${pod.name} settings`}
@@ -138,20 +151,48 @@ function PodNews({ standing }: { standing: PodStanding }) {
 	return <span className="sr-only">{news.join(", ")}</span>;
 }
 
-/** A pod as a small square holding its initial, in the pod's colour, or a person for Personal. */
+/**
+ * A pod as a small square holding its initial, in the pod's colour, or for
+ * Personal a person, locked except at `sm`.
+ */
 export function PodInitial({
 	pod,
 	size = "md",
 	className,
 }: {
 	/** Only what it is drawn from, so a pod not made yet, such as New pod's, can be drawn too. */
-	pod: Pick<Pod, "name" | "color" | "kind">;
+	pod: PodMarkSource;
 	/**
 	 * `sm` is a quieter mark for a row that names its pod: the letter in the
 	 * pod's colour on a tint of it. `lg` stands beside the title of the pod's
 	 * own settings.
 	 */
-	size?: "lg" | "md" | "sm";
+	size?: PodInitialSize;
+	className?: string;
+}) {
+	// Too small for its lock at `sm`, where the row names the pod anyway.
+	if (pod.kind !== "personal" || size === "sm") {
+		return <PodSquare pod={pod} size={size} className={className} />;
+	}
+	return (
+		<Locked lockSize={size === "lg" ? 16 : 8} className={className}>
+			<PodSquare pod={pod} size={size} />
+		</Locked>
+	);
+}
+
+type PodMarkSource = Pick<Pod, "name" | "color" | "kind">;
+
+type PodInitialSize = "lg" | "md" | "sm";
+
+/** The square itself, without a Personal pod's lock. */
+function PodSquare({
+	pod,
+	size,
+	className,
+}: {
+	pod: PodMarkSource;
+	size: PodInitialSize;
 	className?: string;
 }) {
 	const palette = pod.color === null ? undefined : podPalettes[pod.color];
