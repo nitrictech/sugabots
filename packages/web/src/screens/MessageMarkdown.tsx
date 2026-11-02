@@ -1,6 +1,18 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
+import { cn } from "cn";
 import type { Root } from "hast";
-import { createElement, type ReactNode } from "react";
+import { toString as hastToString } from "hast-util-to-string";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+	type CSSProperties,
+	cloneElement,
+	createElement,
+	isValidElement,
+	type ReactNode,
+	useRef,
+	useState,
+} from "react";
+import { flushSync } from "react-dom";
 import {
 	type Components,
 	defaultRemarkPlugins,
@@ -10,6 +22,7 @@ import {
 } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
+import { Button } from "@/ui/button.tsx";
 import { codeHighlighter } from "./code-highlighter.ts";
 import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
 
@@ -38,6 +51,8 @@ export function MessageMarkdown({
 				controls={CONTROLS}
 				linkSafety={LINK_SAFETY}
 				plugins={PLUGINS}
+				// A long block folds instead (see `FoldingCodeBlock`), so the bubble never holds a scroller of its own.
+				codeBlockMaxHeight={Number.POSITIVE_INFINITY}
 				isAnimating={false}
 			>
 				{text}
@@ -144,8 +159,61 @@ function ScrollingTable({ children }: ExtraProps & { children?: ReactNode }) {
 	);
 }
 
+/* About 400px of code, the height Streamdown would otherwise cap a block at and scroll. */
+const FOLDED_LINES = 20;
+
+/**
+ * FoldingCodeBlock shows the first `FOLDED_LINES` of a longer fenced block,
+ * fading out where it is cut off, with Show more over the fade for the rest
+ * and Show less under the card once it is open. The copy button still copies
+ * all of it.
+ */
+function FoldingCodeBlock({ node, children }: ExtraProps & { children?: ReactNode }) {
+	const block = useRef<HTMLDivElement>(null);
+	const [open, setOpen] = useState(false);
+	// Streamdown's own `pre` marks its code this way, which is what makes its `code` draw the card.
+	const code = isValidElement<{ "data-block"?: string }>(children)
+		? cloneElement(children, { "data-block": "true" })
+		: children;
+	const lineCount = node ? hastToString(node).trimEnd().split("\n").length : 0;
+	if (lineCount <= FOLDED_LINES) return code;
+	function toggle() {
+		if (!open) {
+			setOpen(true);
+			return;
+		}
+		// Folding a long block could otherwise leave the reader far below it.
+		flushSync(() => setOpen(false));
+		block.current?.scrollIntoView({ block: "nearest" });
+	}
+	return (
+		<div
+			ref={block}
+			className="relative flex flex-col"
+			data-folded={open ? undefined : ""}
+			style={{ "--folded-lines": FOLDED_LINES } as CSSProperties}
+		>
+			{code}
+			<Button
+				variant="secondary"
+				size="sm"
+				aria-expanded={open}
+				onClick={toggle}
+				className={cn(
+					"self-center border border-border-strong shadow-popover",
+					open ? "-mt-2 mb-4" : "absolute bottom-6 left-1/2 -translate-x-1/2",
+				)}
+			>
+				{open ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
+				{open ? "Show less" : "Show more"}
+			</Button>
+		</div>
+	);
+}
+
 const COMPONENTS: Components = {
 	[MENTION_TAG]: MarkdownMention,
+	pre: FoldingCodeBlock,
 	// Streamdown's headings are sized for a page; a bubble is 520px wide.
 	h1: heading("h1", "text-2xl"),
 	h2: heading("h2", "text-xl"),

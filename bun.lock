@@ -197,6 +197,7 @@
         "cn": "^0.2.6",
         "effect": "catalog:",
         "frimousse": "^0.4.0",
+        "hast-util-to-string": "3.0.1",
         "lucide-react": "^1.43.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
