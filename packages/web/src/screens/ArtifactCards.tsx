@@ -148,41 +148,43 @@ export function ArtifactCardView({
 		>
 			<div
 				className={cn(
-					"flex items-center gap-2.5 px-3 py-2.5",
+					"flex flex-wrap items-center gap-2.5 px-3 py-2.5",
 					showsContent && "border-border border-b",
 				)}
 			>
 				<StageMark>
 					<kind.Icon strokeWidth={2} />
 				</StageMark>
-				<span className="flex min-w-0 flex-1 flex-col gap-px">
+				<span className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-foreground text-sm">{artifact.title}</span>
 					<span className="truncate text-[12.5px] text-muted-foreground">
 						{kind.label} by {botName}
 					</span>
 				</span>
-				{expandable && (
+				<div className="ml-auto flex gap-2.5">
+					{expandable && (
+						<Button
+							variant="ghost"
+							size="sm"
+							aria-expanded={expanded}
+							aria-label={`${expanded ? "Hide" : "Preview"} ${artifact.title}`}
+							onClick={() => setExpanded(!expanded)}
+							className="border border-border-strong text-foreground"
+						>
+							{expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
+							{expanded ? "Hide" : "Preview"}
+						</Button>
+					)}
 					<Button
-						variant="ghost"
+						variant="secondary"
 						size="sm"
-						aria-expanded={expanded}
-						aria-label={`${expanded ? "Hide" : "Preview"} ${artifact.title}`}
-						onClick={() => setExpanded(!expanded)}
-						className="border border-border-strong text-foreground"
+						aria-label={`Open ${artifact.title}`}
+						onClick={onOpen}
 					>
-						{expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
-						{expanded ? "Hide" : "Preview"}
+						<Maximize2 aria-hidden />
+						Open
 					</Button>
-				)}
-				<Button
-					variant="secondary"
-					size="sm"
-					aria-label={`Open ${artifact.title}`}
-					onClick={onOpen}
-				>
-					<Maximize2 aria-hidden />
-					Open
-				</Button>
+				</div>
 			</div>
 			{showsContent && (
 				<kind.Inline
