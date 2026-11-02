@@ -6,6 +6,7 @@ import type {
 	Message,
 	PodChat,
 	RoutineFeed,
+	ThreadType,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, isNotNull, isNull, not, notExists, sql } from "drizzle-orm";
@@ -153,6 +154,14 @@ export interface Interface {
 	/** Records that the actor has read the conversation up to its newest finished message. */
 	readonly markRead: (
 		conversationId: string,
+	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
+	/**
+	 * Records that the actor has read one routine run or collaboration, by its
+	 * thread `threadId`, leaving the rest of its conversation as it was. Other
+	 * threads are hidden from this.
+	 */
+	readonly markItemRead: (
+		threadId: string,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 }
 
@@ -469,6 +478,21 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
+
+		markItemRead: (threadId) =>
+			operation(
+				"markItemRead",
+				transaction(
+					Effect.gen(function* () {
+						const { thread } = yield* visibility.thread(threadId);
+						if (!ITEM_THREAD_TYPES.has(thread.type)) {
+							return yield* new ResourceHidden({ resource: "thread" });
+						}
+						const { userId } = yield* CurrentActor.Service;
+						yield* threads.markRead(userId, thread.id);
+					}),
+				),
+			),
 	});
 });
 
@@ -483,6 +507,8 @@ export const layer = layerNoDeps.pipe(
 	]),
 );
 
+/** The threads that are an item of their own in Inbox: a routine run's and a collaboration's. */
+const ITEM_THREAD_TYPES: ReadonlySet<ThreadType> = new Set(["routine", "collaboration"]);
 /** The bot asked to host the conversation is not crew in its pod, or the pod is out of reach. */
 export class HostNotCrew extends Data.TaggedError("HostNotCrew") implements UserFacing {
 	get userMessage() {

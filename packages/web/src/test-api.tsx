@@ -415,6 +415,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
 	client.api.chats.activity.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
+	client.api.chats.markItemRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.reportPresence.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.settings.mockReturnValue(

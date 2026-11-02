@@ -379,6 +379,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			api("/conversations/:conversationId/read"),
 			() => new HttpResponse(null, { status: 204 }),
 		),
+		http.post(api("/threads/:threadId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
 			// By the pod's id or its slug, as the API takes it.
 			const named = new URL(request.url).searchParams.get("pod");

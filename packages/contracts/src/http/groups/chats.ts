@@ -128,6 +128,12 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
+		/** Reads one routine run or collaboration, by its thread, and nothing else in its conversation. */
+		HttpApiEndpoint.post("markItemRead", "/threads/:threadId/read", {
+			params: { threadId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: refused,
+		}),
 		HttpApiEndpoint.post("send", "/conversations/:conversationId/messages", {
 			params: { conversationId: Schema.String },
 			payload: newMessageSchema,
