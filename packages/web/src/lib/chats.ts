@@ -178,8 +178,8 @@ export function useMarkChatsRead() {
 }
 
 /**
- * Records that the person has read one routine run or collaboration, by its
- * thread, without reading the rest of the conversation it is in.
+ * Records that the person has read the conversation a routine run or
+ * collaboration is in up to that item, by its thread, leaving later ones unread.
  */
 export function useMarkItemRead() {
 	const queries = useQueryClient();
