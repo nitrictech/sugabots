@@ -96,6 +96,9 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("markRead", ({ params }) =>
 				chats.markRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("markItemRead", ({ params }) =>
+				chats.markItemRead(params.threadId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("send", ({ params, payload }) =>
 				chats
 					.post({

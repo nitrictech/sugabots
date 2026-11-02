@@ -177,6 +177,20 @@ export function useMarkChatsRead() {
 	});
 }
 
+/**
+ * Records that the person has read one routine run or collaboration, by its
+ * thread, without reading the rest of the conversation it is in.
+ */
+export function useMarkItemRead() {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: (threadId: string) =>
+			Effect.runPromise(client.api.chats.markItemRead({ params: { threadId } })),
+		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+	});
+}
+
 /** How many conversations Mark all as read marks at once. */
 const MARK_READ_CONCURRENCY = 4;
 
