@@ -453,6 +453,7 @@ export function ConversationChat({
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
+				inPersonalPod={pod.kind === "personal"}
 				title={ongoing ? undefined : title}
 				done={done}
 				conversationId={conversationId}
@@ -1242,7 +1243,7 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 			</h2>
 			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
 				{place.kind === "personal" ? (
-					"Your own bot. It works for you only and nobody else in the workspace can see this conversation."
+					"Your own bot. It works for you only, and nobody else can see this conversation, workspace admins included."
 				) : place.kind === "channel" ? (
 					`This is the start of ${agent.name}'s channel.`
 				) : (

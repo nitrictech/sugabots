@@ -94,9 +94,9 @@ export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
-		await expect(
-			canvas.getByRole("heading", { name: growthDesk.name, level: 1 }),
-		).toBeInTheDocument();
+		const header = chatHeaderOf(canvas.getByRole("heading", { name: growthDesk.name, level: 1 }));
+		// A shared pod's bot: the header leaves out the Personal pod's "Only you".
+		await expect(within(header).queryByText("Only you")).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 	},
 });
@@ -532,19 +532,32 @@ export const PodOnAPhone = meta.story({
 	},
 });
 
-/** Your own bot in your Personal pod, nobody has written to yet: the start of the chat, saying it is yours alone. */
+/**
+ * Your own bot in your Personal pod, nobody has written to yet: the start of
+ * the chat, saying it is yours alone, as its header does for as long as it is open.
+ */
 export const FirstMessage = meta.story({
 	render: () => <StoryApp path={chatPath(chief)} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(
-				"Your own bot. It works for you only and nobody else in the workspace can see this conversation.",
+				"Your own bot. It works for you only, and nobody else can see this conversation, workspace admins included.",
 				{},
 				{ timeout: 10_000 },
 			),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: chief.name, level: 1 })).toBeInTheDocument();
+		const header = chatHeaderOf(canvas.getByRole("heading", { name: chief.name, level: 1 }));
+		await expect(within(header).getByText("Only you")).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
+	},
+});
+
+/** Your own bot on a phone: "Only you" before its model, under its name. */
+export const FirstMessageOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	render: () => <StoryApp path={chatPath(chief)} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText(/^Only you · /, {}, { timeout: 10_000 })).toBeVisible();
 	},
 });
 
@@ -1260,3 +1273,10 @@ export const DraggingFiles = meta.story({
 		await expect(await canvas.findByText("Drop files to attach")).toBeVisible();
 	},
 });
+
+/** The header a chat's title heading is in, apart from the sidebar beside it. */
+function chatHeaderOf(heading: HTMLElement): HTMLElement {
+	const header = heading.closest("header");
+	if (!header) throw new Error("The chat's title is not in a header");
+	return header;
+}

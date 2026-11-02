@@ -2,7 +2,7 @@ import type { ArtifactSummary } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { engineering, growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { engineering, growthDesk, personal, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	StoryApp,
@@ -48,7 +48,9 @@ export const Home = meta.story({
 			"page",
 		);
 		await expect(within(pods).getByRole("link", { name: engineering.name })).toBeVisible();
+		await expect(within(pods).getByRole("link", { name: "Personal, Only you" })).toBeVisible();
 		await expect(canvas.getByRole("heading", { level: 1, name: revenue.name })).toBeVisible();
+		await expect(canvas.queryByText("Only you can see into this pod.")).toBeNull();
 		await expect(canvas.getByRole("link", { name: "Artifacts" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: "Growth Desk" })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
@@ -56,6 +58,17 @@ export const Home = meta.story({
 			"aria-current",
 			"page",
 		);
+	},
+});
+
+/** Home on Personal: under its name, that only you can see into it. */
+export const PersonalHome = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${personal.slug}`} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { level: 1, name: personal.name }, { timeout: 10_000 }),
+		).toBeVisible();
+		await expect(canvas.getByText("Only you can see into this pod.")).toBeVisible();
 	},
 });
 

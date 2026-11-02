@@ -9,6 +9,7 @@ import { usePods } from "@/lib/pods.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { ConversationList } from "@/shell/ConversationList.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
+import { Locked, LockGlyph, ONLY_YOU, PERSONAL_POD_PRIVACY } from "@/shell/PersonalPrivacy.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 
@@ -30,11 +31,11 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 				aria-label={pod.name}
 				className="@container/sidebar flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-[20px] bg-list shadow-[inset_1px_1px_0_var(--color-border)]"
 			>
-				<header className="flex items-center gap-2 pt-[18px] pr-3 pb-3 pl-[18px]">
+				<header className="flex flex-col gap-0.5 pt-[18px] pr-3 pb-3 pl-[18px]">
 					<Link
 						{...podSettingsLink(pod)}
 						aria-label={`${pod.name} settings`}
-						className="focus-ring flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-foreground"
+						className="focus-ring flex min-w-0 items-center gap-1.5 rounded-md text-foreground"
 					>
 						<h1 className="m-0 min-w-0 truncate font-semibold text-[22px] tracking-[-0.02em]">
 							{pod.name}
@@ -46,6 +47,12 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 							className="shrink-0 text-subtle-foreground"
 						/>
 					</Link>
+					{pod.kind === "personal" && (
+						<p className="m-0 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+							<LockGlyph size={8} className="shrink-0" />
+							{PERSONAL_POD_PRIVACY}
+						</p>
+					)}
 				</header>
 				<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-2 pb-4 pl-1.5">
 					<Link
@@ -89,6 +96,11 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 					marker?.needsApproval === true ||
 					(marker?.failedRoutines ?? 0) > 0;
 				const current = pod.id === currentPodId;
+				const label = [
+					pod.name,
+					...(pod.kind === "personal" ? [ONLY_YOU] : []),
+					...(news ? ["something new"] : []),
+				].join(", ");
 				return (
 					<div key={pod.id} className="relative flex w-full justify-center">
 						{(current || news) && (
@@ -102,7 +114,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 						)}
 						<Link
 							{...podLink(pod)}
-							aria-label={news ? `${pod.name}, something new` : pod.name}
+							aria-label={label}
 							aria-current={current ? "page" : undefined}
 							className="focus-ring rounded-[14px]"
 						>
@@ -136,10 +148,11 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 	);
 }
 
-/** A pod's tile in the rail: its initial in its colour on a tint of it, or a person for Personal. */
+/** A pod's tile in the rail: its initial in its colour on a tint of it, or for Personal a person, locked. */
 function RailTile({ pod }: { pod: Pod }) {
 	const palette = pod.color === null ? undefined : podPalettes[pod.color];
-	return (
+	const personal = pod.kind === "personal";
+	const tile = (
 		<span
 			aria-hidden
 			className={cn(
@@ -148,11 +161,12 @@ function RailTile({ pod }: { pod: Pod }) {
 			)}
 			style={palette && { background: palette.tile, color: palette.swatch }}
 		>
-			{pod.kind === "personal" ? (
+			{personal ? (
 				<User size={20} strokeWidth={2} />
 			) : (
 				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "?")
 			)}
 		</span>
 	);
+	return personal ? <Locked lockSize={16}>{tile}</Locked> : tile;
 }

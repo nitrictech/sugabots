@@ -123,7 +123,7 @@ export const podSchema = Schema.Struct({
 	kind: Schema.Literals(["personal", "shared"]),
 	name: Schema.String,
 	slug: podSlugSchema,
-	/** `null` on a Personal pod, which is drawn as its lock rather than a tile. */
+	/** `null` on a Personal pod, which is drawn as a person rather than a coloured tile. */
 	color: Schema.NullOr(podColorSchema),
 	permissions: podPermissionsSchema,
 	createdAt: isoTimestampSchema,

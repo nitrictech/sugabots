@@ -17,6 +17,7 @@ import { activityLink, agentChatLink, conversationLink, podLink } from "@/lib/li
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { LockGlyph, ONLY_YOU, OnlyYou } from "@/shell/PersonalPrivacy.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -71,6 +72,7 @@ export interface DetailsToggle {
  */
 export function ChatHeader({
 	agent,
+	inPersonalPod,
 	title,
 	done,
 	conversationId,
@@ -80,6 +82,8 @@ export function ChatHeader({
 	details,
 }: HeaderPlace & {
 	agent: Agent;
+	/** Whether the chat is in the viewer's Personal pod, which its header says only they see into. */
+	inPersonalPod: boolean;
 	/** The thread's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it. */
@@ -111,12 +115,14 @@ export function ChatHeader({
 						}
 						name={agent.name}
 						detail={modelName ?? undefined}
+						inPersonalPod={inPersonalPod}
 						onClick={openDetails}
 					/>
 				) : (
 					<ThreadBadge
 						title={title}
 						within={modelName ? `${agent.name} · ${modelName}` : agent.name}
+						inPersonalPod={inPersonalPod}
 						onClick={openDetails}
 					/>
 				)
@@ -140,6 +146,9 @@ export function ChatHeader({
 					<span className="shrink-0 whitespace-nowrap text-[12.5px] text-muted-foreground">
 						{modelName}
 					</span>
+				)}
+				{inPersonalPod && (
+					<OnlyYou lock side="bottom" className="text-[12.5px] text-muted-foreground" />
 				)}
 			</div>
 			{done ? (
@@ -265,17 +274,21 @@ function HeaderBar({
 
 /**
  * Whose chat it is, in a phone's header: its face beside its name, and under
- * the name `detail`, such as a bot's model. It opens its Details where it has them.
+ * the name `detail`, such as a bot's model, after "Only you" in a Personal
+ * pod. It opens its Details where it has them.
  */
 function FaceBadge({
 	face,
 	name,
 	detail,
+	inPersonalPod = false,
 	onClick,
 }: {
 	face: ReactNode;
 	name: string;
 	detail?: string;
+	/** Whether the chat is in the viewer's Personal pod. */
+	inPersonalPod?: boolean;
 	onClick?: () => void;
 }) {
 	const content = (
@@ -285,8 +298,10 @@ function FaceBadge({
 				<span className="max-w-full truncate font-semibold text-[16px] text-foreground">
 					{name}
 				</span>
-				{detail && (
-					<span className="max-w-full truncate text-[12px] text-muted-foreground">{detail}</span>
+				{(detail || inPersonalPod) && (
+					<span className="max-w-full truncate text-[12px] text-muted-foreground">
+						<BadgeDetail inPersonalPod={inPersonalPod}>{detail}</BadgeDetail>
+					</span>
 				)}
 			</span>
 		</>
@@ -336,11 +351,14 @@ type ChatMark = "channel" | "routine";
 function ThreadBadge({
 	title,
 	within,
+	inPersonalPod = false,
 	onClick,
 }: {
 	title: string;
 	/** What the thread is in or with, such as its bot. */
 	within?: string;
+	/** Whether the thread is in the viewer's Personal pod. */
+	inPersonalPod?: boolean;
 	onClick?: () => void;
 }) {
 	return (
@@ -353,12 +371,24 @@ function ThreadBadge({
 			className="glass flex h-11 min-w-0 max-w-full flex-col items-start justify-center rounded-full px-4 text-left text-foreground active:bg-hover-strong"
 		>
 			<span className="max-w-full truncate font-semibold text-[16px] leading-tight">{title}</span>
-			{within && (
+			{(within || inPersonalPod) && (
 				<span className="max-w-full truncate text-[12px] text-muted-foreground leading-tight">
-					in {within}
+					<BadgeDetail inPersonalPod={inPersonalPod}>{within && `in ${within}`}</BadgeDetail>
 				</span>
 			)}
 		</button>
+	);
+}
+
+/** The second line of a phone header's badge: `children`, after a locked "Only you" in a Personal pod. */
+function BadgeDetail({ inPersonalPod, children }: { inPersonalPod: boolean; children: ReactNode }) {
+	if (!inPersonalPod) return children;
+	return (
+		<>
+			<LockGlyph size={8} className="mr-1 inline align-[-0.5px]" />
+			{ONLY_YOU}
+			{children && <> · {children}</>}
+		</>
 	);
 }
 

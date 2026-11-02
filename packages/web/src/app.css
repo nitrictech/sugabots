@@ -487,6 +487,21 @@
 	mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 
+/*
+ * A notch cut from an element's top right corner, for a lock of `--lock-size`
+ * laid over that corner and reaching `--lock-overhang` past it, as `Locked`
+ * sets both. Cut rather than backed with a colour, so it reads on whatever the
+ * element sits on.
+ */
+@utility lock-notch {
+	--lock-centre: calc(var(--lock-size) / 2 - var(--lock-overhang));
+	mask-image: radial-gradient(
+		circle at calc(100% - var(--lock-centre)) var(--lock-centre),
+		transparent calc(var(--lock-size) / 2 + 1px),
+		#000 calc(var(--lock-size) / 2 + 1.5px)
+	);
+}
+
 /* A row that scrolls sideways under a swipe or its own arrows, without a bar. */
 @utility no-scrollbar {
 	scrollbar-width: none;
