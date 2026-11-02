@@ -460,6 +460,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await mentioned()).toBe(false);
 	});
 
+	it("says when a message the person has not read mentions everyone", async () => {
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const mentioned = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.channels.find(
+				(item) => item.conversation.id === current.id,
+			)?.mentionsYou;
+
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: current.id,
+				authorUserId: administratorId,
+				kind: "text",
+				status: "complete",
+				parts: [{ type: "text", text: "@here standup is starting" }],
+				content: "@here standup is starting",
+			}),
+		);
+
+		expect(await mentioned()).toBe(true);
+	});
+
 	it("refuses to mark a pod's chat done", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 

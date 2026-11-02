@@ -18,6 +18,7 @@ import type {
 } from "@sugabots/contracts";
 import {
 	DEFAULT_CHAT_PAGE_LIMIT,
+	GROUP_MENTION_HANDLES,
 	handleFromName,
 	mentionPattern,
 	messagePreview,
@@ -703,9 +704,9 @@ function caughtUpAt(db: Executor, userId: string, threadId: SQLWrapper): SQL<Dat
 	return sql<Date | null>`greatest((${readThrough}), (${lastWritten}))`;
 }
 
-/** Whether a `message` mentions `handle`, as the floor reads a mention. */
+/** Whether a `message` mentions `handle`, or everyone with `@here` or `@channel`. */
 function mentions(handle: string): SQL {
-	return sql`${message.content} ~* ${mentionPattern(handle)}`;
+	return sql`${message.content} ~* ${mentionPattern(handle, ...GROUP_MENTION_HANDLES)}`;
 }
 
 /** How far back the activity feed looks: past this, a conversation is old news, read or not. */

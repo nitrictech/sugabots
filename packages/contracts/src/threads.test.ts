@@ -8,6 +8,8 @@ import {
 	MAX_THREAD_HISTORY_LIMIT,
 	MAX_THREAD_TITLE_CHARACTERS,
 	MESSAGE_PREVIEW_CHARACTERS,
+	mentionPattern,
+	mentionsEveryone,
 	messagePartsFor,
 	messagePreview,
 	messageSchema,
@@ -208,6 +210,32 @@ describe("thread contracts", () => {
 
 	it.each([undefined, { nested: [NaN] }, new Date(0)])("rejects non-JSON values: %s", (value) => {
 		expect(Schema.decodeResult(jsonValueSchema)(value)._tag).toBe("Failure");
+	});
+});
+
+describe("mentionsEveryone", () => {
+	it.each(["@here", "@channel, standup is on", "Heads up @Here: the build is red", "(@channel)"])(
+		"reads %j as addressing everyone",
+		(content) => {
+			expect(mentionsEveryone(content)).toBe(true);
+		},
+	);
+
+	it.each(["sam@here.com", "@heresy", "@here-ish", "@channels", "@sam", "here and channel"])(
+		"does not read %j as addressing everyone",
+		(content) => {
+			expect(mentionsEveryone(content)).toBe(false);
+		},
+	);
+});
+
+describe("mentionPattern", () => {
+	it("matches a mention of any handle it is given, as mentionedHandles reads one", () => {
+		const pattern = new RegExp(mentionPattern("sam", "here"), "i");
+		expect(pattern.test("ping @Sam and others")).toBe(true);
+		expect(pattern.test("@here")).toBe(true);
+		expect(pattern.test("@samantha")).toBe(false);
+		expect(pattern.test("sam@here.com")).toBe(false);
 	});
 });
 

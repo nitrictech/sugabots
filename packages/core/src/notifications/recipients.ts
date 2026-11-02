@@ -2,6 +2,7 @@ import {
 	conversationNotificationTag,
 	handleFromName,
 	mentionedHandles,
+	mentionsEveryone,
 	type NotificationContent,
 	type NotificationLevel,
 	type QuietHours,
@@ -137,18 +138,21 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	if (!place || !NOTIFYING_THREAD_TYPES.has(place.type)) return [];
 	const mentioned = new Set(mentionedHandles(written.content));
 	const { author, authorName } = written;
+	// Only a person's `@here` or `@channel` reaches everyone, not a bot's.
+	const addressesEveryone = author.kind === "person" && mentionsEveryone(written.content);
 	// A thread with a bot is the bot's; elsewhere, such as a pod's chat, what a bot posts is.
 	const botId = place.hostAgentId ?? (author.kind === "bot" ? author.agentId : null);
 	const audience = yield* audienceOf(db, place, botId, now);
 	return audience.flatMap((person): Addressed[] => {
 		if (author.kind === "person" && person.id === author.userId) return [];
-		const reason: Reason = mentioned.has(handleFromName(person.name))
-			? "mention"
-			: person.id === written.repliesTo
-				? "reply"
-				: person.participant && place.type === "conversation"
-					? "participant"
-					: "activity";
+		const reason: Reason =
+			addressesEveryone || mentioned.has(handleFromName(person.name))
+				? "mention"
+				: person.id === written.repliesTo
+					? "reply"
+					: person.participant && place.type === "conversation"
+						? "participant"
+						: "activity";
 		if (!wants(person, reason, now)) return [];
 		// A bot's channel is named for it, so what the bot says there needs no "in".
 		const where =
