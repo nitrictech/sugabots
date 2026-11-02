@@ -2,6 +2,9 @@ export * as ConnectionTools from "./connections.ts";
 
 import {
 	type ConnectionAccess,
+	type ConnectionPreset,
+	connectionCatalog,
+	connectionPresetFor,
 	connectionToolKey,
 	connectionToolMutating,
 } from "@sugabots/contracts";
@@ -73,6 +76,8 @@ export interface ConnectionToolSet {
 	unavailable: string[];
 	/** What each connection's server says about using its tools, by handle. */
 	instructions: Record<string, string>;
+	/** Catalog servers the pod has not added. */
+	addable: readonly ConnectionPreset[];
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
 }
@@ -181,6 +186,7 @@ export function from({
 		forPod: (workspaceId, podId, turn) =>
 			Effect.gen(function* () {
 				const reached = yield* connections.targetsForPod(workspaceId, podId);
+				const addable = presetsAddableTo(reached);
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
@@ -190,7 +196,7 @@ export function from({
 					instructions: gitHub.instructions,
 				};
 				const targets = reached.filter((target) => target.kind === "mcp");
-				if (targets.length === 0) return { ...nothingOffered, ...ownTools };
+				if (targets.length === 0) return { ...nothingOffered, ...ownTools, addable };
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const now = yield* Clock.currentTimeMillis;
 				const sessions = new Map<string, Promise<ServerSession>>();
@@ -281,6 +287,7 @@ export function from({
 						),
 						...ownTools.instructions,
 					},
+					addable,
 					close: async () => {
 						await Promise.allSettled(
 							[...sessions.values()].map((session) => session.then((open) => open.close())),
@@ -289,6 +296,17 @@ export function from({
 				};
 			}),
 	};
+}
+
+/** Catalog servers whose host does not match any of `reached`. */
+function presetsAddableTo(reached: readonly { url: string }[]): readonly ConnectionPreset[] {
+	const installed = new Set(
+		reached.flatMap((target) => {
+			const preset = connectionPresetFor(target.url);
+			return preset ? [preset.id] : [];
+		}),
+	);
+	return connectionCatalog.filter((preset) => !installed.has(preset.id));
 }
 
 function buildOfferedTools(
@@ -321,6 +339,7 @@ const nothingOffered: ConnectionToolSet = {
 	tools: {},
 	unavailable: [],
 	instructions: {},
+	addable: [],
 	close: async () => undefined,
 };
 

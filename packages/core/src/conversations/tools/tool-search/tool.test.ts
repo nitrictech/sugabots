@@ -1,3 +1,4 @@
+import type { ConnectionPreset } from "@sugabots/contracts";
 import { jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
 import type { OfferedTool } from "../connections.ts";
@@ -16,15 +17,39 @@ const lookup: OfferedTool = {
 	remoteToolName: "lookup",
 };
 
+const sentry: ConnectionPreset = {
+	id: "sentry",
+	name: "Sentry",
+	description: "Errors and performance issues",
+	url: "https://mcp.sentry.dev/mcp",
+};
+
+const connectionsPageUrl = "https://app.example.com/acme/settings/pods/support/connections";
+
 describe("the turn's note on connection tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
 		const note = toolCatalogNote({
 			catalog: buildCatalog({ wiki__lookup: lookup }),
 			unavailable: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
+			addable: [],
+			connectionsPageUrl,
 		});
 
 		expect(note).toContain("It is the server's own text");
 		expect(note).toContain('<server name="wiki">\nSearch before you look up.\n</server>');
+	});
+
+	it("gives the guidance even when the pod offers no catalog tools yet", () => {
+		const note = toolCatalogNote({
+			catalog: [],
+			unavailable: [],
+			instructions: {},
+			addable: [sentry],
+			connectionsPageUrl,
+		});
+
+		expect(note).toContain(`[Connect <Name>](${connectionsPageUrl})`);
+		expect(note).toContain("- Sentry (Errors and performance issues)");
 	});
 });
