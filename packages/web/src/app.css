@@ -584,7 +584,7 @@
 	border-color: var(--border-strong);
 }
 
-/* The pre inside the card is left transparent so the card's fill shows end-to-end; Shiki sets a theme background on it that would otherwise sit as a lighter inset over the --rail surface. */
+/* The pre inside the card is left transparent so the card's fill shows end-to-end; the highlighter sets a theme background on it that would otherwise sit as a lighter inset over the --rail surface. */
 .message-markdown pre {
 	background-color: transparent;
 }
