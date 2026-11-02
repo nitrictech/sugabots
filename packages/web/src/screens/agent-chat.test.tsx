@@ -561,7 +561,10 @@ describe("ongoing agent Chat", () => {
 		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(triager.name) })).toBeNull();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		expect(list.getAllByRole("option")).toHaveLength(2);
+		// After the people and bots come the two groups, which are not people the pod has.
+		expect(list.getByRole("option", { name: /@here/ })).toBeTruthy();
+		expect(list.getByRole("option", { name: /@channel/ })).toBeTruthy();
+		expect(list.getAllByRole("option")).toHaveLength(4);
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {

@@ -126,7 +126,8 @@ export const SelectMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Ask @");
 		await expect(canvas.getByRole("listbox", { name: "People and bots to mention" })).toBeVisible();
-		await expect(canvas.getAllByRole("option")).toHaveLength(3);
+		// The three people and bots, then @here and @channel.
+		await expect(canvas.getAllByRole("option")).toHaveLength(5);
 		await userEvent.type(input, "ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(2);
 		await userEvent.keyboard("{ArrowDown}");
@@ -144,6 +145,19 @@ export const SelectMention = meta.story({
 		await userEvent.clear(input);
 		await userEvent.type(input, "@Sam Ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+	},
+});
+
+/** `@here` and `@channel` are offered beside the people, and are written as typed, like a handle. */
+export const SelectGroupMention = meta.story({
+	tags: ["ai-generated"],
+	play: async ({ canvas, userEvent, args }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "Heads up @cha");
+		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
+		await expect(args.onSubmit).not.toHaveBeenCalled();
 	},
 });
 

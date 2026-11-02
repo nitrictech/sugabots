@@ -190,6 +190,14 @@ describe("what people and bots write", () => {
 
 		expect(await screen.findByText("Issue Triager", { selector: "span" })).toBeDefined();
 	});
+
+	it("marks @here and @channel in a reply as mentions of everyone", async () => {
+		show([reply([{ type: "text", text: "@here the deploy is out, @channel please check." }])]);
+
+		const chips = await screen.findAllByText(/^@(here|channel)$/, { selector: "span" });
+
+		expect(chips.map((chip) => chip.textContent)).toEqual(["@here", "@channel"]);
+	});
 });
 
 describe("a finished reply that used tools", () => {

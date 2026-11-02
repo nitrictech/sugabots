@@ -1,5 +1,8 @@
 import {
 	type AgentParticipant,
+	GROUP_MENTION_HANDLES,
+	type GroupMentionHandle,
+	isGroupMentionHandle,
 	mentionedHandles,
 	splitAroundMentions,
 	type ThreadDetails,
@@ -7,7 +10,7 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
-import { type ComponentProps, createContext, type ReactNode, useContext } from "react";
+import { type ComponentProps, createContext, Fragment, type ReactNode, useContext } from "react";
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
@@ -58,6 +61,36 @@ export function participantWithHandle(
 	return mentionable.find((candidate) => candidate.handle === lowered);
 }
 
+/** `@here` or `@channel`, offered beside the people and bots a mention can name. */
+export interface GroupMention {
+	kind: "group";
+	handle: GroupMentionHandle;
+}
+
+/** What the composer offers after an `@`: everyone in `mentionable`, then the group mentions. */
+export type MentionSuggestion = ThreadParticipant | GroupMention;
+
+export const GROUP_MENTIONS: readonly GroupMention[] = GROUP_MENTION_HANDLES.map((handle) => ({
+	kind: "group",
+	handle,
+}));
+
+const chipClassName =
+	"mx-px inline-flex items-baseline gap-1 rounded-[5px] bg-chip px-1 font-semibold text-foreground leading-[1.5]";
+
+/** `@here` or `@channel` as a chip, which notifies everyone in the conversation. */
+function GroupMentionChip({ handle }: { handle: GroupMentionHandle }) {
+	return <span className={chipClassName}>{`@${handle}`}</span>;
+}
+
+/** A mention as it is written: a chip for a group, or for whom `handle` names in `mentionable`, else its text. */
+function mentionNode(handle: string, mentionable: readonly ThreadParticipant[]): ReactNode {
+	const lowered = handle.toLowerCase();
+	if (isGroupMentionHandle(lowered)) return <GroupMentionChip handle={lowered} />;
+	const participant = participantWithHandle(mentionable, handle);
+	return participant ? <MentionChip participant={participant} /> : `@${handle}`;
+}
+
 /**
  * A mention as a chip that stands off the words around it: a bot by its face
  * and name, a person by their handle. Sent messages and the composer both
@@ -69,13 +102,7 @@ export function MentionChip({
 	...rest
 }: { participant: ThreadParticipant } & ComponentProps<"span">) {
 	return (
-		<span
-			{...rest}
-			className={cn(
-				"mx-px inline-flex items-baseline gap-1 rounded-[5px] bg-chip px-1 font-semibold text-foreground leading-[1.5]",
-				className,
-			)}
-		>
+		<span {...rest} className={cn(chipClassName, className)}>
 			{participant.kind === "agent" ? (
 				<>
 					<AgentAvatar
@@ -99,13 +126,8 @@ export function MentionChip({
 export function textWithMentions(content: string, mentionable: ThreadParticipant[]): ReactNode[] {
 	return splitAroundMentions(content).map((part, index) => {
 		if (index % 2 === 0) return part;
-		const participant = participantWithHandle(mentionable, part);
-		return participant ? (
-			// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
-			<MentionChip key={index} participant={participant} />
-		) : (
-			`@${part}`
-		);
+		// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
+		return <Fragment key={index}>{mentionNode(part, mentionable)}</Fragment>;
 	});
 }
 
@@ -141,8 +163,8 @@ export const remarkMentions: Plugin<[], Root> = () => (tree) => {
 };
 
 /**
- * A `<mention>` from `remarkMentions`: a chip if it names someone in
- * `MentionableContext`, else its text. Its props come from the markdown tree
+ * A `<mention>` from `remarkMentions`: a chip if it is `@here` or `@channel`, or
+ * names someone in `MentionableContext`, else its text. Its props come from the markdown tree
  * untyped, so the handle is checked rather than assumed.
  */
 export function MarkdownMention({
@@ -150,7 +172,7 @@ export function MarkdownMention({
 	children,
 }: ExtraProps & { handle?: unknown; children?: unknown }) {
 	const mentionable = useContext(MentionableContext);
-	const participant =
-		typeof handle === "string" ? participantWithHandle(mentionable, handle) : undefined;
-	return participant ? <MentionChip participant={participant} /> : (children as ReactNode);
+	if (typeof handle !== "string") return children as ReactNode;
+	const node = mentionNode(handle, mentionable);
+	return typeof node === "string" ? (children as ReactNode) : node;
 }
