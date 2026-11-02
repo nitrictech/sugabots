@@ -72,7 +72,7 @@ export function MentionChip({
 		<span
 			{...rest}
 			className={cn(
-				"mx-px inline-flex items-center gap-1 rounded-[5px] bg-chip px-1 align-[-0.15em] font-semibold text-foreground leading-[1.5]",
+				"mx-px inline-flex items-baseline gap-1 rounded-[5px] bg-chip px-1 font-semibold text-foreground leading-[1.5]",
 				className,
 			)}
 		>
@@ -83,7 +83,7 @@ export function MentionChip({
 						face={participant.face}
 						shape={participant.shape}
 						size={14}
-						className="shrink-0"
+						className="shrink-0 self-center"
 					/>
 					<span className="sr-only">@</span>
 					{participant.name}
