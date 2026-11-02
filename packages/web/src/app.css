@@ -578,6 +578,18 @@
 	font: 500 13px var(--font-mono);
 }
 
+/* A block of code in a bot's message. Streamdown wraps the block in a themed card; the fill is set to --rail so the surface sinks below the bubble like Claude.ai's code pane, and --border-strong on the edge carries the separation when the background difference alone is subtle. */
+.message-markdown [data-streamdown="code-block"] {
+	background: var(--rail);
+	border-color: var(--border-strong);
+}
+
+.message-markdown pre > code {
+	color: var(--foreground);
+	font: 13px var(--font-mono);
+	line-height: 1.5;
+}
+
 /*
  * A reply that finished while it was being watched grows to fit its words,
  * from its name line down, so it reads as arriving rather than as swapped in.

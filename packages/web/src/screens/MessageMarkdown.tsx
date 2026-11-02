@@ -10,6 +10,7 @@ import {
 } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
+import { codeHighlighter } from "./code-highlighter.ts";
 import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
 
 /*
@@ -36,6 +37,7 @@ export function MessageMarkdown({
 				components={COMPONENTS}
 				controls={CONTROLS}
 				linkSafety={LINK_SAFETY}
+				plugins={PLUGINS}
 				isAnimating={false}
 			>
 				{text}
@@ -114,6 +116,9 @@ const CONTROLS = {
 	mermaid: false,
 	image: false,
 };
+
+/* Shiki syntax highlighting for fenced code, github-light / github-dark by default. */
+const PLUGINS = { code: codeHighlighter };
 
 /**
  * ScrollingTable renders a table in a labelled, keyboard-focusable horizontal
