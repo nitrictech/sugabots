@@ -1,43 +1,40 @@
-import { artifactKindSchema, type ToolCallPart } from "@sugabots/contracts";
+import {
+	type ArtifactPart,
+	artifactsWrittenBy,
+	type MessagePart,
+	type ToolCallPart,
+} from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { cn } from "cn";
-import { Schema } from "effect";
 import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
 import { useState } from "react";
-import { ARTIFACT_WRITING_TOOLS, useArtifact } from "@/lib/artifacts.ts";
+import { useArtifact } from "@/lib/artifacts.ts";
 import { StageMark } from "@/shell/Stage.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
 
-const writtenArtifactSchema = Schema.Struct({
-	status: Schema.Literal("written"),
-	artifactId: Schema.String,
-	kind: artifactKindSchema,
-	title: Schema.String,
-	version: Schema.Int,
-});
-
-export type WrittenArtifact = Omit<typeof writtenArtifactSchema.Type, "status">;
+export type WrittenArtifact = Omit<ArtifactPart, "type">;
 
 /**
- * The artifacts a reply's calls wrote, under its tool line, each a card at the
- * version the reply wrote that opens it large.
+ * The artifacts a message shows, each a card at the version written that
+ * opens it large: those its reply's calls wrote, under its tool line, or, on a
+ * routine's posted result, those its run wrote.
  */
 export function ArtifactCards({
-	calls,
+	parts,
 	podId,
 	botName,
 	onOpen,
 	className,
 }: {
-	calls: readonly ToolCallPart[];
+	parts: readonly MessagePart[];
 	podId: string;
 	/** The bot that wrote the reply, whom each card names as its maker. */
 	botName: string;
 	onOpen: (artifactId: string) => void;
 	className?: string;
 }) {
-	const written = writtenBy(calls);
+	const written = writtenIn(parts);
 	if (written.length === 0) return null;
 	return (
 		<ul
@@ -199,15 +196,15 @@ export function ArtifactCardView({
 	);
 }
 
-/** Each artifact the calls wrote, once, at the last version they wrote. */
-function writtenBy(calls: readonly ToolCallPart[]): WrittenArtifact[] {
-	const latest = new Map<string, WrittenArtifact>();
-	for (const call of calls) {
-		if (call.status !== "completed" || !ARTIFACT_WRITING_TOOLS.has(call.tool)) continue;
-		const parsed = Schema.decodeUnknownResult(writtenArtifactSchema)(call.output);
-		if (parsed._tag === "Failure") continue;
-		const { status: _, ...artifact } = parsed.success;
-		latest.set(artifact.artifactId, artifact);
-	}
-	return [...latest.values()];
+/**
+ * Each artifact the parts show, once: those a posted result carries, and
+ * those a reply's calls wrote.
+ */
+function writtenIn(parts: readonly MessagePart[]): ArtifactPart[] {
+	const carried = parts.filter((part): part is ArtifactPart => part.type === "artifact");
+	const calls = parts.filter((part): part is ToolCallPart => part.type === "tool_call");
+	const byId = new Map(
+		[...carried, ...artifactsWrittenBy(calls)].map((artifact) => [artifact.artifactId, artifact]),
+	);
+	return [...byId.values()];
 }

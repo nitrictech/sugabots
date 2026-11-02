@@ -1,4 +1,4 @@
-import type { CollaborationPart } from "@sugabots/contracts";
+import { ARTIFACT_WRITING_TOOLS, type CollaborationPart } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
@@ -10,7 +10,7 @@ import type { AgentAdministration } from "../../workspaces/agents/agent-administ
 import type { BotRoutines } from "../routines/bot-routines.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
-import { artifactTools, MUTATING_ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { artifactTools } from "../tools/artifacts/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
@@ -213,7 +213,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	});
 	for (const [key, tool] of Object.entries(artifacts)) {
 		if (prepared.context.agent.disabledTools.includes(key)) continue;
-		tools[key] = recorded(key, tool, { ...recording, mutating: MUTATING_ARTIFACT_TOOLS.has(key) });
+		tools[key] = recorded(key, tool, { ...recording, mutating: ARTIFACT_WRITING_TOOLS.has(key) });
 	}
 	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
 	const catalog = buildCatalog(deps.connections, builtInFound);

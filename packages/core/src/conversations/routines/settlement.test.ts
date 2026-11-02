@@ -1,4 +1,4 @@
-import type { RoutineResults } from "@sugabots/contracts";
+import type { ArtifactPart, RoutineResults } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
@@ -13,6 +13,7 @@ import {
 	routine,
 	routineExecution,
 	thread,
+	toolCall,
 	turn,
 } from "../../database/schema.ts";
 import {
@@ -34,6 +35,7 @@ import {
 	releaseTurn,
 	replyTurnOf,
 	runningTurns,
+	ToolCallRepository,
 	Turn,
 	type TurnCheckpoint,
 	TurnExecution,
@@ -65,6 +67,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	const settlement = onPostgres({ settleRun, failRun });
 	const runner = onPostgres(Context.get(conversations, RoutineRunner.Service));
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
+	const toolCalls = onPostgres(Context.get(conversations, ToolCallRepository.Service));
 	const execution = onPostgres({
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
@@ -195,17 +198,114 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		return { accepted, run, askingTurn, childThread, activeCollaboration, runningTurn };
 	}
 
-	/** Ends the run's turn with `content` as its reply, which completes the run. */
-	async function replyAndFinish(threadId: string, content: string) {
+	/**
+	 * Ends the run's turn with `content` as its reply, which completes the run,
+	 * after it wrote each of `writes` with `artifact_write`, in order.
+	 */
+	async function replyAndFinish(
+		threadId: string,
+		content: string,
+		writes: readonly Omit<ArtifactPart, "type">[] = [],
+	) {
 		const [turnRun] = await runOnPostgres(runningTurns(threadId));
 		if (!turnRun) throw new Error("The run asked for no turn");
 		const prepared = await prepareRunnable(execution, turnRun);
+		const calls = [];
+		for (const written of writes) {
+			const opened = await toolCalls.open({
+				threadId,
+				messageId: prepared.responseMessage.id,
+				turnId: prepared.turnId,
+				tool: "artifact_write",
+				input: {},
+				atOffset: 0,
+				mutating: true,
+			});
+			await toolCalls.close(opened.id, { output: { status: "written", ...written } });
+			calls.push({ id: opened.id, atOffset: 0 });
+		}
 		// Freed first, so completing the turn finishes the run's work.
 		await runOnPostgres(releaseTurn(turnRun));
 		await turns.complete(
 			replyTurnOf(prepared),
-			{ content, collaborations: [], toolCalls: [] },
+			{ content, collaborations: [], toolCalls: calls },
 			{ contextCapacity: 128_000, readKeptFrom: null },
+		);
+	}
+
+	/**
+	 * A turn of the run, done a minute ago, whose reply wrote each of `writes`
+	 * with `artifact_write`: the run asked somebody something and carried on
+	 * in a later turn.
+	 */
+	async function anEarlierTurnWrote(
+		threadId: string,
+		writes: readonly Omit<ArtifactPart, "type">[],
+	) {
+		const finishedAt = new Date(Date.now() - 60_000);
+		// Its own trigger, so the run's turn waiting on the run's trigger still runs.
+		const [trigger] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "Earlier work.",
+					createdAt: finishedAt,
+				})
+				.returning(),
+		);
+		if (!trigger) throw new Error("Could not create the earlier turn's trigger");
+		const [earlier] = await onDatabase((db) =>
+			db
+				.insert(turn)
+				.values({
+					threadId,
+					agentId,
+					triggerMessageId: trigger.id,
+					status: "done",
+					model: "test/model",
+					startedAt: finishedAt,
+					finishedAt,
+				})
+				.returning(),
+		);
+		if (!earlier) throw new Error("Could not create the earlier turn");
+		const [reply] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "Asking first.",
+					turnId: earlier.id,
+					createdAt: finishedAt,
+				})
+				.returning(),
+		);
+		if (!reply) throw new Error("Could not create the earlier reply");
+		await onDatabase((db) =>
+			db.insert(toolCall).values(
+				writes.map((written) => ({
+					threadId,
+					messageId: reply.id,
+					turnId: earlier.id,
+					tool: "artifact_write",
+					input: {},
+					output: { status: "written", ...written },
+					status: "completed" as const,
+					mutating: true,
+					atOffset: 0,
+					startedAt: finishedAt,
+					finishedAt,
+				})),
+			),
 		);
 	}
 
@@ -766,7 +866,56 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await podChatPosts("Triaged and assigned.")).toEqual([]);
 	});
 
-	it("posts nothing when the run's last reply has no text", async () => {
+	it("posts each artifact a run wrote with its result, at the last version any of its turns wrote", async () => {
+		const { accepted, run } = await aRunningRun("post_to_chat");
+		const dashboard = {
+			artifactId: crypto.randomUUID(),
+			kind: "html" as const,
+			title: "Traction dashboard",
+		};
+		const notes = {
+			artifactId: crypto.randomUUID(),
+			kind: "document" as const,
+			title: "Traction notes",
+			version: 1,
+		};
+
+		await anEarlierTurnWrote(accepted.threadId, [{ ...dashboard, version: 7 }, notes]);
+		await replyAndFinish(accepted.threadId, "Dashboard updated.", [{ ...dashboard, version: 8 }]);
+
+		const posted = await resultsOf(run.executionId);
+		expect(posted.map((row) => row.threadType).sort()).toEqual(["pod_chat", "routine_feed"]);
+		for (const { message: result } of posted) {
+			expect(result.parts).toEqual([
+				{ type: "text", text: "Dashboard updated." },
+				{ type: "artifact", ...dashboard, version: 8 },
+				{ type: "artifact", ...notes },
+			]);
+		}
+	});
+
+	it("posts the artifacts a run wrote when its last reply has no text", async () => {
+		const { accepted, run } = await aRunningRun();
+		const report = {
+			artifactId: crypto.randomUUID(),
+			kind: "document" as const,
+			title: "Weekly report",
+			version: 2,
+		};
+
+		await replyAndFinish(accepted.threadId, "", [report]);
+
+		expect(await resultsOf(run.executionId)).toEqual([
+			expect.objectContaining({
+				message: expect.objectContaining({
+					content: "",
+					parts: [{ type: "artifact", ...report }],
+				}),
+			}),
+		]);
+	});
+
+	it("posts nothing when the run's last reply has no text and it wrote no artifact", async () => {
 		const { accepted, run } = await aRunningRun("post_to_chat");
 
 		await replyAndFinish(accepted.threadId, "  ");

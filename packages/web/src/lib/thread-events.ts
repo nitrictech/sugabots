@@ -1,5 +1,6 @@
 import {
 	type ChatMessagesPage,
+	isAttached,
 	type Message,
 	type MessagePart,
 	messagePartsFor,
@@ -395,14 +396,11 @@ function withPlacedPart(message: Message, part: PlacedPart): Message {
 }
 
 /**
- * The parts drawn afresh from the text and what was placed in it, with the
- * message's files after them, which are never placed in its text.
+ * The parts drawn afresh from the text and what was placed in it, with what
+ * is attached to the message after them, which is never placed in its text.
  */
 function rebuiltParts(message: Message, content: string, placed: PlacedPart[]): MessagePart[] {
-	return [
-		...messagePartsFor(content, placed),
-		...message.parts.filter((part) => part.type === "file"),
-	];
+	return [...messagePartsFor(content, placed), ...message.parts.filter(isAttached)];
 }
 
 function partsWithoutFiles(message: Message): MessagePart[] {

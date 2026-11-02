@@ -103,7 +103,7 @@ export function toMessage(
 	error?: UserText | null,
 ): Message {
 	const parts = row.parts.flatMap((part): MessagePart[] => {
-		if (part.type === "text") {
+		if (part.type === "text" || part.type === "artifact") {
 			return [part];
 		}
 		const made =

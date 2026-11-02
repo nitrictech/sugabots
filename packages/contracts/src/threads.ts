@@ -2,6 +2,7 @@ import { Effect, Schema, SchemaGetter } from "effect";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toString as mdastToString } from "mdast-util-to-string";
 import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "./agents.ts";
+import { ARTIFACT_WRITING_TOOLS, artifactWrittenSchema } from "./artifacts.ts";
 import {
 	attachmentNameSchema,
 	MAX_ATTACHMENTS_PER_MESSAGE,
@@ -307,11 +308,46 @@ export const filePartSchema = Schema.Struct({
 
 export type FilePart = typeof filePartSchema.Type;
 
+/** An artifact as written: which one, and the version the write left it at. */
+const { status: _, ...writtenArtifactFields } = artifactWrittenSchema.fields;
+
+/**
+ * An artifact the routine run behind a posted result wrote, at the version
+ * the run left it at. The result carries it because the calls that wrote it
+ * stay in the run's own thread.
+ */
+export const artifactPartSchema = Schema.Struct({
+	type: Schema.Literal("artifact"),
+	...writtenArtifactFields,
+});
+
+export type ArtifactPart = typeof artifactPartSchema.Type;
+
+/**
+ * Each artifact the calls wrote, once, at the last version they wrote, in the
+ * order they first wrote them. Calls that wrote nothing, such as a refused
+ * write or another tool's call, are skipped.
+ */
+export function artifactsWrittenBy(
+	calls: Iterable<{ tool: string; status: string; output: unknown }>,
+): ArtifactPart[] {
+	const latest = new Map<string, ArtifactPart>();
+	for (const call of calls) {
+		if (call.status !== "completed" || !ARTIFACT_WRITING_TOOLS.has(call.tool)) continue;
+		const written = Schema.decodeUnknownResult(artifactWrittenSchema)(call.output);
+		if (written._tag === "Failure") continue;
+		const { status: _, ...artifact } = written.success;
+		latest.set(artifact.artifactId, { type: "artifact", ...artifact });
+	}
+	return [...latest.values()];
+}
+
 export const messagePartSchema = Schema.Union([
 	textPartSchema,
 	collaborationPartSchema,
 	toolCallPartSchema,
 	filePartSchema,
+	artifactPartSchema,
 ]);
 
 export type MessagePart = typeof messagePartSchema.Type;
@@ -370,6 +406,13 @@ export function textWithoutNarration<Part extends { type: string; text?: string 
 
 /** A part that sits in the reply's text at an offset: everything but text. */
 export type PlacedPart = Extract<MessagePart, { atOffset: number }>;
+
+/** A part attached to a message after its text rather than placed in it: a file, or a routine result's artifact. */
+export type AttachedPart = Extract<MessagePart, { type: "file" | "artifact" }>;
+
+export function isAttached(part: MessagePart): part is AttachedPart {
+	return part.type === "file" || part.type === "artifact";
+}
 
 /** The collaborations and tool calls in a message, as they were placed in its text. */
 export function placedParts(message: { parts: readonly MessagePart[] }): PlacedPart[] {

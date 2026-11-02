@@ -296,7 +296,7 @@ export const InAThread = meta.story({
 		<QueryPreview>
 			<div className="p-6 pl-[50px]">
 				<ArtifactCards
-					calls={[written("artifact_edit", plan)]}
+					parts={[written("artifact_edit", plan)]}
 					podId={revenue.id}
 					botName={scribe.name}
 					onOpen={fn()}

@@ -1,4 +1,5 @@
 import {
+	type ArtifactPart,
 	type CollaborationPart,
 	type FilePart,
 	type Message,
@@ -7,6 +8,7 @@ import {
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
+import { ARTIFACT_READ_TOOL } from "../tools/artifacts/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { COPY_FILE_TO_SANDBOX_TOOL } from "../tools/sandbox/tools.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
@@ -34,6 +36,7 @@ export function messageTextWithPlacedParts(message: Message): string {
 			if (part.type === "text") return part.text;
 			if (part.type === "collaboration") return describeCollaboration(part);
 			if (part.type === "file") return describeAttachment(part, { usesSandbox: false });
+			if (part.type === "artifact") return describeArtifact(part);
 			return describeToolCall(part);
 		})
 		.join("\n\n")
@@ -87,6 +90,14 @@ export function describeAttachment(
 		? `which ${READ_THREAD_FILE_TOOL} reads, or ${COPY_FILE_TO_SANDBOX_TOOL} copies`
 		: `which ${READ_THREAD_FILE_TOOL} reads`;
 	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}) as file ${file.id}, ${reads}]`;
+}
+
+/**
+ * An artifact a routine run's posted result shows, as one bracketed line: the
+ * artifact itself is in the pod, where it may have changed since.
+ */
+export function describeArtifact(artifact: ArtifactPart): string {
+	return `[Showed the ${artifact.kind} artifact "${artifact.title}" as written at version ${artifact.version}, artifact ${artifact.artifactId}; ${ARTIFACT_READ_TOOL} reads its current version]`;
 }
 
 /** A file's size as people write it, such as 2.1 MB. */

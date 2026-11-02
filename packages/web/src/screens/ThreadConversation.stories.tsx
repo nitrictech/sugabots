@@ -1,4 +1,6 @@
 import type {
+	Artifact,
+	ArtifactPart,
 	FilePart,
 	Message,
 	MessagePart,
@@ -8,6 +10,7 @@ import type {
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -223,6 +226,82 @@ export const RoutineResult = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "From Morning standup" }));
 		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000a03");
+	},
+});
+
+const tractionReport: Artifact = {
+	id: "0199a3a0-0000-7000-8000-000000000a15",
+	podId: POD,
+	kind: "document",
+	title: "Weekly traction",
+	version: 4,
+	createdBy: { agentId: host.id, name: host.name },
+	createdAt: "2026-09-01T04:30:00.000Z",
+	updatedAt: "2026-09-22T04:29:00.000Z",
+	content: "# Weekly traction\n\nSign-ups are up 18% on last week.",
+	shownVersion: {
+		number: 4,
+		author: { agentId: host.id, name: host.name },
+		createdAt: "2026-09-22T04:29:00.000Z",
+	},
+};
+
+const tractionCard: ArtifactPart = {
+	type: "artifact",
+	artifactId: tractionReport.id,
+	kind: tractionReport.kind,
+	title: tractionReport.title,
+	version: tractionReport.version,
+};
+
+/** The weekly traction routine's result, made of `parts`. */
+function tractionResult(parts: MessagePart[]): Message {
+	return {
+		...reply("0199a3a0-0000-7000-8000-000000000a11", parts),
+		routineResultOf: {
+			executionId: "0199a3a0-0000-7000-8000-000000000a12",
+			threadId: "0199a3a0-0000-7000-8000-000000000a13",
+			routineId: "0199a3a0-0000-7000-8000-000000000a14",
+			routineName: "Weekly traction",
+		},
+	};
+}
+
+/**
+ * A routine run's result with the artifact the run wrote, as a card under its
+ * words, the same as under the reply in the run's own thread.
+ */
+export const RoutineResultWithArtifact = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/4`, () =>
+				HttpResponse.json(tractionReport),
+			),
+		);
+	},
+	args: {
+		onOpenArtifact: fn(),
+		messages: [
+			tractionResult([
+				{ type: "text", text: "Weekly traction is updated: sign-ups are up 18%." },
+				tractionCard,
+			]),
+		],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await waitFor(() => expect(canvas.getByText("Document by Issue Triager")).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "Open Weekly traction" }));
+		await expect(args.onOpenArtifact).toHaveBeenCalledWith(tractionReport.id);
+	},
+});
+
+/** A routine run's result that is only the artifact the run wrote, when its last reply had no words. */
+export const RoutineResultOnlyArtifact = meta.story({
+	beforeEach: RoutineResultWithArtifact.input.beforeEach,
+	args: { onOpenArtifact: fn(), messages: [tractionResult([tractionCard])] },
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText("Document by Issue Triager")).toBeVisible());
+		await expect(canvas.getByRole("button", { name: "From Weekly traction" })).toBeVisible();
 	},
 });
 
