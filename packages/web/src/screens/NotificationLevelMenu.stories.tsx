@@ -24,6 +24,16 @@ async function openMenuOf(row: Element) {
 	);
 }
 
+/**
+ * Clicks a menu item that closes the menus, and waits until they have closed.
+ * The accessibility check after each story would otherwise find their focus
+ * guards while a busy machine is still animating them away.
+ */
+async function chooseAndClose(item: HTMLElement) {
+	await userEvent.click(item);
+	await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+}
+
 const meta = preview.meta({
 	title: "Views/NotificationLevelMenu",
 	parameters: { layout: "fullscreen" },
@@ -88,14 +98,14 @@ export const MutingABot = meta.story({
 		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
 		await openMenuOf(row);
 		await expect(await screen.findByRole("group", { name: "Notify you about…" })).toBeVisible();
-		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Nothing" }));
+		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Nothing" }));
 		await expect(await sidebar.findByRole("img", { name: "Muted" })).toBeVisible();
 
 		await openMenuOf(row);
-		await userEvent.click(
+		await chooseAndClose(
 			await screen.findByRole("menuitemradio", { name: "Default (mentions and replies)" }),
 		);
-		await expect(sidebar.queryByRole("img", { name: "Muted" })).toBeNull();
+		await waitFor(() => expect(sidebar.queryByRole("img", { name: "Muted" })).toBeNull());
 	},
 });
 
@@ -110,13 +120,13 @@ export const MutingABotForAWhile = meta.story({
 		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Mute for 1 hour" }));
+		await chooseAndClose(await screen.findByRole("menuitem", { name: "Mute for 1 hour" }));
 		await expect(await sidebar.findByRole("img", { name: /^Muted until / })).toBeVisible();
 
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: /^Unmute/ }));
-		await expect(sidebar.queryByRole("img", { name: /^Muted/ })).toBeNull();
+		await chooseAndClose(await screen.findByRole("menuitem", { name: /^Unmute/ }));
+		await waitFor(() => expect(sidebar.queryByRole("img", { name: /^Muted/ })).toBeNull());
 	},
 });
 
@@ -128,11 +138,8 @@ export const OpeningNotificationSettings = meta.story({
 		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Notification settings" }));
+		await chooseAndClose(await screen.findByRole("menuitem", { name: "Notification settings" }));
 		await expect(await canvas.findByRole("heading", { name: "Notifications" })).toBeVisible();
-		// Done once the menus have finished closing, whose focus guards the accessibility check
-		// that follows would otherwise find while a busy machine is still animating them away.
-		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 	},
 });
 
@@ -149,7 +156,7 @@ export const ChoosingAPodsLevel = meta.story({
 			{ name: pod.name },
 		);
 		await openMenuOf(podRow);
-		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Everything" }));
+		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Everything" }));
 
 		await openMenuOf(sidebar.getByText(bot.name));
 		await expect(
