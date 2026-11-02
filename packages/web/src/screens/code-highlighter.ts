@@ -1,133 +1,81 @@
-import { createHighlighterCore, type HighlighterCore } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { CodeHighlighterPlugin } from "streamdown";
 
 /* Streamdown declares its result type locally but doesn't export it; derive it from the plugin's own signature. */
 type HighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin["highlight"]>>;
 
 /*
- * Streamdown's `code` plugin ships every Shiki grammar and a saturated GitHub
- * theme pair. In chat the grammars people actually paste are a handful, and
- * the saturated palette clashes with the monochrome bubble. This module loads
- * only the grammars Sugabots threads contain, under muted themes that sit
- * closer to the palette, and exposes it as the same `CodeHighlighterPlugin`
- * Streamdown expects.
+ * Fenced code is highlighted with Pierre's Highlights, which tokenizes
+ * synchronously and also offers a tokenizer that keeps its state as code
+ * streams in. Its muted themes sit closer to the monochrome bubble than
+ * Streamdown's saturated GitHub pair.
  */
-
-const LANGUAGES = [
-	"typescript",
-	"javascript",
-	"python",
-	"shell",
-	"json",
-	"markdown",
-	"java",
-	"go",
-	"rust",
-	"ruby",
-	"sql",
-	"yaml",
-	"html",
-	"css",
-] as const;
-type Language = (typeof LANGUAGES)[number];
-
-/* Common fence tags that mean one of the loaded grammars. */
-const ALIASES: Record<string, Language> = {
-	ts: "typescript",
-	tsx: "typescript",
-	js: "javascript",
-	jsx: "javascript",
-	py: "python",
-	sh: "shell",
-	bash: "shell",
-	zsh: "shell",
-	md: "markdown",
-	rb: "ruby",
-	yml: "yaml",
-	golang: "go",
-	rs: "rust",
-};
-
-function normalize(lang: string): Language | undefined {
-	const key = lang.toLowerCase();
-	const resolved = (ALIASES[key] ?? key) as Language;
-	return (LANGUAGES as readonly string[]).includes(resolved) ? resolved : undefined;
-}
 
 /*
  * Streamdown's token classes read CSS variables with specific names:
  * `--sdm-c` for light-mode foreground, `--shiki-dark` for dark-mode foreground.
- * Shiki emits one variable per theme key under a shared prefix, so we name the
- * light theme `sdm-c` and the dark theme `shiki-dark` under the `--` prefix to
- * make the output land on exactly those names.
+ * Highlights emits one variable per theme key under a shared prefix, so we
+ * name the light theme `sdm-c` and the dark theme `shiki-dark` under the `--`
+ * prefix to make the output land on exactly those names.
  */
 const LIGHT_KEY = "sdm-c";
 const DARK_KEY = "shiki-dark";
-const THEMES = [LIGHT_KEY, DARK_KEY] as const satisfies [string, string];
 
-const highlighterPromise: Promise<HighlighterCore> = createHighlighterCore({
-	themes: [import("shiki/themes/min-light.mjs"), import("shiki/themes/min-dark.mjs")],
-	langs: [
-		import("shiki/langs/typescript.mjs"),
-		import("shiki/langs/javascript.mjs"),
-		import("shiki/langs/python.mjs"),
-		import("shiki/langs/bash.mjs"),
-		import("shiki/langs/json.mjs"),
-		import("shiki/langs/markdown.mjs"),
-		import("shiki/langs/java.mjs"),
-		import("shiki/langs/go.mjs"),
-		import("shiki/langs/rust.mjs"),
-		import("shiki/langs/ruby.mjs"),
-		import("shiki/langs/sql.mjs"),
-		import("shiki/langs/yaml.mjs"),
-		import("shiki/langs/html.mjs"),
-		import("shiki/langs/css.mjs"),
-	],
-	engine: createJavaScriptRegexEngine(),
-});
-
-let ready: HighlighterCore | undefined;
-highlighterPromise.then(
-	(h) => {
-		ready = h;
-	},
-	// A one-time init failure would otherwise leave `ready` undefined forever
-	// and every fenced block silently fall back to plain mono; surface it as
-	// a page error so a dev notices (and any error reporter plugged in sees it).
-	(error) => {
-		reportError(error);
-	},
-);
-
-function highlight(h: HighlighterCore, code: string, lang: Language): HighlightResult {
-	const result = h.codeToTokens(code, {
-		lang,
-		themes: { [LIGHT_KEY]: "min-light", [DARK_KEY]: "min-dark" },
-		cssVariablePrefix: "--",
-		defaultColor: false,
-	});
+/*
+ * The highlighter is a WebAssembly module of a few hundred kilobytes, so it is
+ * fetched the first time a message contains fenced code rather than with the app.
+ */
+async function importHighlighter() {
+	const [{ codeToTokens, isSupportedLanguage }, { minLight, minDark }] = await Promise.all([
+		import("@pierre/highlights"),
+		import("@pierre/highlights/themes"),
+	]);
 	return {
-		tokens: result.tokens as HighlightResult["tokens"],
-		bg: result.bg,
-		fg: result.fg,
-		rootStyle: result.rootStyle,
+		isSupportedLanguage,
+		/** Null for a language Highlights has no lexer for. */
+		highlight: (code: string, lang: string): HighlightResult | null => {
+			if (!isSupportedLanguage(lang)) return null;
+			return codeToTokens(code, {
+				lang,
+				themes: { [LIGHT_KEY]: minLight, [DARK_KEY]: minDark },
+				cssVariablePrefix: "--",
+				defaultColor: false,
+			});
+		},
 	};
+}
+type Highlighter = Awaited<ReturnType<typeof importHighlighter>>;
+
+let ready: Highlighter | undefined;
+let loading: Promise<Highlighter | undefined> | undefined;
+
+/* Resolves to undefined if the import fails, leaving code plain; the failure is reported once. */
+function loadHighlighter(): Promise<Highlighter | undefined> {
+	loading ??= importHighlighter().then(
+		(highlighter) => {
+			ready = highlighter;
+			return highlighter;
+		},
+		(error) => {
+			reportError(error);
+			return undefined;
+		},
+	);
+	return loading;
 }
 
 export const codeHighlighter: CodeHighlighterPlugin = {
 	name: "shiki",
 	type: "code-highlighter",
-	getSupportedLanguages: () => [...LANGUAGES],
-	getThemes: () => [...THEMES],
-	supportsLanguage: (lang) => normalize(lang) !== undefined,
-	highlight: (options, callback) => {
-		const lang = normalize(options.language);
-		if (!lang) return null;
-		if (ready) return highlight(ready, options.code, lang);
-		if (callback) {
-			void highlighterPromise.then((h) => callback(highlight(h, options.code, lang)));
-		}
+	// Streamdown calls neither of these; `highlight` returning null leaves the block as plain text.
+	getSupportedLanguages: () => [],
+	supportsLanguage: (lang) => ready?.isSupportedLanguage(lang) ?? false,
+	getThemes: () => [LIGHT_KEY, DARK_KEY],
+	highlight: ({ code, language }, callback) => {
+		if (ready) return ready.highlight(code, language);
+		void loadHighlighter().then((highlighter) => {
+			const result = highlighter?.highlight(code, language);
+			if (result) callback?.(result);
+		});
 		return null;
 	},
 };

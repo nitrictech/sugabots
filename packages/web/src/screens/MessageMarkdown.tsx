@@ -117,7 +117,7 @@ const CONTROLS = {
 	image: false,
 };
 
-/* Shiki syntax highlighting for fenced code, github-light / github-dark by default. */
+/* Syntax highlighting for fenced code; see `code-highlighter.ts`. */
 const PLUGINS = { code: codeHighlighter };
 
 /**

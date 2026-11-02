@@ -23,6 +23,7 @@
 		"@leeoniya/ufuzzy": "^1.0.19",
 		"@noble/hashes": "^2.4.0",
 		"@novnc/novnc": "1.7.0",
+		"@pierre/highlights": "0.3.0",
 		"@sugabots/avatars": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/emoji": "workspace:*",
@@ -38,7 +39,6 @@
 		"lucide-react": "^1.43.0",
 		"react": "^19.2.8",
 		"react-dom": "^19.2.8",
-		"shiki": "^4.6.0",
 		"streamdown": "^2.6.0",
 		"unist-util-visit": "^5.1.0",
 		"uuid": "^14.0.2"
