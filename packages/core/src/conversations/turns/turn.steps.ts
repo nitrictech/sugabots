@@ -527,6 +527,8 @@ const streamReply = (
 					catalog,
 					unavailable: connections.unavailable,
 					instructions: connections.instructions,
+					addable: connections.addable,
+					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/connections`,
 				}),
 				sandbox: sandbox.note,
 			};
