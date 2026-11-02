@@ -98,7 +98,9 @@ export function IconButton({
 		render,
 		defaultTagName: "button",
 		props: {
-			type: render ? undefined : "button",
+			// Omitted, not undefined, with `render`: undefined would erase a rendered
+			// close's own type="button", so it would submit its form.
+			...(render ? {} : { type: "button" as const }),
 			"aria-label": label,
 			className: cn(iconButtonClassName(variant, size), className),
 			children,
