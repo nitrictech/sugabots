@@ -1,4 +1,4 @@
-import type { ToolCallPart } from "@sugabots/contracts";
+import { ARTIFACT_WRITING_TOOLS, type ToolCallPart } from "@sugabots/contracts";
 import {
 	type QueryClient,
 	queryOptions,
@@ -13,12 +13,6 @@ import { client } from "@/api.ts";
  * A pod's artifacts. They refetch on every visit, and whenever a thread the
  * app is following reports a write (see `refreshArtifactsAfter`).
  */
-
-/** The tools whose completed calls wrote an artifact. */
-export const ARTIFACT_WRITING_TOOLS: ReadonlySet<string> = new Set([
-	"artifact_write",
-	"artifact_edit",
-]);
 
 /**
  * Refetches the artifacts on screen once `toolCall` has written one. Every

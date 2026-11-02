@@ -180,11 +180,11 @@ function triggerMessageContent(
  * the routine's thread, so it writes that reply to them.
  */
 const POSTED_RESULT_NOTE =
-	"When you finish, your last reply is posted in this routine's thread for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
+	"When you finish, your last reply is posted in this routine's thread for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.";
 
 /** As `POSTED_RESULT_NOTE`, for a routine whose result is posted in its pod's chat too. */
 const POSTED_TO_POD_CHAT_NOTE =
-	"When you finish, your last reply is posted in this routine's thread and in the pod's chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
+	"When you finish, your last reply is posted in this routine's thread and in the pod's chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.";
 
 function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigger) {
 	if (left.kind !== right.kind) return false;

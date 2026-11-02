@@ -1,8 +1,12 @@
 export * as RoutineSettlement from "./settlement.ts";
 
-import { textWithoutNarration } from "@sugabots/contracts";
+import {
+	ARTIFACT_WRITING_TOOLS,
+	artifactsWrittenBy,
+	textWithoutNarration,
+} from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	afterCommit,
@@ -21,6 +25,7 @@ import {
 	routine,
 	routineExecution,
 	thread,
+	toolCall,
 	turn,
 } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -85,22 +90,26 @@ export const make = Effect.gen(function* () {
 	const threads = yield* ThreadRepository.Service;
 
 	/**
-	 * Posts the agent's last reply in the run's own thread into the routine's
-	 * thread, and into the pod's chat as well when `resultGoesToPodChat`: the
-	 * chat chosen while it is not archived, or else the pod's first. A run whose
-	 * agent wrote nothing to show posts nothing.
+	 * Posts the agent's last reply in the run's own thread, with the artifacts
+	 * the run wrote there, into the routine's thread, and into the pod's chat as
+	 * well when `resultGoesToPodChat`: the chat chosen while it is not archived,
+	 * or else the pod's first. A run whose agent wrote nothing to show posts
+	 * nothing.
 	 */
 	const postResult = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
-			const content = (yield* lastReplyText(run)).trim();
-			if (content === "") return;
-			yield* threads.postRunResult({ run, content });
+			const result = {
+				content: (yield* lastReplyText(run)).trim(),
+				artifacts: yield* artifactsWrittenIn(run.threadId),
+			};
+			if (result.content === "" && result.artifacts.length === 0) return;
+			yield* threads.postRunResult({ run, result });
 			const placement = yield* placementOf(run.threadId);
 			if (!resultGoesToPodChat(run.results, placement.podKind)) return;
 			const chatId =
 				(yield* chosenChatOf(run.routineId)) ??
 				(yield* threads.openPodChat({ ...placement, initiatorUserId: null })).id;
-			yield* threads.postRunResultToChat({ chatId, run, content });
+			yield* threads.postRunResultToChat({ chatId, run, result });
 		});
 
 	/**
@@ -340,6 +349,25 @@ const lastReplyText = (run: schema.RoutineExecutionRow) =>
 				.limit(1),
 		),
 		([row]) => (row ? textWithoutNarration(row.parts) : ""),
+	);
+
+/** Each artifact written in the thread `threadId`, as `artifactsWrittenBy` its calls in the order they finished. */
+const artifactsWrittenIn = (threadId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ tool: toolCall.tool, status: toolCall.status, output: toolCall.output })
+				.from(toolCall)
+				.where(
+					and(
+						eq(toolCall.threadId, threadId),
+						eq(toolCall.status, "completed"),
+						inArray(toolCall.tool, [...ARTIFACT_WRITING_TOOLS]),
+					),
+				)
+				.orderBy(asc(toolCall.finishedAt), asc(toolCall.id)),
+		),
+		artifactsWrittenBy,
 	);
 
 const executionThread = (executionId: string) =>

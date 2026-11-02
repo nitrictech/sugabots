@@ -316,6 +316,9 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 					fileNames: event.message.parts.flatMap((part) =>
 						part.type === "file" ? [part.name] : [],
 					),
+					artifactTitles: event.message.parts.flatMap((part) =>
+						part.type === "artifact" ? [part.title] : [],
+					),
 					repliesTo:
 						event.message.replyTo?.author.kind === "person"
 							? event.message.replyTo.author.id

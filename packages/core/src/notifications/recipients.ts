@@ -112,6 +112,8 @@ export interface WrittenMessage {
 	content: string;
 	/** The names of the files it shares, which stand in for its text when it has none. */
 	fileNames: readonly string[];
+	/** The titles of the artifacts a routine's result shows, which stand in for its text when it has none. */
+	artifactTitles: readonly string[];
 	/** The person whose message it answers, who hears of it as of a reply in Slack. */
 	repliesTo: string | null;
 }
@@ -126,7 +128,10 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	written: WrittenMessage,
 	now: Date,
 ) {
-	const preview = previewOf(written.content) || sharedFilesPreview(written.fileNames);
+	const preview =
+		previewOf(written.content) ||
+		sharedPreview(written.fileNames, "files") ||
+		sharedPreview(written.artifactTitles, "artifacts");
 	if (!preview) return [];
 	const place = yield* placeOf(db, written.threadId);
 	if (!place || !NOTIFYING_THREAD_TYPES.has(place.type)) return [];
@@ -183,6 +188,7 @@ export const forReply = Effect.fn("Notifications.forReply")(function* (
 			authorName: answering.agentName,
 			content: completed.content,
 			fileNames: [],
+			artifactTitles: [],
 			repliesTo: answering.userId,
 		},
 		now,
@@ -349,9 +355,9 @@ function previewOf(content: string): string {
 		: flat;
 }
 
-function sharedFilesPreview(fileNames: readonly string[]): string {
-	if (fileNames.length === 0) return "";
-	return fileNames.length === 1 ? `Shared ${fileNames[0]}` : `Shared ${fileNames.length} files`;
+function sharedPreview(names: readonly string[], plural: "files" | "artifacts"): string {
+	if (names.length === 0) return "";
+	return names.length === 1 ? `Shared ${names[0]}` : `Shared ${names.length} ${plural}`;
 }
 
 type Place = NonNullable<Effect.Success<ReturnType<typeof placeOf>>>;

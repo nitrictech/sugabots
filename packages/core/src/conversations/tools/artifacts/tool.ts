@@ -1,9 +1,11 @@
 import {
+	ARTIFACT_WRITING_TOOLS,
 	type Artifact,
 	type ArtifactSummary,
 	artifactContentSchema,
 	artifactKindSchema,
 	artifactTitleSchema,
+	artifactWrittenSchema,
 	type BuiltInToolKey,
 } from "@sugabots/contracts";
 import { type Tool, tool } from "ai";
@@ -25,12 +27,6 @@ export const ARTIFACT_TOOLS: ReadonlySet<string> = new Set([
 	ARTIFACT_EDIT_TOOL,
 ]);
 
-/** The artifact tools that change something, for the turn to record as mutating. */
-export const MUTATING_ARTIFACT_TOOLS: ReadonlySet<string> = new Set([
-	ARTIFACT_WRITE_TOOL,
-	ARTIFACT_EDIT_TOOL,
-]);
-
 export interface ArtifactToolOptions {
 	by: Artifacts.AgentInThread;
 	/** The turn the tools are bound to, whose writes to one artifact are one version. */
@@ -47,22 +43,9 @@ export interface ArtifactToolOptions {
 }
 
 /** What the model is told about an artifact it made or changed. */
-interface Written {
-	status: "written";
-	artifactId: string;
-	kind: Artifact["kind"];
-	title: string;
-	version: number;
-}
+type Written = typeof artifactWrittenSchema.Type;
 
 type Refusal = { status: "refused"; reason: string };
-
-/** A write's result as recorded with its call: the parts that say which version it wrote. */
-const writtenSchema = Schema.Struct({
-	status: Schema.Literal("written"),
-	artifactId: Schema.String,
-	version: Schema.Int,
-});
 
 const artifactIdSchema = Schema.String.annotate({
 	description: "The artifact's id, from artifact_list or the write that made it",
@@ -99,9 +82,9 @@ export function artifactTools({
 
 	/** Whether this turn wrote `version` of the artifact, and so may write over it. */
 	const wroteInTurn = (artifactId: string, version: number) =>
-		Effect.map(calls.completedOutputs(turnId, [...MUTATING_ARTIFACT_TOOLS]), (outputs) =>
+		Effect.map(calls.completedOutputs(turnId, [...ARTIFACT_WRITING_TOOLS]), (outputs) =>
 			outputs.some((output) => {
-				const written = Schema.decodeUnknownOption(writtenSchema)(output);
+				const written = Schema.decodeUnknownOption(artifactWrittenSchema)(output);
 				return (
 					Option.isSome(written) &&
 					written.value.artifactId === artifactId &&

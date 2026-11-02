@@ -379,6 +379,45 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 	});
 
+	it("names the artifacts a routine's result shares without text in the pod's chat", async () => {
+		const chat = await podChat();
+		await chooseLevel(people.bob.id, "all");
+		const resultSharing = (titles: readonly string[]) =>
+			ConversationEvent.MessagePosted({
+				threadId: chat,
+				workspaceId,
+				podId,
+				message: {
+					id: crypto.randomUUID(),
+					content: "",
+					parts: titles.map((title) => ({
+						type: "artifact",
+						artifactId: crypto.randomUUID(),
+						kind: "html",
+						title,
+						version: 1,
+					})),
+					author: {
+						kind: "agent",
+						id: botId,
+						name: "Scout",
+						handle: "scout",
+						color: "green",
+						face: "pill",
+						shape: "circle",
+					},
+				} as Message,
+			});
+
+		await emit(resultSharing(["Weekly traction"]));
+		await emit(resultSharing(["Weekly traction", "Pipeline"]));
+
+		expect(await deliveredTo(people.bob.id)).toEqual([
+			expect.objectContaining({ body: "Shared Weekly traction" }),
+			expect.objectContaining({ body: "Shared 2 artifacts" }),
+		]);
+	});
+
 	it("tells the people in a conversation of a bot's reply, and those who chose everything", async () => {
 		const conversation = await conversationWithBot([people.ada.id]);
 		await chooseLevel(people.cy.id, "all");

@@ -1,6 +1,7 @@
 import { type Message, messageAuthorName, quotedPreview } from "@sugabots/contracts";
 import type { Models } from "../../providers/models/models.ts";
 import {
+	describeArtifact,
 	describeAttachment,
 	describeCollaboration,
 	describeReplyTo,
@@ -192,6 +193,7 @@ function promptMessagesFor(
 	const records = message.parts.flatMap((part): string[] => {
 		if (part.type === "text" || part.type === "file") return [];
 		if (part.type === "collaboration") return [describeCollaboration(part)];
+		if (part.type === "artifact") return [describeArtifact(part)];
 		return [describeToolCall(part, resultFiles.get(part.id))];
 	});
 	if (records.length === 0) return authored ? [authored] : [];

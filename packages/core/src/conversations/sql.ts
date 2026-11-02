@@ -1,4 +1,5 @@
 import type {
+	ArtifactKind,
 	CollaborationStatus,
 	JsonValue,
 	MessageStatus,
@@ -532,12 +533,15 @@ export const messageReaction = pgTable(
  * answer live on the `collaboration` row and are composed in on read, so the reply's
  * writer and the collaborator's completing turn never write the same row. A tool
  * call is kept by reference for the same reason in the other direction: its
- * output lands on the `tool_call` row without rewriting the reply's parts.
+ * output lands on the `tool_call` row without rewriting the reply's parts. An
+ * artifact on a routine run's posted result is kept whole: it names the
+ * version the run wrote, which never changes.
  */
 export type StoredMessagePart =
 	| { type: "text"; text: string }
 	| { type: "collaboration"; collaborationId: string }
-	| { type: "tool_call"; toolCallId: string };
+	| { type: "tool_call"; toolCallId: string }
+	| { type: "artifact"; artifactId: string; kind: ArtifactKind; title: string; version: number };
 
 /**
  * One agent asking another for help mid-reply. The reply is `parentMessage`;

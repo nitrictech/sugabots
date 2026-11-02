@@ -4,6 +4,7 @@ import {
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
+	isAttached,
 	type Message,
 	mentionedHandles,
 	messageAuthorName,
@@ -1153,7 +1154,11 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 	);
 }
 
-/** In a thread's intro, the whole of the message in the pod's chat it was started from, and its files by name. */
+/**
+ * In a thread's intro, the whole of the message in the pod's chat it was
+ * started from, and what is attached to it by name: its files, or a routine
+ * result's artifacts.
+ */
 function StartedFrom({
 	message,
 	mentionable,
@@ -1161,7 +1166,9 @@ function StartedFrom({
 	message: Message;
 	mentionable: ThreadParticipant[];
 }) {
-	const files = message.parts.filter((part): part is FilePart => part.type === "file");
+	const attached = message.parts
+		.filter(isAttached)
+		.map((part) => (part.type === "file" ? part.name : part.title));
 	return (
 		<div className="mt-1 flex max-w-[720px] flex-col gap-1 border-border-strong border-l-2 pl-3">
 			<span className="font-semibold text-[14px] text-foreground">
@@ -1172,10 +1179,8 @@ function StartedFrom({
 					{textWithMentions(message.content, mentionable)}
 				</p>
 			)}
-			{files.length > 0 && (
-				<p className="m-0 truncate text-[13px] text-muted-foreground">
-					{files.map((file) => file.name).join(", ")}
-				</p>
+			{attached.length > 0 && (
+				<p className="m-0 truncate text-[13px] text-muted-foreground">{attached.join(", ")}</p>
 			)}
 		</div>
 	);

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { BuiltInToolKey } from "./built-in-tools.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -54,3 +55,22 @@ export const artifactSchema = Schema.Struct({
 	shownVersion: artifactVersionSummarySchema,
 });
 export type Artifact = typeof artifactSchema.Type;
+
+/** The tools whose completed calls write an artifact, returning what `artifactWrittenSchema` reads. */
+export const ARTIFACT_WRITING_TOOLS: ReadonlySet<string> = new Set([
+	"artifact_write",
+	"artifact_edit",
+] satisfies BuiltInToolKey[]);
+
+/**
+ * What a call to one of `ARTIFACT_WRITING_TOOLS` returns when it writes: the
+ * artifact, at the version it wrote. The model is told this, and it is
+ * recorded as the call's output.
+ */
+export const artifactWrittenSchema = Schema.Struct({
+	status: Schema.Literal("written"),
+	artifactId: uuidSchema,
+	kind: artifactKindSchema,
+	title: Schema.String,
+	version: Schema.Int.check(Schema.isGreaterThan(0)),
+});
