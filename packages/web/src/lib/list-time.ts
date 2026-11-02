@@ -1,21 +1,33 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_DAYS = 7;
+const YESTERDAY = "Yesterday";
 
 /**
  * When a message was sent, as a conversation list shows it: the time for
  * today, "Yesterday", the weekday within the week, then the date, with the
- * year only when it is not this one.
+ * year only when it is not this one. Inside a sentence, use
+ * {@link formatListTimeInSentence}.
  */
 export function formatListTime(at: Date, now: Date, locale?: string): string {
 	const daysAgo = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
 	if (daysAgo <= 0) return formatClockTime(at, locale);
-	if (daysAgo === 1) return "Yesterday";
+	if (daysAgo === 1) return YESTERDAY;
 	if (daysAgo < WEEK_DAYS) return at.toLocaleDateString(locale, { weekday: "short" });
 	return at.toLocaleDateString(locale, {
 		day: "numeric",
 		month: "short",
 		year: at.getFullYear() === now.getFullYear() ? undefined : "numeric",
 	});
+}
+
+/**
+ * {@link formatListTime} for the middle of a sentence, such as "Last used
+ * yesterday": only "Yesterday" is lowercased, since weekday and month names
+ * keep their capitals ("Last used 2 Oct").
+ */
+export function formatListTimeInSentence(at: Date, now: Date, locale?: string): string {
+	const shown = formatListTime(at, now, locale);
+	return shown === YESTERDAY ? shown.toLowerCase() : shown;
 }
 
 /**

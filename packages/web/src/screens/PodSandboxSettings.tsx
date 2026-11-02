@@ -1,7 +1,7 @@
 import type { PodSandbox } from "@sugabots/contracts";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatListTime } from "@/lib/list-time.ts";
+import { formatListTimeInSentence } from "@/lib/list-time.ts";
 import { usePodSandbox, usePodSandboxActions } from "@/lib/pod-sandbox.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -84,11 +84,11 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 				sub={
 					busy.length > 0
 						? busy.join(", ")
-						: `Last used ${formatListTime(new Date(sandbox.lastUsedAt), now).toLowerCase()}`
+						: `Last used ${formatListTimeInSentence(new Date(sandbox.lastUsedAt), now)}`
 				}
 				trailing={
 					<SettingsValue>
-						Made {formatListTime(new Date(sandbox.createdAt), now).toLowerCase()}
+						Made {formatListTimeInSentence(new Date(sandbox.createdAt), now)}
 					</SettingsValue>
 				}
 			/>
