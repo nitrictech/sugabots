@@ -23,6 +23,7 @@
 		"@leeoniya/ufuzzy": "^1.0.19",
 		"@noble/hashes": "^2.4.0",
 		"@novnc/novnc": "1.7.0",
+		"@streamdown/code": "^2.0.0",
 		"@sugabots/avatars": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/emoji": "workspace:*",

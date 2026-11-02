@@ -1,3 +1,4 @@
+import { code as codeHighlighter } from "@streamdown/code";
 import type { ThreadParticipant } from "@sugabots/contracts";
 import type { Root } from "hast";
 import { createElement, type ReactNode } from "react";
@@ -36,6 +37,7 @@ export function MessageMarkdown({
 				components={COMPONENTS}
 				controls={CONTROLS}
 				linkSafety={LINK_SAFETY}
+				plugins={PLUGINS}
 				isAnimating={false}
 			>
 				{text}
@@ -114,6 +116,9 @@ const CONTROLS = {
 	mermaid: false,
 	image: false,
 };
+
+/* Shiki syntax highlighting for fenced code, github-light / github-dark by default. */
+const PLUGINS = { code: codeHighlighter };
 
 /**
  * ScrollingTable renders a table in a labelled, keyboard-focusable horizontal
