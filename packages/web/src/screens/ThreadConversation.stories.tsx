@@ -572,6 +572,67 @@ export const UnlabelledCodeBlock = meta.story({
 	},
 });
 
+/**
+ * A block longer than a bubble should hold: it shows its first lines, fading
+ * out, and Show more opens the rest in place rather than in a scroller.
+ */
+export const LongCodeBlock = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		const body = canvas
+			.getByRole("group", { name: "Code block" })
+			.closest<HTMLElement>('[data-streamdown="code-block-body"]');
+		if (!body) throw new Error("No code block body");
+		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+		await userEvent.click(canvas.getByRole("button", { name: "Show more" }));
+		await expect(body.scrollHeight).toBe(body.clientHeight);
+		await userEvent.click(canvas.getByRole("button", { name: "Show less" }));
+		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+	},
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000106",
+				host,
+				[
+					"This retries the deploy with backoff and gives up after five attempts:",
+					"",
+					"```ts",
+					"const MAX_ATTEMPTS = 5;",
+					"const BASE_DELAY_MS = 500;",
+					"",
+					"export async function deployWithRetry(stack: Stack): Promise<DeployResult> {",
+					"\tlet lastError: unknown;",
+					"\tfor (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {",
+					"\t\ttry {",
+					"\t\t\tconst result = await provisioner.apply(stack);",
+					'\t\t\tlog.info("deployed", { stack: stack.name, attempt });',
+					"\t\t\treturn result;",
+					"\t\t} catch (error) {",
+					"\t\t\tlastError = error;",
+					"\t\t\tif (!isRetryable(error)) throw error;",
+					"\t\t\tconst delay = BASE_DELAY_MS * 2 ** (attempt - 1);",
+					'\t\t\tlog.warn("deploy failed, retrying", { attempt, delayMs: delay, error });',
+					"\t\t\tawait sleep(delay);",
+					"\t\t}",
+					"\t}",
+					"\tthrow new DeployFailed(stack.name, lastError);",
+					"}",
+					"",
+					"function isRetryable(error: unknown): boolean {",
+					"\tif (!(error instanceof ProvisionerError)) return false;",
+					'\treturn error.code === "Throttling" || error.code === "ServiceUnavailable";',
+					"}",
+					"",
+					"function sleep(ms: number): Promise<void> {",
+					"\treturn new Promise((resolve) => setTimeout(resolve, ms));",
+					"}",
+					"```",
+				].join("\n"),
+			),
+		],
+	},
+});
+
 const wideTableAnswer = [
 	"Here's where each region stands:",
 	"",
