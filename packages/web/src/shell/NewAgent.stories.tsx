@@ -171,6 +171,23 @@ export const MadeAsShown = meta.story({
 	},
 });
 
+/** The × discards a bot that has a name and a model, rather than making it. */
+export const ClosedWithoutMaking = meta.story({
+	args: { podId: revenue.id },
+	beforeEach({ msw }) {
+		created = [];
+		msw.use(createAgent, listAgents);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.type(within(dialog).getByRole("textbox", { name: "Name" }), "Support Desk");
+		const close = within(dialog).getByRole("button", { name: "Close" });
+		await userEvent.click(close);
+		await expect(args.onCreated).not.toHaveBeenCalled();
+		await expect(created).toEqual([]);
+	},
+});
+
 /**
  * The models fill the right: Suggested first, with the default, then each
  * provider's, with what each can do; a search narrows a long list.
