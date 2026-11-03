@@ -2,19 +2,27 @@ import { useEffect } from "react";
 import { matchesMedia } from "./media.ts";
 
 /**
- * Shows `count` outside the page: on the icon of Sugabots installed as an
- * app, and in the title. Nothing shows while it is zero. The title goes back
- * as it was when the count goes, and the icon is cleared when the caller
- * unmounts.
+ * Titles the page `title`, and shows `count` outside the page: on the icon of
+ * Sugabots installed as an app, and in the title. Nothing shows while it is
+ * zero. The title goes back as it was, and the icon is cleared, when the
+ * caller unmounts.
  */
-export function useAppBadge(count: number) {
+export function useAppBadge(count: number, title: string) {
+	// First, so it keeps the title from before this sets it.
+	useEffect(() => {
+		const before = document.title;
+		return () => {
+			showOnIcon(0);
+			document.title = before;
+		};
+	}, []);
 	useEffect(() => {
 		// Sets the icon straight to the new count: clearing it first, between two counts, would flicker.
 		showOnIcon(count);
-		if (count === 0) return;
-		return markTitle(`(${count})`);
 	}, [count]);
-	useEffect(() => () => showOnIcon(0), []);
+	useEffect(() => {
+		document.title = count === 0 ? title : markTitle(title, `(${count})`);
+	}, [count, title]);
 }
 
 /**
@@ -37,10 +45,6 @@ const INSTALLED_APP = "(display-mode: standalone)";
  * and Edge show a title that starts with the name as it is, and put the name
  * in front of any other, which would repeat it.
  */
-function markTitle(marker: string): () => void {
-	const title = document.title;
-	document.title = matchesMedia(INSTALLED_APP) ? `${title} ${marker}` : `${marker} ${title}`;
-	return () => {
-		document.title = title;
-	};
+function markTitle(title: string, marker: string): string {
+	return matchesMedia(INSTALLED_APP) ? `${title} ${marker}` : `${marker} ${title}`;
 }

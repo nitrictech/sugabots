@@ -2531,7 +2531,7 @@ describe("the app's badge", () => {
 		);
 		mount(linearPage);
 
-		await waitFor(() => expect(document.title).toBe("(1) Sugabots"));
+		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
 		expect(setAppBadge).toHaveBeenCalledWith(1);
 	});
 
@@ -2543,7 +2543,7 @@ describe("the app's badge", () => {
 		);
 		mount(linearPage);
 
-		await waitFor(() => expect(document.title).toBe("Sugabots (1)"));
+		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace (1)"));
 	});
 
 	it("leaves the icon and the title alone for unread messages that are not for you", async () => {
@@ -2556,7 +2556,7 @@ describe("the app's badge", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: "Suga-Team" }));
 		await within(screen.getByRole("group", { name: "Suga-Team" })).findByText(/2 unread messages/);
-		expect(document.title).toBe("Sugabots");
+		expect(document.title).toBe("Sugabots | Suga Workspace");
 		expect(setAppBadge).not.toHaveBeenCalled();
 	});
 
@@ -2569,13 +2569,13 @@ describe("the app's badge", () => {
 			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
 		);
 		mount(linearPage);
-		await waitFor(() => expect(document.title).toBe("(1) Sugabots"));
+		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
 		clearAppBadge.mockClear();
 
 		client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
 		updates.emit(streamEvent("thread.changed", { threadId: waitingApproval.threadId }));
 
-		await waitFor(() => expect(document.title).toBe("Sugabots"));
+		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));
 		expect(clearAppBadge).toHaveBeenCalled();
 	});
 });
