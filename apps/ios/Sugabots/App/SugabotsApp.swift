@@ -26,9 +26,13 @@ struct SugabotsApp: App {
 
 /// Signing in, or the signed-in person's workspace. A view rather than the
 /// scene's body, since only a view's body redraws when `Session` changes.
+@MainActor
 private struct RootView: View {
 	@Environment(Session.self) private var session
 	@Environment(Toaster.self) private var toaster
+	@Environment(\.accessibilityReduceMotion) private var reduceMotion
+	@AppStorage(Liveliness.storageKey) private var liveliness = Liveliness.chosenByDefault
+	@State private var typing = TypingWatch()
 
 	var body: some View {
 		ZStack(alignment: .bottom) {
@@ -50,6 +54,9 @@ private struct RootView: View {
 		}
 		.animation(.easeOut(duration: 0.2), value: toaster.message)
 		.background(Palette.background.ignoresSafeArea())
+		// Bots' faces move as chosen on this device, and not at all where the system asks for less motion.
+		.environment(\.liveliness, reduceMotion ? .off : liveliness)
+		.environment(typing)
 	}
 }
 

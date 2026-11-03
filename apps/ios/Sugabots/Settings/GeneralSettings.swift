@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Your profile, as the web's `ProfileSettings`: your name, email and theme,
+/// Your profile, as the web's `ProfileSettings`: your name, email, theme and how much bots' faces move,
 /// Notifications, your invite link, and Sign out.
 @MainActor
 struct ProfileSettingsScreen: View {
 	@Environment(Session.self) private var session
 	@Environment(WorkspaceStore.self) private var store
 	@AppStorage(Theme.storageKey) private var theme = Theme.dark
+	@AppStorage(Liveliness.storageKey) private var liveliness = Liveliness.chosenByDefault
 	@State private var name: String?
 
 	var body: some View {
@@ -27,6 +28,10 @@ struct ProfileSettingsScreen: View {
 			SettingsGroup(label: "Appearance") {
 				SettingsRow.trailing(label: "Theme") {
 					SegmentedChoice(label: "Theme", options: Theme.allCases.map { ($0, $0.label) }, value: theme) { theme = $0 }
+				}
+				SettingsDivider()
+				SettingsRow.trailing(label: "Animations", sub: "How often bots' faces move") {
+					SegmentedChoice(label: "Animations", options: Liveliness.allCases.map { ($0, $0.label) }, value: liveliness) { liveliness = $0 }
 				}
 			}
 			SettingsGroup {

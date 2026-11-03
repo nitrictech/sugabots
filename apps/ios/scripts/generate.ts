@@ -31,6 +31,7 @@ export const generators: Record<string, RegisteredGenerator> = {
 	"generate-catalogs.ts": iosOnly(catalogs.generate),
 	"generate-connection-marks.ts": iosOnly(connectionMarks.generate),
 	"generate-emoji.ts": iosOnly(emoji.generate),
+	"generate-face-motion.ts": iosOnly(faceMotion.generate),
 	"generate-limits.ts": iosOnly(limits.generate),
 	"generate-lucide-icons.ts": iosOnly(lucideIcons.generate),
 	"generate-native-constants.ts": iosOnly(nativeConstants.generate),

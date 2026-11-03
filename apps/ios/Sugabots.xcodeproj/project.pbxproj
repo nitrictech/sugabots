@@ -27,6 +27,10 @@
 		BBABD080951E1845220A26E8 /* Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F6F585620EC11CCDE525A6 /* Controls.swift */; };
 		56D6C924863DDEB7437F800F /* Faces.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9AE8FE1CDBAFCE46BF578E /* Faces.swift */; };
 		CC29E82252B5FE216850DDE9 /* Avatars.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F6B58CD306C531CFFC774F /* Avatars.swift */; };
+		B88253E33182EA5463C76227 /* LivelyBotFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8652F04125E09A3DEB652D /* LivelyBotFace.swift */; };
+		0CE628BBDD69C47B47E4EA9D /* FaceRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1443F2DA1A66A5223865F5 /* FaceRig.swift */; };
+		12564E0D16D0D1063B5C395D /* FacePaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA776EEA704E5A8FDCB7DF25 /* FacePaths.swift */; };
+		D20F64DE317082BC7A9854F0 /* FaceMotion.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2DFBEB116BB69534707D317 /* FaceMotion.generated.swift */; };
 		6200298A0F341EEBB9CEC47F /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B17129B8579BC8CF7E165FE /* Palette.swift */; };
 		5519534E4D310800FBD74534 /* SVGPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1A8E67DCFD5C397203F038 /* SVGPath.swift */; };
 		90FE1ACDA6033F0CDD13BFE9 /* HomeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AF57B4CF1C84550D1950112 /* HomeScreen.swift */; };
@@ -146,6 +150,10 @@
 		76F6F585620EC11CCDE525A6 /* Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controls.swift; sourceTree = "<group>"; };
 		DB9AE8FE1CDBAFCE46BF578E /* Faces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Faces.swift; sourceTree = "<group>"; };
 		A5F6B58CD306C531CFFC774F /* Avatars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Avatars.swift; sourceTree = "<group>"; };
+		AB8652F04125E09A3DEB652D /* LivelyBotFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LivelyBotFace.swift"; sourceTree = "<group>"; };
+		CC1443F2DA1A66A5223865F5 /* FaceRig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FaceRig.swift"; sourceTree = "<group>"; };
+		FA776EEA704E5A8FDCB7DF25 /* FacePaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FacePaths.swift"; sourceTree = "<group>"; };
+		C2DFBEB116BB69534707D317 /* FaceMotion.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FaceMotion.generated.swift"; sourceTree = "<group>"; };
 		6B17129B8579BC8CF7E165FE /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
 		3A1A8E67DCFD5C397203F038 /* SVGPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGPath.swift; sourceTree = "<group>"; };
 		ABED72F46CC97B327B1A2B9E /* JetBrainsMono.woff2 */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono.woff2; sourceTree = "<group>"; };
@@ -390,6 +398,10 @@
 				76F6F585620EC11CCDE525A6 /* Controls.swift */,
 				DB9AE8FE1CDBAFCE46BF578E /* Faces.swift */,
 				A5F6B58CD306C531CFFC774F /* Avatars.swift */,
+				AB8652F04125E09A3DEB652D /* LivelyBotFace.swift */,
+				CC1443F2DA1A66A5223865F5 /* FaceRig.swift */,
+				FA776EEA704E5A8FDCB7DF25 /* FacePaths.swift */,
+				C2DFBEB116BB69534707D317 /* FaceMotion.generated.swift */,
 				6B17129B8579BC8CF7E165FE /* Palette.swift */,
 				3A1A8E67DCFD5C397203F038 /* SVGPath.swift */,
 			);
@@ -686,6 +698,10 @@
 				BBABD080951E1845220A26E8 /* Controls.swift in Sources */,
 				56D6C924863DDEB7437F800F /* Faces.swift in Sources */,
 				CC29E82252B5FE216850DDE9 /* Avatars.swift in Sources */,
+				B88253E33182EA5463C76227 /* LivelyBotFace.swift in Sources */,
+				0CE628BBDD69C47B47E4EA9D /* FaceRig.swift in Sources */,
+				12564E0D16D0D1063B5C395D /* FacePaths.swift in Sources */,
+				D20F64DE317082BC7A9854F0 /* FaceMotion.generated.swift in Sources */,
 				6200298A0F341EEBB9CEC47F /* Palette.swift in Sources */,
 				5519534E4D310800FBD74534 /* SVGPath.swift in Sources */,
 				90FE1ACDA6033F0CDD13BFE9 /* HomeScreen.swift in Sources */,
