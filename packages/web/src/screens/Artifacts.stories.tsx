@@ -312,6 +312,24 @@ export const InAThread = meta.story({
 	},
 });
 
+/**
+ * On a phone, where a card is too narrow for its name and its buttons in one
+ * row, the buttons drop below the name, which shows whole.
+ */
+export const InAThreadOnAPhone = meta.story({
+	beforeEach: InAThread.input.beforeEach,
+	render: InAThread.input.render,
+	globals: { viewport: { value: "mobile1" } },
+	play: async ({ canvas }) => {
+		const maker = canvas.getByText("Document by Growth Desk");
+		const open = canvas.getByRole("button", { name: "Open Q4 outreach plan" });
+		await expect(maker.scrollWidth).toBeLessThanOrEqual(maker.clientWidth);
+		await expect(open.getBoundingClientRect().top).toBeGreaterThan(
+			maker.getBoundingClientRect().bottom,
+		);
+	},
+});
+
 function QueryPreview({ children }: { children: ReactNode }) {
 	const [queryClient] = useState(
 		() => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
