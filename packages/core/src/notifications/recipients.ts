@@ -3,6 +3,7 @@ import {
 	handleFromName,
 	mentionedHandles,
 	mentionsEveryone,
+	NOTIFYING_THREAD_TYPES,
 	type NotificationContent,
 	type NotificationLevel,
 	type QuietHours,
@@ -344,8 +345,6 @@ export const forRoutineRun = Effect.fn("Notifications.forRoutineRun")(function* 
 			}),
 		);
 });
-
-const NOTIFYING_THREAD_TYPES = new Set(["conversation", "pod_chat", "bot_channel"]);
 
 /** The most of a message a notification shows. */
 const PREVIEW_CHARACTERS = 180;
