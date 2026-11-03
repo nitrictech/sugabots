@@ -1,4 +1,4 @@
-import { botColors } from "@sugabots/avatars";
+import { botColors, type LivelyFace, type MoodLoop, useMoodLoop } from "@sugabots/avatars";
 import {
 	type Agent,
 	type AgentColor,
@@ -30,6 +30,7 @@ import {
 	type FormEvent,
 	type KeyboardEvent,
 	type ReactNode,
+	useEffect,
 	useId,
 	useRef,
 	useState,
@@ -192,7 +193,7 @@ export function NewAgentDialog({
 								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-xl text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip"
 							/>
 							<div className="grid flex-1 place-items-center">
-								<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
+								<CreationFace look={look} />
 							</div>
 							<LookGrid
 								looks={looks}
@@ -335,7 +336,7 @@ function PhoneNewBot({
 							(naming || customising) && "scale-50",
 						)}
 					>
-						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
+						<CreationFace look={look} />
 					</span>
 					{!customising && !naming && (
 						<span
@@ -640,6 +641,43 @@ function ModelRow({
 			</span>
 		</button>
 	);
+}
+
+/**
+ * How the bot being made carries itself: mostly at ease, often pleased, and
+ * now and then briefly excited.
+ */
+const CREATION_MOODS: MoodLoop = [
+	{ mood: "idle", weight: 1, seconds: { least: 4, most: 9 } },
+	{ mood: "happy", weight: 3, seconds: { least: 2, most: 4 } },
+	{ mood: "excited", weight: 1, seconds: { least: 1.2, most: 2 } },
+];
+
+/** The bot being made, large: hopping each time its look changes, and moving through `CREATION_MOODS`. */
+function CreationFace({ look }: { look: Look }) {
+	const mood = useMoodLoop(CREATION_MOODS);
+	const face = useRef<LivelyFace>(null);
+	const key = lookKey(look);
+	const shownKey = useRef(key);
+	useEffect(() => {
+		if (key === shownKey.current) return;
+		shownKey.current = key;
+		face.current?.play("hop");
+	}, [key]);
+	return (
+		<AgentAvatar
+			color={look.color}
+			face={look.face}
+			shape={look.shape}
+			size={112}
+			lively={{ mood, watchPointer: true, ref: face }}
+		/>
+	);
+}
+
+/** Names a look, so the bot hops whenever any part of it changes. */
+function lookKey({ color, shape, face }: Look): string {
+	return `${color}-${shape}-${face}`;
 }
 
 /** Looks to start from, with no colour twice before every colour has been used. */

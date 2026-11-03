@@ -1,3 +1,4 @@
+import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
 	type Agent,
 	type Pod,
@@ -9,6 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
@@ -271,6 +273,29 @@ function ThemeChoice() {
 	return <SegmentedControl label="Theme" options={themes} value={theme} onChange={setTheme} />;
 }
 
+/** What each level is called in settings; every level must have a name, so a new one can't be left out. */
+const livelinessNames: Record<Liveliness, string> = {
+	off: "Off",
+	sometimes: "Sometimes",
+	often: "Often",
+};
+
+const livelinessOptions = livelinessLevels.map((level) => ({
+	value: level,
+	label: livelinessNames[level],
+}));
+function LivelinessChoice() {
+	const [liveliness, setLiveliness] = useLivelinessChoice();
+	return (
+		<SegmentedControl
+			label="Animations"
+			options={livelinessOptions}
+			value={liveliness}
+			onChange={setLiveliness}
+		/>
+	);
+}
+
 function ProfileSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
@@ -303,6 +328,11 @@ function ProfileSettings() {
 			</SettingsGroup>
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
+				<SettingsRow
+					label="Animations"
+					sub="How often bots' faces move"
+					trailing={<LivelinessChoice />}
+				/>
 			</SettingsGroup>
 			{/* Below a laptop's width your profile is opened from a card, with no list beside it that has Notifications. */}
 			{openedFromCard && (

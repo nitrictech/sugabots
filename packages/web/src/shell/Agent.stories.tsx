@@ -1,7 +1,10 @@
-import { botColorVariables } from "@sugabots/avatars";
+import { type BotMood, botColorVariables, botMoods, type LivelyFace } from "@sugabots/avatars";
 import { agentColors, agentFaces, agentShapes } from "@sugabots/contracts";
+import { useRef, useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
+import { Button } from "@/ui/button.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { AgentAvatar } from "./Agent.tsx";
 
 const meta = preview.meta({
@@ -113,4 +116,81 @@ export const Stacked = meta.story({
 			))}
 		</div>
 	),
+});
+
+/** A mood's name as a label: `idle` reads "Idle". */
+function moodLabel(mood: BotMood): string {
+	return mood.charAt(0).toUpperCase() + mood.slice(1);
+}
+
+const moodOptions = botMoods.map((mood) => ({ value: mood, label: moodLabel(mood) }));
+
+/** Lively shows every head shape alive, for trying each mood, how one eases into the next, and a hop. */
+export const Lively = meta.story({
+	globals: { liveliness: "sometimes" },
+	render: function Render() {
+		const faces = useRef<(LivelyFace | null)[]>([]);
+		const [mood, setMood] = useState<BotMood>("idle");
+		return (
+			<div className="flex flex-col items-start gap-6 pt-6">
+				<div className="flex items-center gap-3">
+					<Button
+						onClick={() => {
+							for (const face of faces.current) face?.play("hop");
+						}}
+					>
+						Hop
+					</Button>
+					<SegmentedControl label="Mood" options={moodOptions} value={mood} onChange={setMood} />
+				</div>
+				<div className="grid w-fit grid-cols-7 gap-6">
+					{agentShapes.map((shape, index) => (
+						<AgentAvatar
+							key={shape}
+							color={agentColors[index % agentColors.length] ?? "green"}
+							face={agentFaces[index % agentFaces.length]}
+							shape={shape}
+							size={80}
+							lively={{
+								mood,
+								ref: (face) => {
+									faces.current[index] = face;
+								},
+							}}
+						/>
+					))}
+				</div>
+			</div>
+		);
+	},
+});
+
+/** Moods shows a bot in each mood side by side, for comparing them. */
+export const Moods = meta.story({
+	globals: { liveliness: "sometimes" },
+	render: () => (
+		<div className="flex gap-8 pt-6">
+			{botMoods.map((mood, index) => (
+				<figure key={mood} className="m-0 flex flex-col items-center gap-3">
+					<AgentAvatar
+						color={agentColors[index % agentColors.length] ?? "green"}
+						face={agentFaces[index % agentFaces.length]}
+						shape={agentShapes[index % agentShapes.length] ?? "circle"}
+						size={96}
+						lively={{ mood }}
+					/>
+					<figcaption className="text-subtle-foreground text-xs">{moodLabel(mood)}</figcaption>
+				</figure>
+			))}
+		</div>
+	),
+	play: async ({ canvas }) => {
+		for (const mood of botMoods) await expect(canvas.getByText(moodLabel(mood))).toBeVisible();
+	},
+});
+
+/** OneLively shows a single lively face, for judging one mood by itself, or what one face costs. */
+export const OneLively = meta.story({
+	globals: { liveliness: "sometimes" },
+	args: { size: 96, lively: { mood: "idle" } },
 });

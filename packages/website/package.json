@@ -27,7 +27,7 @@
 		"class-variance-authority": "^0.7.1",
 		"cn": "^0.2.6",
 		"lucide-react": "^1.48.0",
-		"motion": "^13.4.3",
+		"motion": "13.4.4",
 		"posthog-js": "^1.434.15",
 		"react": "^19.2.8",
 		"react-dom": "^19.2.8"

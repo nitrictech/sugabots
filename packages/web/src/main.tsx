@@ -3,6 +3,7 @@ import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { failureMessage } from "@/lib/failure.ts";
+import { LivelinessProvider } from "@/lib/liveliness.tsx";
 import { createQueryClient } from "@/lib/query.ts";
 import { type Session, useSessionFromApi } from "@/lib/session.ts";
 import { reloadWhenADeployReplacesChunks } from "@/lib/stale-chunks.ts";
@@ -66,9 +67,11 @@ function SessionRouter({ session }: { session: Session }) {
 	return (
 		<QueryClientProvider client={queries}>
 			<TooltipProvider>
-				<PagesFromContentOrigin value={true}>
-					<AppRouterProvider router={router} session={session} />
-				</PagesFromContentOrigin>
+				<LivelinessProvider>
+					<PagesFromContentOrigin value={true}>
+						<AppRouterProvider router={router} session={session} />
+					</PagesFromContentOrigin>
+				</LivelinessProvider>
 			</TooltipProvider>
 		</QueryClientProvider>
 	);

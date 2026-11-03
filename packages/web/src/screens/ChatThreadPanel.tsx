@@ -18,7 +18,7 @@ import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { FailedRunMessage } from "./RoutineRun.tsx";
-import { ThreadConversation } from "./ThreadConversation.tsx";
+import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
@@ -63,6 +63,11 @@ export function ChatThreadPanel({
 	const details = query.data;
 	const type = openableThreadType(entry?.type ?? details?.thread.type, frame);
 	const routineExecution = details?.routineExecution;
+	// A routine's run shows its result, not the trigger that started it.
+	const shownMessages =
+		type === "routine"
+			? (details?.messages ?? []).filter((message) => message.author.kind !== "routine_trigger")
+			: (details?.messages ?? []);
 	// Beside a chat a run never opens, so neither is there a way back to one.
 	const parentRoutine =
 		frame.kind === "sidebar"
@@ -168,11 +173,8 @@ export function ChatThreadPanel({
 				)}
 				<ThreadConversation
 					fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
-					messages={
-						type === "routine"
-							? details.messages.filter((message) => message.author.kind !== "routine_trigger")
-							: details.messages
-					}
+					messages={shownMessages}
+					answeringFace={findAnsweringFace(shownMessages, true)}
 					host={host}
 					// A notice says the reply is not coming, so nobody is shown typing it.
 					isRunning={details.thread.status === "running" && notices.length === 0}

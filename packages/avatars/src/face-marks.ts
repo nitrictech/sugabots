@@ -3,6 +3,17 @@ import type { AgentFace } from "@sugabots/contracts";
 /** The side of the square a face is drawn in, in SVG user units. */
 export const FACE_VIEWBOX_SIZE = 40;
 
+/** A distance in viewbox units as a number of percent of the face, for placing or moving an HTML layer the face's size. */
+export function viewboxPercentage(units: number): number {
+	return (units / FACE_VIEWBOX_SIZE) * 100;
+}
+
+/** The size of each of a thinking bot's dots, on the 40-unit face. */
+export const THINKING_DOT_RADIUS = 2.4;
+
+/** How thick an arc eye's line is; a shut or smiling eye is drawn as thick. */
+export const ARC_EYE_STROKE_WIDTH = 1.8;
+
 /** One mark drawn on the face disc: an eye, or both eyes as one stroked path. */
 export type FaceMark =
 	| { shape: "circle"; cx: number; cy: number; r: number }
@@ -30,7 +41,7 @@ const marksByFace: Record<AgentFace, readonly FaceMark[]> = {
 		{
 			shape: "stroke",
 			d: "M10.9 22a3.1 3.1 0 0 1 6.2 0M22.9 22a3.1 3.1 0 0 1 6.2 0",
-			strokeWidth: 1.8,
+			strokeWidth: ARC_EYE_STROKE_WIDTH,
 		},
 	],
 	// 0.16 squares, 0.12 apart.
@@ -41,7 +52,7 @@ const marksByFace: Record<AgentFace, readonly FaceMark[]> = {
 	// A 0.14 dot and a 0.19-wide arc, 0.13 apart.
 	wink: [
 		{ shape: "circle", cx: 13.6, cy: 20, r: 2.8 },
-		{ shape: "stroke", d: "M22.5 22.4a2.9 2.9 0 0 1 5.8 0", strokeWidth: 1.8 },
+		{ shape: "stroke", d: "M22.5 22.4a2.9 2.9 0 0 1 5.8 0", strokeWidth: ARC_EYE_STROKE_WIDTH },
 	],
 };
 

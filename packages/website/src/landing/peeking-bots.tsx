@@ -1,6 +1,14 @@
-import { BotFace, type BotLook } from "@sugabots/avatars";
+import {
+	BotFace,
+	type BotLook,
+	defaultLiveliness,
+	LivelinessContext,
+	LivelyBotFace,
+	type LivelyFace,
+} from "@sugabots/avatars";
 import { cn } from "cn";
 import { motion } from "motion/react";
+import { useRef } from "react";
 import { Reveal, riseIn } from "@/components/reveal";
 
 interface PeekingBot {
@@ -47,33 +55,40 @@ const peekingBots: readonly PeekingBot[] = [
 /** The end of the landing page: a row of bots peeking up over the footer's edge. */
 export function PeekingBots() {
 	return (
-		<Reveal
-			stagger={0.1}
-			delay={0.2}
-			aria-hidden
-			className="flex items-end justify-center gap-1 overflow-hidden pt-24 sm:gap-1.5 sm:pt-40"
+		// The site has no setting for it, so its bots move as much as the app's do by default.
+		<LivelinessContext value={defaultLiveliness}>
+			<Reveal
+				stagger={0.1}
+				delay={0.2}
+				aria-hidden
+				className="flex items-end justify-center gap-1 overflow-hidden pt-24 sm:gap-1.5 sm:pt-40"
+			>
+				{peekingBots.map((bot) => (
+					<PeekingBotFace key={bot.look.color} {...bot} />
+				))}
+			</Reveal>
+		</LivelinessContext>
+	);
+}
+
+/** One of the row: it watches the pointer, and hops when the pointer touches its head. */
+function PeekingBotFace({ look, place }: PeekingBot) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<motion.div
+			variants={riseIn}
+			className={cn("pointer-events-none relative shrink-0", place)}
+			onPointerEnter={() => face.current?.play("hop")}
 		>
-			{peekingBots.map(({ look, place }) => (
-				// Each lifts while the pointer is on its head, not the box around it.
-				<motion.div
-					key={look.color}
-					variants={riseIn}
-					className={cn("group pointer-events-none relative shrink-0", place)}
-				>
-					<BotFace
-						{...look}
-						className="size-full transition-transform duration-500 ease-landing group-hover:-translate-y-4"
-					/>
-					{/*
-					 * An unseen copy of the head that takes the pointer where it's painted. It
-					 * stays put as the head lifts, so the head doesn't slip out from under the pointer.
-					 */}
-					<BotFace
-						{...look}
-						className="absolute inset-0 size-full opacity-0 [&_*]:pointer-events-auto"
-					/>
-				</motion.div>
-			))}
-		</Reveal>
+			<LivelyBotFace {...look} watchPointer ref={face} className="size-full" />
+			{/*
+			 * An unseen copy of the head that takes the pointer where it's painted. It
+			 * stays put as the head hops, so the head doesn't slip out from under the pointer.
+			 */}
+			<BotFace
+				{...look}
+				className="absolute inset-0 size-full opacity-0 [&_*]:pointer-events-auto"
+			/>
+		</motion.div>
 	);
 }

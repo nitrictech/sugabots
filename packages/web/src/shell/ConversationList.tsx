@@ -1,3 +1,4 @@
+import { type LivelyFace, LivelyGroup, useGroupTurn } from "@sugabots/avatars";
 import {
 	type Agent,
 	type ChatList,
@@ -10,7 +11,7 @@ import {
 import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronRight, Hash, Plus, Users } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, type Ref, useRef, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, conversationLink, newThreadLink, podChatLink } from "@/lib/links.ts";
@@ -55,7 +56,8 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 	const { agents } = useAgents();
 	const { data: notificationSettings } = useNotificationSettings();
 	return (
-		<>
+		// The bots' faces take turns to move, so the list never fidgets all at once.
+		<LivelyGroup>
 			<ConversationListView
 				pod={pod}
 				chats={pod.kind === "shared" ? (list.data?.chats ?? []) : undefined}
@@ -69,7 +71,7 @@ export function ConversationList({ pod, selected }: { pod: Pod; selected?: ListS
 				notificationSettings={notificationSettings}
 			/>
 			{newBot.dialog}
-		</>
+		</LivelyGroup>
 	);
 }
 
@@ -380,6 +382,21 @@ const botClassName =
 /** How many of a bot's open threads show under it, before All threads leads to the rest. */
 const THREADS_SHOWN = 6;
 
+/** A bot's face on its row: still except on its turn to move among the list's faces. */
+function BotItemFace({ agent, faceRef }: { agent: Agent; faceRef: Ref<LivelyFace> }) {
+	const movingTurn = useGroupTurn();
+	return (
+		<AgentAvatar
+			color={agent.color}
+			face={agent.face}
+			shape={agent.shape}
+			size={18}
+			lively={{ mood: movingTurn ? "idle" : "still", watchPointer: true, ref: faceRef }}
+			className="shrink-0"
+		/>
+	);
+}
+
 /**
  * A bot on one line, which opens its channel, with its threads under it
  * while it or one of them is open. At its end, what is new in its channel
@@ -389,6 +406,7 @@ const THREADS_SHOWN = 6;
  * place of their mark under the pointer or on focus. Right-clicked, a bot
  * offers its notifications.
  */
+
 function BotItem({
 	pod,
 	group,
@@ -418,6 +436,8 @@ function BotItem({
 	notificationSettings?: NotificationSettings;
 }) {
 	const { agent, channel } = group;
+	// Its face hops when the pointer moves onto the row.
+	const face = useRef<LivelyFace>(null);
 	// Unfolded, what is new in the threads shows on their own rows.
 	const folded = newsIn(
 		open ? [] : group.threads.filter((row) => row.conversation.doneAt === null),
@@ -438,13 +458,7 @@ function BotItem({
 			</>
 		) : undefined;
 	const mark = agent ? (
-		<AgentAvatar
-			color={agent.color}
-			face={agent.face}
-			shape={agent.shape}
-			size={18}
-			className="shrink-0"
-		/>
+		<BotItemFace agent={agent} faceRef={face} />
 	) : (
 		<Users aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
 	);
@@ -483,6 +497,7 @@ function BotItem({
 	);
 	const row = (
 		<div
+			onPointerEnter={() => face.current?.play("hop")}
 			className={cn(
 				"group/bot flex h-8 items-center rounded-sm pr-1.5 max-md:h-11 max-md:rounded-lg max-md:active:bg-row-selected",
 				shaded ? "bg-row-selected" : "hover:bg-row-hover",
