@@ -233,6 +233,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					title: "Budget review is Friday and bring the number…",
 				}),
 				lastMessage: null,
+				// Nobody has written in it yet.
+				participants: [],
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,

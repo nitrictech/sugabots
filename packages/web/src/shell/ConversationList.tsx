@@ -7,10 +7,10 @@ import {
 	type NotificationSettings,
 	type Pod,
 } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronRight, Hash, Plus, Users } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, conversationLink, newThreadLink, podChatLink } from "@/lib/links.ts";
@@ -137,15 +137,12 @@ export function ConversationListView({
 			? selected?.kind === "podChat"
 			: isSelected(chat.conversation.id) ||
 				(selected?.kind === "podChat" && chat.conversation.main);
-	// Done threads leave the sidebar, but for the one open, so marking it done doesn't pull it from under you.
-	const listed = rows.filter(
-		(row) => row.conversation.doneAt === null || isSelected(row.conversation.id),
-	);
 	// A thread between people hangs under the chat it was started from; any other goes under its bot.
-	const byChat = threadsByChat(chats ?? [], listed);
+	// Done ones are kept, so a bot with only done threads still leads to them.
+	const byChat = threadsByChat(chats ?? [], rows);
 	const groups = groupByBot(
 		bots,
-		listed.filter((row) => !startedInChatOf(row, byChat)),
+		rows.filter((row) => !startedInChatOf(row, byChat)),
 		channels,
 	);
 
@@ -380,8 +377,8 @@ const PHONE_ROW =
 const botClassName =
 	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left text-sm max-md:gap-3 max-md:rounded-lg max-md:text-base";
 
-/** How many of a bot's open threads show before Show more. */
-const THREADS_BEFORE_SHOW_MORE = 4;
+/** How many of a bot's open threads show under it, before All threads leads to the rest. */
+const THREADS_SHOWN = 6;
 
 /**
  * A bot on one line, which opens its channel, with its threads under it
@@ -422,7 +419,9 @@ function BotItem({
 }) {
 	const { agent, channel } = group;
 	// Unfolded, what is new in the threads shows on their own rows.
-	const folded = newsIn(open ? [] : group.threads);
+	const folded = newsIn(
+		open ? [] : group.threads.filter((row) => row.conversation.doneAt === null),
+	);
 	const unread = (channel?.unreadMessages ?? 0) + folded.unreadMessages;
 	const waiting =
 		channel?.needsApproval || channel?.mentionsYou || folded.needsYou || routinesNeedYou;
@@ -547,33 +546,49 @@ function BotItem({
 				row
 			)}
 			{open && group.threads.length > 0 && (
-				<ThreadTree pod={pod} threads={group.threads} isSelected={isSelected} />
+				<ThreadTree
+					pod={pod}
+					threads={group.threads}
+					isSelected={isSelected}
+					last={
+						agent && (
+							<AllThreadsRow pod={pod} agent={agent} channel={channel} channelOpen={channelOpen} />
+						)
+					}
+				/>
 			)}
 		</li>
 	);
 }
 
 /**
- * Threads hanging under a bot or a chat: the first few, and the one open on
- * the page wherever it is, then how many more.
+ * Threads hanging under a bot or a chat that aren't done, and the one open on
+ * the page wherever it is, done or not, then `last`. With `last`, the way to
+ * all of a bot's threads, only the newest few show, and it leads to the rest.
+ * Nothing while none is shown and there is no `last`.
  */
 function ThreadTree({
 	pod,
 	threads,
 	isSelected,
+	last,
 }: {
 	pod: Pod;
-	/** Newest first. */
+	/** Newest first, done ones included. */
 	threads: readonly ChatListItem[];
 	isSelected: (conversationId: string | undefined) => boolean;
+	/** A last row after the threads. */
+	last?: ReactNode;
 }) {
-	// Showing all its rows, after Show more, until the page is left.
-	const [unclipped, setUnclipped] = useState(false);
-	const shownThreads = unclipped ? Infinity : THREADS_BEFORE_SHOW_MORE;
-	const shown = threads.filter(
+	// Done threads leave the sidebar, but for the one open, so marking it done doesn't pull it from under you.
+	const listed = threads.filter(
+		(row) => row.conversation.doneAt === null || isSelected(row.conversation.id),
+	);
+	const shownThreads = last ? THREADS_SHOWN : Infinity;
+	const shown = listed.filter(
 		(row, index) => index < shownThreads || isSelected(row.conversation.id),
 	);
-	const hidden = threads.length - shown.length;
+	if (shown.length === 0 && !last) return null;
 	return (
 		<ul
 			className={`m-0 mt-px ml-4.25 flex list-none flex-col gap-px border-border border-l p-0 ${NESTED_INDENT}`}
@@ -583,14 +598,44 @@ function ThreadTree({
 					<ThreadRow row={row} pod={pod} selected={isSelected(row.conversation.id)} />
 				</li>
 			))}
-			{hidden > 0 && (
-				<li>
-					<button type="button" onClick={() => setUnclipped(true)} className={quietButtonClassName}>
-						Show {hidden} more
-					</button>
-				</li>
-			)}
+			{last && <li>{last}</li>}
 		</ul>
+	);
+}
+
+/**
+ * The way to all of a bot's threads, done ones included, which opens them
+ * beside its channel; shaded while they are open there.
+ */
+function AllThreadsRow({
+	pod,
+	agent,
+	channel,
+	channelOpen,
+}: {
+	pod: Pod;
+	agent: Agent;
+	channel?: ListedChannel;
+	/** Whether the bot's channel is the page open, beside which its threads open. */
+	channelOpen: boolean;
+}) {
+	const threadsOpen = useSearch({
+		strict: false,
+		select: (search) => search.threads !== undefined,
+	});
+	const selected = channelOpen && threadsOpen;
+	const search = { threads: "open" } as const;
+	return (
+		<Link
+			{...(channel
+				? conversationLink({ pod, conversationId: channel.conversation.id }, search)
+				: agentChatLink({ pod, agent }, search))}
+			aria-current={selected ? "true" : undefined}
+			className={cn(threadRowClassName(selected), !selected && "text-subtle-foreground")}
+		>
+			<span className="min-w-0 flex-1 truncate">All threads</span>
+			<ChevronRight aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+		</Link>
 	);
 }
 
@@ -602,10 +647,6 @@ function FailedDot() {
 		</span>
 	);
 }
-
-/** A small grey text button under a bot's threads, such as Show more. */
-const quietButtonClassName =
-	"focus-ring flex h-7 w-full items-center rounded-sm px-2 text-left text-xs text-subtle-foreground hover:text-muted-foreground";
 
 /** A row under a bot or a channel, shaded while it is the one open. */
 function threadRowClassName(selected: boolean): string {

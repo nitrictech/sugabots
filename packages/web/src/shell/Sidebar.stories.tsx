@@ -41,6 +41,7 @@ const threads: ChatListItem[] = [growthDesk, accountManager, leadResearcher].map
 		needsApproval: false,
 		mentionsYou: false,
 		lastMessage: null,
+		participants: [],
 		waitingOn: null,
 	}),
 );

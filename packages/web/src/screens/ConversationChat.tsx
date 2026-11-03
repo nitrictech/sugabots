@@ -51,6 +51,7 @@ import {
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
+import type { ThreadsTab } from "@/lib/links.ts";
 import { agentSettingsLink, conversationLink, routineThreadLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
@@ -110,6 +111,7 @@ import {
 	typersAfter,
 } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
+import { ThreadsStage } from "./ThreadsStage.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
 /**
@@ -124,13 +126,14 @@ const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try a
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
- * `version` is absent, the bot's sandbox desktop, or the bot's routines, at
- * the view of them that is open.
+ * `version` is absent, the bot's sandbox desktop, the bot's routines, at
+ * the view of them that is open, or the bot's threads, at the tab open.
  */
 export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
 	| { kind: "desktop" }
-	| { kind: "routines"; view: RoutinesView };
+	| { kind: "routines"; view: RoutinesView }
+	| { kind: "threads"; tab: ThreadsTab };
 
 /** Opens `staged` large beside a chat, or closes it as a `Stage` asks, as `how` says; see `CloseStage`. */
 export type StagedChange = (staged: Staged | undefined, how?: { replace: boolean }) => void;
@@ -789,6 +792,14 @@ export function ConversationChat({
 					agent={agent}
 					pod={pod}
 					mayUse={pod.permissions.useDesktops}
+					onClose={() => onStagedChange(undefined)}
+				/>
+			) : staged?.kind === "threads" && agent ? (
+				<ThreadsStage
+					agent={agent}
+					pod={pod}
+					tab={staged.tab}
+					onTabChange={(tab) => onStagedChange({ kind: "threads", tab }, { replace: true })}
 					onClose={() => onStagedChange(undefined)}
 				/>
 			) : staged?.kind === "routines" && agent ? (

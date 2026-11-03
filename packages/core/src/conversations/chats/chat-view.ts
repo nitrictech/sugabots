@@ -81,6 +81,7 @@ import {
 	messageFromRelations,
 	messageRelations,
 	personColumns,
+	recentParticipantsOf,
 	toParticipant,
 } from "../threads/participants.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
@@ -188,6 +189,7 @@ export const make = Effect.gen(function* () {
 										at: last.createdAt.toISOString(),
 									}
 								: null,
+							participants: row.participants.map(toParticipant),
 							waitingOn: waitingOn.get(row.conversation.id) || null,
 							...marksOf(row.conversation.id),
 							mentionsYou: mentioning.has(row.conversation.id),
@@ -486,7 +488,7 @@ const listedConversations = Effect.fn("ChatView.listedConversations")(function* 
 ) {
 	const conversation = alias(thread, "conversation");
 	return yield* db
-		.select({ conversation, agent })
+		.select({ conversation, agent, participants: recentParticipantsOf(conversation.id) })
 		.from(conversation)
 		.leftJoin(agent, eq(agent.id, conversation.hostAgentId))
 		.where(
