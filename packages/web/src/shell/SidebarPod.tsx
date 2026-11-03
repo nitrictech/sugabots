@@ -27,7 +27,7 @@ export interface PodStanding {
 /**
  * A pod in the sidebar: its name, which folds it away or opens it, and under
  * it, while open, `children`. Under the pointer or on focus, a caret takes
- * the place of the pod's mark and its settings come in at the end. Folded, it
+ * the place of the pod's mark, and `newMenu` and its settings come in at the end. Folded, it
  * says how much is new in it, and is shaded while it holds the page open.
  * Right-clicked, it offers its notifications. A Personal pod's name says that
  * only you see into it.
@@ -39,6 +39,7 @@ export function SidebarPod({
 	onToggle,
 	settingsBack,
 	notificationSettings,
+	newMenu,
 	children,
 }: {
 	standing: PodStanding;
@@ -50,6 +51,8 @@ export function SidebarPod({
 	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded. */
 	notificationSettings?: NotificationSettings;
+	/** What makes something new in the pod, such as a channel or a bot. */
+	newMenu?: ReactNode;
 	children: ReactNode;
 }) {
 	const { pod } = standing;
@@ -110,6 +113,10 @@ export function SidebarPod({
 						</span>
 					)}
 					{!open && <PodNews standing={standing} />}
+					{/* Kept in view while its menu is open, which takes the pointer and focus away from the row. */}
+					<span className="hidden group-hover/pod:contents group-has-focus-visible/pod:contents group-has-data-popup-open/pod:contents">
+						{newMenu}
+					</span>
 					<IconButton
 						label={`${pod.name} settings`}
 						size="sm"

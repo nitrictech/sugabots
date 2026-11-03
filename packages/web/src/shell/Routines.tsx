@@ -141,8 +141,9 @@ export function RoutinesPage({
  * A routine: the bot that runs it, its name, when it last ran, and under it
  * how it stands: paused, or how its last run went, or when it runs before it
  * has. A paused one is greyer; one whose thread mentions the viewer is bright.
+ * It opens the routine's own thread.
  */
-function RoutineRow({
+export function RoutineRow({
 	pod,
 	row,
 	routine,

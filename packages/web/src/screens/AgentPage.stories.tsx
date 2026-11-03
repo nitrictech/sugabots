@@ -987,6 +987,26 @@ export const Sandbox = meta.story({
 });
 
 /**
+ * The bot's routines, opened from the top of its chat beside it as its
+ * computer is, saying how to get one while it has none, and closed again.
+ */
+export const RoutinesBesideTheChat = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Routines" }, { timeout: 10_000 }),
+		);
+		const routines = await canvas.findByRole("region", { name: `${growthDesk.name}'s routines` });
+		await expect(
+			await within(routines).findByText(`No routines for ${growthDesk.name} yet`),
+		).toBeVisible();
+		await userEvent.click(within(routines).getByRole("button", { name: "Close" }));
+		await waitFor(() =>
+			expect(canvas.queryByRole("region", { name: `${growthDesk.name}'s routines` })).toBeNull(),
+		);
+	},
+});
+
+/**
  * Without computers set up in the workspace, the button is still there, and
  * opens to say what computers are for and how to get them.
  */

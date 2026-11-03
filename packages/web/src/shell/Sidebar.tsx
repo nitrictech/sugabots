@@ -16,6 +16,7 @@ import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
 import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
+import { NewInPodMenu } from "@/shell/NewInPod.tsx";
 import { type PodStanding, SidebarPod } from "@/shell/SidebarPod.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
@@ -30,9 +31,8 @@ export type SidebarView = "inbox" | "approvals" | "settings" | "artifacts" | "ro
 
 /**
  * The column down the left: Inbox and Approvals across every pod and the
- * workspace's Settings, then each
- * pod in turn, with its artifacts and routines, its chats and its bots, and
- * you and Help at the foot. A phone has `MobileTabBar` and `MobileHome` instead.
+ * workspace's Settings, then each pod in turn, with its artifacts, then its
+ * channels and its bots in one list, and you and Help at the foot. A phone has `MobileTabBar` and `MobileHome` instead.
  */
 export function Sidebar() {
 	const { data: pods } = usePods();
@@ -71,6 +71,7 @@ export function Sidebar() {
 			onSignOut={() => void signOut()}
 			// A phone has its tabs instead, and Home in place of the pods.
 			className="max-md:hidden"
+			newIn={(pod) => <NewInPodMenu pod={pod} />}
 			conversationsOf={(pod) => (
 				<ConversationList
 					pod={pod}
@@ -150,6 +151,7 @@ export function SidebarView({
 	notificationSettings,
 	onSignOut,
 	className,
+	newIn,
 	conversationsOf,
 }: {
 	/** Every pod the viewer reaches, shared first, then Personal, with how each stands. */
@@ -171,7 +173,9 @@ export function SidebarView({
 	notificationSettings?: NotificationSettings;
 	onSignOut: () => void;
 	className?: string;
-	/** A pod's chats and bots, under its artifacts and routines. */
+	/** What makes a channel or a bot in a pod, at the end of its name. */
+	newIn?: (pod: Pod) => ReactNode;
+	/** A pod's channels and bots, under its artifacts. */
 	conversationsOf: (pod: Pod) => ReactNode;
 }) {
 	const [folded, toggleFolded] = useFolded();
@@ -250,6 +254,7 @@ export function SidebarView({
 							onToggle={() => toggleFolded(pod.id)}
 							settingsBack={settingsBack}
 							notificationSettings={notificationSettings}
+							newMenu={newIn?.(pod)}
 						>
 							<div className="flex flex-col gap-px pt-px pb-px">
 								<SidebarLink

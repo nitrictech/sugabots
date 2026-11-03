@@ -81,7 +81,7 @@ const meta = preview.meta({
 	beforeEach: () => localStorage.removeItem(`sugabots-open-bots:${revenue.id}`),
 	args: {
 		pod: revenue,
-		chats: { list: [revenueChat], onNew: fn() },
+		chats: [revenueChat],
 		bots: [accountManager, growthDesk, leadResearcher],
 		rows: revenueRows,
 		status: "ready" as const,
@@ -143,20 +143,13 @@ export const UnreadInTheOpenBotsThreads = meta.story({
 	},
 });
 
-/**
- * A bot with no thread yet is listed all the same, and opened shows its
- * Routines, which it has before it runs any; its + starts a thread with it.
- */
+/** A bot with no thread yet is listed all the same; its + starts a thread with it. */
 export const BotWithNoThreads = meta.story({
 	args: {
 		rows: revenueRows.slice(0, 2),
 		selected: { kind: "bot", handle: leadResearcher.handle },
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("link", { name: "Routines" })).toHaveAttribute(
-			"href",
-			expect.stringMatching(new RegExp(`/pods/revenue/routines\\?bot=${leadResearcher.handle}$`)),
-		);
 		await expect(
 			canvas.getByRole("link", { name: `New thread with ${leadResearcher.name}` }),
 		).toHaveAttribute("href", expect.stringMatching(/\/pods\/revenue\/threads\/new\?agent=/));
@@ -174,11 +167,10 @@ export const BotsWhileTheChatIsOpen = meta.story({
 		await expect(canvas.getByRole("link", { name: leadResearcher.name })).not.toHaveAttribute(
 			"aria-current",
 		);
-		await expect(canvas.queryByRole("link", { name: "Routines" })).toBeNull();
 	},
 });
 
-/** A bot's channel, while it is found by the bot's handle, marks the bot as the open row, open on its Routines. */
+/** A bot's channel, while it is found by the bot's handle, marks the bot as the open row. */
 export const OpeningABotsChannel = meta.story({
 	args: {
 		rows: revenueRows.slice(0, 2),
@@ -189,18 +181,16 @@ export const OpeningABotsChannel = meta.story({
 			"aria-current",
 			"page",
 		);
-		await expect(canvas.getByRole("link", { name: "Routines" })).toBeVisible();
 	},
 });
 
-/** Starting a thread with a bot opens it on its Routines and threads, without marking its channel. */
+/** Starting a thread with a bot opens it on its threads, without marking its channel. */
 export const StartingAThreadWithABot = meta.story({
 	args: {
 		rows: revenueRows.slice(0, 2),
 		selected: { kind: "newThread", handle: leadResearcher.handle },
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("link", { name: "Routines" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: leadResearcher.name })).not.toHaveAttribute(
 			"aria-current",
 		);
@@ -245,7 +235,7 @@ export const PodChat = meta.story({
 
 /** A pod whose chat nobody has opened yet still offers it, and opens it from its own address. */
 export const PodChatUnopened = meta.story({
-	args: { chats: { list: [], onNew: fn() } },
+	args: { chats: [] },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /^General/ })).toHaveAttribute(
 			"href",
@@ -254,21 +244,17 @@ export const PodChatUnopened = meta.story({
 	},
 });
 
-const newChat = fn();
-
-/** A pod with more than one chat lists them under Chats, with + to start another; the one open is marked. */
+/** A pod with more than one channel lists them all, before its bots; the one open is marked. */
 export const SeveralChats = meta.story({
 	args: {
-		chats: { list: [revenueChat, pricingChat], onNew: newChat },
+		chats: [revenueChat, pricingChat],
 		selected: { kind: "conversation", conversationId: pricingChat.conversation.id },
 	},
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /^Pricing/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
-		await userEvent.click(canvas.getByRole("button", { name: `New channel in ${revenue.name}` }));
-		await expect(newChat).toHaveBeenCalledOnce();
 	},
 });
 
@@ -384,10 +370,7 @@ export const OpenDoneThread = meta.story({
 	},
 });
 
-/**
- * A Personal pod has no pod channels. Each bot opens its own channel, with
- * its Routines under it.
- */
+/** A Personal pod has no pod channels. Each bot opens its own channel. */
 export const PersonalPod = meta.story({
 	args: {
 		pod: personal,
@@ -406,18 +389,17 @@ export const PersonalPod = meta.story({
 		selected: { kind: "conversation", conversationId: storyChannelFor(chief).id },
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.queryByRole("heading", { name: "Channels" })).toBeNull();
+		await expect(canvas.queryByRole("link", { name: /^General/ })).toBeNull();
 		await expect(canvas.getByRole("link", { name: "Chief" })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
-		await expect(canvas.getByRole("link", { name: /^Routines/ })).toBeVisible();
 	},
 });
 
 const newBot = fn();
 
-/** A pod with no bots offers the first under Bots, as an Add a bot row with a dashed face. */
+/** A pod with no bots offers the first after its channels, as an Add a bot row with a dashed face. */
 export const EmptyPod = meta.story({
 	args: {
 		pod: design,

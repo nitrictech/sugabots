@@ -299,11 +299,8 @@ export const Default = meta.story({
 		);
 		await expect(canvas.getByRole("switch", { name: "Routine on" })).toBeChecked();
 		const revenuePod = canvas.getByRole("group", { name: "Revenue" });
-		// Its bot's Routines, in the sidebar, is the row open.
-		await expect(within(revenuePod).getByRole("link", { name: /^Routines/ })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
+		// Routines are reached from the bot, so the sidebar has no row of its own for them.
+		await expect(within(revenuePod).queryByRole("link", { name: /^Routines/ })).toBeNull();
 	},
 });
 
