@@ -49,6 +49,15 @@ describe("a person's message", () => {
 		});
 	});
 
+	it("goes to nobody when it mentions everyone", () => {
+		expect(
+			decideFloor(input({ threadType: "routine_feed", content: "@channel the report is late" })),
+		).toEqual({ kind: "nobody" });
+		expect(decideFloor(input({ content: "@here quick poll: lunch?" }))).toEqual({
+			kind: "nobody",
+		});
+	});
+
 	it("goes to the conversation's bot, not to the bots mentioned", () => {
 		// The conversation's bot brings a mentioned bot in by collaborating.
 		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({

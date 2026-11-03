@@ -348,6 +348,37 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.cy.id)).toEqual([]);
 	});
 
+	it.each(["@here the launch moved to Friday", "@channel the launch moved to Friday"])(
+		"tells everyone in the pod of a person's %s, but not the author or an outsider",
+		async (text) => {
+			const chat = await podChat();
+
+			await emit(personPosted(chat, people.ada, text));
+
+			expect(await deliveredTo(people.bob.id)).toEqual([
+				expect.objectContaining({
+					title: `${people.ada.name} mentioned you in Launch`,
+					body: text,
+				}),
+			]);
+			expect(await deliveredTo(people.cy.id)).toHaveLength(1);
+			expect(sentTo(people.ada.id)).toEqual([]);
+			expect(sentTo(people.outsider.id)).toEqual([]);
+		},
+	);
+
+	it("does not let a bot reach everyone with @channel", async () => {
+		const conversation = await conversationWithBot([people.ada.id]);
+		await chooseLevel(people.ada.id, "all");
+
+		await emit(await botReplied(conversation, "@channel I am done."));
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			expect.objectContaining({ title: "Scout in Release notes" }),
+		]);
+		expect(sentTo(people.bob.id)).toEqual([]);
+	});
+
 	it("tells a person of a reply to their message in the pod's chat, and names a file shared without text", async () => {
 		const chat = await podChat();
 		const asked = personPosted(chat, people.bob, "Who has the launch checklist?");

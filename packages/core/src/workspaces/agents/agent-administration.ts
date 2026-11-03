@@ -42,6 +42,7 @@ export interface Interface {
 		| AuthorizationDenied
 		| ModelProviderRepository.ModelNotEnabled
 		| AgentRepository.AgentNameTaken
+		| AgentRepository.AgentHandleReserved
 		| AgentRepository.PodOutsideWorkspace,
 		CurrentActor.Service
 	>;
@@ -54,6 +55,7 @@ export interface Interface {
 		| EmptyAgentUpdate
 		| ModelProviderRepository.ModelNotEnabled
 		| AgentRepository.AgentNameTaken
+		| AgentRepository.AgentHandleReserved
 		| AgentRepository.AgentGone
 		| AgentRepository.SystemAgentImmutable,
 		CurrentActor.Service

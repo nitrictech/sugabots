@@ -145,13 +145,32 @@ export function splitAroundMentions(content: string): string[] {
 }
 
 /**
- * A pattern matching a mention of `handle` as `mentionedHandles` reads one,
- * in syntax that JavaScript and Postgres regular expressions both accept.
- * Match it case-insensitively. Handles are lowercase letters, digits and
- * hyphens, so none needs escaping.
+ * A pattern matching a mention of `handle` or any of `more` as
+ * `mentionedHandles` reads one, in syntax that JavaScript and Postgres regular
+ * expressions both accept. Match it case-insensitively. Handles are lowercase
+ * letters, digits and hyphens, so none needs escaping.
  */
-export function mentionPattern(handle: string): string {
-	return `(?<!${NOT_BEFORE_MENTION.source})@${handle}(?![a-z0-9]|-[a-z0-9])`;
+export function mentionPattern(handle: string, ...more: string[]): string {
+	return `(?<!${NOT_BEFORE_MENTION.source})@(?:${[handle, ...more].join("|")})(?![a-z0-9]|-[a-z0-9])`;
+}
+
+/**
+ * Handles that address everyone in a conversation instead of one participant,
+ * as `@here` and `@channel` do in Slack. Nothing tells who is active, so
+ * both reach everyone who can see the conversation. They never give a bot a
+ * turn: only a bot's own handle does.
+ */
+export const GROUP_MENTION_HANDLES = ["here", "channel"] as const;
+
+export type GroupMentionHandle = (typeof GROUP_MENTION_HANDLES)[number];
+
+export function isGroupMentionHandle(handle: string): handle is GroupMentionHandle {
+	return (GROUP_MENTION_HANDLES as readonly string[]).includes(handle);
+}
+
+/** Whether a message addresses everyone, with `@here` or `@channel`. */
+export function mentionsEveryone(content: string): boolean {
+	return mentionedHandles(content).some(isGroupMentionHandle);
 }
 
 /** `content` without its mentions, the text around them kept as it is. */
