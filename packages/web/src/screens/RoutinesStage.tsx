@@ -2,6 +2,7 @@ import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useChatList, useOpenRoutineFeed } from "@/lib/chats.ts";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { RoutineRow } from "@/shell/Routines.tsx";
@@ -33,6 +34,7 @@ export type RoutinesView =
  * them, each opening its own thread in their place, or a new one being made.
  * A routine or a new one is a level inside the list, and the Back before its
  * name returns to the list, so the bot's chat stays in view throughout.
+ * Escape goes back up a level at a time, as the Back does, then closes it.
  */
 export function RoutinesStage({
 	agent,
@@ -66,7 +68,14 @@ export function RoutinesStage({
 	);
 	if (view.kind === "new") {
 		return (
-			<Stage label="New routine" icon={mark} title="New routine" parent={parent} onClose={onClose}>
+			<Stage
+				key="new"
+				label="New routine"
+				icon={mark}
+				title="New routine"
+				parent={parent}
+				onClose={onClose}
+			>
 				<div className="-mx-6 min-h-0 flex-1 overflow-y-auto max-md:-mx-3">
 					<NewRoutinePage
 						choices={[{ agent, pod }]}
@@ -80,6 +89,8 @@ export function RoutinesStage({
 	}
 	return (
 		<Stage
+			// Its own, apart from a new one's, so each takes the focus as it opens.
+			key="list"
 			label={title}
 			icon={mark}
 			title={title}
@@ -178,11 +189,17 @@ function RoutineThread({
 	trailing: ReactNode;
 }) {
 	const opened = useOpenRoutineFeed(pod, routineId);
+	const keys = usePanelKeys<HTMLElement>(parent.onBack);
 	const [threadId, setThreadId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	return (
-		// In place of the list, and like it, covering the chat on a phone.
-		<div className="flex min-h-0 min-w-0 flex-1 bg-background max-md:absolute max-md:inset-0 max-md:z-40">
+		// In place of the list, and like it, covering the chat on a phone; there
+		// while its thread opens, so it holds the focus from the start.
+		<section
+			aria-label="Routine"
+			{...keys}
+			className="flex min-h-0 min-w-0 flex-1 bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
+		>
 			{opened.isError ? (
 				<EmptyState title="Could not open this routine">
 					It may have been removed. Reload this page to try again.
@@ -201,7 +218,7 @@ function RoutineThread({
 					/>
 				)
 			)}
-		</div>
+		</section>
 	);
 }
 

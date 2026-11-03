@@ -8,6 +8,7 @@ import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -45,6 +46,8 @@ export function DesktopStage({
 	const may = useWorkspacePermissions();
 	const backToChat = useBackToHere("Chat");
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	// For a phone's own view, which covers everything; a wider screen's `Stage` has its own.
+	const phoneKeys = usePanelKeys<HTMLElement>(onClose);
 	// What stands between the bot and a computer, if anything: the workspace has none, or the bot doesn't use one.
 	const missing =
 		sandboxes === undefined
@@ -106,10 +109,8 @@ export function DesktopStage({
 		return (
 			<section
 				aria-label={`${agent.name}'s computer`}
-				onKeyDown={(event) => {
-					if (event.key === "Escape") onClose();
-				}}
-				className="fixed inset-0 z-50 flex flex-col bg-black pt-[max(12px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]"
+				{...phoneKeys}
+				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-[max(12px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]"
 			>
 				<div className="shrink-0 px-4">
 					<button type="button" aria-label="Close" onClick={onClose} className={BACK_BUTTON}>

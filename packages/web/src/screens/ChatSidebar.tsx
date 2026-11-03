@@ -1,5 +1,6 @@
 import { cn } from "cn";
 import { type ReactNode, type Ref, useState } from "react";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 
@@ -42,6 +43,7 @@ export function ChatSidebar({
 	className?: string;
 	children: ReactNode;
 }) {
+	const keys = usePanelKeys<HTMLElement>(onClose);
 	return (
 		<>
 			{/* The dimmed chat behind it closes it, as a tap outside a sheet or drawer does. */}
@@ -57,11 +59,9 @@ export function ChatSidebar({
 			/>
 			<aside
 				aria-label={label}
-				onKeyDown={(event) => {
-					if (event.key === "Escape") onClose();
-				}}
+				{...keys}
 				className={cn(
-					"flex min-h-0 w-[380px] shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
+					"flex min-h-0 w-[380px] outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
 					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-[min(400px,100%)] md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					sheet
 						? // Over the floating tabs, as a phone's sheet covers its tab bar.
