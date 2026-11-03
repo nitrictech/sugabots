@@ -32,6 +32,7 @@ import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChannelActions, type ChannelToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
+import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
 /** How many rows a list shows before Show more. */
@@ -384,15 +385,20 @@ function Summary({
 	const folds = text !== undefined && text.length > SUMMARY_FOLDED_OVER;
 	return (
 		<SidebarSection title="Summary">
-			<p
-				className={cn(
-					"m-0 text-xs leading-normal",
-					text ? "text-soft-foreground" : "text-muted-foreground",
-					folds && !open && "line-clamp-3",
-				)}
-			>
-				{text ?? "A summary will appear after the first reply."}
-			</p>
+			{text ? (
+				<div
+					className={cn(
+						"text-soft-foreground text-xs leading-normal",
+						folds && !open && "line-clamp-3",
+					)}
+				>
+					<MessageMarkdown text={text} mentionable={[]} />
+				</div>
+			) : (
+				<p className="m-0 text-muted-foreground text-xs leading-normal">
+					A summary will appear after the first reply.
+				</p>
+			)}
 			{folds && <ShowMore open={open} onToggle={() => setOpen(!open)} />}
 		</SidebarSection>
 	);
