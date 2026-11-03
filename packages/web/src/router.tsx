@@ -1773,7 +1773,11 @@ function pageDepth(pathname: string): number {
 	}
 }
 
-export function createAppRouter(options?: { history?: RouterHistory }) {
+export function createAppRouter(options?: {
+	history?: RouterHistory;
+	/** Off where nothing watches the page slide, as in stories, so a quick redirect can't interrupt one. */
+	defaultViewTransition?: false;
+}) {
 	const router = createRouter({
 		routeTree,
 		// Supplied by `RouterProvider` once the session is known.

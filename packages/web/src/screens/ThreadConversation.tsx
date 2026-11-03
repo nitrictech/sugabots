@@ -1,4 +1,4 @@
-import { botColorVariables, type MoodLoop, useMoodLoop } from "@sugabots/avatars";
+import { botColorVariables } from "@sugabots/avatars";
 import {
 	type CollaborationPart,
 	type FilePart,
@@ -21,7 +21,7 @@ import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, WatchingAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -278,46 +278,9 @@ export function typersAfter(
 	return [...peopleTyping];
 }
 
-/**
- * How the face of the bot answering carries itself while the viewer writes
- * back: watching them, now and then briefly pleased or excited.
- */
-const WATCHING_MOODS: MoodLoop = [
-	{ mood: "idle", weight: 1, seconds: { least: 25, most: 60 } },
-	{ mood: "happy", weight: 2, seconds: { least: 1.5, most: 2.5 } },
-	{ mood: "excited", weight: 1, seconds: { least: 1, most: 1.5 } },
-];
-
 interface AnsweringFaceState {
 	botTyping: boolean;
 	viewerWriting: boolean;
-}
-
-/**
- * The face of the bot answering: thinking while the bot is typing, as the
- * typing line says; watching the viewer while they write back; else still.
- */
-function AnsweringAvatar({
-	author,
-	size,
-	botTyping,
-	viewerWriting,
-}: AnsweringFaceState & {
-	author: Extract<Message["author"], { kind: "agent" }>;
-	size: number;
-}) {
-	const watching = viewerWriting && !botTyping;
-	const watchingMood = useMoodLoop(WATCHING_MOODS, watching);
-	const mood = botTyping ? "thinking" : watching ? watchingMood : "still";
-	return (
-		<AgentAvatar
-			color={author.color}
-			face={author.face}
-			shape={author.shape}
-			size={size}
-			lively={{ mood, watchPointer: true, watchTyping: true }}
-		/>
-	);
 }
 
 /** Where the face of the bot answering is drawn, and whether it's typing now. */
@@ -628,7 +591,12 @@ function MessageRow({
 				{startsGroup ? (
 					<span aria-hidden className="mt-0.5 flex">
 						{author.kind === "agent" && liveFace ? (
-							<AnsweringAvatar author={author} size={size.face} {...liveFace} />
+							<WatchingAvatar
+								bot={author}
+								size={size.face}
+								busy={liveFace.botTyping}
+								watching={liveFace.viewerWriting}
+							/>
 						) : author.kind === "agent" ? (
 							<AgentAvatar
 								color={author.color}

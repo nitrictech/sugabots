@@ -1,4 +1,4 @@
-import { type LivelyFace, LivelyGroup, useGroupTurn } from "@sugabots/avatars";
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	type ChatList,
@@ -11,7 +11,7 @@ import {
 import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronRight, Hash, Plus, Users } from "lucide-react";
-import { type ReactNode, type Ref, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, conversationLink, newThreadLink, podChatLink } from "@/lib/links.ts";
@@ -20,7 +20,7 @@ import { countOf } from "@/lib/name-list.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
 import { useOpenBots } from "@/lib/open-bots.ts";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { useNewBot } from "@/shell/NewInPod.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
@@ -382,21 +382,6 @@ const botClassName =
 /** How many of a bot's open threads show under it, before All threads leads to the rest. */
 const THREADS_SHOWN = 6;
 
-/** A bot's face on its row: still except on its turn to move among the list's faces. */
-function BotItemFace({ agent, faceRef }: { agent: Agent; faceRef: Ref<LivelyFace> }) {
-	const movingTurn = useGroupTurn();
-	return (
-		<AgentAvatar
-			color={agent.color}
-			face={agent.face}
-			shape={agent.shape}
-			size={18}
-			lively={{ mood: movingTurn ? "idle" : "still", watchPointer: true, ref: faceRef }}
-			className="shrink-0"
-		/>
-	);
-}
-
 /**
  * A bot on one line, which opens its channel, with its threads under it
  * while it or one of them is open. At its end, what is new in its channel
@@ -458,7 +443,7 @@ function BotItem({
 			</>
 		) : undefined;
 	const mark = agent ? (
-		<BotItemFace agent={agent} faceRef={face} />
+		<TurnTakingAvatar bot={agent} size={18} faceRef={face} className="shrink-0" />
 	) : (
 		<Users aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
 	);

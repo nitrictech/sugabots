@@ -1,5 +1,5 @@
 import { HttpResponse, http } from "msw";
-import { expect, screen, within } from "storybook/test";
+import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { appHandlers, StoryApp, storyUser, storyWorkspace } from "../story-app.tsx";
 
@@ -49,7 +49,10 @@ export const DeleteWorkspace = meta.story({
 			await canvas.findByRole("button", { name: "Delete workspace" }, { timeout: 10_000 }),
 		);
 		const dialog = await screen.findByRole("dialog", { name: /^Delete .+\?$/ });
-		await expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+		// The dialog moves focus to Cancel just after it appears.
+		await waitFor(() =>
+			expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus(),
+		);
 	},
 });
 
