@@ -219,13 +219,13 @@ function OnboardingFrame({
 }) {
 	return (
 		<main className="flex min-h-full flex-col overflow-auto bg-background text-foreground">
-			<header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center px-8 pt-7 max-md:px-4">
+			<header className="grid shrink-0 grid-cols-centered items-center px-8 pt-7 max-md:px-4">
 				<span>
 					{onBack && (
 						<button
 							type="button"
 							onClick={onBack}
-							className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[14.5px] text-link"
+							className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link"
 						>
 							<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
 							Back
@@ -242,7 +242,7 @@ function OnboardingFrame({
 								key={step}
 								className={`h-1.5 rounded-full transition-all ${
 									index === current
-										? "w-[22px] bg-foreground"
+										? "w-5.5 bg-foreground"
 										: index < current
 											? "w-1.5 bg-muted-foreground"
 											: "w-1.5 bg-border-strong"
@@ -255,14 +255,14 @@ function OnboardingFrame({
 					<button
 						type="button"
 						onClick={onCancel}
-						className="focus-ring col-start-3 justify-self-end rounded-md font-medium text-[14.5px] text-link"
+						className="focus-ring col-start-3 justify-self-end rounded-md font-medium text-sm text-link"
 					>
 						Cancel
 					</button>
 				)}
 			</header>
 			<div className="grid flex-1 place-items-center px-4 py-10">
-				<div className="flex w-full max-w-[440px] flex-col gap-[22px]">{children}</div>
+				<div className="flex w-full max-w-110 flex-col gap-5.5">{children}</div>
 			</div>
 		</main>
 	);
@@ -271,11 +271,11 @@ function OnboardingFrame({
 function StepHeading({ title, children }: { title: ReactNode; children?: ReactNode }) {
 	return (
 		<>
-			<h1 className="m-0 text-balance text-center font-bold text-[30px] leading-[1.15] tracking-[-0.02em]">
+			<h1 className="m-0 text-balance text-center font-bold text-3xl leading-tight tracking-tight">
 				{title}
 			</h1>
 			{children && (
-				<p className="m-0 text-pretty text-center text-[15px] text-muted-foreground leading-[1.55]">
+				<p className="m-0 text-pretty text-center text-sm text-muted-foreground leading-normal">
 					{children}
 				</p>
 			)}
@@ -288,7 +288,7 @@ function QuietLink({ onClick, children }: { onClick: () => void; children: React
 		<button
 			type="button"
 			onClick={onClick}
-			className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground"
+			className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-sm text-muted-foreground"
 		>
 			{children}
 		</button>
@@ -296,7 +296,7 @@ function QuietLink({ onClick, children }: { onClick: () => void; children: React
 }
 
 const fieldClass =
-	"focus-ring w-full rounded-2xl bg-list px-4 py-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground";
+	"focus-ring w-full rounded-2xl bg-list px-4 py-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground";
 
 function WorkspaceStep({
 	workspace,
@@ -332,7 +332,7 @@ function WorkspaceStep({
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-[22px]">
+		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Name your workspace">
 				It's just you for now. You can invite people later.
 			</StepHeading>
@@ -398,7 +398,7 @@ function ConnectProviderStep({
 	);
 
 	return (
-		<div className="flex flex-col gap-[22px]">
+		<div className="flex flex-col gap-5.5">
 			<StepHeading title="Connect a provider">
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
@@ -492,7 +492,7 @@ function ChooseModelStep({
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-[22px]">
+		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Choose a model">
 				Your first bot thinks with this. You can switch on more of {provider.name}'s models later.
 			</StepHeading>
@@ -509,7 +509,7 @@ function ChooseModelStep({
 					<legend className="sr-only">Model</legend>
 					{large && (
 						<div className="border-border border-b p-3">
-							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+							<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 								<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
 								<input
 									type="search"
@@ -517,7 +517,7 @@ function ChooseModelStep({
 									onChange={(event) => setSearch(event.target.value)}
 									placeholder={`Search ${choices.length} models`}
 									aria-label="Search models"
-									className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+									className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 								/>
 							</label>
 						</div>
@@ -528,14 +528,14 @@ function ChooseModelStep({
 					 */}
 					<div className={large ? "h-52 overflow-y-auto" : undefined}>
 						{shown.length === 0 && (
-							<p className="m-0 px-4 py-3 text-muted-foreground text-sm">No models match.</p>
+							<p className="m-0 px-4 py-3 text-muted-foreground text-xs">No models match.</p>
 						)}
 						{shown.map((model) => (
 							<label
 								key={model.id}
 								className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 last:border-b-0 has-focus-visible:bg-panel hover:bg-panel"
 							>
-								<span className="min-w-0 flex-1 truncate font-medium text-[14.5px] text-foreground">
+								<span className="min-w-0 flex-1 truncate font-medium text-sm text-foreground">
 									{modelName(model)}
 								</span>
 								<input
@@ -586,7 +586,7 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-[22px]">
+		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Make your first bot" />
 			<div className="flex justify-center">
 				<AgentAvatar color={color} face={face} shape={shape} size={96} />
@@ -686,22 +686,22 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 
 	const count = emails.length;
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-[22px]">
+		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Bring your friends">
 				Invite people to your workspace. You can add them to pods later.
 			</StepHeading>
-			<div className="focus-ring-within flex min-h-[52px] flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
+			<div className="focus-ring-within flex min-h-13 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
 				{emails.map((email) => (
 					<span
 						key={email}
-						className="flex items-center gap-1.5 rounded-full bg-border-strong py-1 pr-1.5 pl-2.5 text-[13.5px]"
+						className="flex items-center gap-1.5 rounded-full bg-border-strong py-1 pr-1.5 pl-2.5 text-xs"
 					>
 						{email}
 						<button
 							type="button"
 							aria-label={`Remove ${email}`}
 							onClick={() => setEmails((current) => current.filter((one) => one !== email))}
-							className="focus-ring grid size-[18px] place-items-center rounded-full text-soft-foreground"
+							className="focus-ring grid size-4.5 place-items-center rounded-full text-soft-foreground"
 						>
 							<X aria-hidden size={10} strokeWidth={3} />
 						</button>
@@ -718,7 +718,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 					onBlur={addDraft}
 					placeholder={count === 0 ? "Email addresses" : ""}
 					disabled={sending}
-					className="min-w-40 flex-1 bg-transparent px-1 py-1.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
+					className="min-w-40 flex-1 bg-transparent px-1 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 				/>
 			</div>
 			{failed.length > 0 && (
@@ -772,22 +772,20 @@ function ReadyStep({
 		<>
 			<StepHeading title={`${bot.name} is ready`} />
 			<div
-				className="flex flex-col gap-[3px] rounded-[20px] bg-list px-4 py-[18px]"
+				className="flex flex-col gap-0.75 rounded-3xl bg-list px-4 py-4.5"
 				style={botColorVariables(bot.color)}
 			>
-				<span className="pb-1 pl-[42px] font-medium text-[11.5px] text-muted-foreground">
-					{bot.name}
-				</span>
+				<span className="pb-1 pl-10.5 font-medium text-2xs text-muted-foreground">{bot.name}</span>
 				<div className="flex items-end gap-2">
 					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={34} />
-					<div className="flex min-w-0 flex-col gap-[3px]">
+					<div className="flex min-w-0 flex-col gap-0.75">
 						{[
 							`Hi, I'm ${bot.name}.`,
 							"I've only just been set up. Help me work out what I'm for?",
 						].map((line) => (
 							<p
 								key={line}
-								className="m-0 rounded-[20px_20px_20px_6px] bg-bot-tint px-3.5 py-2.5 text-[15px] text-bot-text leading-normal"
+								className="m-0 rounded-bubble rounded-bl-tail bg-bot-tint px-3.5 py-2.5 text-sm text-bot-text leading-normal"
 							>
 								{line}
 							</p>

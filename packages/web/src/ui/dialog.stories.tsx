@@ -15,7 +15,7 @@ function ProvidersPage() {
 	const [open, setOpen] = useState(false);
 	return (
 		<div className="flex min-h-dvh flex-col gap-4 bg-background p-8">
-			<h1 className="font-bold text-2xl text-foreground">Providers</h1>
+			<h1 className="font-bold text-base text-foreground">Providers</h1>
 			<p className="max-w-prose text-muted-foreground">
 				Every provider you connect offers its models to the bots in this workspace.
 			</p>

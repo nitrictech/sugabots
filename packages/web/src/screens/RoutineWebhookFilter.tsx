@@ -105,7 +105,7 @@ export function FilterGroup({
 				<SettingsAddRow label="Add condition" onClick={() => beginEditing("new")} />
 			) : null}
 			{filter.length >= MAX_WEBHOOK_FILTER_CONDITIONS && (
-				<p className="m-0 px-4 py-3 text-muted-foreground text-sm">
+				<p className="m-0 px-4 py-3 text-muted-foreground text-xs">
 					At most {MAX_WEBHOOK_FILTER_CONDITIONS} conditions.
 				</p>
 			)}
@@ -141,7 +141,7 @@ function ConditionEditor({
 			}}
 		>
 			<legend className="sr-only">{condition ? "Edit condition" : "New condition"}</legend>
-			<label htmlFor={pathId} className="text-foreground text-sm">
+			<label htmlFor={pathId} className="text-foreground text-xs">
 				JSON path
 			</label>
 			<input
@@ -152,7 +152,7 @@ function ConditionEditor({
 				autoComplete="off"
 				spellCheck={false}
 				placeholder="data.labels.name"
-				className="focus-ring min-w-0 rounded-md border border-border bg-list px-3 py-2 font-mono text-foreground text-sm"
+				className="focus-ring min-w-0 rounded-md border border-border bg-list px-3 py-2 font-mono text-foreground text-xs"
 			/>
 			{values.map((value, index) => (
 				<div key={value.id} className="flex items-start gap-2">
@@ -169,7 +169,7 @@ function ConditionEditor({
 								),
 							)
 						}
-						className="min-h-10 rounded-md border-border px-3 py-2 font-mono text-sm"
+						className="min-h-10 rounded-md border-border px-3 py-2 font-mono text-xs"
 					/>
 					<IconButton
 						label={`Remove value ${index + 1}`}
@@ -191,7 +191,7 @@ function ConditionEditor({
 					Add value
 				</Button>
 			)}
-			<p className="m-0 text-muted-foreground text-sm">
+			<p className="m-0 text-muted-foreground text-xs">
 				Any accepted value may match. An empty value matches an empty string.
 			</p>
 			<div className="flex justify-end gap-2">

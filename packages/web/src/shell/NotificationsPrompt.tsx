@@ -32,7 +32,7 @@ export function NotificationsPrompt() {
 			className="flex shrink-0 items-center gap-3 border-border border-b bg-panel py-1.5 pr-2 pl-4"
 		>
 			<BellRing aria-hidden size={16} className="shrink-0 text-link" />
-			<p className="m-0 min-w-0 flex-1 text-[13.5px] text-soft-foreground leading-normal">
+			<p className="m-0 min-w-0 flex-1 text-xs text-soft-foreground leading-normal">
 				Get notified when you're mentioned, a bot replies to you, or one needs your approval.
 			</p>
 			<Button size="sm" disabled={enable.isPending} onClick={() => enable.mutate()}>

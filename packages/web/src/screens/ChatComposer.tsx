@@ -28,7 +28,7 @@ import { type MentionTarget, mentionTargetKey } from "./mentions.tsx";
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
 const toolButtonClassName =
-	"focus-ring grid size-[30px] place-items-center rounded-tail text-muted-foreground transition-colors hover:bg-chip";
+	"focus-ring grid size-7.5 place-items-center rounded-tail text-muted-foreground transition-colors hover:bg-chip";
 
 /**
  * Where a message is written: a box that grows with its text and sends on
@@ -245,7 +245,7 @@ export function ChatComposer({
 						editor.current?.focus();
 					}
 				}}
-				className="focus-ring-within flex cursor-text flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-[23px] max-md:p-1"
+				className="focus-ring-within flex cursor-text flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-3xl max-md:p-1"
 			>
 				<div className="flex flex-col max-md:w-full max-md:empty:hidden">
 					{replyingTo && (
@@ -326,14 +326,14 @@ export function ChatComposer({
 						disabled={
 							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
 						}
-						className="focus-ring grid size-[30px] place-items-center rounded-[8px] bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
+						className="focus-ring grid size-7.5 place-items-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
 					>
 						<Send size={15} strokeWidth={2.2} className="max-md:hidden" />
 						<ArrowUp size={18} strokeWidth={2.25} className="md:hidden" />
 					</button>
 				</div>
 			</div>
-			<div aria-live="polite" className="pt-1.5 pl-3 text-destructive-text text-sm empty:hidden">
+			<div aria-live="polite" className="pt-1.5 pl-3 text-destructive-text text-xs empty:hidden">
 				{error}
 			</div>
 		</form>
@@ -345,7 +345,7 @@ function ReplyingToStrip({ message, onCancel }: { message: MessageReplyTo; onCan
 	const { author } = message;
 	const name = messageAuthorName(author);
 	return (
-		<div className="flex items-center gap-2 border-border border-b py-1.5 pr-1.5 pl-3 text-[13px]">
+		<div className="flex items-center gap-2 border-border border-b py-1.5 pr-1.5 pl-3 text-xs">
 			<p className="m-0 flex min-w-0 flex-1 items-center gap-1.5 text-muted-foreground">
 				<span className="shrink-0">
 					Replying to <span className="font-semibold text-soft-foreground">{name}</span>
@@ -538,7 +538,7 @@ function SuggestionList<Item>({
 		list.current?.children[selected]?.scrollIntoView({ block: "nearest" });
 	}, [selected]);
 	return (
-		<div className="absolute bottom-[calc(100%+6px)] left-1.5 z-20 w-[280px] max-w-[calc(100%-12px)] overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover">
+		<div className="absolute bottom-full mb-1.5 left-1.5 z-20 w-70 max-w-composer-menu overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover">
 			<div className="px-3 pt-2.5 pb-1 font-medium text-subtle-foreground text-xs">{title}</div>
 			<div
 				ref={list}
@@ -559,7 +559,7 @@ function SuggestionList<Item>({
 						onMouseDown={(event) => event.preventDefault()}
 						onMouseEnter={() => onHighlight(index)}
 						onClick={() => onChoose(index)}
-						className="flex w-full items-center gap-2.5 rounded-tail px-2 py-[7px] text-left aria-selected:bg-chip"
+						className="flex w-full items-center gap-2.5 rounded-tail px-2 py-1.75 text-left aria-selected:bg-chip"
 					>
 						{renderItem(item)}
 					</button>
@@ -575,12 +575,12 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 			<>
 				<span
 					aria-hidden
-					className="grid size-[26px] shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
+					className="grid size-6.5 shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
 				>
 					<AtSign size={14} />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-[14px]">@{suggestion.handle}</span>
+					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
 						Notify everyone who can see this
 					</span>
@@ -602,7 +602,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 				<PersonAvatar person={participant} size={26} />
 			)}
 			<span className="flex min-w-0 flex-1 flex-col gap-px">
-				<span className="truncate font-medium text-[14px]">{participant.name}</span>
+				<span className="truncate font-medium text-sm">{participant.name}</span>
 				<span className="truncate text-muted-foreground text-xs">
 					{participant.kind === "agent" ? "Bot" : `@${participant.handle}`}
 				</span>
@@ -614,10 +614,10 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 function EmojiOption({ emoji }: { emoji: Emoji }) {
 	return (
 		<>
-			<span aria-hidden className="grid size-[26px] place-items-center text-[20px] leading-none">
+			<span aria-hidden className="grid size-6.5 place-items-center text-xl leading-none">
 				{emoji.emoji}
 			</span>
-			<span className="min-w-0 flex-1 truncate text-[14px]">
+			<span className="min-w-0 flex-1 truncate text-sm">
 				<span className="sr-only">{emoji.emoji} </span>:{emoji.shortcodes[0]}:
 			</span>
 		</>

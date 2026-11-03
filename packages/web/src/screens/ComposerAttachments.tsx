@@ -65,7 +65,7 @@ export function AttachmentTray({
 					ref={tray}
 					aria-label="Attached files"
 					className={cn(
-						"m-0 flex max-h-[206px] list-none flex-wrap gap-2 overflow-y-auto px-2.5 pt-2.5",
+						"m-0 flex max-h-51.5 list-none flex-wrap gap-2 overflow-y-auto px-2.5 pt-2.5",
 						overflowing && "mask-b-from-82% pb-2.5",
 						"max-sm:max-h-none max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:mask-none max-sm:px-2 max-sm:pt-2 max-sm:pb-0",
 					)}
@@ -81,7 +81,7 @@ export function AttachmentTray({
 					))}
 				</ul>
 			)}
-			<div role="status" className="flex flex-col gap-1 px-3 pt-2 text-[13px] empty:hidden">
+			<div role="status" className="flex flex-col gap-1 px-3 pt-2 text-xs empty:hidden">
 				{failures.map((note, index) => (
 					<p
 						key={note.reason}
@@ -94,7 +94,7 @@ export function AttachmentTray({
 							strokeWidth={2.2}
 							className="mt-px shrink-0 text-destructive-text"
 						/>
-						<span className="min-w-0 [overflow-wrap:anywhere]">
+						<span className="min-w-0 wrap-anywhere">
 							<span className="font-medium text-foreground">{note.names}</span>: {note.reason}
 						</span>
 					</p>
@@ -133,7 +133,7 @@ export function LeftOutNote({ count }: { count: number }) {
 	return (
 		<div
 			role="status"
-			className="flex items-center gap-2 px-3 pt-2.5 text-[13px] text-soft-foreground empty:hidden"
+			className="flex items-center gap-2 px-3 pt-2.5 text-xs text-soft-foreground empty:hidden"
 		>
 			{count > 0 && (
 				<>
@@ -180,7 +180,7 @@ export function AttachmentChip({
 		<li
 			title={status ? `${file.name} · ${status}` : file.name}
 			className={cn(
-				"group relative block size-20 shrink-0 overflow-hidden rounded-[10px] border has-focus-visible:border-primary-tint-border max-sm:size-[72px]",
+				"group relative block size-20 shrink-0 overflow-hidden rounded-lg border has-focus-visible:border-primary-tint-border max-sm:size-18",
 				failed ? "border-destructive/50 bg-destructive-hover" : "border-border-strong bg-chip",
 			)}
 		>
@@ -195,7 +195,7 @@ export function AttachmentChip({
 				<FilePreview file={file} look={look} dimmed={upload.state === "uploading"} />
 			)}
 			{failed ? (
-				<span className="absolute inset-x-0 bottom-0 flex h-[22px] items-center justify-center border-destructive/30 border-t bg-destructive-hover font-medium text-[10px] text-destructive-text transition-opacity group-focus-within:opacity-0 group-hover:opacity-0">
+				<span className="absolute inset-x-0 bottom-0 flex h-5.5 items-center justify-center border-destructive/30 border-t bg-destructive-hover font-medium text-3xs text-destructive-text transition-opacity group-focus-within:opacity-0 group-hover:opacity-0">
 					{upload.state === "tooLarge" ? "Too large" : "Failed"}
 				</span>
 			) : (
@@ -208,21 +208,21 @@ export function AttachmentChip({
 						aria-label={`Retry ${file.name}`}
 						aria-describedby={failureId}
 						onClick={onRetry}
-						className="focus-ring absolute top-1/2 left-1/2 z-[2] grid size-8 -translate-x-1/2 -translate-y-[70%] place-items-center rounded-full bg-hover text-foreground transition-colors hover:bg-hover-strong"
+						className="focus-ring absolute top-1/2 left-1/2 z-2 grid size-8 -translate-x-1/2 -translate-y-7/10 place-items-center rounded-full bg-hover text-foreground transition-colors hover:bg-hover-strong"
 					>
 						<RotateCcw aria-hidden size={16} strokeWidth={2.4} />
 					</button>
 				</Tooltip>
 			)}
-			<span className="pointer-events-none absolute inset-0 flex flex-col justify-end gap-0.5 bg-linear-to-b from-20% from-transparent to-75% to-background/92 px-[7px] py-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+			<span className="pointer-events-none absolute inset-0 flex flex-col justify-end gap-0.5 bg-linear-to-b from-20% from-transparent to-75% to-background/92 px-1.75 py-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 				<MiddleTruncated
 					text={file.name}
-					className="font-medium text-[11px] text-foreground leading-[1.3]"
+					className="font-medium text-2xs text-foreground leading-tight"
 				/>
 				{status && (
 					<span
 						className={cn(
-							"text-[10.5px] leading-[1.25]",
+							"text-2xs leading-tight",
 							failed ? "text-destructive-text" : "text-soft-foreground",
 						)}
 					>
@@ -237,7 +237,7 @@ export function AttachmentChip({
 					aria-describedby={failureId}
 					data-remove-chip
 					onClick={onRemove}
-					className="focus-ring absolute top-1 right-1 z-[3] grid size-6 place-items-center rounded-full bg-background/85 text-foreground opacity-0 transition-opacity hover:bg-background focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+					className="focus-ring absolute top-1 right-1 z-3 grid size-6 place-items-center rounded-full bg-background/85 text-foreground opacity-0 transition-opacity hover:bg-background focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
 				>
 					<X aria-hidden size={12} strokeWidth={2.4} />
 				</button>
@@ -270,16 +270,16 @@ function FilePreview({ file, look, dimmed }: { file: File; look: FileLook; dimme
 		return (
 			<span
 				className={cn(
-					"absolute inset-[9px_14px_-6px] flex flex-col gap-1 rounded-[3px] bg-file-page px-[7px] py-2",
+					"absolute top-2.25 inset-x-3.5 -bottom-1.5 flex flex-col gap-1 rounded bg-file-page px-1.75 py-2",
 					fade,
 				)}
 			>
-				<i className="mb-0.5 block h-[5px] w-[62%] rounded-sm bg-file-page-heading" />
-				<i className="block h-[3px] rounded-sm bg-file-page-line" />
-				<i className="block h-[3px] rounded-sm bg-file-page-line" />
-				<i className="block h-[3px] w-[70%] rounded-sm bg-file-page-line" />
-				<i className="block h-[3px] rounded-sm bg-file-page-line" />
-				<i className="block h-[3px] w-[70%] rounded-sm bg-file-page-line" />
+				<i className="mb-0.5 block h-1.25 w-5/8 rounded-sm bg-file-page-heading" />
+				<i className="block h-0.75 rounded-sm bg-file-page-line" />
+				<i className="block h-0.75 rounded-sm bg-file-page-line" />
+				<i className="block h-0.75 w-7/10 rounded-sm bg-file-page-line" />
+				<i className="block h-0.75 rounded-sm bg-file-page-line" />
+				<i className="block h-0.75 w-7/10 rounded-sm bg-file-page-line" />
 			</span>
 		);
 	}
@@ -287,7 +287,7 @@ function FilePreview({ file, look, dimmed }: { file: File; look: FileLook; dimme
 		return (
 			<span
 				style={SHEET_GRID}
-				className={cn("absolute inset-[9px_10px_-6px] rounded-[3px] bg-file-page", fade)}
+				className={cn("absolute top-2.25 inset-x-2.5 -bottom-1.5 rounded bg-file-page", fade)}
 			/>
 		);
 	}
@@ -344,7 +344,7 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 	return (
 		<span
 			className={cn(
-				"absolute bottom-[5px] left-[5px] flex h-4 max-w-[calc(100%-10px)] items-center truncate rounded-[4px] px-[5px] font-semibold text-[10px] text-white tracking-[0.03em] transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
+				"absolute bottom-1.25 left-1.25 flex h-4 max-w-attachment-preview items-center truncate rounded px-1.25 font-semibold text-3xs text-white tracking-wide transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
 				look === "sheet" ? "bg-file-badge-sheet" : "bg-file-badge-other",
 			)}
 		>
@@ -362,9 +362,9 @@ function UploadProgress({ name, fraction }: { name: string; fraction: number }) 
 			aria-valuemin={0}
 			aria-valuemax={100}
 			aria-valuenow={percent}
-			className="absolute inset-x-0 bottom-0 z-[2] h-[3px] bg-border-strong"
+			className="absolute inset-x-0 bottom-0 z-2 h-0.75 bg-border-strong"
 		>
-			<span className="block h-full bg-meter transition-[width]" style={{ width: `${percent}%` }} />
+			<span className="block h-full bg-meter transition-all" style={{ width: `${percent}%` }} />
 		</span>
 	);
 }

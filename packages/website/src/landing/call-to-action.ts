@@ -13,8 +13,8 @@ export const callToAction = cva(
 				quiet: "font-medium text-landing-button-text hover:bg-landing-bubble hover:text-white",
 			},
 			size: {
-				large: "rounded-[10px] px-[22px] py-[13px] text-[15px] leading-none",
-				small: "rounded-[9px] px-3.5 py-[9px] text-sm leading-none",
+				large: "rounded-lg px-5.5 py-3.25 text-sm leading-none",
+				small: "rounded-lg px-3.5 py-2.25 text-sm leading-none",
 			},
 		},
 		compoundVariants: [{ variant: "primary", size: "small", className: "px-4" }],

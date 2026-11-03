@@ -55,7 +55,7 @@ export function HelpMenu() {
 				<Tooltip label="Help" side="top">
 					<DropdownMenuTrigger
 						aria-label="Help"
-						className="focus-ring grid size-7 shrink-0 place-items-center rounded-[6px] text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
+						className="focus-ring grid size-7 shrink-0 place-items-center rounded-sm text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
 					>
 						<CircleHelp aria-hidden size={16} strokeWidth={1.75} />
 					</DropdownMenuTrigger>
@@ -83,7 +83,7 @@ export function HelpMenu() {
 						<Info aria-hidden className="text-muted-foreground" />
 						<span className="flex-1">About Sugabots</span>
 						{known?.versioned && (
-							<span className="text-muted-foreground text-sm tabular-nums">{known.version}</span>
+							<span className="text-muted-foreground text-xs tabular-nums">{known.version}</span>
 						)}
 					</DropdownMenuItem>
 				</DropdownMenuContent>
@@ -139,7 +139,7 @@ export function AboutDialog({
 		<DialogContent sheetOnPhone className="gap-4 p-5 pt-6 sm:max-w-100">
 			<div className="flex flex-col items-center gap-2.5">
 				<SugabotsMark className="size-14" />
-				<DialogTitle className="text-lg">Sugabots</DialogTitle>
+				<DialogTitle className="text-sm">Sugabots</DialogTitle>
 			</div>
 			<SettingsGroup
 				note={

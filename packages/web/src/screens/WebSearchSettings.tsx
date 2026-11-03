@@ -161,9 +161,7 @@ function ProviderChoice({
 	const name = useId();
 	return (
 		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-0.5 pb-2.5 font-medium text-[13px] text-muted-foreground">
-				Provider
-			</legend>
+			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">Provider</legend>
 			<div className={SETTINGS_CARD}>
 				{searchProviderCatalog.map((candidate) => (
 					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
@@ -176,10 +174,8 @@ function ProviderChoice({
 							className="sr-only"
 						/>
 						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
-						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-							<span className="truncate font-medium text-[13px] text-foreground">
-								{candidate.name}
-							</span>
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+							<span className="truncate font-medium text-sm text-foreground">{candidate.name}</span>
 							<span className="text-pretty text-subtle-foreground text-xs">
 								{providerDescriptions[candidate.id]}
 							</span>

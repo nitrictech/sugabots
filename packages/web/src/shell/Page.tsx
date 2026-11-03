@@ -55,19 +55,19 @@ export function PageHeader({
 	return (
 		<header
 			className={cn(
-				"flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6",
-				"max-md:h-auto max-md:border-b-0 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
+				"flex h-13 shrink-0 items-center gap-3 border-border border-b pr-4 pl-6",
+				"max-md:h-auto max-md:border-b-0 max-md:pt-safe-or-3 max-md:pb-2",
 				tab ? "max-md:gap-0.5 max-md:pr-2 max-md:pl-4" : "max-md:gap-2 max-md:px-4",
 			)}
 		>
 			{place.kind === "pod" && <HeaderBack back={{ to: "pod", pod: place.pod }} />}
 			<h1
 				className={cn(
-					"m-0 min-w-0 flex-1 truncate font-medium text-[14px] text-foreground",
+					"m-0 min-w-0 flex-1 truncate font-medium text-sm text-foreground",
 					tab
-						? "max-md:font-semibold max-md:text-[28px] max-md:tracking-[-0.02em]"
+						? "max-md:font-semibold max-md:text-3xl max-md:tracking-tight"
 						: // Centred between Back and the actions, as a phone's own titles are.
-							"max-md:text-center max-md:font-semibold max-md:text-[17px]",
+							"max-md:text-center max-md:font-semibold max-md:text-base",
 				)}
 			>
 				{title}

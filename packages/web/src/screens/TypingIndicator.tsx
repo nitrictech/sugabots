@@ -32,7 +32,7 @@ export function TypingIndicator({
 			role="status"
 			aria-label={label}
 			className={cn(
-				"flex h-[26px] items-center gap-2 px-5 font-medium text-[12.5px] text-muted-foreground",
+				"flex h-6.5 items-center gap-2 px-5 font-medium text-xs text-muted-foreground",
 				className,
 			)}
 		>

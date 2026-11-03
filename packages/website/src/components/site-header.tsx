@@ -53,7 +53,7 @@ export function SiteHeader({
 	const track = (cta: Parameters<typeof trackCallToActionClick>[0]) => () =>
 		trackCallToActionClick(cta, placement);
 	const iconButton = cn(
-		"grid size-9 place-items-center rounded-[9px] opacity-75 transition-[opacity,background-color] hover:opacity-100",
+		"grid size-9 place-items-center rounded-lg opacity-75 transition hover:opacity-100",
 		colours.text,
 		colours.link,
 	);
@@ -69,8 +69,8 @@ export function SiteHeader({
 			>
 				<div className="flex items-center gap-2.5">
 					<a href={homeHref} className={cn("flex items-center gap-2.5", colours.text)}>
-						<SugabotsMark className="size-[30px]" />
-						<span className="text-lg font-bold tracking-[-0.01em]">Sugabots</span>
+						<SugabotsMark className="size-7.5" />
+						<span className="text-lg font-bold tracking-normal">Sugabots</span>
 					</a>
 					{badge && (
 						<a
@@ -101,7 +101,7 @@ export function SiteHeader({
 						aria-label="GitHub"
 						className={iconButton}
 					>
-						<GitHubIcon className="size-[18px]" />
+						<GitHubIcon className="size-4.5" />
 					</a>
 					<a
 						href={siteLinks.discord}
@@ -109,7 +109,7 @@ export function SiteHeader({
 						aria-label="Discord"
 						className={iconButton}
 					>
-						<DiscordIcon className="size-[18px]" />
+						<DiscordIcon className="size-4.5" />
 					</a>
 					<span className={cn("mx-2.5 hidden h-5 w-px lg:block", colours.divider)} />
 					<a

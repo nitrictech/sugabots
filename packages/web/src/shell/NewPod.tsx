@@ -56,7 +56,7 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 					<PodInitial
 						pod={{ name, color, kind: "shared" }}
 						size="lg"
-						className="size-16 rounded-2xl text-[26px]"
+						className="size-16 rounded-2xl text-2xl"
 					/>
 				</div>
 				<SettingsGroup note="You'll add bots, people and connections next.">

@@ -43,7 +43,7 @@ export function DetailTooltip({
 			{...props}
 			content={
 				<>
-					<span className="font-semibold text-[13px] text-foreground">{title}</span>
+					<span className="font-semibold text-xs text-foreground">{title}</span>
 					<span className="text-muted-foreground text-xs">{description}</span>
 				</>
 			}

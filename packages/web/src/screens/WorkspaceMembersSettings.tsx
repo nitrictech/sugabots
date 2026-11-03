@@ -151,7 +151,7 @@ function Roster({
 			}
 		>
 			{members.isPending ? (
-				<p className="m-0 text-md text-muted-foreground">Loading members…</p>
+				<p className="m-0 text-xs text-muted-foreground">Loading members…</p>
 			) : members.error ? (
 				<Alert>Members could not be loaded. Reload this page to try again.</Alert>
 			) : (
@@ -489,7 +489,7 @@ function PodMembershipRow({
 
 	return (
 		<SettingsRow
-			icon={<PodInitial pod={pod} className="size-7 rounded-[7px] text-xs" />}
+			icon={<PodInitial pod={pod} className="size-7 rounded-sm text-xs" />}
 			label={pod.name}
 			sub={place.error ? failureMessage(place.error) : counts.join(", ")}
 			trailing={
@@ -559,7 +559,7 @@ function InviteDialog({
 					placeholder="Email addresses, separated by commas"
 					disabled={sending}
 					autoComplete="off"
-					className="focus-ring w-full rounded-xl border border-settings-card-border bg-settings-card px-4 py-3.5 text-[13px] text-foreground leading-5 outline-none placeholder:text-muted-foreground"
+					className="focus-ring w-full rounded-xl border border-settings-card-border bg-settings-card px-4 py-3.5 text-xs text-foreground leading-5 outline-none placeholder:text-muted-foreground"
 				/>
 				<SettingsGroup note={workspaceRoleDescription(role)}>
 					<SettingsRow

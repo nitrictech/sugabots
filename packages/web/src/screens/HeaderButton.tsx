@@ -40,7 +40,7 @@ export function HeaderButton({
 			)}
 		>
 			{icon}
-			<span className="hidden font-medium text-sm md:@2xl/chat-header:inline">{label}</span>
+			<span className="hidden font-medium text-xs md:@2xl/chat-header:inline">{label}</span>
 		</IconButton>
 	);
 }

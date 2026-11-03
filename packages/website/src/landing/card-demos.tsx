@@ -17,7 +17,7 @@ import { arrive, type Bot, crew, MessageRow, people } from "@/landing/chat-parts
 
 const demoArea =
 	// A little taller on phones, where the messages wrap onto more lines.
-	"relative flex h-68 flex-col rounded-[14px] border border-landing-line bg-landing-page sm:h-64";
+	"relative flex h-68 flex-col rounded-xl border border-landing-line bg-landing-page sm:h-64";
 
 /** Gary asks, Growth Desk drafts, and Lorraine replies; the visitor can add their own 👍 to the draft. */
 export function ThreadDemo() {
@@ -42,7 +42,7 @@ export function ThreadDemo() {
 					aria-label={reacted ? "Remove your 👍" : "React with 👍"}
 					onClick={() => setReacted((was) => !was)}
 					className={cn(
-						"mt-1 flex h-6 items-center gap-[5px] self-start rounded-lg border px-2 text-[12.5px] font-medium tabular-nums transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-landing-accent",
+						"mt-1 flex h-6 items-center gap-1.25 self-start rounded-lg border px-2 text-xs font-medium tabular-nums transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-landing-accent",
 						reacted
 							? "border-landing-text bg-landing-button text-landing-text"
 							: "border-transparent bg-landing-chip text-landing-secondary hover:border-landing-control",
@@ -68,41 +68,39 @@ export function ApprovalDemo() {
 
 	return (
 		<div className={cn(demoArea, "justify-center p-4 sm:p-6")}>
-			<div className="flex min-w-0 flex-col gap-2.5 rounded-[6px_20px_20px_20px] bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
+			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl rounded-tl-sm bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
 				<div className="flex min-w-0 items-start gap-2.5">
-					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-[7px] bg-[#635bff] text-white">
-						<StripeIcon className="size-[13px]" />
+					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-indigo-500 text-white">
+						<StripeIcon className="size-3.25" />
 					</span>
 					<div className="flex min-w-0 flex-col gap-0.5">
-						<span className="text-xs/[1.4] text-landing-muted">
-							Ticket Desk wants to use Stripe
-						</span>
-						<span className="text-sm/[1.4] font-medium">Refund payment</span>
+						<span className="text-xs/snug text-landing-muted">Ticket Desk wants to use Stripe</span>
+						<span className="text-sm/snug font-medium">Refund payment</span>
 					</div>
 				</div>
-				<dl className="ml-[34px] grid min-w-0 grid-cols-[fit-content(min(180px,40%))_minmax(0,1fr)] items-baseline gap-x-4 gap-y-0.5 border-l-2 border-landing-rule pl-2.5 text-sm/[1.4]">
-					<dt className="min-w-[72px] py-0.5 text-landing-muted">Customer</dt>
+				<dl className="ml-8.5 grid min-w-0 grid-cols-capped-label items-baseline gap-x-4 gap-y-0.5 border-l-2 border-landing-rule pl-2.5 text-sm/snug">
+					<dt className="min-w-18 py-0.5 text-landing-muted">Customer</dt>
 					<dd className="py-0.5">Kestrel Freight</dd>
-					<dt className="min-w-[72px] py-0.5 text-landing-muted">Amount</dt>
+					<dt className="min-w-18 py-0.5 text-landing-muted">Amount</dt>
 					<dd className="py-0.5">$1,280</dd>
-					<dt className="min-w-[72px] py-0.5 text-landing-muted">Reason</dt>
+					<dt className="min-w-18 py-0.5 text-landing-muted">Reason</dt>
 					<dd className="py-0.5">Charged twice on 3 Oct</dd>
 				</dl>
-				<div className="ml-[34px] flex min-h-8 items-center">
+				<div className="ml-8.5 flex min-h-8 items-center">
 					{answer === "waiting" ? (
-						<fieldset className="flex flex-wrap items-center gap-2 text-[13px] font-semibold">
+						<fieldset className="flex flex-wrap items-center gap-2 text-xs font-semibold">
 							<legend className="sr-only">Answer Ticket Desk’s request</legend>
 							<button
 								type="button"
 								onClick={() => setAnswer("allowed")}
-								className="h-[31px] rounded-[8px] bg-landing-pill px-4 text-landing-page transition-colors hover:bg-landing-pill-hover focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
+								className="h-7.75 rounded-md bg-landing-pill px-4 text-landing-page transition-colors hover:bg-landing-pill-hover focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Allow
 							</button>
 							<button
 								type="button"
 								onClick={() => setAnswer("denied")}
-								className="h-[31px] rounded-[8px] bg-landing-button px-4 transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
+								className="h-7.75 rounded-md bg-landing-button px-4 transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Deny
 							</button>
@@ -110,7 +108,7 @@ export function ApprovalDemo() {
 					) : (
 						<p
 							role="status"
-							className={cn("flex items-center gap-1.5 text-xs/[1.5] text-landing-muted", arrive)}
+							className={cn("flex items-center gap-1.5 text-xs/normal text-landing-muted", arrive)}
 						>
 							{answer === "allowed" ? (
 								<CheckIcon className="size-3 shrink-0" strokeWidth={2.8} />
@@ -155,7 +153,7 @@ export function HandoffDemo() {
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
 				<span aria-hidden className="flex shrink-0">
 					{[crew.growthDesk, crew.pricingAnalyst].map((bot) => (
-						<span key={bot.name} className="-mr-[7px]">
+						<span key={bot.name} className="-mr-1.75">
 							<BotFace
 								{...bot.look}
 								ring={{ color: "var(--color-landing-page)", width: 2 }}
@@ -164,7 +162,7 @@ export function HandoffDemo() {
 						</span>
 					))}
 				</span>
-				<span className="truncate pl-2 text-[13px] font-semibold text-landing-text">
+				<span className="truncate pl-2 text-xs font-semibold text-landing-text">
 					Collaboration with {crew.pricingAnalyst.name}
 				</span>
 			</div>
@@ -265,21 +263,19 @@ export function ModelsDemo() {
 							: "border-transparent bg-transparent",
 					)}
 				>
-					<BotFace {...choice.bot.look} className="size-[30px]" />
+					<BotFace {...choice.bot.look} className="size-7.5" />
 					<span className="flex min-w-0 flex-1 flex-col gap-px">
 						<span className="truncate text-sm font-semibold text-landing-text">
 							{choice.bot.name}
 						</span>
-						<span className="truncate text-[12.5px] text-landing-faint">{choice.job}</span>
+						<span className="truncate text-xs text-landing-faint">{choice.job}</span>
 					</span>
 					{/* One width for every model, wide enough for the longest, so they line up down the card. */}
-					<span className="flex w-[8.5rem] shrink-0 items-center gap-2 rounded-[9px] border border-landing-frame bg-landing-raised px-2.5 py-1.5">
+					<span className="flex w-34 shrink-0 items-center gap-2 rounded-lg border border-landing-frame bg-landing-raised px-2.5 py-1.5">
 						<ProviderMark preset={choice.preset} />
-						<span className="flex min-w-0 flex-col leading-[1.15]">
-							<span className="truncate text-[13px] font-medium text-landing-text">
-								{choice.model}
-							</span>
-							<span className="truncate text-[11.5px] text-landing-faint">{choice.provider}</span>
+						<span className="flex min-w-0 flex-col leading-tight">
+							<span className="truncate text-xs font-medium text-landing-text">{choice.model}</span>
+							<span className="truncate text-xs text-landing-faint">{choice.provider}</span>
 						</span>
 					</span>
 				</div>
@@ -297,7 +293,7 @@ function ProviderMark({ preset }: { preset: ProviderPresetId }) {
 			alt=""
 			width={15}
 			height={15}
-			className={cn("size-[15px] shrink-0 object-contain", logo.scale)}
+			className={cn("size-3.75 shrink-0 object-contain", logo.scale)}
 		/>
 	);
 }

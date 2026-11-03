@@ -24,7 +24,7 @@ export function Shell() {
 
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (
-		<div className="relative flex h-[var(--visible-height,100dvh)] min-w-0 flex-col overflow-hidden bg-background">
+		<div className="relative flex h-visible min-w-0 flex-col overflow-hidden bg-background">
 			<NotificationsPrompt />
 			<div className="flex min-h-0 min-w-0 flex-1">
 				<Sidebar />

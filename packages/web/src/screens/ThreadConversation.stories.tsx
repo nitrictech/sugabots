@@ -518,7 +518,7 @@ export const InTheSidebar = meta.story({
 	},
 	decorators: [
 		(Story) => (
-			<div className="w-[380px]">
+			<div className="w-95">
 				<Story />
 			</div>
 		),
@@ -756,7 +756,7 @@ export const WideTableArriving = meta.story({
 	},
 	// As wide as the collaboration panel, too narrow for the table, which scrolls inside the message.
 	render: (args) => (
-		<div className="w-[560px]">
+		<div className="w-140">
 			<LastReplyLandsWhileWatched {...args} />
 		</div>
 	),

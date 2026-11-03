@@ -115,7 +115,7 @@ export function MentionChip({
 		<span
 			{...rest}
 			className={cn(
-				"mx-px inline-flex items-baseline gap-1 rounded-[5px] bg-chip px-1 font-semibold text-foreground leading-[1.5]",
+				"mx-px inline-flex items-baseline gap-1 rounded-xs bg-chip px-1 font-semibold text-foreground leading-normal",
 				className,
 			)}
 		>

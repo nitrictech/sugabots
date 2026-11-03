@@ -55,11 +55,9 @@ export function ScheduleGroups({
 				/>
 				{reading.kind === "written" && (
 					<div className="flex flex-col gap-1 border-border border-b px-4 py-3 last:border-b-0">
-						<span className="text-[14.5px] text-foreground">{reading.label}</span>
-						<code className="font-mono text-[13px] text-muted-foreground">
-							{reading.expression}
-						</code>
-						<span className="text-sm text-subtle-foreground">Pick a repeat to replace it.</span>
+						<span className="text-sm text-foreground">{reading.label}</span>
+						<code className="font-mono text-xs text-muted-foreground">{reading.expression}</code>
+						<span className="text-xs text-subtle-foreground">Pick a repeat to replace it.</span>
 					</div>
 				)}
 				{schedule && <RepeatRows schedule={schedule} onChange={onChange} />}
@@ -96,7 +94,7 @@ function RepeatRows({
 				onMore={schedule.every < max ? () => changeEvery(schedule.every + 1) : undefined}
 			/>
 			{schedule.repeat === "weekly" && (
-				<fieldset className="m-0 flex min-h-[46px] items-center gap-3 border-0 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
+				<fieldset className="m-0 flex min-h-11.5 items-center gap-3 border-0 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
 					<legend className="sr-only">Days</legend>
 					{/* The legend names the days for assistive technology; this shows it in the label column. */}
 					<span aria-hidden className="contents">
@@ -109,7 +107,7 @@ function RepeatRows({
 								<label
 									key={day.value}
 									title={day.long}
-									className="focus-ring-within grid size-8 shrink-0 cursor-pointer place-items-center rounded-full bg-chip font-medium text-[13px] text-soft-foreground transition-colors has-checked:bg-primary has-checked:text-primary-foreground"
+									className="focus-ring-within grid size-8 shrink-0 cursor-pointer place-items-center rounded-full bg-chip font-medium text-xs text-soft-foreground transition-colors has-checked:bg-primary has-checked:text-primary-foreground"
 								>
 									<input
 										type="checkbox"
@@ -168,7 +166,7 @@ function TimesRow({
 	onChange: (times: number[]) => void;
 }) {
 	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
+		<div className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
 			<SettingsFieldLabel>Times</SettingsFieldLabel>
 			<ul className="m-0 flex flex-1 list-none flex-wrap gap-2 p-0">
 				{times.map((time, index) => {
@@ -208,7 +206,7 @@ function TimesRow({
 							type="button"
 							aria-label="Add a time"
 							onClick={() => onChange([...times, nextTime(times)])}
-							className="focus-ring h-full rounded-lg bg-primary px-3 py-1.5 font-medium text-[14px] text-primary-foreground transition-colors hover:bg-primary-hover"
+							className="focus-ring h-full rounded-lg bg-primary px-3 py-1.5 font-medium text-sm text-primary-foreground transition-colors hover:bg-primary-hover"
 						>
 							+ Add
 						</button>
@@ -248,7 +246,7 @@ function TimeSelect({
 		>
 			<Select.Trigger
 				aria-label={label}
-				className="focus-ring cursor-pointer rounded-lg py-1.5 pr-1 pl-3 font-semibold text-[14px] text-foreground tabular-nums"
+				className="focus-ring cursor-pointer rounded-lg py-1.5 pr-1 pl-3 font-semibold text-sm text-foreground tabular-nums"
 			>
 				<Select.Value />
 			</Select.Trigger>
@@ -259,13 +257,13 @@ function TimeSelect({
 					align="start"
 					sideOffset={6}
 				>
-					<Select.Popup className="max-h-[min(var(--available-height),16rem)] min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto [scrollbar-gutter:stable] rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0">
+					<Select.Popup className="max-h-popover min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto scrollbar-gutter-stable rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0">
 						{options.map((option) => (
 							<Select.Item
 								key={option}
 								value={option}
 								disabled={taken.includes(option)}
-								className="flex min-h-8 cursor-pointer select-none items-center gap-3 rounded-tail py-1.5 pr-2 pl-2.5 text-[14px] tabular-nums outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground"
+								className="flex min-h-8 cursor-pointer select-none items-center gap-3 rounded-tail py-1.5 pr-2 pl-2.5 text-sm tabular-nums outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground"
 							>
 								<Select.ItemText className="flex-1">{formatTime(option)}</Select.ItemText>
 								{/* Holds the tick's room on every row, so the list is as wide with it as without. */}
@@ -309,7 +307,7 @@ function StepperRow({
 	onMore: (() => void) | undefined;
 }) {
 	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
+		<div className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
 			<SettingsFieldLabel>{label}</SettingsFieldLabel>
 			<span className="flex flex-1 items-center justify-end gap-3">
 				<StepButton label={lessLabel} onClick={onLess}>
@@ -317,7 +315,7 @@ function StepperRow({
 				</StepButton>
 				<output
 					aria-label={label}
-					className="min-w-16 text-center font-semibold text-[16px] text-foreground tabular-nums"
+					className="min-w-16 text-center font-semibold text-base text-foreground tabular-nums"
 				>
 					{value}
 				</output>
@@ -344,7 +342,7 @@ function StepButton({
 			aria-label={label}
 			onClick={onClick}
 			disabled={!onClick}
-			className="focus-ring grid size-[30px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover disabled:opacity-45"
+			className="focus-ring grid size-7.5 shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover disabled:opacity-45"
 		>
 			{children}
 		</button>

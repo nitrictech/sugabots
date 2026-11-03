@@ -16,10 +16,10 @@ import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 
 const widths = {
-	compact: "max-w-[420px] sm:max-w-[420px]",
-	default: "max-w-[460px] sm:max-w-[460px]",
+	compact: "max-w-105 sm:max-w-105",
+	default: "max-w-115 sm:max-w-115",
 	/** For writing at length, such as a routine's instructions. */
-	wide: "max-w-[640px] sm:max-w-[640px]",
+	wide: "max-w-160 sm:max-w-160",
 } as const;
 
 /** DialogForm renders a modal form inside Dialog. Start it with a DialogFormHeader and end it with a DialogFormFooter. */
@@ -67,9 +67,9 @@ export function DialogFormFrame({
 			}
 			showCloseButton={false}
 			className={cn(
-				"flex max-h-[calc(100dvh-20px)] flex-col gap-0 overflow-hidden p-0",
+				"flex max-h-dialog flex-col gap-0 overflow-hidden p-0",
 				widths[width],
-				"max-md:inset-0 max-md:h-[var(--visible-height,100dvh)] max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none",
+				"max-md:inset-0 max-md:h-visible max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none",
 			)}
 		>
 			{children}
@@ -141,7 +141,7 @@ export function DialogFormHeader({
 	onClose?: () => void;
 }) {
 	return (
-		<header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-[18px] pt-4 pb-3 max-md:px-4 max-md:pt-[max(16px,env(safe-area-inset-top))]">
+		<header className="grid grid-cols-centered items-center gap-3 px-4.5 pt-4 pb-3 max-md:px-4 max-md:pt-safe-or-4">
 			{/* `flex`: an inline span would set Back on a line of text, taller than the title, so the header would grow with it. */}
 			<span className="flex justify-self-start">
 				{onBack && (
@@ -149,20 +149,20 @@ export function DialogFormHeader({
 						type="button"
 						aria-label="Back"
 						className={cn(
-							"focus-ring inline-flex items-center gap-0.5 rounded-md text-left text-[14.5px] text-link disabled:text-disabled-foreground",
+							"focus-ring inline-flex items-center gap-0.5 rounded-md text-left text-sm text-link disabled:text-disabled-foreground",
 							BACK_ON_PHONE,
 						)}
 						disabled={backDisabled}
 						onClick={onBack}
 					>
-						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-[22px]" />
+						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
 						<span className={BACK_LABEL_ON_PHONE}>Back</span>
 					</button>
 				)}
 				{/* On a phone, where the dialog is the screen, the way out is at the top left, as a page's is. */}
 				{!onBack && <PhoneClose />}
 			</span>
-			<DialogTitle className="text-center font-semibold text-[15px] text-foreground max-md:text-[17px]">
+			<DialogTitle className="text-center font-semibold text-sm text-foreground max-md:text-base">
 				{title}
 			</DialogTitle>
 			<span className="flex justify-self-end">
@@ -242,7 +242,7 @@ export function DialogFormFooter({
 		// On a phone, at the foot of the screen, its buttons shared out across it and sized for a thumb.
 		<footer
 			className={cn(
-				"flex justify-end gap-2 px-[18px] pb-[18px] max-md:mt-auto max-md:px-4 max-md:pt-3 max-md:pb-[max(16px,env(safe-area-inset-bottom))] max-md:*:h-11 max-md:*:flex-1 max-md:*:text-[15px]",
+				"flex justify-end gap-2 px-4.5 pb-4.5 max-md:mt-auto max-md:px-4 max-md:pt-3 max-md:pb-safe-or-4 max-md:*:h-11 max-md:*:flex-1 max-md:*:text-sm",
 				// Holding only Cancel, which a phone leaves to the header, it takes no room there.
 				!action && !beside && "max-md:hidden",
 			)}
@@ -292,7 +292,7 @@ export function DialogFormBody({
 	return (
 		<div
 			className={cn(
-				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-[18px] pt-1 pb-5 max-md:flex-1 max-md:px-4",
+				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-4.5 pt-1 pb-5 max-md:flex-1 max-md:px-4",
 				gap === "compact" ? "gap-3" : "gap-3.5",
 			)}
 		>

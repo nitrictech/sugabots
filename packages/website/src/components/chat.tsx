@@ -54,9 +54,9 @@ export function ChatMessage({ author, time, className, children }: ChatMessagePr
 			</span>
 			<div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
 				<div className="flex items-center gap-2">
-					<span className="text-[15px] font-semibold">{author.name}</span>
+					<span className="text-sm font-semibold">{author.name}</span>
 					{author.kind === "bot" && (
-						<span className="rounded-[4px] bg-muted px-[5px] py-px text-[10.5px] leading-[1.4] font-semibold text-muted-foreground">
+						<span className="rounded bg-muted px-1.25 py-px text-xs leading-snug font-semibold text-muted-foreground">
 							Bot
 						</span>
 					)}
@@ -72,7 +72,7 @@ export function ChatMessage({ author, time, className, children }: ChatMessagePr
 export function ChatText({ className, ...props }: ComponentProps<"p">) {
 	return (
 		<p
-			className={cn("self-stretch text-[15px] leading-normal text-pretty break-words", className)}
+			className={cn("self-stretch text-sm leading-normal text-pretty break-words", className)}
 			{...props}
 		/>
 	);
@@ -128,18 +128,18 @@ export function ChatCollaboration({ from, to, lastReply, status }: ChatCollabora
 					<BotAvatar
 						key={`${look.color}-${look.face}`}
 						size="xs"
-						className="-mr-[7px] shadow-[0_0_0_2px_var(--card)]"
+						className="-mr-1.75 ring-2 ring-card"
 						{...look}
 					/>
 				))}
 			</span>
-			<span className="truncate pl-2 text-[13px] font-semibold text-link">
+			<span className="truncate pl-2 text-xs font-semibold text-link">
 				Collaboration with {to.name}
 			</span>
 			{lastReply && (
-				<span className="shrink-0 text-[12.5px] text-muted-foreground">Last reply {lastReply}</span>
+				<span className="shrink-0 text-xs text-muted-foreground">Last reply {lastReply}</span>
 			)}
-			<span className="shrink-0 rounded-[5px] bg-muted px-1.5 py-px text-[11.5px] font-semibold text-muted-foreground">
+			<span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-xs font-semibold text-muted-foreground">
 				{status}
 			</span>
 		</div>
@@ -173,18 +173,18 @@ export function ChatApproval({
 	return (
 		<section
 			aria-label={`Approval request: ${action}`}
-			className="mt-1.5 mb-1 flex w-full max-w-[460px] flex-col gap-2.5 rounded-[6px_20px_20px_20px] border bg-background py-2.5 pr-3 pl-2.5"
+			className="mt-1.5 mb-1 flex w-full max-w-115 flex-col gap-2.5 rounded-3xl rounded-tl-sm border bg-background py-2.5 pr-3 pl-2.5"
 		>
 			<div className="flex items-start gap-2.5">
-				<span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-secondary text-xs font-bold text-secondary-foreground">
+				<span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
 					{mark}
 				</span>
 				<span className="flex min-w-0 flex-col gap-0.5">
 					<span className="text-xs text-muted-foreground">{who}</span>
-					<span className="text-sm font-medium [overflow-wrap:anywhere]">{action}</span>
+					<span className="text-sm font-medium wrap-anywhere">{action}</span>
 				</span>
 			</div>
-			<div className="ml-[34px]">
+			<div className="ml-8.5">
 				<AnimatePresence mode="wait" initial={false}>
 					<RevealItem key={decision} initial="hidden" animate="visible" exit="hidden">
 						{decision === "pending" ? (

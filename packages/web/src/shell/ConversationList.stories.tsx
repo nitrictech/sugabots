@@ -93,7 +93,7 @@ const meta = preview.meta({
 	},
 	decorators: [
 		(Story) => (
-			<div className="h-[640px] w-62 overflow-y-auto border-border border-r bg-rail px-3 pt-4">
+			<div className="h-160 w-62 overflow-y-auto border-border border-r bg-rail px-3 pt-4">
 				<Story />
 			</div>
 		),

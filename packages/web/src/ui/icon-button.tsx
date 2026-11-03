@@ -19,7 +19,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 const sizes = {
 	sm: "size-5 [&_svg]:size-3.5",
 	default: "size-6 [&_svg]:size-3.5",
-	lg: "size-[30px] [&_svg]:size-[15px]",
+	lg: "size-7.5 [&_svg]:size-3.75",
 } as const;
 
 export interface IconButtonProps extends Omit<ComponentProps<"button">, "children"> {
@@ -48,7 +48,7 @@ type IconButtonVariant = "quiet" | "outline" | "pane" | "bar" | "round";
  * Merged over a `bar` button beside a phone's large page title, such as
  * Inbox's: sized for a thumb, with its icon to match.
  */
-export const ROOMY_ON_PHONE = "max-md:size-10 max-md:rounded-[10px] max-md:[&_svg]:size-5";
+export const ROOMY_ON_PHONE = "max-md:size-10 max-md:rounded-lg max-md:[&_svg]:size-5";
 
 /**
  * Merged over a `bar` button in a chat's header: on a phone it floats over the
@@ -71,14 +71,14 @@ export function iconButtonClassName(
 		variant === "outline" || variant === "pane" || variant === "round"
 			? "bg-chip text-foreground hover:bg-hover"
 			: variant === "bar"
-				? "rounded-[8px] text-soft-foreground hover:bg-chip"
+				? "rounded-md text-soft-foreground hover:bg-chip"
 				: "text-muted-foreground hover:bg-hover hover:text-foreground",
 		variant === "bar"
-			? "size-[30px]"
+			? "size-7.5"
 			: variant === "round"
-				? "size-[29px] [&_svg]:size-4"
+				? "size-7.25 [&_svg]:size-4"
 				: size === "lg" && variant === "pane"
-					? "size-[34px]"
+					? "size-8.5"
 					: sizes[size],
 	);
 }

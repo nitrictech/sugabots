@@ -71,7 +71,7 @@ export function UsageSettings({
 					<Breakdown usage={usage.data} stale={usage.isPlaceholderData} />
 				</>
 			) : (
-				<div aria-hidden className={cn(SETTINGS_CARD, "h-[228px] animate-pulse")} />
+				<div aria-hidden className={cn(SETTINGS_CARD, "h-57 animate-pulse")} />
 			)}
 		</SettingsPage>
 	);
@@ -92,7 +92,7 @@ function MonthStepper({
 			<IconButton label="Previous month" onClick={() => onChange(shiftMonth(month, -1))}>
 				<ChevronLeft strokeWidth={2} />
 			</IconButton>
-			<span className="min-w-[72px] text-center font-medium text-[13px] text-foreground">
+			<span className="min-w-18 text-center font-medium text-xs text-foreground">
 				{monthLabel(month)}
 			</span>
 			<IconButton
@@ -130,7 +130,7 @@ function SpendSummary({
 			<div className="flex items-center gap-3">
 				<p
 					className={cn(
-						"m-0 flex-1 font-semibold text-[32px] text-foreground tabular-nums tracking-[-0.03em]",
+						"m-0 flex-1 font-semibold text-3xl text-foreground tabular-nums tracking-tight",
 						staleness(stale),
 					)}
 				>
@@ -178,12 +178,12 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 					? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
 					: "Spend each day. Nothing was spent."
 			}
-			className="-mx-[1.5px] flex h-24 items-end"
+			className="-mx-0.5 flex h-24 items-end"
 		>
 			{days.map((day) =>
 				day.date > today ? (
-					<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-[1.5px]">
-						<span className="h-0.5 w-full rounded-[3px] bg-chip" />
+					<span key={day.date} className="flex h-full min-w-0 flex-1 items-end px-0.5">
+						<span className="h-0.5 w-full rounded bg-chip" />
 					</span>
 				) : (
 					<Tooltip
@@ -211,12 +211,12 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 							onClick={() => setOpenDate(day.date)}
 							tabIndex={-1}
 							aria-label={`${dayLabel(day.date)}: ${formatUsd(day.usd)}`}
-							className="group flex h-full min-w-0 flex-1 cursor-default px-[1.5px]"
+							className="group flex h-full min-w-0 flex-1 cursor-default px-0.5"
 						>
-							<span className="flex w-full items-end rounded-[3px] group-data-popup-open:bg-chip">
+							<span className="flex w-full items-end rounded group-data-popup-open:bg-chip">
 								<span
 									className={cn(
-										"min-h-0.5 w-full rounded-[3px]",
+										"min-h-0.5 w-full rounded",
 										day.date === today ? "bg-usage-bar-today" : "bg-usage-bar",
 									)}
 									style={
@@ -277,7 +277,7 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 			{lines.length === 0 ? (
 				<p
 					className={cn(
-						"m-0 px-4 py-6 text-center text-[13px] text-muted-foreground",
+						"m-0 px-4 py-6 text-center text-xs text-muted-foreground",
 						staleness(stale),
 					)}
 				>
@@ -298,12 +298,12 @@ function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
 	const unknown = line.usd === 0 && line.unpricedRequests > 0;
 	return (
 		<li className="flex min-h-14 min-w-0 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 sm:gap-5">
-			<span className="flex min-w-0 flex-[1.4] basis-0 items-center gap-3 sm:flex-1">
+			<span className="flex min-w-0 flex-wide basis-0 items-center gap-3 sm:flex-1">
 				<span aria-hidden className="shrink-0">
 					{line.icon}
 				</span>
-				<span className="flex min-w-0 flex-col leading-[1.35]">
-					<span title={line.label} className="truncate text-[13px] text-foreground">
+				<span className="flex min-w-0 flex-col leading-snug">
+					<span title={line.label} className="truncate text-sm text-foreground">
 						{line.label}
 					</span>
 					<span className="truncate text-subtle-foreground text-xs">{line.sub}</span>
@@ -318,7 +318,7 @@ function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
 					}}
 				/>
 			</span>
-			<span className="w-[72px] shrink-0 text-right text-[13px] text-foreground tabular-nums">
+			<span className="w-18 shrink-0 text-right text-xs text-foreground tabular-nums">
 				{unknown ? (
 					<>
 						<span aria-hidden>—</span>
@@ -447,7 +447,7 @@ function BotIcon({
 /** The first letter of `name` on a square, for what has no face of its own. */
 function LetterTile({ name }: { name: string }) {
 	return (
-		<span className="grid size-6 place-items-center rounded-[7px] bg-chip font-semibold text-[11px] text-muted-foreground">
+		<span className="grid size-6 place-items-center rounded-sm bg-chip font-semibold text-2xs text-muted-foreground">
 			{name.trim().charAt(0).toUpperCase()}
 		</span>
 	);

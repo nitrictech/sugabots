@@ -44,11 +44,11 @@ export function SideThreadLine({
 			onClick={onOpen}
 			aria-label={[description, standing, time && `Last reply ${time}`].filter(Boolean).join(", ")}
 			// On a phone, a whole row for a thumb: its name over a quieter line, and a chevron.
-			className="focus-ring group/thread mt-1 ml-2 flex max-w-full items-center gap-2 rounded-md pr-1.5 text-left max-md:min-h-11 max-md:w-[calc(100%-8px)] max-md:gap-2.5 max-md:rounded-[10px] max-md:active:bg-row-selected"
+			className="focus-ring group/thread mt-1 ml-2 flex max-w-full items-center gap-2 rounded-md pr-1.5 text-left max-md:min-h-11 max-md:w-thread-line max-md:gap-2.5 max-md:rounded-lg max-md:active:bg-row-selected"
 		>
 			<span
 				aria-hidden
-				className="-mt-1 h-4 w-2.5 shrink-0 self-start rounded-bl-[7px] border-border-dashed border-b border-l max-md:h-5"
+				className="-mt-1 h-4 w-2.5 shrink-0 self-start rounded-bl-sm border-border-dashed border-b border-l max-md:h-5"
 			/>
 			<span aria-hidden className="flex shrink-0 py-1 pr-0.5">
 				{faces.map((face) =>
@@ -61,27 +61,25 @@ export function SideThreadLine({
 							size={16}
 							ringed={{ color: "var(--background)", width: 1.5 }}
 							// Positioned, as a person's face is, so each face sits over the one before it.
-							className="relative -mr-0.5 max-md:-mr-1.5 max-md:size-[22px]"
+							className="relative -mr-0.5 max-md:-mr-1.5 max-md:size-5.5"
 						/>
 					) : face.kind === "person" ? (
 						<PersonAvatar
 							key={face.id}
 							person={face}
 							size={16}
-							className="-mr-0.5 shadow-[0_0_0_1.5px_var(--background)] max-md:-mr-1.5 max-md:size-[22px]! max-md:text-[10px]!"
+							className="-mr-0.5 ring-2 ring-background max-md:-mr-1.5 max-md:size-5.5! max-md:text-3xs!"
 						/>
 					) : null,
 				)}
 			</span>
 			<span className="flex min-w-0 items-center gap-2 max-md:flex-1 max-md:flex-col max-md:items-start max-md:gap-0.5">
-				<span className="max-w-full truncate font-semibold text-[13px] text-foreground group-hover/thread:underline group-hover/thread:underline-offset-2 max-md:text-[14px]">
+				<span className="max-w-full truncate font-semibold text-xs text-foreground group-hover/thread:underline group-hover/thread:underline-offset-2 max-md:text-sm">
 					{label}
 				</span>
 				<span className="flex min-w-0 max-w-full items-center gap-2 max-md:gap-1.5">
 					{detail && (
-						<span className="truncate text-[12.5px] text-subtle-foreground max-md:text-[12px]">
-							{detail}
-						</span>
+						<span className="truncate text-xs text-subtle-foreground max-md:text-xs">{detail}</span>
 					)}
 					{status === "working" ? (
 						<span
@@ -93,21 +91,19 @@ export function SideThreadLine({
 							<i />
 						</span>
 					) : status?.urgent ? (
-						<span className="shrink-0 rounded-[5px] bg-primary px-1.5 py-px font-semibold text-[11.5px] text-primary-foreground">
+						<span className="shrink-0 rounded-xs bg-primary px-1.5 py-px font-semibold text-2xs text-primary-foreground">
 							{status.text}
 						</span>
 					) : (
 						status && (
-							<span className="flex shrink-0 items-center gap-1 text-[12.5px] text-muted-foreground max-md:text-[12px]">
+							<span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-md:text-xs">
 								{status.done && <Check aria-hidden size={12} strokeWidth={2.25} />}
 								{status.text}
 							</span>
 						)
 					)}
 					{time && (
-						<span className="shrink-0 text-[12.5px] text-subtle-foreground max-md:text-[12px]">
-							{time}
-						</span>
+						<span className="shrink-0 text-xs text-subtle-foreground max-md:text-xs">{time}</span>
 					)}
 				</span>
 			</span>

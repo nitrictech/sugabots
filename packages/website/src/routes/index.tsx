@@ -72,7 +72,7 @@ export const Route = createFileRoute("/")({
 function LandingPage() {
 	return (
 		// The landing page is drawn in the app's dark UI, whatever the visitor's colour scheme.
-		<div data-landing className="min-h-screen bg-landing-page text-base/[1.55] text-landing-text">
+		<div data-landing className="min-h-screen bg-landing-page text-base/normal text-landing-text">
 			<SiteHeader placement="header" homeHref="#top" />
 			<main>
 				<Hero />

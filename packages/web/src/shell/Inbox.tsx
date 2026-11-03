@@ -88,7 +88,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 				}
 				className={cn(
 					// Free to be narrower than its longest row, which is cut short to fit a phone.
-					"relative flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 max-md:border-r-0 md:w-[clamp(280px,var(--list-width,380px),60%)] md:shrink-0",
+					"relative flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 max-md:border-r-0 md:w-inbox-list md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
@@ -130,9 +130,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 				/>
 				<ul className="tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
 					{feed.isError && (
-						<li className="px-3 py-3 text-[13px] text-muted-foreground">
-							Inbox could not be loaded.
-						</li>
+						<li className="px-3 py-3 text-xs text-muted-foreground">Inbox could not be loaded.</li>
 					)}
 					{feed.isSuccess && items.length === 0 && (
 						// Quiet and in the middle; a phone, with no pane beside it, adds the tray.
@@ -143,14 +141,14 @@ export function Inbox({ children }: { children: ReactNode }) {
 								strokeWidth={1.25}
 								className="mb-2 text-subtle-foreground md:hidden"
 							/>
-							<p className="m-0 text-[13px] text-muted-foreground max-md:text-[15px]">
+							<p className="m-0 text-xs text-muted-foreground max-md:text-sm">
 								{unreadOnly ? "Nothing unread" : "Nothing here yet"}
 							</p>
 							{unreadOnly && (
 								<button
 									type="button"
 									onClick={() => setUnreadOnly(false)}
-									className="focus-ring rounded-md font-medium text-[13px] text-foreground max-md:text-[15px]"
+									className="focus-ring rounded-md font-medium text-xs text-foreground max-md:text-sm"
 								>
 									Show everything
 								</button>
@@ -198,7 +196,7 @@ function KindFilter({
 				{kinds.map((option) => (
 					<DropdownMenuCheckboxItem
 						key={option.value}
-						className="min-h-8 py-1.5 text-[13px]"
+						className="min-h-8 py-1.5 text-xs"
 						checked={chosen.has(option.value)}
 						onCheckedChange={() => onToggle(option.value)}
 					>
@@ -238,7 +236,7 @@ function UnreadOnlyIcon() {
 export function InboxOverview() {
 	const { unreadInInbox } = useAttentionCounts();
 	return (
-		<div className="flex h-full pb-[10%]">
+		<div className="flex h-full pb-20">
 			<EmptyState
 				icon={<InboxIcon strokeWidth={1.75} />}
 				title={
@@ -346,7 +344,7 @@ function FaceOf({ item }: { item: ActivityItem }) {
 						shape={item.agent.shape}
 						size={24}
 					/>
-					<span className="absolute -right-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full bg-chip-strong text-foreground shadow-[0_0_0_2px_var(--background)]">
+					<span className="absolute -right-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full bg-chip-strong text-foreground ring-2 ring-background">
 						<RoutineTriggerIcon kind={item.triggerKind} size={11} strokeWidth={2.4} />
 					</span>
 				</span>
@@ -426,7 +424,7 @@ function InboxRow({
 	const { title, detail } = wordsOf(item);
 	const content = (
 		<>
-			<span className="w-1.5 shrink-0 pt-[7px]">
+			<span className="w-1.5 shrink-0 pt-1.75">
 				{item.unread && (
 					<span className="block size-1.5 rounded-full bg-foreground">
 						<span className="sr-only">Unread</span>
@@ -440,7 +438,7 @@ function InboxRow({
 				<span className="flex min-w-0 items-center gap-2">
 					<span
 						className={cn(
-							"min-w-0 flex-1 truncate text-[13px]",
+							"min-w-0 flex-1 truncate text-xs",
 							item.unread ? "font-semibold text-foreground" : "text-muted-foreground",
 						)}
 					>
@@ -454,9 +452,7 @@ function InboxRow({
 					)}
 				</span>
 				<span className="flex min-w-0 items-baseline gap-2">
-					<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
-						{detail}
-					</span>
+					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{detail}</span>
 					<ListTime at={item.at} />
 				</span>
 			</span>

@@ -401,8 +401,8 @@ function segmentsOf(message: Message): Segment[] {
 
 /** How each part of a row is sized: the regular chat, or the sidebar's narrower thread. */
 const ROW = {
-	regular: { face: 36, row: "gap-3.5 px-5", words: "text-[15px] leading-[1.5]" },
-	compact: { face: 32, row: "gap-3 px-[18px]", words: "text-[14.5px] leading-[1.5]" },
+	regular: { face: 36, row: "gap-3.5 px-5", words: "text-sm leading-normal" },
+	compact: { face: 32, row: "gap-3 px-4.5", words: "text-sm leading-normal" },
 } as const;
 
 /**
@@ -525,7 +525,7 @@ function MessageRow({
 		>
 			{/* A reply's face lines up with its author's name, under the quote. */}
 			<span
-				className={cn("flex shrink-0 justify-center", message.replyTo && "pt-[21px]")}
+				className={cn("flex shrink-0 justify-center", message.replyTo && "pt-5.25")}
 				style={{ width: size.face }}
 			>
 				{startsGroup ? (
@@ -544,7 +544,7 @@ function MessageRow({
 				) : (
 					<span
 						className={cn(
-							"text-[11px] text-subtle-foreground tabular-nums leading-[22px] transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
+							"text-2xs text-subtle-foreground tabular-nums leading-5.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
 							timeTapped ? "opacity-100" : "opacity-0",
 						)}
 					>
@@ -558,7 +558,7 @@ function MessageRow({
 					<div className="flex items-center gap-2 pb-px">
 						<AuthorName name={author.name} link={authorLink} />
 						{agent && (
-							<span className="rounded-[4px] bg-chip px-[5px] py-px font-semibold text-[10.5px] text-muted-foreground leading-[1.4]">
+							<span className="rounded bg-chip px-1.25 py-px font-semibold text-2xs text-muted-foreground leading-snug">
 								Bot
 							</span>
 						)}
@@ -590,7 +590,7 @@ function MessageRow({
 						const call = segment.toolCall;
 						if (!agent) return null;
 						return (
-							<div key={segment.key} className="w-full max-w-[460px] pt-1.5 pb-1">
+							<div key={segment.key} className="w-full max-w-115 pt-1.5 pb-1">
 								<ToolApprovalCard
 									call={call}
 									agent={agent}
@@ -638,7 +638,7 @@ function MessageRow({
 					onOpenDesktop &&
 					message.status === "streaming" &&
 					calls.some((call) => call.tool.startsWith(BROWSER_TOOL_PREFIX)) && (
-						<div className="w-full max-w-[460px] pt-2 pb-1.5">
+						<div className="w-full max-w-115 pt-2 pb-1.5">
 							<LiveDesktopCard
 								threadId={message.threadId}
 								agentId={agent.id}
@@ -677,7 +677,7 @@ function MessageRow({
 			{(words || replyable || threadable || reactable) && (
 				<div
 					className={cn(
-						"absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
+						"absolute -top-3.5 right-5 z-10 flex rounded-md border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
 						picking ? "opacity-100" : "pointer-events-none opacity-0",
 					)}
 				>
@@ -719,7 +719,7 @@ function MessageRow({
 }
 
 const TOOLBAR_BUTTON =
-	"h-7 w-[30px] rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-[15px]";
+	"h-7 w-7.5 rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-3.75";
 
 /**
  * Over a reply, whose message it answers and that message's first line. With
@@ -743,7 +743,7 @@ function ReplyQuote({
 	);
 	// 21px tall, which the reply's face is moved down by to line up with the name.
 	const className =
-		"-ml-1 flex h-[21px] max-w-full items-center gap-1 rounded-[6px] px-1 text-[13px] text-muted-foreground leading-[19px]";
+		"-ml-1 flex h-5.25 max-w-full items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground leading-4.75";
 	if (!onJump) return <p className={cn("m-0", className)}>{quote}</p>;
 	return (
 		<button
@@ -759,9 +759,9 @@ function ReplyQuote({
 
 /** An author's name, leading to their page when there is one. */
 function AuthorName({ name, link }: { name: string; link: AuthorLink | undefined }) {
-	const className = "font-semibold text-[15px] text-foreground";
+	const className = "font-semibold text-sm text-foreground";
 	if (!link) return <span className={className}>{name}</span>;
-	const linkClassName = cn(className, "rounded-[3px] hover:underline focus-ring");
+	const linkClassName = cn(className, "rounded hover:underline focus-ring");
 	return link.kind === "agent" ? (
 		<Link {...link.options} className={linkClassName}>
 			{name}
@@ -861,7 +861,7 @@ function RoutineTriggerCard({ message }: { message: Message }) {
 				<div className="pb-1 font-semibold text-muted-foreground text-xs">
 					{message.author.routineName} <span className="font-normal">{source}</span>
 				</div>
-				<p className="m-0 whitespace-pre-wrap break-words text-body-foreground text-md leading-relaxed">
+				<p className="m-0 whitespace-pre-wrap break-words text-body-foreground text-xs leading-relaxed">
 					{message.content}
 				</p>
 			</div>

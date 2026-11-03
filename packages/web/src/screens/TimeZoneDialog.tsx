@@ -147,7 +147,7 @@ function TimeZoneStep({
 				onBack={region ? () => browse(undefined) : undefined}
 			/>
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
@@ -155,11 +155,11 @@ function TimeZoneStep({
 						onChange={(event) => setQuery(event.target.value)}
 						placeholder={searchLabel}
 						aria-label={searchLabel}
-						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 					/>
 				</label>
 				{/* One height on every step, so going into a region and back doesn't resize the dialog. */}
-				<div className="-mx-1 flex h-[min(432px,55vh)] flex-col gap-5 overflow-y-auto px-1">
+				<div className="-mx-1 flex h-time-zones flex-col gap-5 overflow-y-auto px-1">
 					{needle === "" && !region ? (
 						<>
 							{deviceChoice && <SettingsGroup>{zoneRow(deviceChoice)}</SettingsGroup>}

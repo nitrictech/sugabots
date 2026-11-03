@@ -20,7 +20,7 @@ export function DemoVideo() {
 	return (
 		<div
 			id="demo"
-			className="overflow-hidden rounded-[18px] border border-landing-frame bg-landing-card shadow-[0_30px_90px_rgba(0,0,0,0.55)]"
+			className="overflow-hidden rounded-2xl border border-landing-frame bg-landing-card shadow-2xl"
 		>
 			{demoVideo.src !== undefined && os !== undefined ? (
 				<video
@@ -83,9 +83,9 @@ function PosterFrame() {
 			)}
 			<div className="pointer-events-none absolute bottom-3.5 left-4 flex items-center gap-2.5">
 				<span className="grid size-12 place-items-center rounded-full border border-white/14 bg-landing-page/72 backdrop-blur-sm">
-					<PlayIcon className="size-[18px] fill-white text-white" />
+					<PlayIcon className="size-4.5 fill-white text-white" />
 				</span>
-				<span className="rounded-md bg-landing-page/72 px-2.5 py-[5px] text-sm font-medium text-landing-text">
+				<span className="rounded-md bg-landing-page/72 px-2.5 py-1.25 text-sm font-medium text-landing-text">
 					Watch the demo
 				</span>
 			</div>

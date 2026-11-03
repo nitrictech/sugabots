@@ -186,7 +186,7 @@ export function SidebarView({
 			ref={nav}
 			aria-label="Sidebar"
 			className={cn(
-				"@container/sidebar relative flex min-h-0 shrink-0 flex-col border-border border-r bg-rail max-md:flex-1 md:w-(--sidebar-width) md:max-w-[400px]",
+				"@container/sidebar relative flex min-h-0 shrink-0 flex-col border-border border-r bg-rail max-md:flex-1 md:w-(--sidebar-width) md:max-w-100",
 				className,
 			)}
 			style={{ "--sidebar-width": `${width ?? SIDEBAR_DEFAULT_WIDTH_PX}px` } as CSSProperties}
@@ -306,7 +306,7 @@ function SidebarLink({
 		props: {
 			"aria-current": selected ? "page" : undefined,
 			className: cn(
-				"focus-ring flex h-8 items-center gap-2.5 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors [&>svg]:mx-px [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:stroke-[1.75]",
+				"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-sm transition-colors [&>svg]:mx-px [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:stroke-2",
 				selected
 					? "bg-row-selected text-foreground"
 					: "text-muted-foreground hover:bg-row-hover hover:text-foreground",

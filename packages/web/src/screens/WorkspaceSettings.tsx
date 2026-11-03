@@ -30,6 +30,7 @@ import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
+	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsNameRow,
@@ -293,7 +294,12 @@ function ProfileSettings() {
 					error={updateName.error ? failureMessage(updateName.error) : undefined}
 					onCommit={(name) => updateName.mutateAsync(name)}
 				/>
-				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
+				<SettingsControlRow label="Email">
+					{/* In the name's column and at its size, which a touch screen keeps at 16px for its field. */}
+					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground pointer-coarse:text-base">
+						{user.email}
+					</span>
+				</SettingsControlRow>
 			</SettingsGroup>
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
@@ -373,13 +379,13 @@ function ReferralLinkSettings() {
 			}
 		>
 			<div className="flex flex-col gap-1">
-				<h3 className="m-0 font-medium text-[14px] text-foreground">Share your invite link</h3>
+				<h3 className="m-0 font-medium text-sm text-foreground">Share your invite link</h3>
 				<p className="m-0 text-muted-foreground text-xs">
 					Anyone with it can sign up and get a workspace of their own.
 				</p>
 			</div>
 			<div className="flex h-11 min-w-0 items-center gap-2.5 rounded-lg border border-settings-card-border bg-background pr-1.5 pl-3.5">
-				<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
+				<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
 					{withoutScheme(link)}
 				</span>
 				<Button

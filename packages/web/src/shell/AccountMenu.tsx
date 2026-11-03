@@ -46,16 +46,14 @@ export function AccountMenu({
 				className="focus-ring flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 text-left transition-colors hover:bg-row-hover data-popup-open:bg-row-selected"
 			>
 				<PersonAvatar person={user} size={24} />
-				<span className="min-w-0 flex-1 truncate text-[13px] text-soft-foreground">
-					{user.name}
-				</span>
+				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{user.name}</span>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent side="top" align="start" className="w-[232px]">
+			<DropdownMenuContent side="top" align="start" className="w-58">
 				<div className="flex items-center gap-2.5 p-2">
 					<PersonAvatar person={user} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col leading-snug">
-						<span className="truncate font-medium text-[14px] text-foreground">{user.name}</span>
-						<span className="truncate text-[12px] text-subtle-foreground">{user.email}</span>
+						<span className="truncate font-medium text-sm text-foreground">{user.name}</span>
+						<span className="truncate text-xs text-subtle-foreground">{user.email}</span>
 					</span>
 				</div>
 				<DropdownMenuSeparator />
@@ -63,7 +61,7 @@ export function AccountMenu({
 					<DropdownMenuSubTrigger>
 						<WorkspaceRow workspace={current} />
 					</DropdownMenuSubTrigger>
-					<DropdownMenuContent side="right" align="end" className="w-[232px]">
+					<DropdownMenuContent side="right" align="end" className="w-58">
 						<DropdownMenuItem
 							render={
 								<Link
@@ -131,7 +129,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
 		<>
 			<span
 				aria-hidden
-				className="grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-tile font-semibold text-[10px] text-foreground"
+				className="grid size-4.5 shrink-0 place-items-center rounded-xs bg-tile font-semibold text-3xs text-foreground"
 			>
 				{Array.from(workspace.name.trim())[0]?.toUpperCase() ?? "?"}
 			</span>

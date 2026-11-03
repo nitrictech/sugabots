@@ -61,11 +61,11 @@ export function ChatSidebar({
 				aria-label={label}
 				{...keys}
 				className={cn(
-					"flex min-h-0 w-[380px] outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
-					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-[min(400px,100%)] md:max-xl:border-l-0 md:max-xl:shadow-dialog",
+					"flex min-h-0 w-95 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
+					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-100 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					sheet
 						? // Over the floating tabs, as a phone's sheet covers its tab bar.
-							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-[82%] max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
+							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-9/11 max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
 						: "max-md:inset-0",
 					className,
 				)}
@@ -78,11 +78,11 @@ export function ChatSidebar({
 				)}
 				<header
 					className={cn(
-						"flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-[18px]",
+						"flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4.5",
 						headerless && "xl:hidden",
 						// On a phone, what it shows heads it, so its header is only the round Back.
 						headerless &&
-							"max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
+							"max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 					)}
 				>
 					{headerless && (
@@ -100,16 +100,14 @@ export function ChatSidebar({
 							ref={headingRef}
 							tabIndex={headingRef ? -1 : undefined}
 							className={cn(
-								"m-0 min-w-0 shrink-0 truncate font-semibold text-[15px] text-foreground outline-none max-md:shrink",
+								"m-0 min-w-0 shrink-0 truncate font-semibold text-sm text-foreground outline-none max-md:shrink",
 								headerless && "max-md:sr-only",
 							)}
 						>
 							{heading}
 						</h2>
 						{subheading && (
-							<span className="min-w-0 truncate text-[13px] text-subtle-foreground">
-								{subheading}
-							</span>
+							<span className="min-w-0 truncate text-xs text-subtle-foreground">{subheading}</span>
 						)}
 					</div>
 					{actions}
@@ -152,7 +150,7 @@ export function SidebarSection({
 			)}
 		>
 			<div className="flex items-center gap-2 max-md:px-1">
-				<h3 className="m-0 flex-1 font-medium text-subtle-foreground text-xs max-md:text-[13px]">
+				<h3 className="m-0 flex-1 font-medium text-subtle-foreground text-xs max-md:text-xs">
 					{title}
 				</h3>
 				{end}

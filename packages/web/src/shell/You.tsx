@@ -110,7 +110,7 @@ export function YouPod({ pod }: { pod: Pod }) {
 	);
 	return (
 		<section aria-label={pod.name} className="flex min-h-0 min-w-0 flex-1 flex-col">
-			<header className="flex shrink-0 items-center gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2">
+			<header className="flex shrink-0 items-center gap-3 px-4 pt-safe-or-3 pb-2">
 				{backToYou}
 			</header>
 			<div
@@ -119,7 +119,7 @@ export function YouPod({ pod }: { pod: Pod }) {
 			>
 				<div className="flex items-center gap-3 px-1">
 					<PodInitial pod={pod} />
-					<h1 className="m-0 min-w-0 truncate font-semibold text-[28px] text-foreground tracking-[-0.02em]">
+					<h1 className="m-0 min-w-0 truncate font-semibold text-3xl text-foreground tracking-tight">
 						{pod.name}
 					</h1>
 				</div>
@@ -146,7 +146,7 @@ function LetterTile({ letter }: { letter: string }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground font-semibold text-[12px] text-background"
+			className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground font-semibold text-xs text-background"
 		>
 			{Array.from(letter.trim())[0]?.toUpperCase() ?? "?"}
 		</span>

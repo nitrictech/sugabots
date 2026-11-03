@@ -555,8 +555,7 @@ export function ConversationChat({
 				}
 				className={cn(
 					"relative flex min-w-0 flex-1 flex-col",
-					staged &&
-						"md:w-[clamp(320px,var(--pane-width,440px),calc(100%_-_360px))] md:flex-none md:border-border md:border-r",
+					staged && "md:w-thread-pane md:flex-none md:border-border md:border-r",
 				)}
 			>
 				{staged && (
@@ -594,7 +593,7 @@ export function ConversationChat({
 							lastScrollTop.current = element.scrollTop;
 							setLatestInView(atFoot);
 						}}
-						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-[calc(max(12px,env(safe-area-inset-top))+64px)]"
+						className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-safe-offset-16"
 					>
 						{/* Anchored to the bottom, so a short chat sits just above the composer. */}
 						<div
@@ -688,7 +687,7 @@ export function ConversationChat({
 											reacting={reacting}
 										/>
 									) : group.item.kind === "thread" ? (
-										<div className="px-5 py-0.5 pl-[70px]">
+										<div className="px-5 py-0.5 pl-17.5">
 											<ThreadLine
 												item={group.item}
 												startedBy={undefined}
@@ -716,7 +715,7 @@ export function ConversationChat({
 							{jump.notFound && (
 								<p
 									role="status"
-									className="m-0 px-5 py-2 text-center text-muted-foreground text-sm"
+									className="m-0 px-5 py-2 text-center text-muted-foreground text-xs"
 								>
 									Could not find the message you opened in this chat.
 								</p>
@@ -724,7 +723,7 @@ export function ConversationChat({
 							<ThreadNotices notices={notices} />
 						</div>
 					</div>
-					<div className="shrink-0 px-4 max-md:pb-[var(--tab-bar-space,0px)] md:px-5">
+					<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 						{agent?.model === null ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
@@ -757,11 +756,11 @@ export function ConversationChat({
 						 * On a phone, with the tabs straight under it, it takes room only while
 						 * there is something to say, and is a small gap above the tabs otherwise.
 						 */}
-						<div className="flex h-[26px] items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
+						<div className="flex h-6.5 items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
 							{anyoneTyping(typers) ? (
 								<TypingIndicator typers={typers} className="px-1" />
 							) : (
-								hint && <p className="m-0 px-1 text-[12.5px] text-muted-foreground">{hint}</p>
+								hint && <p className="m-0 px-1 text-xs text-muted-foreground">{hint}</p>
 							)}
 						</div>
 					</div>
@@ -1101,10 +1100,10 @@ function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
 /** In a routine's thread: that it paused itself after failing twice in a row, and when. */
 function PausedLine({ at }: { at: string }) {
 	return (
-		<p className="m-0 flex items-center gap-2 px-5 py-2 pl-[70px] font-medium text-[13.5px] text-muted-foreground">
+		<p className="m-0 flex items-center gap-2 px-5 py-2 pl-17.5 font-medium text-xs text-muted-foreground">
 			<Pause aria-hidden size={14} strokeWidth={2} className="shrink-0" />
 			Paused after two failed runs in a row.
-			<span className="font-normal text-[12px] text-subtle-foreground">
+			<span className="font-normal text-xs text-subtle-foreground">
 				{formatListTime(new Date(at), new Date())}
 			</span>
 		</p>
@@ -1172,8 +1171,8 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 	const starter = details.members.find((member) => member.id === thread.initiatorUserId);
 	return (
 		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
-			<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">{thread.title}</h2>
-			<p className="m-0 text-[13.5px] text-muted-foreground">
+			<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{thread.title}</h2>
+			<p className="m-0 text-xs text-muted-foreground">
 				{starter ? `Started by ${starter.name} in ${pod.name}` : `Started in ${pod.name}`},{" "}
 				{formatListTime(new Date(thread.createdAt), new Date())}
 			</p>
@@ -1200,12 +1199,12 @@ function StartedFrom({
 		.filter(isAttached)
 		.map((part) => (part.type === "file" ? part.name : part.title));
 	return (
-		<div className="mt-1 flex max-w-[720px] flex-col gap-1 border-border-strong border-l-2 pl-3">
-			<span className="font-semibold text-[14px] text-foreground">
+		<div className="mt-1 flex max-w-180 flex-col gap-1 border-border-strong border-l-2 pl-3">
+			<span className="font-semibold text-sm text-foreground">
 				{messageAuthorName(message.author)}
 			</span>
 			{message.content !== "" && (
-				<p className="m-0 whitespace-pre-wrap break-words text-[15px] text-soft-foreground leading-[1.5]">
+				<p className="m-0 whitespace-pre-wrap break-words text-sm text-soft-foreground leading-normal">
 					{textWithMentions(
 						message.content,
 						message.author.kind === "person" ? [...mentionable, ...GROUP_MENTIONS] : mentionable,
@@ -1213,7 +1212,7 @@ function StartedFrom({
 				</p>
 			)}
 			{attached.length > 0 && (
-				<p className="m-0 truncate text-[13px] text-muted-foreground">{attached.join(", ")}</p>
+				<p className="m-0 truncate text-xs text-muted-foreground">{attached.join(", ")}</p>
 			)}
 		</div>
 	);
@@ -1223,8 +1222,8 @@ function StartedFrom({
 function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
 	return (
 		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
-			<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">{title}</h2>
-			<p className="m-0 text-[13.5px] text-muted-foreground">
+			<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{title}</h2>
+			<p className="m-0 text-xs text-muted-foreground">
 				Runs as {agent.name}. Each run posts here.
 			</p>
 		</div>
@@ -1238,8 +1237,8 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<PodChatTile color={pod.color} size={64} />
-			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">{name}</h2>
-			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
+			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{name}</h2>
+			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
 				This is the start of {name}, with {countOf(people, "person", "people")} and{" "}
 				{countOf(bots, "bot", "bots")}. Talk here, or mention a bot to start a thread with it.
 			</p>
@@ -1263,10 +1262,10 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 	if (place.kind === "thread" && place.title) {
 		return (
 			<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-				<h2 className="m-0 font-bold text-[24px] text-foreground leading-tight tracking-[-0.01em] [text-wrap:balance] max-md:text-[20px]">
+				<h2 className="m-0 font-bold text-2xl text-foreground leading-tight tracking-normal text-balance max-md:text-xl">
 					{place.title}
 				</h2>
-				<p className="m-0 flex max-w-[560px] items-center gap-2 text-[14.5px] text-muted-foreground leading-[1.5]">
+				<p className="m-0 flex max-w-140 items-center gap-2 text-sm text-muted-foreground leading-normal">
 					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
 					With {agent.name}
 				</p>
@@ -1276,10 +1275,8 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
-			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
-				{agent.name}
-			</h2>
-			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
+			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{agent.name}</h2>
+			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
 				{place.kind === "personal" ? (
 					"Your own bot. It works for you only, and nobody else can see this conversation, workspace admins included."
 				) : place.kind === "channel" ? (
@@ -1303,7 +1300,7 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 	const backToChat = useBackToHere("Chat");
 	return (
-		<p className="mx-auto m-0 w-full max-w-[760px] rounded-2xl border border-border-strong px-4 py-3.5 text-base text-muted-foreground leading-relaxed">
+		<p className="mx-auto m-0 w-full max-w-190 rounded-2xl border border-border-strong px-4 py-3.5 text-sm text-muted-foreground leading-relaxed">
 			{agent.name} has no model yet, so it cannot answer.{" "}
 			{pod.permissions.updateAgents ? (
 				<>

@@ -389,7 +389,7 @@ function ContextMeter({ used }: { used: number }) {
 					style={{ left: `${COMPACTION_LINE}%` }}
 				/>
 			</div>
-			<div className="relative h-4 text-[0.7rem] font-semibold text-muted-foreground">
+			<div className="relative h-4 text-xs font-semibold text-muted-foreground">
 				<span className="absolute left-0">Short-term memory</span>
 				<span className="absolute -translate-x-1/2" style={{ left: `${COMPACTION_LINE}%` }}>
 					Compact

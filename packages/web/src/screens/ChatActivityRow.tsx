@@ -54,7 +54,7 @@ export function ChatActivityRow(
 		>
 			<span aria-hidden className="grid w-9 shrink-0 place-items-center text-muted-foreground">
 				{props.type === "collaboration" ? (
-					<span className="relative h-[18px] w-[30px]">
+					<span className="relative h-4.5 w-7.5">
 						<AgentAvatar
 							color={props.initiator.color}
 							face={props.initiator.face}
@@ -72,14 +72,14 @@ export function ChatActivityRow(
 						/>
 					</span>
 				) : state === "failed" ? (
-					<span className="grid size-[15px] place-items-center rounded-full bg-destructive font-bold text-[10px] text-white leading-none">
+					<span className="grid size-3.75 place-items-center rounded-full bg-destructive font-bold text-3xs text-white leading-none">
 						!
 					</span>
 				) : (
 					<RoutineTriggerIcon kind={props.triggerKind} size={15} strokeWidth={2.2} />
 				)}
 			</span>
-			<span className="min-w-0 truncate font-medium text-[13.5px] text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
+			<span className="min-w-0 truncate font-medium text-xs text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
 				{text}
 			</span>
 			{state === "running" ? (

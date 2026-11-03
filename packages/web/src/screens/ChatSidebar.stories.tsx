@@ -8,10 +8,7 @@ function Chat() {
 		<div className="flex flex-1 flex-col gap-3 p-6">
 			{["Morning. Three things need you today.", "Move the budget one to Friday", "Done."].map(
 				(line) => (
-					<p
-						key={line}
-						className="m-0 max-w-[70%] rounded-bubble bg-chip px-3.5 py-2.5 text-[15px]"
-					>
+					<p key={line} className="m-0 max-w-7/10 rounded-bubble bg-chip px-3.5 py-2.5 text-sm">
 						{line}
 					</p>
 				),
@@ -32,7 +29,7 @@ const meta = preview.meta({
 			<ChatSidebar {...args} className="bg-background">
 				<div className="flex flex-col gap-4 px-3.5 pb-4">
 					<SidebarSection title="Summary" className="px-3.5 py-3">
-						<p className="m-0 text-[14px]">Linear Handler checked Sentry and opened an issue.</p>
+						<p className="m-0 text-sm">Linear Handler checked Sentry and opened an issue.</p>
 					</SidebarSection>
 				</div>
 			</ChatSidebar>

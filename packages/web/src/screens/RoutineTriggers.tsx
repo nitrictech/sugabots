@@ -297,7 +297,7 @@ export function TriggerDialog({
 					backDisabled={pending}
 				/>
 				<DialogFormBody>
-					<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+					<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 						{settings ?? (
 							<DraftGroups
 								pod={pod}

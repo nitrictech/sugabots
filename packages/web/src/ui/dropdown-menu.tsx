@@ -11,7 +11,7 @@ import { Check, ChevronRight } from "lucide-react";
  */
 
 const popupClassName =
-	"z-50 max-h-(--available-height) min-w-[8rem] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
+	"z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root {...props} />;
@@ -50,7 +50,7 @@ function DropdownMenuContent({
 }
 
 const itemClassName =
-	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-base outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 
 function DropdownMenuItem({
 	className,
@@ -87,7 +87,7 @@ function DropdownMenuCheckboxItem({
 		>
 			<span
 				aria-hidden
-				className="grid size-3.5 shrink-0 place-items-center rounded-[3.5px] border border-disabled-foreground text-primary-foreground transition-colors group-data-checked/checkbox:border-primary group-data-checked/checkbox:bg-primary"
+				className="grid size-3.5 shrink-0 place-items-center rounded border border-disabled-foreground text-primary-foreground transition-colors group-data-checked/checkbox:border-primary group-data-checked/checkbox:bg-primary"
 			>
 				<MenuPrimitive.CheckboxItemIndicator className="flex">
 					<Check className="size-2.5" strokeWidth={3.5} />
@@ -108,7 +108,7 @@ function DropdownMenuGroupLabel({ className, ...props }: MenuPrimitive.GroupLabe
 	return (
 		<MenuPrimitive.GroupLabel
 			data-slot="dropdown-menu-group-label"
-			className={cn("px-2.5 pt-2 pb-1 text-[13px] text-muted-foreground", className)}
+			className={cn("px-2.5 pt-2 pb-1 text-xs text-muted-foreground", className)}
 			{...props}
 		/>
 	);

@@ -63,7 +63,7 @@ export function ComputerSheet({
 				{...drag.handlers}
 				className="-mx-4 flex h-6 cursor-grab touch-none justify-center pt-2 active:cursor-grabbing"
 			>
-				<span className="h-[5px] w-9 rounded-full bg-border-strong" />
+				<span className="h-1.25 w-9 rounded-full bg-border-strong" />
 			</div>
 			{/* Named for a screen reader, which hears what the sheet is; the screen shows it. */}
 			<DialogTitle className="sr-only">{title}</DialogTitle>
@@ -73,7 +73,7 @@ export function ComputerSheet({
 						type="button"
 						onClick={onOpenFull}
 						aria-label={`Open ${title} full screen`}
-						className="focus-ring overflow-hidden rounded-[12px] border border-border-strong"
+						className="focus-ring overflow-hidden rounded-xl border border-border-strong"
 					>
 						<DesktopScreen
 							threadId={threadId}
@@ -82,7 +82,7 @@ export function ComputerSheet({
 							offersReconnect={false}
 						/>
 					</button>
-					<Button variant="outline" className="h-11 text-[15px]" onClick={onOpenFull}>
+					<Button variant="outline" className="h-11 text-sm" onClick={onOpenFull}>
 						Open full screen
 					</Button>
 				</div>
@@ -98,7 +98,7 @@ export function ComputerSheet({
 					{pod.permissions.updateAgents && (
 						<>
 							<Button
-								className="h-11 w-full text-[15px]"
+								className="h-11 w-full text-sm"
 								disabled={update.isPending}
 								onClick={() => update.mutate({ usesSandbox: true })}
 							>
@@ -123,7 +123,7 @@ export function ComputerSheet({
 							to="./settings/$section"
 							params={{ section: "sandboxes" }}
 							state={backToChat}
-							className={buttonStyles({ className: "h-11 w-full text-[15px]" })}
+							className={buttonStyles({ className: "h-11 w-full text-sm" })}
 						>
 							Set up computers
 						</Link>
@@ -147,8 +147,8 @@ function NoComputer({
 	return (
 		<div className="flex flex-col items-center gap-2 pt-2 text-center">
 			<Monitor aria-hidden size={28} strokeWidth={1.5} className="text-subtle-foreground" />
-			<p className="m-0 font-medium text-[15px] text-foreground">{text}</p>
-			<p className="m-0 text-[14px] text-muted-foreground leading-normal">{detail}</p>
+			<p className="m-0 font-medium text-sm text-foreground">{text}</p>
+			<p className="m-0 text-sm text-muted-foreground leading-normal">{detail}</p>
 			{children && <div className="mt-3 flex w-full flex-col gap-2">{children}</div>}
 		</div>
 	);

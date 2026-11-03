@@ -57,7 +57,7 @@ export function GitHubConnectStep({
 			<DialogFormBody>
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
 					<ConnectionMark presetId="github" name="GitHub" />
-					<span className="text-[13.5px] text-muted-foreground">
+					<span className="text-xs text-muted-foreground">
 						The pod gets a private GitHub App of its own: you make it on GitHub, then install it on
 						the account it works on.
 					</span>
@@ -72,7 +72,7 @@ export function GitHubConnectStep({
 							value={organization}
 							onChange={(event) => setOrganization(event.target.value)}
 							placeholder="Optional"
-							className="min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
 						/>
 					</SettingsControlRow>
 				</SettingsGroup>
@@ -137,7 +137,7 @@ export function GitHubRepositoriesGroup({
 				{listed.map((item) => (
 					<SettingsRow
 						key={item.repository}
-						label={<span className="font-mono text-[13.5px]">{item.repository}</span>}
+						label={<span className="font-mono text-xs">{item.repository}</span>}
 						sub={`Added by ${item.addedByName ?? "someone who has left"}`}
 						trailing={
 							canManage && (
@@ -216,7 +216,7 @@ function AddRepositoryDialog({
 			<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 				<DialogFormHeader title={`Add from ${account}`} />
 				<DialogFormBody>
-					<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+					<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 						<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
 						<input
 							type="search"
@@ -224,19 +224,19 @@ function AddRepositoryDialog({
 							onChange={(event) => setQuery(event.target.value)}
 							placeholder="Search repositories"
 							aria-label="Search repositories"
-							className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 						/>
 					</label>
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 					{reached.error && <Alert>{failureMessage(reached.error)}</Alert>}
-					<div className="-mx-1 max-h-[min(420px,55vh)] overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+					<div className="-mx-1 max-h-repos overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 						{shown.length > 0 ? (
 							<SettingsGroup>
 								{shown.map((choice) => (
 									<SettingsRow
 										key={choice.repository}
 										icon={choice.private ? <Lock size={14} /> : <BookOpen size={14} />}
-										label={<span className="font-mono text-[13.5px]">{choice.repository}</span>}
+										label={<span className="font-mono text-xs">{choice.repository}</span>}
 										sub={choice.private ? "Private" : "Public"}
 										trailing={
 											adding === choice.repository ? (
@@ -250,12 +250,12 @@ function AddRepositoryDialog({
 								))}
 							</SettingsGroup>
 						) : reached.isPending ? (
-							<p className="m-0 px-1 text-muted-foreground text-sm">
+							<p className="m-0 px-1 text-muted-foreground text-xs">
 								Finding the repositories the app reaches…
 							</p>
 						) : (
 							!reached.isError && (
-								<p className="m-0 px-1 text-muted-foreground text-sm">
+								<p className="m-0 px-1 text-muted-foreground text-xs">
 									{needle === ""
 										? `The connection has every repository the app reaches on ${account}.`
 										: `No repository matches “${query.trim()}”.`}

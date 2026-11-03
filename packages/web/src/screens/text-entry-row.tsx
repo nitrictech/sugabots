@@ -52,22 +52,19 @@ export function TextEntryRow({
 
 	return (
 		<div className="flex min-h-12 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label htmlFor={id} className="w-[82px] shrink-0 text-[13px] text-foreground">
+			<label htmlFor={id} className="w-20.5 shrink-0 text-xs text-foreground">
 				{label}
 			</label>
 			{showingSecret ? (
 				<>
-					<span
-						id={id}
-						className="min-w-0 flex-1 truncate font-mono text-[13px] text-muted-foreground"
-					>
+					<span id={id} className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
 						{savedKeyMask}
 					</span>
 					<button
 						type="button"
 						onClick={() => setReplacing(true)}
 						disabled={disabled}
-						className="focus-ring shrink-0 rounded-md font-medium text-link text-sm"
+						className="focus-ring shrink-0 rounded-md font-medium text-link text-xs"
 					>
 						Replace
 					</button>
@@ -76,7 +73,7 @@ export function TextEntryRow({
 							type="button"
 							onClick={onRemove}
 							disabled={disabled}
-							className="focus-ring shrink-0 rounded-md font-medium text-destructive-text text-sm"
+							className="focus-ring shrink-0 rounded-md font-medium text-destructive-text text-xs"
 						>
 							Remove
 						</button>
@@ -100,7 +97,7 @@ export function TextEntryRow({
 							setReplacing(false);
 						}
 					}}
-					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			)}
 		</div>

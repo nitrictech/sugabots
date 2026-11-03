@@ -177,7 +177,7 @@ const meta = preview.meta({
 			useEffect(() => () => queryClient.clear(), [queryClient]);
 			return (
 				<QueryClientProvider client={queryClient}>
-					<div className="flex h-[860px] justify-end bg-background">
+					<div className="flex h-215 justify-end bg-background">
 						<Story />
 					</div>
 				</QueryClientProvider>

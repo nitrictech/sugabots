@@ -65,7 +65,7 @@ export function SidebarPod({
 			<NotificationsContextMenu settings={notificationSettings} place={notificationPlace}>
 				<div
 					className={cn(
-						"group/pod flex h-8 items-center rounded-[6px] pr-1.5 transition-colors",
+						"group/pod flex h-8 items-center rounded-sm pr-1.5 transition-colors",
 						!open && holdsSelected ? "bg-row-selected" : "hover:bg-row-hover",
 					)}
 				>
@@ -74,7 +74,7 @@ export function SidebarPod({
 						aria-expanded={open}
 						aria-describedby={personal ? privacyId : undefined}
 						onClick={onToggle}
-						className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left"
+						className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left"
 					>
 						<span className="grid size-5 shrink-0 place-items-center *:col-start-1 *:row-start-1">
 							<PodInitial
@@ -94,7 +94,7 @@ export function SidebarPod({
 						<span className="flex min-w-0 flex-1 items-center gap-1.5">
 							<span
 								className={cn(
-									"min-w-0 truncate text-[14px]",
+									"min-w-0 truncate text-sm",
 									// Grey like the rows under it; bright when folded over something new.
 									!open && hasNews(standing)
 										? "font-semibold text-foreground"
@@ -103,7 +103,7 @@ export function SidebarPod({
 							>
 								{pod.name}
 							</span>
-							{personal && <OnlyYou className="text-[12px] text-subtle-foreground" />}
+							{personal && <OnlyYou className="text-xs text-subtle-foreground" />}
 						</span>
 						<MutedMark settings={notificationSettings} place={notificationPlace} />
 					</button>
@@ -210,9 +210,9 @@ function PodSquare({
 			className={cn(
 				"grid shrink-0 place-items-center font-semibold",
 				{
-					sm: "size-4 rounded-[4px] text-[10px]",
-					md: "size-5 rounded-[5px] text-[11px]",
-					lg: "size-11 rounded-[11px] text-lg",
+					sm: "size-4 rounded text-3xs",
+					md: "size-5 rounded-xs text-2xs",
+					lg: "size-11 rounded-xl text-sm",
 				}[size],
 				!palette && "bg-tile text-foreground",
 				palette && !small && "text-black/80",

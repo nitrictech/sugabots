@@ -118,7 +118,7 @@ export function LookSections({
 function LookSection({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<div className="flex flex-col gap-2">
-			<span className="text-[13px] text-muted-foreground">{label}</span>
+			<span className="text-xs text-muted-foreground">{label}</span>
 			{children}
 		</div>
 	);
@@ -147,7 +147,7 @@ function FaceChoices<Option extends string>({
 			{options.map((option) => (
 				<label
 					key={option}
-					className="grid aspect-square cursor-pointer place-items-center rounded-[10px] border border-transparent bg-chip transition-colors hover:bg-hover has-checked:border-ring has-checked:bg-person-avatar has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-2"
+					className="grid aspect-square cursor-pointer place-items-center rounded-lg border border-transparent bg-chip transition-colors hover:bg-hover has-checked:border-ring has-checked:bg-person-avatar has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-2"
 				>
 					<input
 						type="radio"
@@ -213,7 +213,7 @@ function Swatches<Color extends string>({
 		<fieldset
 			className={cn(
 				"m-0 grid flex-1 border-0 p-0",
-				columns ? "gap-2.5" : "grid-cols-[repeat(auto-fit,1.75rem)] justify-between gap-1.5",
+				columns ? "gap-2.5" : "grid-cols-swatches justify-between gap-1.5",
 			)}
 			style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 2rem))` } : undefined}
 		>
@@ -259,7 +259,7 @@ function ShapePicker({
 			{agentShapes.map((shape) => (
 				<label
 					key={shape}
-					className="grid h-9 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-9 cursor-pointer place-items-center rounded-lg bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
@@ -307,7 +307,7 @@ function EyesPicker({
 			{agentFaces.map((face) => (
 				<label
 					key={face}
-					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-8 cursor-pointer place-items-center rounded-lg bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"

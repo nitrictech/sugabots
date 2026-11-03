@@ -33,7 +33,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 
 /** Pins the dialog to the bottom edge at full width below the `sm` breakpoint, undoing the centring. */
 const sheetOnPhoneClassName =
-	"max-sm:top-auto max-sm:max-w-full max-sm:rounded-b-none max-sm:pb-[max(20px,env(safe-area-inset-bottom))]";
+	"max-sm:top-auto max-sm:max-w-full max-sm:rounded-b-none max-sm:pb-safe-or-5";
 
 function DialogContent({
 	className,
@@ -65,7 +65,7 @@ function DialogContent({
 			<DialogPrimitive.Popup
 				data-slot="dialog-content"
 				className={cn(
-					"fixed inset-0 z-50 m-auto grid h-fit w-full max-w-[calc(100%-20px)] gap-4 rounded-dialog bg-panel p-4 text-foreground text-sm shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
+					"fixed inset-0 z-50 m-auto grid h-fit w-full max-w-dialog gap-4 rounded-dialog bg-panel p-4 text-foreground text-xs shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
 					sheetOnPhone && sheetOnPhoneClassName,
 					className,
 				)}
@@ -87,7 +87,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 	return (
 		<DialogPrimitive.Title
 			data-slot="dialog-title"
-			className={cn("font-semibold text-[15px] text-foreground leading-snug", className)}
+			className={cn("font-semibold text-sm text-foreground leading-snug", className)}
 			{...props}
 		/>
 	);
@@ -98,7 +98,7 @@ function DialogDescription({ className, ...props }: DialogPrimitive.Description.
 		<DialogPrimitive.Description
 			data-slot="dialog-description"
 			className={cn(
-				"text-muted-foreground text-sm *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+				"text-muted-foreground text-xs *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
 				className,
 			)}
 			{...props}

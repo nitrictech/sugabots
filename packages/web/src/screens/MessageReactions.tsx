@@ -53,7 +53,7 @@ export function MessageReactions({
 				);
 				const face = (
 					<>
-						<span aria-hidden className="text-[14px] leading-none">
+						<span aria-hidden className="text-sm leading-none">
 							{reaction.emoji}
 						</span>
 						<span aria-hidden className="font-semibold text-xs tabular-nums">
@@ -163,7 +163,7 @@ export function AddReactionButton({
 						className="origin-(--transform-origin) overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95"
 					>
 						{full && (
-							<p className="m-0 max-w-[332px] border-border-strong border-b px-3 py-2 text-muted-foreground text-sm">
+							<p className="m-0 max-w-83 border-border-strong border-b px-3 py-2 text-muted-foreground text-xs">
 								This message has {MAX_REACTION_EMOJI_PER_MESSAGE} different reactions, the most it
 								can have. You can still add one of those.
 							</p>

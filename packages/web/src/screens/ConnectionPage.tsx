@@ -203,7 +203,7 @@ function ConnectionCard({
 					<SettingsRow
 						label="Address"
 						trailing={
-							<span className="min-w-0 truncate font-mono text-[13px] text-muted-foreground">
+							<span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
 								{connection.url}
 							</span>
 						}
@@ -407,7 +407,7 @@ function SecretForm({
 				value={secret}
 				onChange={(event) => setSecret(event.target.value)}
 				placeholder={needsToken ? "Paste the access token" : "Paste the new secret"}
-				className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+				className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-subtle-foreground"
 			/>
 			<Button type="button" size="sm" variant="ghost" onClick={done}>
 				Cancel
@@ -492,8 +492,8 @@ function ToolSettings({
 	if (tools.isPending) {
 		return (
 			<div role="status" aria-label="Loading tools" className="flex flex-col gap-3">
-				<div className="h-[92px] animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
-				<div className="h-[92px] animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
+				<div className="h-23 animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
+				<div className="h-23 animate-pulse rounded-xl border border-settings-card-border bg-settings-card" />
 			</div>
 		);
 	}
@@ -581,8 +581,8 @@ function ToolSection({
 	return (
 		<section aria-labelledby={headingId}>
 			<div className="sticky top-0 z-10 flex items-center gap-3 border-border border-b bg-chip px-4 py-2.5">
-				<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.35]">
-					<h3 id={headingId} className="m-0 font-medium text-[13px] text-foreground">
+				<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+					<h3 id={headingId} className="m-0 font-medium text-xs text-foreground">
 						{heading}
 					</h3>
 					<span className="text-pretty text-subtle-foreground text-xs">{description}</span>
@@ -672,7 +672,7 @@ function IndividualTools({
 			<section aria-label="Tools" className={SETTINGS_CARD}>
 				{/* Above the list and as solid as the card, so no row shows past the list's top as it scrolls. */}
 				<div className="relative z-1 border-border border-b bg-settings-card p-2.5">
-					<label className="focus-ring-within flex h-[34px] items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
 						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
 						<input
 							type="search"
@@ -680,7 +680,7 @@ function IndividualTools({
 							onChange={(event) => setQuery(event.target.value)}
 							placeholder={`Search ${tools.length} ${connection.name} tools`}
 							aria-label="Search tools"
-							className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
 						/>
 					</label>
 				</div>
@@ -689,11 +689,11 @@ function IndividualTools({
 					className={cn(
 						tools.length > TOOLS_SHOWN_BEFORE_SCROLLING &&
 							// Relative, so the hidden radios inside are held to it: placed by the page instead, those scrolled out of view would lengthen it.
-							"relative h-[min(560px,60vh)] overflow-y-auto [scrollbar-gutter:stable]",
+							"relative h-tool-list overflow-y-auto scrollbar-gutter-stable",
 						// Its sticky headings layered within it, under the search and the page's Back.
 						"isolate",
 						// A phone's scrollbar floats over the list, and pulling past its top would open a gap under the search.
-						"max-md:overscroll-none max-md:[scrollbar-gutter:auto]",
+						"max-md:overscroll-none max-md:scrollbar-gutter-auto",
 					)}
 				>
 					{shownApart.length > 0 && (
@@ -731,7 +731,7 @@ function IndividualTools({
 						);
 					})}
 					{!anyShown && (
-						<p className="m-0 px-4 py-8 text-center text-[13px] text-subtle-foreground">
+						<p className="m-0 px-4 py-8 text-center text-xs text-subtle-foreground">
 							No tools match.
 						</p>
 					)}

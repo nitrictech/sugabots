@@ -35,11 +35,11 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		Icon: FileText,
 		file: { extension: "md", type: "text/markdown", contentOf: (content) => content },
 		// A preview, not the document: wide enough for its tables.
-		cardWidth: "max-w-[640px]",
+		cardWidth: "max-w-160",
 		Inline: DocumentPreview,
 		Full: ({ content }) => (
-			<div className="min-h-0 flex-1 overflow-y-auto rounded-[12px] border border-border bg-list">
-				<article className="mx-auto max-w-[760px] px-6 py-6 max-md:px-4">
+			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
+				<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
 					<MessageMarkdown text={content} mentionable={[]} />
 				</article>
 			</div>
@@ -54,7 +54,7 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		cardWidth: "max-w-none",
 		Inline: LivePage,
 		Full: ({ title, content, at }) => (
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[12px] border border-border">
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
 				<HtmlFrame html={content} title={title} at={at} className="min-h-0 flex-1" />
 			</div>
 		),
@@ -80,7 +80,7 @@ function DocumentPreview({
 			onClick={onOpen}
 			aria-label={`Open ${title}`}
 			style={{ maxHeight: DOCUMENT_PREVIEW_HEIGHT_PX }}
-			className="focus-ring relative block w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-sm [mask-image:linear-gradient(to_bottom,black_60%,transparent)]"
+			className="focus-ring relative block w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
 		>
 			<MessageMarkdown text={content} mentionable={[]} />
 		</button>
@@ -131,7 +131,7 @@ function LivePage({
 					<button
 						type="button"
 						onClick={expanded ? collapse : () => setExpanded(true)}
-						className="focus-ring flex h-8 items-center gap-1.5 rounded-[8px] border border-border-strong bg-panel px-3.5 font-semibold text-[13px] text-foreground shadow-popover transition-colors hover:bg-hover"
+						className="focus-ring flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-panel px-3.5 font-semibold text-xs text-foreground shadow-popover transition-colors hover:bg-hover"
 					>
 						{expanded ? <ChevronUp aria-hidden size={15} /> : <ChevronDown aria-hidden size={15} />}
 						{expanded ? "Show less" : "Show all"}
@@ -144,8 +144,6 @@ function LivePage({
 
 function InlineLoading() {
 	return (
-		<div className="grid h-[120px] place-content-center text-muted-foreground text-sm">
-			Loading…
-		</div>
+		<div className="grid h-30 place-content-center text-muted-foreground text-xs">Loading…</div>
 	);
 }

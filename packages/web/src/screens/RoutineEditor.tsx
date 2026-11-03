@@ -301,7 +301,7 @@ function NameInputRow({ value, onChange }: { value: string; onChange: (value: st
 				onChange={(event) => onChange(event.target.value)}
 				maxLength={MAX_ROUTINE_NAME_CHARACTERS}
 				placeholder="e.g. Friday pipeline review"
-				className="min-w-0 flex-1 rounded-md bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+				className="min-w-0 flex-1 rounded-md bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 			/>
 		</SettingsControlRow>
 	);
@@ -331,11 +331,11 @@ function BotRow({
 				shape={chosen.agent.shape}
 				size={24}
 			/>
-			<span className="truncate text-[13px] text-foreground">{chosen.agent.name}</span>
-			<span className="truncate text-muted-foreground text-sm">{chosen.pod.name}</span>
+			<span className="truncate text-xs text-foreground">{chosen.agent.name}</span>
+			<span className="truncate text-muted-foreground text-xs">{chosen.pod.name}</span>
 		</span>
 	) : (
-		<span className="flex-1 text-[13px] text-muted-foreground">Choose a bot</span>
+		<span className="flex-1 text-xs text-muted-foreground">Choose a bot</span>
 	);
 
 	if (!choosable) {
@@ -363,8 +363,8 @@ function BotRow({
 			</button>
 			{open &&
 				pods.map((pod) => (
-					<section key={pod.id} aria-label={pod.name} className="pb-1.5 pl-[116px]">
-						<h3 className="m-0 px-1 pt-1 pb-1 font-medium text-sm text-subtle-foreground">
+					<section key={pod.id} aria-label={pod.name} className="pb-1.5 pl-29">
+						<h3 className="m-0 px-1 pt-1 pb-1 font-medium text-xs text-subtle-foreground">
 							{pod.name}
 						</h3>
 						<ul className="m-0 flex list-none flex-col p-0 pr-2">
@@ -387,7 +387,7 @@ function BotRow({
 												shape={agent.shape}
 												size={24}
 											/>
-											<span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+											<span className="min-w-0 flex-1 truncate text-xs text-foreground">
 												{agent.name}
 											</span>
 											{agent.id === chosen?.agent.id && (
@@ -461,7 +461,7 @@ function InstructionsPage({
 					readOnly={!editable}
 					maxLength={MAX_ROUTINE_INSTRUCTIONS_CHARACTERS}
 					placeholder="e.g. Summarise this week's replies and flag anything that has stalled."
-					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[13px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="block min-h-95 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsGroup>
 			{editable && <div className="flex justify-end">{action}</div>}
@@ -509,7 +509,7 @@ export function ChatRow({
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label={`Chat: ${name}`}
-					className="focus-ring ml-auto flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-[8px] bg-chip px-2.5 text-[14px] text-foreground transition-colors hover:bg-hover"
+					className="focus-ring ml-auto flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
 				>
 					<span className="truncate">{name}</span>
 					<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
@@ -551,7 +551,7 @@ function SwitchRow({
 }) {
 	return (
 		<div className="flex min-h-14 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="flex-1 text-[13px] text-foreground">{label}</span>
+			<span className="flex-1 text-xs text-foreground">{label}</span>
 			<Toggle label={label} checked={checked} disabled={disabled} onChange={onChange} />
 		</div>
 	);

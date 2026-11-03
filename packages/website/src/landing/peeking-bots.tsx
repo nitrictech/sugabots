@@ -16,31 +16,31 @@ interface PeekingBot {
 const peekingBots: readonly PeekingBot[] = [
 	{
 		look: { color: "rose", face: "dot", shape: "flower" },
-		place: "hidden xl:block xl:size-24 xl:translate-y-[24%]",
+		place: "hidden xl:block xl:size-24 xl:translate-y-1/4",
 	},
 	{
 		look: { color: "amber", face: "wink", shape: "bowl" },
-		place: "size-11 translate-y-[24%] sm:size-22 lg:size-32 lg:translate-y-[30%]",
+		place: "size-11 translate-y-1/4 sm:size-22 lg:size-32 lg:translate-y-3/10",
 	},
 	{
 		look: { color: "sky", face: "arc", shape: "pebble" },
-		place: "size-16 translate-y-[30%] sm:size-28 lg:size-40",
+		place: "size-16 translate-y-3/10 sm:size-28 lg:size-40",
 	},
 	{
 		look: { color: "purple", face: "pill", shape: "hexagon" },
-		place: "size-24 translate-y-[26%] sm:size-44 lg:size-64",
+		place: "size-24 translate-y-1/4 sm:size-44 lg:size-64",
 	},
 	{
 		look: { color: "green", face: "dot", shape: "leaf" },
-		place: "size-18 translate-y-[22%] sm:size-26 lg:size-36",
+		place: "size-18 translate-y-2/9 sm:size-26 lg:size-36",
 	},
 	{
 		look: { color: "orange", face: "square", shape: "ghost" },
-		place: "size-13 translate-y-[28%] sm:size-20 lg:size-28",
+		place: "size-13 translate-y-2/7 sm:size-20 lg:size-28",
 	},
 	{
 		look: { color: "pink", face: "arc", shape: "star" },
-		place: "hidden xl:block xl:size-20 xl:translate-y-[26%]",
+		place: "hidden xl:block xl:size-20 xl:translate-y-1/4",
 	},
 ];
 

@@ -7,7 +7,7 @@ export function Note({ className, children, ...props }: ComponentProps<"div">) {
 	return (
 		<div
 			className={cn(
-				"flex items-start gap-3 rounded-panel bg-list px-4 py-3 text-[14px] text-soft-foreground leading-normal",
+				"flex items-start gap-3 rounded-panel bg-list px-4 py-3 text-sm text-soft-foreground leading-normal",
 				className,
 			)}
 			{...props}

@@ -49,7 +49,7 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 		return <ConnectionMark presetId={choice.connection} name={choice.label} size="tile" />;
 	}
 	return (
-		<SettingsRowIcon className="size-[34px] rounded-[10px]">
+		<SettingsRowIcon className="size-8.5 rounded-lg">
 			<RoutineTriggerIcon kind={choice.kind} size={15} strokeWidth={2.2} />
 		</SettingsRowIcon>
 	);
@@ -96,7 +96,7 @@ export function TriggerKindStep({
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 			<DialogFormHeader title="Add a trigger" onClose={done} />
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
@@ -104,10 +104,10 @@ export function TriggerKindStep({
 						onChange={(event) => setQuery(event.target.value)}
 						placeholder="Search triggers"
 						aria-label="Search triggers"
-						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 					/>
 				</label>
-				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
 					{pod && (
 						<SettingsGroup label="From this pod's connections">

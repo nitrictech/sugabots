@@ -74,7 +74,7 @@ export function ScreenshotCarousel() {
 		<section
 			aria-roledescription="carousel"
 			aria-label="A look inside Sugabots"
-			className="flex flex-col gap-8 overflow-hidden pt-40 sm:pt-[260px]"
+			className="flex flex-col gap-8 overflow-hidden pt-40 sm:pt-65"
 			onFocus={() => setFocused(true)}
 			onBlur={(event) => {
 				if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -147,7 +147,7 @@ export function ScreenshotCarousel() {
 						>
 							<span
 								className={cn(
-									"block h-1 rounded-xs transition-[width,background-color] duration-260 ease-landing group-focus-visible:ring-2 group-focus-visible:ring-landing-accent",
+									"block h-1 rounded-xs transition-all duration-260 ease-landing group-focus-visible:ring-2 group-focus-visible:ring-landing-accent",
 									index === current ? "w-7 bg-landing-text" : "w-2 bg-landing-rule",
 								)}
 							/>
@@ -195,7 +195,7 @@ function Slide({ screenshot, label, offset, draggedPx, onSelect, onEnlarge }: Sl
 			aria-hidden={!isCurrent}
 			onClick={isCurrent ? undefined : onSelect}
 			className={cn(
-				"absolute inset-0 transition-[opacity,transform] duration-380 ease-landing motion-reduce:transition-none",
+				"absolute inset-0 transition duration-380 ease-landing motion-reduce:transition-none",
 				isCurrent ? "opacity-100" : "cursor-pointer opacity-50",
 				draggedPx !== undefined && "transition-none",
 			)}
@@ -203,7 +203,7 @@ function Slide({ screenshot, label, offset, draggedPx, onSelect, onEnlarge }: Sl
 				transform: `translateX(calc(${offset} * (100% + ${SLIDE_GAP_PX}px) + ${draggedPx ?? 0}px))`,
 			}}
 		>
-			<div className="relative size-full overflow-hidden rounded-[20px] border border-landing-frame bg-landing-card">
+			<div className="relative size-full overflow-hidden rounded-3xl border border-landing-frame bg-landing-card">
 				{screenshot.image ? (
 					<button
 						type="button"
@@ -287,10 +287,10 @@ function EnlargedScreenshot({
 						alt={`${screenshot.title}: ${screenshot.description}`}
 						width={2240}
 						height={1400}
-						className="block h-auto max-h-[calc(92vh-5.5rem)] w-auto max-w-[min(96vw,calc(100vw-9rem))] rounded-xl"
+						className="block h-auto max-h-lightbox w-auto max-w-lightbox rounded-xl"
 					/>
 				) : (
-					<span className="grid aspect-16/10 w-[min(80vw,1040px)] place-items-center rounded-xl border border-landing-frame bg-landing-card p-6 text-center text-sm text-landing-faint">
+					<span className="grid aspect-16/10 w-lightbox place-items-center rounded-xl border border-landing-frame bg-landing-card p-6 text-center text-sm text-landing-faint">
 						Screenshot: {screenshot.shows}
 					</span>
 				)}
@@ -337,7 +337,7 @@ const lightboxButton =
  */
 function Captions({ current }: { current: number }) {
 	return (
-		<div className="grid max-w-[560px]">
+		<div className="grid max-w-140">
 			{screenshots.map((screenshot, index) => (
 				<div
 					key={screenshot.title}
@@ -348,7 +348,7 @@ function Captions({ current }: { current: number }) {
 					)}
 				>
 					<span className="text-lg font-semibold text-landing-text">{screenshot.title}</span>
-					<span className="text-[15.5px]/[1.5] text-pretty text-landing-muted">
+					<span className="text-base/normal text-pretty text-landing-muted">
 						{screenshot.description}
 					</span>
 				</div>

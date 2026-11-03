@@ -132,12 +132,12 @@ export function NewAgentDialog({
 		<DialogContent
 			showCloseButton={false}
 			// On a phone, a page of its own, as tall as what the keyboard leaves.
-			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[780px] max-md:inset-0 max-md:flex max-md:h-[var(--visible-height,100dvh)] max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:flex-col max-md:rounded-none"
+			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-195 max-md:inset-0 max-md:flex max-md:h-visible max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:flex-col max-md:rounded-none"
 		>
 			<DialogTitle className="sr-only">New bot</DialogTitle>
 			<form
 				onSubmit={submit}
-				className="flex min-h-0 min-w-0 flex-col max-md:flex-1 max-md:overflow-y-auto md:h-[580px] md:flex-row"
+				className="flex min-h-0 min-w-0 flex-col max-md:flex-1 max-md:overflow-y-auto md:h-145 md:flex-row"
 			>
 				{phone ? (
 					<PhoneNewBot
@@ -177,7 +177,7 @@ export function NewAgentDialog({
 				) : (
 					<>
 						<div
-							className="flex w-[300px] shrink-0 flex-col items-center gap-5 p-6 transition-colors"
+							className="flex w-75 shrink-0 flex-col items-center gap-5 p-6 transition-colors"
 							style={stage}
 						>
 							<input
@@ -189,7 +189,7 @@ export function NewAgentDialog({
 								autoComplete="off"
 								// biome-ignore lint/a11y/noAutofocus: naming the bot is the one thing the dialog cannot guess.
 								autoFocus
-								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-[22px] text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip"
+								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-xl text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip"
 							/>
 							<div className="grid flex-1 place-items-center">
 								<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={112} />
@@ -280,7 +280,7 @@ function PhoneNewBot({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header
-				className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2 transition-colors"
+				className="sticky top-0 z-10 grid grid-cols-centered items-center gap-3 px-4 pt-safe-or-3 pb-2 transition-colors"
 				style={stage}
 			>
 				<span className="flex justify-self-start">
@@ -299,7 +299,7 @@ function PhoneNewBot({
 						</DialogClose>
 					)}
 				</span>
-				<span className="font-semibold text-[17px] text-foreground">
+				<span className="font-semibold text-base text-foreground">
 					{customising ? "Look" : "New bot"}
 				</span>
 				<span className="flex justify-self-end">
@@ -307,7 +307,7 @@ function PhoneNewBot({
 						<Button
 							type="submit"
 							size="sm"
-							className="h-11 rounded-full px-5 text-[15px]"
+							className="h-11 rounded-full px-5 text-sm"
 							disabled={!canCreate}
 						>
 							Create
@@ -325,7 +325,7 @@ function PhoneNewBot({
 					disabled={customising}
 					onClick={() => onCustomise(true)}
 					className={cn(
-						"focus-ring relative flex justify-center rounded-3xl transition-[height] duration-300 ease-out motion-reduce:transition-none",
+						"focus-ring relative flex justify-center rounded-3xl transition-all duration-300 ease-out motion-reduce:transition-none",
 						naming || customising ? "h-14" : "h-28",
 					)}
 				>
@@ -357,7 +357,7 @@ function PhoneNewBot({
 							placeholder="Name your bot"
 							maxLength={64}
 							autoComplete="off"
-							className="h-12 w-full rounded-xl border border-border-strong bg-panel px-4 text-[16px] text-foreground outline-none placeholder:text-subtle-foreground focus:border-primary-tint-border"
+							className="h-12 w-full rounded-xl border border-border-strong bg-panel px-4 text-base text-foreground outline-none placeholder:text-subtle-foreground focus:border-primary-tint-border"
 						/>
 						{alerts}
 					</>
@@ -485,7 +485,7 @@ function ModelPicker({
 		<section aria-label="Model" className="flex min-h-0 flex-1 flex-col">
 			<div className="flex shrink-0 flex-col gap-4 px-5 pt-5 pb-3">
 				<div className={HEADER_ROW}>
-					<h2 className="m-0 flex-1 font-semibold text-[15px] text-foreground">Model</h2>
+					<h2 className="m-0 flex-1 font-semibold text-sm text-foreground">Model</h2>
 					<Close />
 				</div>
 				<div className="flex h-10 items-center gap-2 rounded-lg border border-border-strong px-3 focus-within:shadow-(--ring-shadow)">
@@ -509,13 +509,13 @@ function ModelPicker({
 						}}
 						placeholder={`Search ${countOf(models.length, "model", "models")}`}
 						autoComplete="off"
-						className="min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-subtle-foreground"
+						className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-subtle-foreground"
 					/>
 				</div>
 			</div>
 			<div ref={list} className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 max-md:max-h-96">
 				{found.length === 0 && (
-					<p className="m-0 px-2 py-3 text-[13px] text-muted-foreground">
+					<p className="m-0 px-2 py-3 text-xs text-muted-foreground">
 						{loading
 							? "Loading models…"
 							: models.length === 0
@@ -556,7 +556,7 @@ function ModelGroup({
 }) {
 	return (
 		<section aria-label={label} className="flex flex-col pb-2">
-			<h3 className="m-0 flex items-center gap-2 px-2 pt-2 pb-1.5 font-medium text-[12.5px] text-muted-foreground">
+			<h3 className="m-0 flex items-center gap-2 px-2 pt-2 pb-1.5 font-medium text-xs text-muted-foreground">
 				{mark}
 				{label}
 			</h3>
@@ -611,11 +611,9 @@ function ModelRow({
 		>
 			<span className="flex min-w-0 flex-1 flex-col gap-1">
 				<span className="flex min-w-0 items-center gap-2">
-					<span className="truncate font-medium text-[14px] text-foreground">
-						{nameOfModel(model)}
-					</span>
+					<span className="truncate font-medium text-sm text-foreground">{nameOfModel(model)}</span>
 					{isDefault && (
-						<span className="shrink-0 rounded-[4px] border border-border-strong px-1.5 font-medium text-[10.5px] text-muted-foreground leading-[16px]">
+						<span className="shrink-0 rounded border border-border-strong px-1.5 font-medium text-2xs text-muted-foreground leading-4">
 							Default
 						</span>
 					)}
@@ -634,7 +632,7 @@ function ModelRow({
 			<span
 				aria-hidden
 				className={cn(
-					"grid size-[18px] shrink-0 place-items-center rounded-full border-[1.5px] transition-colors",
+					"grid size-4.5 shrink-0 place-items-center rounded-full border-2 transition-colors",
 					chosen ? "border-foreground" : "border-disabled-foreground",
 				)}
 			>
@@ -686,10 +684,10 @@ function Tile({
 	return (
 		<label
 			className={cn(
-				size === "sm" ? "size-14" : "size-[68px]",
+				size === "sm" ? "size-14" : "size-17",
 				"grid shrink-0 cursor-pointer place-items-center rounded-xl transition-colors has-focus-visible:shadow-(--ring-shadow)",
 				// One inset ring rather than a border round a fill, whose two rounded edges leave a seam.
-				chosen ? "bg-chip shadow-[inset_0_0_0_1.5px_var(--subtle-foreground)]" : "hover:bg-chip",
+				chosen ? "bg-chip inset-ring-2 inset-ring-subtle-foreground" : "hover:bg-chip",
 			)}
 		>
 			<input
@@ -706,7 +704,7 @@ function Tile({
 }
 
 /** The height of a right-hand page's title row, the same for the models and a look's parts. */
-const HEADER_ROW = "flex h-[22px] shrink-0 items-center";
+const HEADER_ROW = "flex h-5.5 shrink-0 items-center";
 
 /** A step past the start: Back, and its title or tabs beside it. */
 function StepHeader({ onBack, children }: { onBack?: () => void; children: ReactNode }) {
@@ -770,7 +768,7 @@ export function LookStep({
 							aria-selected={part === one}
 							onClick={() => onPartChange(one)}
 							className={cn(
-								"focus-ring rounded-sm font-semibold text-[15px] transition-colors",
+								"focus-ring rounded-sm font-semibold text-sm transition-colors",
 								part === one ? "text-foreground" : "text-muted-foreground hover:text-foreground",
 							)}
 						>
@@ -867,7 +865,7 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 	) : (
 		<span
 			aria-hidden
-			className="grid size-3.5 shrink-0 place-items-center rounded-[3px] bg-chip-strong text-[9px]"
+			className="grid size-3.5 shrink-0 place-items-center rounded bg-chip-strong text-3xs"
 		>
 			{model.providerName.trim().charAt(0).toUpperCase()}
 		</span>

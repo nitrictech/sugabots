@@ -289,7 +289,7 @@ function TimeInput({
 			value={value}
 			// A time being typed is empty until it is whole.
 			onChange={(event) => event.target.value && onChange(event.target.value)}
-			className="ml-auto bg-transparent text-[14.5px] text-foreground outline-none"
+			className="ml-auto bg-transparent text-sm text-foreground outline-none"
 		/>
 	);
 }

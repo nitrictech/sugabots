@@ -69,7 +69,7 @@ export function DetailsSidebar({
 	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(agent.model);
 	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
+		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
 				{/* On a phone, the bot large in the middle, its name under it, then what can be done with it. */}
 				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
@@ -78,13 +78,13 @@ export function DetailsSidebar({
 						face={agent.face}
 						shape={agent.shape}
 						size={36}
-						className="shrink-0 max-md:size-[88px]"
+						className="shrink-0 max-md:size-22"
 					/>
 					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
-						<h3 className="m-0 truncate font-semibold text-[14px] text-foreground max-md:text-[22px]">
+						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
 							{agent.name}
 						</h3>
-						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-[14px]">
+						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-sm">
 							{modelName ?? "No model chosen"}
 						</p>
 					</div>
@@ -145,7 +145,7 @@ function RoundAction({
 		render,
 		props: {
 			className:
-				"focus-ring group/action flex w-16 flex-col items-center gap-1.5 rounded-xl text-[13px] text-soft-foreground",
+				"focus-ring group/action flex w-16 flex-col items-center gap-1.5 rounded-xl text-xs text-soft-foreground",
 			children: (
 				<>
 					<span className="grid size-12 place-items-center rounded-full bg-chip text-foreground transition-colors group-active/action:bg-hover-strong">
@@ -177,7 +177,7 @@ export function PeopleDetails({
 	onClose: () => void;
 }) {
 	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
+		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
 				<InThisThread participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
@@ -211,20 +211,20 @@ export function ChannelDetails({
 	onClose: () => void;
 }) {
 	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-[300px]">
+		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
 				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
 					<span
 						aria-hidden
-						className="grid size-9 shrink-0 place-items-center rounded-[30%] bg-chip text-soft-foreground max-md:size-[88px]"
+						className="grid size-9 shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground max-md:size-22"
 					>
 						<Hash size={18} strokeWidth={2} className="max-md:size-9" />
 					</span>
 					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
-						<h3 className="m-0 truncate font-semibold text-[14px] text-foreground max-md:text-[22px]">
+						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
 							{name}
 						</h3>
-						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-[14px]">
+						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-sm">
 							{[countOf(people, "person", "people"), countOf(bots, "bot", "bots")].join(", ")}
 						</p>
 					</div>
@@ -295,7 +295,7 @@ function InThisThread({
 								</span>
 							))}
 							{hidden > 0 && (
-								<span className="-ml-1.5 grid size-5 place-items-center rounded-full bg-chip font-semibold text-[9px] text-muted-foreground ring-2 ring-background">
+								<span className="-ml-1.5 grid size-5 place-items-center rounded-full bg-chip font-semibold text-3xs text-muted-foreground ring-2 ring-background">
 									+{hidden}
 								</span>
 							)}
@@ -357,10 +357,10 @@ function SharedFiles({
 							rel="noreferrer"
 							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 						>
-							<span className="grid size-[22px] shrink-0 place-items-center rounded-[6px] border border-border-strong text-muted-foreground">
+							<span className="grid size-5.5 shrink-0 place-items-center rounded-sm border border-border-strong text-muted-foreground">
 								<FileText aria-hidden size={12} strokeWidth={2} />
 							</span>
-							<span className="min-w-0 flex-1 truncate text-[13px] text-foreground max-md:text-[15px]">
+							<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 								{file.name}
 							</span>
 						</a>
@@ -393,7 +393,7 @@ function Summary({
 		<SidebarSection title="Summary">
 			<p
 				className={cn(
-					"m-0 text-[13px] leading-[1.55]",
+					"m-0 text-xs leading-normal",
 					text ? "text-soft-foreground" : "text-muted-foreground",
 					folds && !open && "line-clamp-3",
 				)}
@@ -413,11 +413,11 @@ function ParticipantRow({
 	user: SessionUser;
 }) {
 	return (
-		<li className="flex h-[34px] items-center gap-2.5 max-md:h-11 max-md:gap-3">
+		<li className="flex h-8.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
 			<span aria-hidden className="contents">
 				<Face participant={participant} size={22} />
 			</span>
-			<span className="min-w-0 flex-1 truncate text-[13px] text-foreground max-md:text-[15px]">
+			<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 				{participant.name}
 			</span>
 			<span className="text-subtle-foreground text-xs">
@@ -453,7 +453,7 @@ function Routines({
 				<button
 					type="button"
 					onClick={() => onOpen()}
-					className="focus-ring rounded-sm text-subtle-foreground text-xs hover:text-foreground max-md:text-sm"
+					className="focus-ring rounded-sm text-subtle-foreground text-xs hover:text-foreground max-md:text-xs"
 				>
 					See all
 				</button>
@@ -467,7 +467,7 @@ function Routines({
 							onClick={() => onOpen(routine.id)}
 							className="focus-ring flex min-w-0 flex-1 flex-col rounded-sm text-left leading-snug hover:[&>span:first-child]:underline"
 						>
-							<span className="truncate text-[13px] text-foreground max-md:text-[15px]">
+							<span className="truncate text-xs text-foreground max-md:text-sm">
 								{routine.name}
 							</span>
 							{scheduleLabel(routine) && (
@@ -519,7 +519,7 @@ export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 								name={connection.name}
 								size="md"
 							/>
-							<span className="min-w-0 flex-1 truncate text-[13px] text-foreground max-md:text-[15px]">
+							<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 								{connection.name}
 							</span>
 							<span className="shrink-0 text-subtle-foreground text-xs">

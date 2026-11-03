@@ -48,13 +48,13 @@ export const Bubbles = meta.story({
 	render: () => (
 		<div className="flex flex-col gap-2" style={{ maxWidth: 520 }}>
 			{agentColors.map((color) => (
-				<div key={color} style={botColorVariables(color)} className="flex items-end gap-2 text-lg">
+				<div key={color} style={botColorVariables(color)} className="flex items-end gap-2 text-sm">
 					<AgentAvatar color={color} face="pill" shape="circle" size={34} />
 					<p
 						className="m-0 rounded-bubble rounded-bl-tail bg-bot-tint text-bot-text"
 						style={{ padding: "9px 15px" }}
 					>
-						Filed it as <span className="font-mono text-bot-mono text-sm">PLAT-482</span> for{" "}
+						Filed it as <span className="font-mono text-bot-mono text-xs">PLAT-482</span> for{" "}
 						{color}.
 					</p>
 				</div>
