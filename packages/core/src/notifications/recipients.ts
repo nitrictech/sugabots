@@ -138,7 +138,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	if (!place || !NOTIFYING_THREAD_TYPES.has(place.type)) return [];
 	const mentioned = new Set(mentionedHandles(written.content));
 	const { author, authorName } = written;
-	// Only a person's `@here` or `@channel` reaches everyone, not a bot's.
+	// Only a person's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole pod.
 	const addressesEveryone = author.kind === "person" && mentionsEveryone(written.content);
 	// A thread with a bot is the bot's; elsewhere, such as a pod's chat, what a bot posts is.
 	const botId = place.hostAgentId ?? (author.kind === "bot" ? author.agentId : null);

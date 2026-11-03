@@ -485,6 +485,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await mentioned()).toBe(true);
 	});
 
+	it("does not say a bot's @channel mentions the person", async () => {
+		const current = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const mentioned = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.channels.find(
+				(item) => item.conversation.id === current.id,
+			)?.mentionsYou;
+
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: current.id,
+				authorAgentId: agentId,
+				kind: "text",
+				status: "complete",
+				parts: [{ type: "text", text: "@channel the report is done" }],
+				content: "@channel the report is done",
+			}),
+		);
+
+		expect(await mentioned()).toBe(false);
+	});
+
 	it("refuses to mark a pod's chat done", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 
