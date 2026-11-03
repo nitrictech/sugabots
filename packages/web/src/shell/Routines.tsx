@@ -6,7 +6,7 @@ import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
-import { newRoutineLink, routineThreadLink } from "@/lib/links.ts";
+import { agentChatLink, newRoutineLink, routineThreadLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
@@ -14,6 +14,7 @@ import { useWorkspace } from "@/lib/workspace.ts";
 import { outcomeOf, RunStatus } from "@/screens/RoutineRun.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
+import { buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
@@ -68,18 +69,33 @@ export function RoutinesPage({
 			<Plus size={16} strokeWidth={1.75} />
 		</IconButton>
 	);
-	// With none yet, the list stays, with its + where it always is, and the space beside it says there are none.
+	// With none yet, the list stays, with its + where it always is, and the space beside it says how one is made.
 	const none = list.isSuccess && routines.length === 0;
 	// A phone has no space beside the list, so the list's own says so.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const noneYet = (
 		<div className="flex h-full pb-[10%]">
-			<EmptyState
+			<NoRoutines
 				title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
-				icon={<RefreshCcw strokeWidth={1.75} />}
-			>
-				Ask {bot ? bot.name : "a bot"} to set some up for you.
-			</EmptyState>
+				pod={pod}
+				create={
+					pod.permissions.manageRoutines
+						? {
+								newRoutine: <Link {...newRoutineLink(pod, bot)} />,
+								whoToAsk: bot ? (
+									<Link
+										{...agentChatLink({ pod, agent: bot })}
+										className="focus-ring rounded-sm text-link underline"
+									>
+										{bot.name}
+									</Link>
+								) : (
+									"a bot"
+								),
+							}
+						: undefined
+				}
+			/>
 		</div>
 	);
 	return (
@@ -93,7 +109,7 @@ export function RoutinesPage({
 				)}
 			>
 				<PageHeader title={title} place={{ kind: "pod", pod }} actions={newRoutine} />
-				{none && phone && <div className="flex min-h-0 flex-1 flex-col">{noneYet}</div>}
+				{none && phone && !chosen && <div className="flex min-h-0 flex-1 flex-col">{noneYet}</div>}
 				<ul
 					className={cn(
 						"tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2",
@@ -106,17 +122,9 @@ export function RoutinesPage({
 						</li>
 					)}
 					{none && !phone && (
-						// Quiet and in the middle, as Inbox's empty list is, with the way to make one under it.
-						<li className="m-auto flex flex-col items-center gap-2 px-6 py-16 text-center">
-							<p className="m-0 text-[13px] text-muted-foreground">No routines yet</p>
-							{pod.permissions.manageRoutines && (
-								<Link
-									{...newRoutineLink(pod, bot)}
-									className="focus-ring rounded-md font-medium text-[13px] text-foreground"
-								>
-									New routine
-								</Link>
-							)}
+						// Quiet and in the middle, as Inbox's empty list is; the way to make one is in the space beside it.
+						<li className="m-auto px-6 py-16 text-center text-[13px] text-muted-foreground">
+							No routines yet
 						</li>
 					)}
 					{routines.map((row) => (
@@ -135,6 +143,45 @@ export function RoutinesPage({
 				{none && !chosen && !phone ? noneYet : children}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * No routines yet, and how one is made: for someone who may make one, New
+ * routine, with asking a bot instead under it. Anyone else is sent to whoever
+ * manages the pod's routines, as a bot makes them only for someone who may.
+ */
+export function NoRoutines({
+	title,
+	pod,
+	create,
+}: {
+	title: string;
+	pod: Pick<Pod, "name">;
+	/** For a viewer who may manage the pod's routines; omitted for anyone else. */
+	create?: {
+		/** The element New routine is, such as a link to the form or a button that opens it. */
+		newRoutine: useRender.RenderProp;
+		/** Who could set one up instead, such as the bot, linked to its chat. */
+		whoToAsk: ReactNode;
+	};
+}) {
+	const newRoutine = useRender({
+		enabled: create !== undefined,
+		render: create?.newRoutine,
+		props: { className: buttonStyles({ size: "sm" }), children: "New routine" },
+	});
+	return (
+		<EmptyState title={title} icon={<RefreshCcw strokeWidth={1.75} />}>
+			{create ? (
+				<span className="mt-3 flex flex-col items-center gap-3">
+					{newRoutine}
+					<span>Or ask {create.whoToAsk} to set one up.</span>
+				</span>
+			) : (
+				<>Ask someone who manages {pod.name}'s routines to set one up.</>
+			)}
+		</EmptyState>
 	);
 }
 

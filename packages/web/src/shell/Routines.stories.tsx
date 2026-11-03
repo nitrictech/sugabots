@@ -10,6 +10,7 @@ import {
 	StoryApp,
 	storyChatDetails,
 	storyPodChatFor,
+	storyPods,
 	storyUser,
 	storyWorkspace,
 } from "@/story-app.tsx";
@@ -364,16 +365,15 @@ export const Empty = meta.story({
 	},
 });
 
+const botWithNonePath = `/${storyWorkspace.slug}/pods/${revenue.slug}/routines?bot=${leadResearcher.handle}`;
+
 /**
  * A bot that runs no routines yet: its list stays, with the + in its header
- * as Inbox has its controls, and the space beside it says how one is made.
+ * as Inbox has its controls, and the space beside it offers New routine, or
+ * asking the bot in its chat.
  */
 export const BotWithNone = meta.story({
-	render: () => (
-		<StoryApp
-			path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines?bot=${leadResearcher.handle}`}
-		/>
-	),
+	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(
@@ -387,13 +387,56 @@ export const BotWithNone = meta.story({
 		).toBeVisible();
 		const list = canvas.getByRole("region", { name: "Routines" });
 		await expect(within(list).getByText("No routines yet")).toBeVisible();
+		// The list keeps only its +, which has no text; New routine itself is in the empty state beside it.
+		const making = canvas.getByText("New routine", { selector: "a" });
+		await expect(list).not.toContainElement(making);
+		await expect(making).toBeVisible();
+		await expect(making).toHaveAttribute(
+			"href",
+			expect.stringContaining(`/routines/new?bot=${leadResearcher.handle}`),
+		);
+		const ask = canvas.getByText(/to set one up\.$/);
+		await expect(ask).toHaveTextContent(`Or ask ${leadResearcher.name} to set one up.`);
+		await expect(within(ask).getByRole("link", { name: leadResearcher.name })).toHaveAttribute(
+			"href",
+			expect.stringContaining(`/agents/${leadResearcher.handle}`),
+		);
+	},
+});
+
+/** Somebody who may not manage the pod's routines is sent to someone who may, as a bot makes them only for them. */
+export const BotWithNoneAsAMember = meta.story({
+	beforeEach({ msw }) {
+		const asMember = storyPods.map((pod) => ({
+			...pod,
+			permissions: { ...pod.permissions, manageRoutines: false },
+		}));
+		msw.use(...appHandlers({ role: "member", pods: asMember }));
+	},
+	render: () => <StoryApp path={botWithNonePath} />,
+	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText(`Ask ${leadResearcher.name} to set some up for you.`),
+			await canvas.findByText(
+				`Ask someone who manages ${revenue.name}'s routines to set one up.`,
+				{},
+				{ timeout: 10_000 },
+			),
 		).toBeVisible();
-		// The + in the header, and New routine under No routines yet, both make one.
-		const making = within(list).getAllByRole("link", { name: "New routine" });
-		await expect(making).toHaveLength(2);
-		for (const link of making) await expect(link).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: "New routine" })).toBeNull();
+	},
+});
+
+/** On a phone, with no space beside the list, the list itself offers New routine. */
+export const BotWithNoneOnPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	render: () => <StoryApp path={botWithNonePath} />,
+	play: async ({ canvas }) => {
+		const list = await canvas.findByRole("region", { name: "Routines" }, { timeout: 10_000 });
+		await expect(
+			await within(list).findByText(`No routines for ${leadResearcher.name} yet`),
+		).toBeVisible();
+		await expect(within(list).getAllByRole("link", { name: "New routine" })).toHaveLength(2);
+		await expect(within(list).getByText(/to set one up\.$/)).toBeVisible();
 	},
 });
 

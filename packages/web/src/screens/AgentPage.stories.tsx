@@ -988,7 +988,7 @@ export const Sandbox = meta.story({
 
 /**
  * The bot's routines, opened from the top of its chat beside it as its
- * computer is, saying how to get one while it has none, and closed again.
+ * computer is, offering New routine while it has none, and closed again.
  */
 export const RoutinesBesideTheChat = meta.story({
 	play: async ({ canvas, userEvent }) => {
@@ -999,10 +999,26 @@ export const RoutinesBesideTheChat = meta.story({
 		await expect(
 			await within(routines).findByText(`No routines for ${growthDesk.name} yet`),
 		).toBeVisible();
+		await expect(
+			within(routines).getByText(`Or ask ${growthDesk.name} to set one up.`),
+		).toBeVisible();
 		await userEvent.click(within(routines).getByRole("button", { name: "Close" }));
 		await waitFor(() =>
 			expect(canvas.queryByRole("region", { name: `${growthDesk.name}'s routines` })).toBeNull(),
 		);
+	},
+});
+
+/** New routine, in the bot's routines beside its chat while it has none, opens the form in their place. */
+export const NewRoutineBesideTheChat = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Routines" }, { timeout: 10_000 }),
+		);
+		const routines = await canvas.findByRole("region", { name: `${growthDesk.name}'s routines` });
+		// By its text: the + in the header has none.
+		await userEvent.click(await within(routines).findByText("New routine", { selector: "button" }));
+		await expect(await canvas.findByRole("region", { name: "New routine" })).toBeVisible();
 	},
 });
 
