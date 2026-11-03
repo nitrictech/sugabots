@@ -805,9 +805,12 @@ function RoutineResultLink({
 	);
 }
 
-/** How a collaboration's line says where it stands, once it has settled or needs somebody. */
+/**
+ * How a collaboration's line says where it stands once it has settled. Until
+ * then, `waiting` and `pending` both mean the collaborator is still working:
+ * `pending` is only the asking agent having moved on, and needs nobody.
+ */
 const COLLABORATION_STATUS: Partial<Record<CollaborationPart["status"], SideThreadStatus>> = {
-	pending: { text: "Needs approval", urgent: true },
 	answered: { text: "Done", done: true },
 	failed: { text: "Stopped" },
 };

@@ -530,7 +530,8 @@ export const InTheSidebar = meta.story({
 
 /**
  * A bot's message that asked another bot shows the collaboration as a thread
- * line under it: both faces, when it last moved, and a tag while it needs you.
+ * line under it: both faces, when it last moved, and that the other bot is
+ * still working, including after the asking bot stopped waiting (`pending`).
  */
 export const CollaborationThread = meta.story({
 	args: {
@@ -560,8 +561,8 @@ export const CollaborationThread = meta.story({
 			name: /^Open Collaboration: Issue Triager and Linear Handler/,
 		});
 		await expect(line).toHaveTextContent("Asked Linear Handler");
-		await expect(line).toHaveTextContent("Needs approval");
-		await expect(line).toHaveAccessibleName(/Last reply \d/);
+		await expect(line).not.toHaveTextContent("Needs approval");
+		await expect(line).toHaveAccessibleName(/Linear Handler, Working, Last reply \d/);
 		await userEvent.click(line);
 		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000313");
 	},
