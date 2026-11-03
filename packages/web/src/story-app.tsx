@@ -530,7 +530,10 @@ export function connectionHandlers(connections: readonly TestConnection[]): Requ
 export function StoryApp({ path, user = storyUser }: { path: string; user?: SessionUser }) {
 	const [queryClient] = useState(() => createQueryClient());
 	const [router] = useState(() =>
-		createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) }),
+		createAppRouter({
+			history: createMemoryHistory({ initialEntries: [path] }),
+			defaultViewTransition: false,
+		}),
 	);
 	useEffect(() => () => queryClient.clear(), [queryClient]);
 	const session = { user, error: undefined, refresh: async () => {} };
