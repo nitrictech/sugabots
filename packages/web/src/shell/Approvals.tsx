@@ -66,7 +66,7 @@ export function Approvals() {
 										type="button"
 										onClick={() => setShowAll(true)}
 										// As Open conversation is on a request's page, centred and sized for a thumb on a phone.
-										className="focus-ring self-start rounded-sm px-1 font-medium text-[13px] text-link max-md:self-center max-md:py-2 max-md:text-[15px]"
+										className="focus-ring self-start rounded-sm px-1 font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 									>
 										Show older
 									</button>
@@ -84,18 +84,18 @@ export function Approvals() {
 function NothingWaiting() {
 	return (
 		// On a phone, as tall as the card at the top of the next tab's Settings, so moving between them is still.
-		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:mb-3 max-md:min-h-[98px] max-md:rounded-[14px] max-md:py-0">
+		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:mb-3 max-md:min-h-24.5 max-md:rounded-2xl max-md:py-0">
 			<span
 				aria-hidden
-				className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-chip text-muted-foreground"
+				className="grid size-10 shrink-0 place-items-center rounded-lg bg-chip text-muted-foreground"
 			>
 				<ShieldCheck size={20} strokeWidth={1.75} />
 			</span>
 			<div className="flex min-w-0 flex-col gap-0.5">
-				<p className="m-0 font-medium text-[14px] text-foreground max-md:text-[15px]">
+				<p className="m-0 font-medium text-sm text-foreground max-md:text-sm">
 					Nothing waiting on you
 				</p>
-				<p className="m-0 text-[13px] text-muted-foreground max-md:text-[14px]">
+				<p className="m-0 text-xs text-muted-foreground max-md:text-sm">
 					Bots ask here before they do anything you need to allow.
 				</p>
 			</div>
@@ -110,7 +110,7 @@ function NothingWaiting() {
  */
 function SectionHeading({ children }: { children: string }) {
 	return (
-		<h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs max-md:-mb-0.5 max-md:px-0.5 max-md:text-[13px] max-md:text-muted-foreground max-md:leading-normal">
+		<h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs max-md:-mb-0.5 max-md:px-0.5 max-md:text-xs max-md:text-muted-foreground max-md:leading-normal">
 			{children}
 		</h2>
 	);
@@ -147,7 +147,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 	return (
 		<article
 			aria-label={`${agent.name}: ${action}`}
-			className="flex flex-col gap-3 rounded-xl border border-border p-4 max-md:rounded-[14px] max-md:bg-card max-md:p-3.5"
+			className="flex flex-col gap-3 rounded-xl border border-border p-4 max-md:rounded-2xl max-md:bg-card max-md:p-3.5"
 		>
 			<Link
 				{...approvalLink(request)}
@@ -155,10 +155,10 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 			>
 				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<h3 className="m-0 font-semibold text-[14px] text-foreground max-md:font-medium max-md:text-[17px]">
+					<h3 className="m-0 font-semibold text-sm text-foreground max-md:font-medium max-md:text-base">
 						{action}
 					</h3>
-					<span className="text-subtle-foreground text-xs max-md:text-[13px]">
+					<span className="text-subtle-foreground text-xs max-md:text-xs">
 						{agent.name} asked {asked}
 					</span>
 				</div>
@@ -182,7 +182,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 						pinned={phone}
 					/>
 				) : (
-					<p className="m-0 text-[13px] text-muted-foreground">
+					<p className="m-0 text-xs text-muted-foreground">
 						No longer waiting: {agent.name} stopped before it was answered.
 					</p>
 				)}
@@ -194,7 +194,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 							request.threadId === request.conversationId ? {} : { thread: request.threadId },
 						)}
 						// A phone reaches the conversation from the request's own page.
-						className="focus-ring rounded-sm text-[12px] text-muted-foreground hover:text-foreground max-md:hidden"
+						className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
 					>
 						Open conversation
 					</Link>
@@ -211,12 +211,12 @@ function ResolvedRow({ request }: { request: AnsweredApproval }) {
 	return (
 		<Link
 			{...approvalLink(request)}
-			className="focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors hover:bg-message-hover max-md:min-h-14 max-md:px-1 max-md:text-[15px] max-md:active:bg-row-selected"
+			className="focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors hover:bg-message-hover max-md:min-h-14 max-md:px-1 max-md:text-sm max-md:active:bg-row-selected"
 		>
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
 			{/* On a phone, what it would have done over which bot, as two lines. */}
 			<span className="min-w-0 flex-1 truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
-				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-[13px] max-md:text-subtle-foreground">
+				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">
 					{agent.name}
 				</span>{" "}
 				<span className="max-md:truncate max-md:text-foreground">{action}</span>

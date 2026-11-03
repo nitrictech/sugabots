@@ -87,7 +87,7 @@ export function RepositoryGroups({
 				{choices.map((choice) => (
 					<SettingsRow
 						key={choice.repository}
-						label={<span className="font-mono text-[13.5px]">{choice.repository}</span>}
+						label={<span className="font-mono text-xs">{choice.repository}</span>}
 						trailing={
 							isChosen(choice) ? (
 								<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
@@ -113,11 +113,9 @@ export function RepositoryGroups({
 				{REPOSITORY_EVENTS.map((event) => (
 					<div
 						key={event}
-						className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0"
+						className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0"
 					>
-						<span className="flex-1 text-[14.5px] text-foreground">
-							{REPOSITORY_EVENT_LABELS[event]}
-						</span>
+						<span className="flex-1 text-sm text-foreground">{REPOSITORY_EVENT_LABELS[event]}</span>
 						<Toggle
 							label={REPOSITORY_EVENT_LABELS[event]}
 							checked={draft.events.includes(event)}

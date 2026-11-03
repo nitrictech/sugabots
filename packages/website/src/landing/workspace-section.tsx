@@ -109,21 +109,21 @@ export function WorkspaceSection() {
 	};
 
 	return (
-		<section className={cn(siteColumn, "pt-[260px]")}>
+		<section className={cn(siteColumn, "pt-65")}>
 			{/* The stretch of scrolling the section stays pinned for: a turn per feature. */}
-			<div ref={track} className="pinned:h-[320vh]">
+			<div ref={track} className="pinned:h-scroll-scene">
 				{/* Pinned centred in the space under the header, and only as tall as its content, so the next section follows at the usual distance. */}
 				<div
 					ref={pinned}
 					style={{ "--pinned-height": `${pinnedHeight}px` } as CSSProperties}
-					className="flex flex-col gap-16 pinned:sticky pinned:top-[max(var(--site-header-height),calc((100svh+var(--site-header-height)-var(--pinned-height))/2))] pinned:gap-12"
+					className="flex flex-col gap-16 pinned:sticky pinned:top-pinned pinned:gap-12"
 				>
 					<SectionHeading
 						title="AI workspace for every team"
 						lede="Most AI chats are you and a bot. Sugabots is your team and your bots, with one history."
 					/>
 					{/* A steady height while pinned, so opening a longer feature doesn't move the heading. */}
-					<div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 pinned:min-h-[400px] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-20">
+					<div className="grid grid-cols-1 items-start gap-10 pinned:min-h-100 lg:grid-cols-2 lg:gap-20">
 						{/* Every demo is drawn, stacked, and the open one fades in over the last, so a switch never flashes. */}
 						<DemoStage className="hidden lg:grid">
 							{features.map(({ title, Demo }, index) => (
@@ -131,7 +131,7 @@ export function WorkspaceSection() {
 									key={title}
 									inert={index !== open}
 									className={cn(
-										"col-start-1 row-start-1 transition-[opacity,translate] duration-500 ease-landing motion-reduce:transition-none",
+										"col-start-1 row-start-1 transition duration-500 ease-landing motion-reduce:transition-none",
 										index === open
 											? "translate-y-0 opacity-100"
 											: "pointer-events-none translate-y-1.5 opacity-0",
@@ -163,7 +163,7 @@ export function WorkspaceSection() {
 												aria-controls={panel}
 												onClick={() => pick(index)}
 												className={cn(
-													"w-full cursor-pointer py-5 text-left text-[21px]/[1.25] font-semibold tracking-[-0.01em] transition-colors outline-none focus-visible:text-landing-text",
+													"w-full cursor-pointer py-5 text-left text-xl/tight font-semibold tracking-normal transition-colors outline-none focus-visible:text-landing-text",
 													isOpen
 														? "text-landing-text"
 														: "text-landing-muted hover:text-landing-text",
@@ -177,13 +177,13 @@ export function WorkspaceSection() {
 											id={panel}
 											inert={!isOpen}
 											className={cn(
-												"grid transition-[grid-template-rows] duration-300 ease-landing motion-reduce:transition-none",
-												isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+												"grid transition-all duration-300 ease-landing motion-reduce:transition-none",
+												isOpen ? "grid-rows-expanded" : "grid-rows-collapsed",
 											)}
 										>
 											<div className="min-h-0 overflow-hidden">
 												<div className="flex flex-col gap-6 pb-7">
-													<p className="max-w-md text-[15.5px]/[1.6] text-pretty text-landing-muted">
+													<p className="max-w-md text-base/relaxed text-pretty text-landing-muted">
 														{feature.body}
 													</p>
 													{isOpen && (
@@ -230,9 +230,7 @@ function featureAt(progress: number) {
 
 /** Where a demo sits, at the top of its column. The column may narrow below a demo's widest line, so the demo truncates rather than spills over the edge. */
 function DemoStage({ className, children }: { className?: string; children: ReactNode }) {
-	return (
-		<div className={cn("grid grid-cols-[minmax(0,1fr)] items-start", className)}>{children}</div>
-	);
+	return <div className={cn("grid grid-cols-1 items-start", className)}>{children}</div>;
 }
 
 /** One demo on the stage, at the width of an app window, lifted off the panel by its shadow. */
@@ -246,13 +244,7 @@ function DemoFrame({
 	children: ReactNode;
 }) {
 	return (
-		<div
-			inert={inert}
-			className={cn(
-				"w-full min-w-0 max-w-[520px] [&>*]:shadow-[0_24px_60px_rgba(0,0,0,0.45)]",
-				className,
-			)}
-		>
+		<div inert={inert} className={cn("w-full min-w-0 max-w-130 [&>*]:shadow-2xl", className)}>
 			{children}
 		</div>
 	);

@@ -152,9 +152,7 @@ export function ConversationListView({
 	return (
 		<div className="flex flex-col gap-px">
 			{status === "failed" && (
-				<p className="m-0 px-2 pb-4 text-[13px] text-muted-foreground">
-					Could not load these chats.
-				</p>
+				<p className="m-0 px-2 pb-4 text-xs text-muted-foreground">Could not load these chats.</p>
 			)}
 			<ul className="m-0 flex list-none flex-col gap-px p-0">
 				{shownChats?.map((chat) => {
@@ -229,7 +227,7 @@ function NoBots({ onNewBot }: { onNewBot?: () => void }) {
 	const mark = (
 		<span
 			aria-hidden
-			className="grid size-[18px] shrink-0 place-items-center rounded-full border border-border-strong border-dashed"
+			className="grid size-4.5 shrink-0 place-items-center rounded-full border border-border-strong border-dashed"
 		>
 			{onNewBot && <Plus size={10} strokeWidth={2.4} className="block" />}
 		</span>
@@ -262,7 +260,7 @@ function NoBots({ onNewBot }: { onNewBot?: () => void }) {
 /** A row of the sidebar: a link or button 32px tall, or 44px for a thumb on a phone, shaded while it is the one open. */
 function sidebarRowClassName(selected: boolean): string {
 	return cn(
-		"focus-ring flex h-8 min-w-0 items-center gap-2.5 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors",
+		"focus-ring flex h-8 min-w-0 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-sm transition-colors",
 		PHONE_ROW,
 		selected
 			? "bg-row-selected text-foreground"
@@ -376,11 +374,11 @@ function startedInChatOf(
 
 /** A row's height and type on a phone, where a thumb taps it rather than a pointer, shaded while pressed. */
 const PHONE_ROW =
-	"max-md:h-11 max-md:gap-3 max-md:rounded-[10px] max-md:text-[16px] max-md:active:bg-row-selected";
+	"max-md:h-11 max-md:gap-3 max-md:rounded-lg max-md:text-base max-md:active:bg-row-selected";
 
 /** A bot's own part of its row: its face and name, filling the row up to its end. */
 const botClassName =
-	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[6px] pl-2 text-left text-[14px] max-md:gap-3 max-md:rounded-[10px] max-md:text-[16px]";
+	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left text-sm max-md:gap-3 max-md:rounded-lg max-md:text-base";
 
 /** How many of a bot's open threads show before Show more. */
 const THREADS_BEFORE_SHOW_MORE = 4;
@@ -453,7 +451,7 @@ function BotItem({
 	);
 	// Under the pointer or on focus, a caret takes the mark's place, as on a pod.
 	const markWithCaret = (
-		<span className="grid size-[18px] shrink-0 place-items-center *:col-start-1 *:row-start-1">
+		<span className="grid size-4.5 shrink-0 place-items-center *:col-start-1 *:row-start-1">
 			<span className="grid group-hover/bot:invisible group-has-focus-visible/bot:invisible">
 				{mark}
 			</span>
@@ -487,7 +485,7 @@ function BotItem({
 	const row = (
 		<div
 			className={cn(
-				"group/bot flex h-8 items-center rounded-[6px] pr-1.5 max-md:h-11 max-md:rounded-[10px] max-md:active:bg-row-selected",
+				"group/bot flex h-8 items-center rounded-sm pr-1.5 max-md:h-11 max-md:rounded-lg max-md:active:bg-row-selected",
 				shaded ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
@@ -518,7 +516,7 @@ function BotItem({
 			{endMark && <span className={END_SLOT}>{endMark}</span>}
 			<span
 				className={cn(
-					"size-[22px] shrink-0 place-items-center",
+					"size-5.5 shrink-0 place-items-center",
 					endMark
 						? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid max-md:grid"
 						: "grid",
@@ -529,7 +527,7 @@ function BotItem({
 					size="sm"
 					render={<Link {...newThreadLink(pod, agent ?? undefined)} />}
 					className={cn(
-						"size-[22px]",
+						"size-5.5",
 						!endMark &&
 							"opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100 max-md:opacity-100",
 					)}
@@ -578,7 +576,7 @@ function ThreadTree({
 	const hidden = threads.length - shown.length;
 	return (
 		<ul
-			className={`m-0 mt-px ml-[17px] flex list-none flex-col gap-px border-border border-l p-0 ${NESTED_INDENT}`}
+			className={`m-0 mt-px ml-4.25 flex list-none flex-col gap-px border-border border-l p-0 ${NESTED_INDENT}`}
 		>
 			{shown.map((row) => (
 				<li key={row.conversation.id}>
@@ -607,12 +605,12 @@ function FailedDot() {
 
 /** A small grey text button under a bot's threads, such as Show more. */
 const quietButtonClassName =
-	"focus-ring flex h-7 w-full items-center rounded-[6px] px-2 text-left text-[12px] text-subtle-foreground hover:text-muted-foreground";
+	"focus-ring flex h-7 w-full items-center rounded-sm px-2 text-left text-xs text-subtle-foreground hover:text-muted-foreground";
 
 /** A row under a bot or a channel, shaded while it is the one open. */
 function threadRowClassName(selected: boolean): string {
 	return cn(
-		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors max-md:h-10 max-md:text-[15px] max-md:active:bg-row-selected",
+		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-sm pr-1.5 pl-2 text-sm transition-colors max-md:h-10 max-md:text-sm max-md:active:bg-row-selected",
 		selected ? "bg-row-selected text-foreground" : "text-muted-foreground hover:text-foreground",
 	);
 }
@@ -655,7 +653,7 @@ export const NESTED_INDENT = "pl-1.5 @[248px]/sidebar:pl-3";
  * The end of a sidebar row, as wide as the + beside a section's name, so a
  * row's dot, its +, and the section's + all line up.
  */
-const END_SLOT = "grid w-[22px] shrink-0 place-items-center";
+const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /**
  * At a row's end: a dot while it waits on the viewer, as a decision or a

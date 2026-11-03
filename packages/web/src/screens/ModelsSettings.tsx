@@ -232,7 +232,7 @@ function DefaultRow({
 			sub={
 				<>
 					<span className="max-md:hidden">{description}</span>
-					<span className="block truncate text-soft-foreground text-[13px] md:hidden">{model}</span>
+					<span className="block truncate text-soft-foreground text-xs md:hidden">{model}</span>
 				</>
 			}
 			trailing={
@@ -457,7 +457,7 @@ function AddProviderSteps({
 			<DialogFormHeader title="Add provider" />
 			<DialogFormBody>
 				{/* The catalog runs longer than a short window, so the list scrolls inside the dialog. */}
-				<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{groups.map((group) => (
 						<SettingsGroup key={group.label} label={group.label}>
 							{group.presets.map((preset) => (
@@ -652,7 +652,7 @@ function CustomProviderStep({
 						mono
 					/>
 					<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5">
-						<span className="flex-1 text-[13px] text-foreground">Format</span>
+						<span className="flex-1 text-sm text-foreground">Format</span>
 						<SegmentedControl
 							label="API format"
 							options={API_FORMATS}

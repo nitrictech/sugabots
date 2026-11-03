@@ -95,7 +95,7 @@ const meta = preview.meta({
 	},
 	decorators: [
 		(Story) => (
-			<div className="flex h-[720px]">
+			<div className="flex h-180">
 				<Story />
 			</div>
 		),

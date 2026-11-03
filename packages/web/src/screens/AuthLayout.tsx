@@ -32,7 +32,7 @@ export function AuthLayout({
 					<button
 						type="button"
 						onClick={onBack}
-						className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[14.5px] text-link"
+						className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link"
 					>
 						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
 						Back
@@ -43,15 +43,15 @@ export function AuthLayout({
 				<div
 					className={cn(
 						"flex w-full flex-col gap-3.5",
-						size === "wide" ? "max-w-[520px]" : "max-w-[440px]",
+						size === "wide" ? "max-w-130" : "max-w-110",
 					)}
 				>
 					<div className="flex flex-col gap-2.5 pb-2 text-center">
-						<h1 className="m-0 text-balance font-bold text-[30px] leading-[1.15] tracking-[-0.02em]">
+						<h1 className="m-0 text-balance font-bold text-3xl leading-tight tracking-tight">
 							{title}
 						</h1>
 						{subtitle !== undefined && (
-							<p className="m-0 text-pretty text-[15px] text-muted-foreground leading-[1.55]">
+							<p className="m-0 text-pretty text-sm text-muted-foreground leading-normal">
 								{subtitle}
 							</p>
 						)}
@@ -64,7 +64,7 @@ export function AuthLayout({
 }
 
 export const fieldClass =
-	"min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground";
+	"min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground";
 
 /** One labelled field in the form's card, as every form in the app lays them out. */
 export function FormRow({
@@ -78,7 +78,7 @@ export function FormRow({
 }) {
 	return (
 		<div className="flex items-center gap-3 border-border border-b px-4 py-3.5 last:border-b-0 focus-within:bg-panel">
-			<label htmlFor={id} className="w-[88px] shrink-0 text-[14px] text-muted-foreground">
+			<label htmlFor={id} className="w-22 shrink-0 text-sm text-muted-foreground">
 				{label}
 			</label>
 			{children}

@@ -74,7 +74,7 @@ export function RoutinesPage({
 	// A phone has no space beside the list, so the list's own says so.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const noneYet = (
-		<div className="flex h-full pb-[10%]">
+		<div className="flex h-full pb-20">
 			<NoRoutines
 				title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
 				pod={pod}
@@ -104,7 +104,7 @@ export function RoutinesPage({
 				aria-label="Routines"
 				className={cn(
 					// `min-w-0`: a long bot's name in the title is cut short rather than widening the page.
-					"flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-[280px] md:shrink-0",
+					"flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-70 md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
@@ -117,13 +117,13 @@ export function RoutinesPage({
 					)}
 				>
 					{list.isError && (
-						<li className="px-2.5 py-2 text-[13px] text-muted-foreground">
+						<li className="px-2.5 py-2 text-xs text-muted-foreground">
 							Routines could not be loaded.
 						</li>
 					)}
 					{none && !phone && (
 						// Quiet and in the middle, as Inbox's empty list is; the way to make one is in the space beside it.
-						<li className="m-auto px-6 py-16 text-center text-[13px] text-muted-foreground">
+						<li className="m-auto px-6 py-16 text-center text-xs text-muted-foreground">
 							No routines yet
 						</li>
 					)}
@@ -230,7 +230,7 @@ export function RoutineRow({
 						<span className="flex min-w-0 items-baseline gap-2">
 							<span
 								className={cn(
-									"min-w-0 flex-1 truncate-fade text-[13px]",
+									"min-w-0 flex-1 truncate-fade text-xs",
 									selected || row.mentionsYou
 										? "text-foreground"
 										: paused

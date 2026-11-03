@@ -194,7 +194,7 @@ export function NewWebhookGroups({
 		<>
 			<SettingsGroup>
 				<SettingsControlRow label="Address">
-					<span className="text-[14.5px] text-muted-foreground">Made when you create it</span>
+					<span className="text-sm text-muted-foreground">Made when you create it</span>
 				</SettingsControlRow>
 				<SourceRow auth={draft.auth} onChange={changeAuth} />
 			</SettingsGroup>
@@ -254,9 +254,7 @@ export function WebhookGroups({
 		<>
 			<SettingsGroup>
 				<SettingsControlRow label="Address">
-					<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-						{url}
-					</code>
+					<code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{url}</code>
 					<CopyIconButton label="Copy address" text={url} size="lg" />
 				</SettingsControlRow>
 				<SourceRow auth={auth} onChange={onChangeAuth} />
@@ -283,7 +281,7 @@ export function WebhookGroups({
 					/>
 					<SettingsControlRow label={secretLabel(auth)}>
 						{!canManage && (
-							<span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">
+							<span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
 								Set by people who manage routines
 							</span>
 						)}
@@ -435,7 +433,7 @@ function MenuRow<Value extends string>({
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				aria-label={`${label}: ${current?.label ?? value}`}
-				className="group focus-ring flex min-h-[46px] w-full cursor-pointer items-center gap-3 border-border border-b px-4 py-2.5 text-left text-[14.5px] text-foreground transition-colors last:border-b-0 hover:bg-panel"
+				className="group focus-ring flex min-h-11.5 w-full cursor-pointer items-center gap-3 border-border border-b px-4 py-2.5 text-left text-sm text-foreground transition-colors last:border-b-0 hover:bg-panel"
 			>
 				<SettingsFieldLabel>{label}</SettingsFieldLabel>
 				<span className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -469,7 +467,7 @@ function SourceMark({ source }: { source: SourceChoice }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground"
+			className="grid size-6 shrink-0 place-items-center rounded-sm bg-chip text-soft-foreground"
 		>
 			<Webhook size={14} strokeWidth={2.2} />
 		</span>
@@ -534,7 +532,7 @@ function CommittedFieldRow({
 				autoComplete="off"
 				spellCheck={false}
 				placeholder={placeholder}
-				className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+				className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 			/>
 		</SettingsControlRow>
 	);
@@ -627,7 +625,7 @@ function SecretField({
 	const label = secretLabel(auth);
 	return (
 		<div className="flex flex-col gap-2 border-border border-b px-4 py-2.5 last:border-b-0">
-			<div className="flex min-h-[26px] items-center gap-3">
+			<div className="flex min-h-6.5 items-center gap-3">
 				<SettingsFieldLabel htmlFor={id}>{label}</SettingsFieldLabel>
 				<input
 					id={id}
@@ -646,7 +644,7 @@ function SecretField({
 					autoComplete="off"
 					spellCheck={false}
 					placeholder={secretPlaceholder(auth)}
-					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-[13px] text-foreground outline-none placeholder:font-sans placeholder:text-[14.5px] placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 				{value !== "" && (
 					<>
@@ -658,7 +656,7 @@ function SecretField({
 				)}
 			</div>
 			{error && (
-				<span role="alert" className="text-destructive-text text-sm">
+				<span role="alert" className="text-destructive-text text-xs">
 					{error}
 				</span>
 			)}

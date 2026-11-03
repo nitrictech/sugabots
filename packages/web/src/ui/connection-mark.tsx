@@ -11,12 +11,12 @@ import { connectionLetters } from "@sugabots/contracts";
  */
 /** `xs` is for a mark inline in a line of text, where a tile would tower over it. */
 const sizes = {
-	xs: { box: "size-4 rounded-xs", glyph: "size-2.5", letters: "text-[8px]" },
-	md: { box: "size-6 rounded-[7px]", glyph: "size-3.5", letters: "text-[11px]" },
+	xs: { box: "size-4 rounded-xs", glyph: "size-2.5", letters: "text-3xs" },
+	md: { box: "size-6 rounded-sm", glyph: "size-3.5", letters: "text-2xs" },
 	sm: { box: "size-8 rounded-lg", glyph: "size-4", letters: "text-xs" },
-	tile: { box: "size-[34px] rounded-[10px]", glyph: "size-[18px]", letters: "text-[13px]" },
-	default: { box: "size-10 rounded-xl", glyph: "size-5", letters: "text-sm" },
-	lg: { box: "size-11 rounded-[13px]", glyph: "size-[22px]", letters: "text-[15px]" },
+	tile: { box: "size-8.5 rounded-lg", glyph: "size-4.5", letters: "text-xs" },
+	default: { box: "size-10 rounded-xl", glyph: "size-5", letters: "text-xs" },
+	lg: { box: "size-11 rounded-xl", glyph: "size-5.5", letters: "text-sm" },
 } as const;
 
 export function ConnectionMark({

@@ -12,7 +12,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		onDropFiles: fn(),
-		className: "flex h-[420px] flex-col rounded-xl border bg-background",
+		className: "flex h-105 flex-col rounded-xl border bg-background",
 		children: (
 			<div className="flex flex-1 items-end p-5 text-muted-foreground">
 				The chat's messages and composer sit here.

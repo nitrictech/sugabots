@@ -75,7 +75,7 @@ export function ProviderSignInRow({
 							<Button
 								variant="ghost"
 								size="bare"
-								className="text-sm"
+								className="text-xs"
 								disabled={actions.signOut.isPending || signOutBlocked !== undefined}
 								title={signOutBlocked}
 								onClick={() => actions.signOut.mutate({ providerId: provider.id })}
@@ -86,7 +86,7 @@ export function ProviderSignInRow({
 							<Button
 								variant="link"
 								size="bare"
-								className="text-sm"
+								className="text-xs"
 								disabled={actions.startSignIn.isPending}
 								onClick={() => setWarning(true)}
 							>
@@ -150,7 +150,7 @@ function SingleUserWarning({
 		>
 			<DialogFormHeader title="Single-user installs only" />
 			<DialogFormBody>
-				<DialogDescription className="m-0 flex gap-2.5 text-md text-muted-foreground">
+				<DialogDescription className="m-0 flex gap-2.5 text-xs text-muted-foreground">
 					<TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
 					<span>
 						A {plan} plan is for one person. Only connect yours if nobody else uses this Sugabots
@@ -207,13 +207,13 @@ function SignInCode({
 
 	return (
 		<div className="flex flex-col gap-3 border-border border-b px-4 py-3 last:border-b-0">
-			<p className="m-0 text-[14px] text-muted-foreground">
+			<p className="m-0 text-sm text-muted-foreground">
 				Open {signInServiceNames[service]}'s sign-in page and enter this code. This page carries on
 				once you have.
 			</p>
 			<div className="flex flex-wrap items-center gap-3">
 				<span className="inline-flex items-center gap-1 rounded-lg bg-chip py-1 pr-1 pl-3">
-					<code className="font-mono text-foreground text-xl tracking-widest">
+					<code className="font-mono text-foreground text-base tracking-widest">
 						{started.userCode}
 					</code>
 					<CopyIconButton label="Copy code" text={started.userCode} />

@@ -96,11 +96,9 @@ export function ProviderTile({
 }) {
 	const large = size === 44;
 	return (
-		<SettingsRowIcon
-			className={large ? "size-11 rounded-[11px] border-0 bg-chip text-lg" : undefined}
-		>
+		<SettingsRowIcon className={large ? "size-11 rounded-xl border-0 bg-chip text-sm" : undefined}>
 			{preset ? (
-				<ProviderLogo preset={preset} className={large ? "size-[22px]" : "size-3.5"} />
+				<ProviderLogo preset={preset} className={large ? "size-5.5" : "size-3.5"} />
 			) : (
 				name.trim().charAt(0).toUpperCase()
 			)}
@@ -127,7 +125,7 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 				/>
 			))}
 			{more > 0 && (
-				<span className="-ml-1.5 grid h-[22px] min-w-[22px] place-items-center rounded-full bg-chip px-1 font-semibold text-[10.5px] text-soft-foreground shadow-[0_0_0_2px_var(--settings-card)]">
+				<span className="-ml-1.5 grid h-5.5 min-w-5.5 place-items-center rounded-full bg-chip px-1 font-semibold text-2xs text-soft-foreground ring-2 ring-settings-card">
 					+{more}
 				</span>
 			)}
@@ -436,7 +434,7 @@ export const API_FORMATS = [
 ] as const;
 
 const fieldText =
-	"w-full min-w-0 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground";
+	"w-full min-w-0 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground";
 
 function EditableRow({
 	label,
@@ -478,7 +476,7 @@ function EditableRow({
 			<ConnectionRow
 				label={label}
 				action={
-					<Button variant="link" size="bare" className="text-sm" onClick={() => setDraft(value)}>
+					<Button variant="link" size="bare" className="text-xs" onClick={() => setDraft(value)}>
 						Change
 					</Button>
 				}
@@ -493,13 +491,13 @@ function EditableRow({
 				label={label}
 				action={
 					<span className="flex shrink-0 items-center gap-3">
-						<Button variant="link" size="bare" className="text-sm" type="submit" disabled={pending}>
+						<Button variant="link" size="bare" className="text-xs" type="submit" disabled={pending}>
 							Save
 						</Button>
 						<Button
 							variant="ghost"
 							size="bare"
-							className="text-sm"
+							className="text-xs"
 							type="button"
 							onClick={() => setDraft(undefined)}
 						>
@@ -518,7 +516,7 @@ function EditableRow({
 					placeholder={placeholder}
 					className={fieldText}
 				/>
-				{problem && <span className="block pt-1 text-destructive-text text-sm">{problem}</span>}
+				{problem && <span className="block pt-1 text-destructive-text text-xs">{problem}</span>}
 			</ConnectionRow>
 		</form>
 	);
@@ -577,7 +575,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 							<Button
 								variant="ghost"
 								size="bare"
-								className="text-sm"
+								className="text-xs"
 								disabled={actions.update.isPending || held !== undefined}
 								title={held && heldReason(held, "one of its models")}
 								onClick={() =>
@@ -590,7 +588,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 						<Button
 							variant="link"
 							size="bare"
-							className="text-sm"
+							className="text-xs"
 							onClick={() => setReplacing(true)}
 						>
 							{provider.hasApiKey ? "Replace" : "Add"}
@@ -611,7 +609,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 						<Button
 							variant="link"
 							size="bare"
-							className="text-sm"
+							className="text-xs"
 							type="submit"
 							disabled={!apiKey || actions.update.isPending}
 						>
@@ -621,7 +619,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 							<Button
 								variant="ghost"
 								size="bare"
-								className="text-sm"
+								className="text-xs"
 								type="button"
 								onClick={() => {
 									setApiKey("");
@@ -647,7 +645,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 					className={fieldText}
 				/>
 				{actions.update.error && (
-					<span role="alert" className="block pt-1 text-destructive-text text-sm">
+					<span role="alert" className="block pt-1 text-destructive-text text-xs">
 						{failureMessage(actions.update.error)}
 					</span>
 				)}
@@ -679,7 +677,7 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 							key={entry.key}
 							role="img"
 							aria-label={entry.name}
-							className="size-[13px] shrink-0"
+							className="size-3.25 shrink-0"
 							strokeWidth={2}
 						/>
 					);
@@ -700,7 +698,7 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 			aria-label="Model list"
 			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must be reachable from the keyboard.
 			tabIndex={0}
-			className="focus-ring relative h-[min(560px,60vh)] overflow-y-auto border-border border-b [scrollbar-gutter:stable] last:border-b-0"
+			className="focus-ring relative h-tool-list overflow-y-auto border-border border-b scrollbar-gutter-stable last:border-b-0"
 		>
 			{children}
 		</section>
@@ -752,7 +750,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 				<Button
 					variant="link"
 					size="bare"
-					className="text-sm"
+					className="text-xs"
 					disabled={actions.fetchModels.isPending || providerLacksCredential(provider)}
 					onClick={() => actions.fetchModels.mutate({ providerId: provider.id })}
 				>
@@ -763,7 +761,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<label className="focus-ring-within flex h-[34px] items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
 						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
 						<input
 							type="search"
@@ -771,7 +769,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							onChange={(event) => setSearch(event.target.value)}
 							placeholder={`Search ${provider.models.length} models`}
 							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground"
+							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
 						/>
 					</label>
 				</div>
@@ -863,13 +861,13 @@ function AddModelRow({ provider, done }: { provider: ModelProvider; done: () => 
 						<Button
 							variant="link"
 							size="bare"
-							className="text-sm"
+							className="text-xs"
 							type="submit"
 							disabled={!modelId.trim() || actions.addModel.isPending}
 						>
 							Add
 						</Button>
-						<Button variant="ghost" size="bare" className="text-sm" type="button" onClick={done}>
+						<Button variant="ghost" size="bare" className="text-xs" type="button" onClick={done}>
 							Cancel
 						</Button>
 					</span>
@@ -886,7 +884,7 @@ function AddModelRow({ provider, done }: { provider: ModelProvider; done: () => 
 					className={fieldText}
 				/>
 				{actions.addModel.error && (
-					<span role="alert" className="block pt-1 text-destructive-text text-sm">
+					<span role="alert" className="block pt-1 text-destructive-text text-xs">
 						{failureMessage(actions.addModel.error)}
 					</span>
 				)}
@@ -955,7 +953,7 @@ function CapabilitiesDialog({
 			<DialogFormBody>
 				<DialogDescription className="font-mono">{model.modelId}</DialogDescription>
 				{offered.length === 0 ? (
-					<p className="m-0 text-md text-muted-foreground">
+					<p className="m-0 text-xs text-muted-foreground">
 						The server lists nothing this model can do, so there is nothing to switch.
 					</p>
 				) : (

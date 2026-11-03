@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tailwindcss-safe-area";
 @import "@fontsource-variable/rubik";
 @import "@fontsource-variable/jetbrains-mono";
 /* Streamdown builds its markdown elements from Tailwind utilities; scan them in. */
@@ -240,22 +241,13 @@
 	--font-sans: "Rubik Variable", "Rubik", system-ui, sans-serif;
 	--font-mono: "JetBrains Mono Variable", ui-monospace, Menlo, monospace;
 
-	--text-2xs: 11px;
+	/* Below Tailwind's scale, for small print such as counts and labels; `xs` is a size up from Tailwind's. */
+	--text-3xs: 10px;
+	--text-3xs--line-height: 1.4;
+	--text-2xs: 12.5px;
 	--text-2xs--line-height: 1.45;
-	--text-xs: 12px;
+	--text-xs: 13px;
 	--text-xs--line-height: 1.45;
-	--text-sm: 12.5px;
-	--text-sm--line-height: 1.4;
-	--text-md: 13px;
-	--text-md--line-height: 1.45;
-	--text-base: 14px;
-	--text-base--line-height: 1.5;
-	--text-lg: 15px;
-	--text-lg--line-height: 1.5;
-	--text-xl: 15.5px;
-	--text-xl--line-height: 1.65;
-	--text-2xl: 17px;
-	--text-2xl--line-height: 1.3;
 
 	--radius-xs: 5px;
 	--radius-sm: 7px;
@@ -717,4 +709,129 @@
 	.reply-grow > * {
 		mask-image: none;
 	}
+}
+
+/*
+ * Sizes that depend on the page at runtime, such as the space a phone's tabs
+ * take or a pane the viewer resizes, which no standard utility can express.
+ */
+@utility h-visible {
+	/* The part of the window the on-screen keyboard leaves, as `lib/visible-height` sets it. */
+	height: var(--visible-height, 100dvh);
+}
+@utility h-above-tab-bar {
+	height: calc(100% - var(--tab-bar-space, 0px));
+}
+@utility pb-tab-bar {
+	padding-bottom: var(--tab-bar-space, 0px);
+}
+@utility pb-tab-bar-offset-3 {
+	padding-bottom: calc(var(--tab-bar-space, 0px) + 0.75rem);
+}
+@utility w-artifact-pane {
+	width: clamp(360px, var(--pane-width, 58%), calc(100% - 320px));
+}
+@utility w-thread-pane {
+	width: clamp(320px, var(--pane-width, 440px), calc(100% - 360px));
+}
+@utility w-inbox-list {
+	width: clamp(280px, var(--list-width, 380px), 60%);
+}
+@utility w-desktop-screen {
+	/* As large as its container allows while keeping the desktop's 4:3 shape. */
+	width: min(100cqw, calc(100cqh * 4 / 3));
+}
+@utility w-tab {
+	/* One of a phone's four tabs, after the 16px of gaps between them. */
+	width: calc((100% - 16px) / 4);
+}
+@utility w-thread-line {
+	width: calc(100% - 8px);
+}
+@utility w-thread-popover {
+	width: min(328px, calc(100vw - 2rem));
+}
+@utility min-w-field {
+	min-width: min(100%, 12rem);
+}
+@utility min-w-field-wide {
+	min-width: min(100%, 15rem);
+}
+@utility min-w-card-name {
+	min-width: min(10rem, 100%);
+}
+@utility max-w-dialog {
+	max-width: calc(100% - 20px);
+}
+@utility max-w-dialog-sm {
+	max-width: min(360px, calc(100% - 20px));
+}
+@utility max-w-attachment-preview {
+	max-width: calc(100% - 10px);
+}
+@utility max-w-composer-menu {
+	max-width: calc(100% - 12px);
+}
+@utility max-h-dialog {
+	max-height: calc(100dvh - 20px);
+}
+@utility max-h-approval {
+	max-height: min(38rem, calc(100dvh - 4rem));
+}
+@utility max-h-popover {
+	/* The room Base UI measures beside a popup's anchor, as `--available-height`. */
+	max-height: min(var(--available-height), 16rem);
+}
+@utility max-h-tool-input {
+	max-height: min(168px, 40vh);
+}
+@utility max-h-repos {
+	max-height: min(420px, 55vh);
+}
+@utility max-h-picker {
+	max-height: min(480px, 60vh);
+}
+@utility max-h-picker-tall {
+	max-height: min(560px, 65vh);
+}
+@utility h-time-zones {
+	height: min(432px, 55vh);
+}
+@utility h-tool-list {
+	height: min(560px, 60vh);
+}
+@utility flex-wide {
+	/* Grows by 1.4 to its siblings' 1, so it takes the larger share of the row. */
+	flex: 1.4;
+}
+@utility grid-cols-centered {
+	/* A middle column centred between two equal sides, such as a title between Back and an action. */
+	grid-template-columns: 1fr auto 1fr;
+}
+@utility grid-cols-label {
+	grid-template-columns: 140px minmax(0, 1fr);
+}
+@utility grid-cols-fit-label {
+	grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+}
+@utility grid-cols-capped-label {
+	grid-template-columns: fit-content(min(180px, 40%)) minmax(0, 1fr);
+}
+@utility grid-cols-swatches {
+	grid-template-columns: repeat(auto-fit, 1.75rem);
+}
+@utility inset-shadow-ring {
+	box-shadow: inset var(--ring-shadow);
+}
+@utility scrollbar-gutter-stable {
+	scrollbar-gutter: stable;
+}
+@utility scrollbar-gutter-auto {
+	scrollbar-gutter: auto;
+}
+@utility scrollbar-thin {
+	scrollbar-width: thin;
+}
+@utility view-transition-tabs {
+	view-transition-name: tabs;
 }

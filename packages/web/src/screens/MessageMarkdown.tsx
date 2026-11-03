@@ -215,9 +215,9 @@ const COMPONENTS: Components = {
 	[MENTION_TAG]: MarkdownMention,
 	pre: FoldingCodeBlock,
 	// Streamdown's headings are sized for a page; a bubble is 520px wide.
-	h1: heading("h1", "text-2xl"),
-	h2: heading("h2", "text-xl"),
-	h3: heading("h3", "text-lg"),
+	h1: heading("h1", "text-base"),
+	h2: heading("h2", "text-base"),
+	h3: heading("h3", "text-sm"),
 	table: ScrollingTable,
 };
 

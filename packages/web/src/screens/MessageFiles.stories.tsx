@@ -57,7 +57,7 @@ const meta = preview.meta({
 	args: { files: [acmeRequest], urlOf },
 	decorators: [
 		(Story) => (
-			<div className="max-w-[640px] bg-background p-5">
+			<div className="max-w-160 bg-background p-5">
 				<Story />
 			</div>
 		),

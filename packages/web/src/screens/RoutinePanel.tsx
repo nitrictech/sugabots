@@ -122,12 +122,12 @@ export function RoutinePanel({
 			label="Routine"
 			onClose={onClose}
 			headerless
-			className="xl:w-[340px]"
+			className="xl:w-85"
 			actions={phone && more}
 		>
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="flex h-[52px] shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
-					<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-[14px] text-foreground">
+				<div className="flex h-13 shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
+					<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-sm text-foreground">
 						{routine?.name ?? "Routine"}
 					</h3>
 					{!phone && more}
@@ -144,7 +144,7 @@ export function RoutinePanel({
 								active ? "bg-success" : "bg-disabled-foreground",
 							)}
 						/>
-						<span className="flex-1 text-[13px] text-foreground">
+						<span className="flex-1 text-xs text-foreground">
 							{active
 								? "Active"
 								: standing.pausedAfterFailures
@@ -174,7 +174,7 @@ export function RoutinePanel({
 								<fieldset disabled={!mayManage} className="contents">
 									{/* Ruled off from the chat picker under it, which a pod with one chat doesn't show. */}
 									<div className="flex min-h-12 items-center gap-3 border-border border-b px-3.5 py-2.5 last:border-b-0">
-										<span className="flex-1 text-[13px] text-foreground">
+										<span className="flex-1 text-xs text-foreground">
 											Also post result in the pod's channel
 										</span>
 										<Toggle
@@ -304,8 +304,8 @@ function Instructions({
 				className="focus-ring flex w-full items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-3 text-left active:bg-row-selected"
 			>
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<span className="text-[13px] text-muted-foreground">Instructions</span>
-					<span className="truncate text-[14px] text-soft-foreground">{instructions}</span>
+					<span className="text-xs text-muted-foreground">Instructions</span>
+					<span className="truncate text-sm text-soft-foreground">{instructions}</span>
 				</span>
 				<ChevronRight
 					aria-hidden
@@ -319,7 +319,7 @@ function Instructions({
 	return (
 		<PanelCard className="flex flex-col gap-1.5 px-3.5 pt-3 pb-3.5">
 			<div className="flex items-center gap-2">
-				<h4 className="m-0 flex-1 font-normal text-[13px] text-muted-foreground">Instructions</h4>
+				<h4 className="m-0 flex-1 font-normal text-xs text-muted-foreground">Instructions</h4>
 				{onEdit && (
 					<button
 						type="button"
@@ -334,7 +334,7 @@ function Instructions({
 			</div>
 			<p
 				className={cn(
-					"m-0 whitespace-pre-wrap text-[13px] text-soft-foreground leading-[1.55]",
+					"m-0 whitespace-pre-wrap text-xs text-soft-foreground leading-normal",
 					folds && !open && "line-clamp-4",
 				)}
 			>
@@ -369,14 +369,14 @@ function Triggers({
 		<section aria-labelledby={`${routine.id}-triggers`} className="flex flex-col gap-2 pt-1">
 			<h4
 				id={`${routine.id}-triggers`}
-				className="m-0 px-0.5 font-normal text-[13px] text-muted-foreground"
+				className="m-0 px-0.5 font-normal text-xs text-muted-foreground"
 			>
 				Triggers
 			</h4>
 			<PanelCard>
 				<ul className="m-0 flex list-none flex-col p-0">
 					{routine.triggers.length === 0 && (
-						<li className="border-border border-b px-3.5 py-3 text-[13px] text-muted-foreground last:border-b-0">
+						<li className="border-border border-b px-3.5 py-3 text-xs text-muted-foreground last:border-b-0">
 							None. It runs only when someone runs it.
 						</li>
 					)}
@@ -423,7 +423,7 @@ function TriggerRow({
 		<>
 			{icon}
 			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate text-[13px] text-foreground">{label}</span>
+				<span className="truncate text-xs text-foreground">{label}</span>
 				{sub && <span className="truncate text-muted-foreground text-xs">{sub}</span>}
 			</span>
 			{onClick && sub && (
@@ -596,7 +596,7 @@ function InstructionsDialog({
 		<DialogForm width="wide" onSubmit={submit}>
 			<DialogFormHeader title="Instructions" />
 			<DialogFormBody gap="compact">
-				<p className="m-0 text-center text-[13px] text-muted-foreground">
+				<p className="m-0 text-center text-xs text-muted-foreground">
 					What {botName} does each time this runs.
 				</p>
 				<SettingsGroup className="p-1" note={instructionsNote(draft)}>
@@ -609,7 +609,7 @@ function InstructionsDialog({
 						onChange={(event) => setDraft(event.target.value)}
 						maxLength={MAX_ROUTINE_INSTRUCTIONS_CHARACTERS}
 						placeholder="e.g. Summarise this week's replies and flag anything that has stalled."
-						className="block min-h-[240px] w-full resize-y rounded-[12px] bg-transparent p-3 text-[14px] text-foreground leading-[1.6] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+						className="block min-h-60 w-full resize-y rounded-xl bg-transparent p-3 text-sm text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 					/>
 				</SettingsGroup>
 				{failure !== undefined && <Alert>{failureMessage(failure)}</Alert>}

@@ -10,10 +10,8 @@ interface SectionHeadingProps {
 export function SectionHeading({ title, lede, className }: SectionHeadingProps) {
 	return (
 		<div className={cn("flex max-w-160 flex-col gap-3 self-center text-center", className)}>
-			<h2 className="text-[clamp(28px,3.4vw,40px)]/[1.1] font-bold tracking-[-0.025em] text-balance">
-				{title}
-			</h2>
-			<p className="text-[17px]/[1.55] text-pretty text-landing-muted">{lede}</p>
+			<h2 className="text-3xl lg:text-4xl/none font-bold tracking-tight text-balance">{title}</h2>
+			<p className="text-base/normal text-pretty text-landing-muted">{lede}</p>
 		</div>
 	);
 }

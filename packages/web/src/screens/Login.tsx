@@ -210,7 +210,7 @@ export function Login({
 }
 
 const secondaryActionClass =
-	"focus-ring rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground";
+	"focus-ring rounded-md px-1.5 py-1.5 font-medium text-sm text-muted-foreground";
 
 /** A bot of each colour, each with its own eyes and a little up or down, as the design lines them up. */
 const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
@@ -231,7 +231,7 @@ const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
 function Welcome({ onContinue }: { onContinue: () => void }) {
 	return (
 		<main className="grid h-full place-items-center overflow-x-hidden bg-background px-4 text-foreground">
-			<div className="flex w-full min-w-0 max-w-[440px] flex-col items-center gap-[22px] text-center">
+			<div className="flex w-full min-w-0 max-w-110 flex-col items-center gap-5.5 text-center">
 				<div aria-hidden className="flex justify-center gap-3 pb-2">
 					{crowd.map(({ color, face, drop }) => (
 						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>
@@ -239,10 +239,8 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
 						</span>
 					))}
 				</div>
-				<h1 className="m-0 font-bold text-[30px] leading-[1.15] tracking-[-0.02em]">
-					Welcome to Sugabots
-				</h1>
-				<p className="m-0 text-pretty text-[15px] text-muted-foreground leading-[1.55]">
+				<h1 className="m-0 font-bold text-3xl leading-tight tracking-tight">Welcome to Sugabots</h1>
+				<p className="m-0 text-pretty text-sm text-muted-foreground leading-normal">
 					Bots that work alongside your team, in chats you already know how to use.
 				</p>
 				<Button

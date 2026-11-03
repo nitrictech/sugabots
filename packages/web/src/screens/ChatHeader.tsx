@@ -145,7 +145,7 @@ export function ChatHeader({
 			}
 		>
 			<div className="flex min-w-0 flex-1 items-baseline gap-2 max-md:sr-only">
-				<h1 className="m-0 min-w-0 truncate font-medium text-[14px] text-foreground">
+				<h1 className="m-0 min-w-0 truncate font-medium text-sm text-foreground">
 					{details ? (
 						<button
 							type="button"
@@ -159,13 +159,11 @@ export function ChatHeader({
 					)}
 				</h1>
 				{modelName && (
-					<span className="shrink-0 whitespace-nowrap text-[12.5px] text-muted-foreground">
+					<span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
 						{modelName}
 					</span>
 				)}
-				{inPersonalPod && (
-					<OnlyYou lock side="bottom" className="text-[12.5px] text-muted-foreground" />
-				)}
+				{inPersonalPod && <OnlyYou lock side="bottom" className="text-xs text-muted-foreground" />}
 			</div>
 			{done ? (
 				<>
@@ -255,7 +253,7 @@ function ThreadMenu({
  * type and place. A phone shows the header's badge in its place.
  */
 const TITLE_CLASS_NAME =
-	"m-0 min-w-0 flex-1 truncate font-medium text-[14px] text-foreground max-md:sr-only";
+	"m-0 min-w-0 flex-1 truncate font-medium text-sm text-foreground max-md:sr-only";
 
 /** How big a chat's face is beside its name in a phone's header, in pixels. */
 const PHONE_FACE_SIZE_PX = 32;
@@ -282,7 +280,7 @@ function HeaderBar({
 		<header
 			className={cn(
 				CHAT_HEADER_CONTAINER,
-				"relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
+				"relative flex h-13 shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 			)}
 		>
 			{parent ? (
@@ -323,11 +321,9 @@ function FaceBadge({
 		<>
 			{face}
 			<span className="flex min-w-0 flex-col items-start text-left leading-tight">
-				<span className="max-w-full truncate font-semibold text-[16px] text-foreground">
-					{name}
-				</span>
+				<span className="max-w-full truncate font-semibold text-base text-foreground">{name}</span>
 				{(detail || inPersonalPod) && (
-					<span className="max-w-full truncate text-[12px] text-muted-foreground">
+					<span className="max-w-full truncate text-xs text-muted-foreground">
 						<BadgeDetail inPersonalPod={inPersonalPod}>{detail}</BadgeDetail>
 					</span>
 				)}
@@ -357,7 +353,7 @@ function FaceBadge({
 function ChannelFace({ mark }: { mark: ChatMark }) {
 	return (
 		<span
-			className="grid shrink-0 place-items-center rounded-[30%] bg-chip text-soft-foreground"
+			className="grid shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground"
 			style={{ width: PHONE_FACE_SIZE_PX, height: PHONE_FACE_SIZE_PX }}
 		>
 			{mark === "routine" ? (
@@ -398,9 +394,9 @@ function ThreadBadge({
 			disabled={!onClick}
 			className="glass flex h-11 min-w-0 max-w-full flex-col items-start justify-center rounded-full px-4 text-left text-foreground active:bg-hover-strong"
 		>
-			<span className="max-w-full truncate font-semibold text-[16px] leading-tight">{title}</span>
+			<span className="max-w-full truncate font-semibold text-base leading-tight">{title}</span>
 			{(within || inPersonalPod) && (
-				<span className="max-w-full truncate text-[12px] text-muted-foreground leading-tight">
+				<span className="max-w-full truncate text-xs text-muted-foreground leading-tight">
 					<BadgeDetail inPersonalPod={inPersonalPod}>{within && `in ${within}`}</BadgeDetail>
 				</span>
 			)}
@@ -413,7 +409,7 @@ function BadgeDetail({ inPersonalPod, children }: { inPersonalPod: boolean; chil
 	if (!inPersonalPod) return children;
 	return (
 		<>
-			<LockGlyph size={8} className="mr-1 inline align-[-0.5px]" />
+			<LockGlyph size={8} className="mr-1 inline align-baseline" />
 			{ONLY_YOU}
 			{children && <> · {children}</>}
 		</>
@@ -549,7 +545,7 @@ export function HeaderBack({ back }: { back: BackTo }) {
 					count={unreadInInbox}
 					size="md"
 					label={`${unreadInInbox} unread in Inbox`}
-					className="h-5 min-w-5 text-[12px]"
+					className="h-5 min-w-5 text-xs"
 				/>
 			)}
 		</>

@@ -93,7 +93,7 @@ const meta = preview.meta({
 			useEffect(() => () => queryClient.clear(), [queryClient]);
 			return (
 				<QueryClientProvider client={queryClient}>
-					<div className="mx-auto max-w-[560px] py-4">
+					<div className="mx-auto max-w-140 py-4">
 						<Story />
 					</div>
 				</QueryClientProvider>

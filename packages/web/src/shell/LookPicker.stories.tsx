@@ -11,7 +11,7 @@ function Look() {
 	const [shape, setShape] = useState<AgentShape>("circle");
 	const [face, setFace] = useState<AgentFace>("pill");
 	return (
-		<div className="flex max-w-[420px] flex-col items-center gap-4 p-4">
+		<div className="flex max-w-105 flex-col items-center gap-4 p-4">
 			<AgentAvatar color={color} face={face} shape={shape} size={96} />
 			<div className="w-full overflow-hidden rounded-panel bg-list">
 				<LookPicker
@@ -57,7 +57,7 @@ export const Pick = meta.story({
 function PodLook() {
 	const [color, setColor] = useState<PodColor>("green");
 	return (
-		<div className="flex max-w-[420px] flex-col items-center gap-4 rounded-panel bg-list p-4">
+		<div className="flex max-w-105 flex-col items-center gap-4 rounded-panel bg-list p-4">
 			<PodTile bots={[{ color: "sky", face: "pill" }]} color={color} size={72} />
 			<PodColourPicker value={color} onChange={setColor} />
 		</div>

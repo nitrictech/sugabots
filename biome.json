@@ -48,6 +48,10 @@
 	},
 	"overrides": [
 		{
+			"includes": ["packages/web/src/**/*.{ts,tsx}", "packages/website/src/**/*.{ts,tsx}"],
+			"plugins": ["./lint/no-fixed-tailwind-values.grit"]
+		},
+		{
 			"includes": [
 				"packages/core/src/providers/connections/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",

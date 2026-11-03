@@ -21,25 +21,20 @@ import { Dialog } from "@/ui/dialog.tsx";
  */
 export function MobileHome({ pod, className }: { pod: Pod; className?: string }) {
 	return (
-		<div
-			className={cn(
-				"flex min-h-0 flex-1 bg-background pt-[max(12px,env(safe-area-inset-top))]",
-				className,
-			)}
-		>
+		<div className={cn("flex min-h-0 flex-1 bg-background pt-safe-or-3", className)}>
 			<PodRail currentPodId={pod.id} />
 			<section
 				aria-label={pod.name}
-				className="@container/sidebar flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-[20px] bg-list shadow-[inset_1px_1px_0_var(--color-border)]"
+				className="@container/sidebar flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-3xl bg-list inset-ring inset-ring-border"
 			>
-				<header className="flex flex-col gap-0.5 pt-[18px] pr-3 pb-3 pl-[18px]">
+				<header className="flex flex-col gap-0.5 pt-4.5 pr-3 pb-3 pl-4.5">
 					<div className="flex items-center gap-2">
 						<Link
 							{...podSettingsLink(pod)}
 							aria-label={`${pod.name} settings`}
 							className="focus-ring flex min-w-0 items-center gap-1.5 rounded-md text-foreground"
 						>
-							<h1 className="m-0 min-w-0 truncate font-semibold text-[22px] tracking-[-0.02em]">
+							<h1 className="m-0 min-w-0 truncate font-semibold text-xl tracking-tight">
 								{pod.name}
 							</h1>
 							<ChevronRight
@@ -53,7 +48,7 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 						<NewInPodMenu pod={pod} className="size-9" />
 					</div>
 					{pod.kind === "personal" && (
-						<p className="m-0 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+						<p className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground">
 							<LockGlyph size={8} className="shrink-0" />
 							{PERSONAL_POD_PRIVACY}
 						</p>
@@ -62,7 +57,7 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 				<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-2 pb-4 pl-1.5">
 					<Link
 						{...artifactsLink(pod)}
-						className="focus-ring flex h-11 shrink-0 items-center gap-3 rounded-[10px] px-3 text-[16px] text-muted-foreground active:bg-row-selected"
+						className="focus-ring flex h-11 shrink-0 items-center gap-3 rounded-lg px-3 text-base text-muted-foreground active:bg-row-selected"
 					>
 						<Library aria-hidden size={20} strokeWidth={1.75} className="shrink-0" />
 						Artifacts
@@ -92,7 +87,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 	return (
 		<nav
 			aria-label="Pods"
-			className="tab-bar-clearance flex w-[68px] shrink-0 flex-col items-center gap-2.5 overflow-y-auto pt-1.5 pb-4"
+			className="tab-bar-clearance flex w-17 shrink-0 flex-col items-center gap-2.5 overflow-y-auto pt-1.5 pb-4"
 		>
 			{sorted.map((pod) => {
 				const marker = markers?.pods[pod.id];
@@ -112,7 +107,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 							<span
 								aria-hidden
 								className={cn(
-									"absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r bg-foreground transition-[height]",
+									"absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r bg-foreground transition-all",
 									current ? "h-9" : "h-2",
 								)}
 							/>
@@ -121,7 +116,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 							{...podLink(pod)}
 							aria-label={label}
 							aria-current={current ? "page" : undefined}
-							className="focus-ring rounded-[14px]"
+							className="focus-ring rounded-2xl"
 						>
 							<RailTile pod={pod} />
 						</Link>
@@ -135,7 +130,7 @@ function PodRail({ currentPodId }: { currentPodId: string }) {
 						type="button"
 						aria-label="New pod"
 						onClick={() => setCreating(true)}
-						className="focus-ring grid size-[46px] shrink-0 place-items-center rounded-2xl bg-chip text-subtle-foreground"
+						className="focus-ring grid size-11.5 shrink-0 place-items-center rounded-2xl bg-chip text-subtle-foreground"
 					>
 						<Plus aria-hidden size={20} strokeWidth={2} />
 					</button>
@@ -161,7 +156,7 @@ function RailTile({ pod }: { pod: Pod }) {
 		<span
 			aria-hidden
 			className={cn(
-				"grid size-[46px] place-items-center rounded-[14px] font-semibold text-[18px]",
+				"grid size-11.5 place-items-center rounded-2xl font-semibold text-lg",
 				!palette && "bg-tile text-foreground",
 			)}
 			style={palette && { background: palette.tile, color: palette.swatch }}

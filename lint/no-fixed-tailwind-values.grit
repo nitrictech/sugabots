@@ -1,0 +1,14 @@
+language js
+
+// Flags fixed Tailwind values in class strings: a value in brackets (`text-[14px]`,
+// `p-[12px]`), a line height or opacity after a slash (`text-sm/[1.4]`), and a CSS property in
+// brackets (`[scrollbar-width:thin]`). Bracketed variants, such as `[&_svg]:`, `data-[size=sm]:`
+// or `group-has-[…]/name:`, pick elements rather than set values: they end in `:`, so they pass.
+or {
+	JsStringLiteralExpression() as $text,
+	JsxString() as $text,
+	JsTemplateChunkElement() as $text
+} where {
+	$text <: r"(?s).*(?:[a-z0-9]-\[[^\[\]]+\]|[a-z]-[a-z0-9.]+/\[[^\]]+\]|(?:^|[\s:])\[[a-z][a-z-]*:[^\]]+\])(?:$|[^:/].*|/[^a-z].*|/[a-z][\w-]*(?:[^\w:-].*|$))",
+	register_diagnostic(span=$text, message="A fixed Tailwind value, such as `text-[14px]`, `text-sm/[1.4]` or `[scrollbar-width:thin]`. Use the standard scale (`text-sm`, `p-3`, `text-sm/snug`) or a named utility from the package's stylesheet.")
+}

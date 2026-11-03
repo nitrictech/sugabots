@@ -77,7 +77,7 @@ export function Stage({
 			{...keys}
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
 		>
-			<header className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
+			<header className="flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2">
 				{parent && <StageBack parent={parent} />}
 				{/* On a phone it covers the page it was opened from, so it goes back to it, as a phone's pages do. */}
 				{!parent && (
@@ -95,7 +95,7 @@ export function Stage({
 				)}
 				{!parent && <span className="contents max-md:hidden">{icon}</span>}
 				<div className="flex min-w-0 flex-1 flex-col pl-1 leading-snug">
-					<h2 className="m-0 truncate font-medium text-[14px] text-foreground max-md:font-semibold max-md:text-[17px]">
+					<h2 className="m-0 truncate font-medium text-sm text-foreground max-md:font-semibold max-md:text-base">
 						{title}
 					</h2>
 					{byline && <p className="m-0 truncate text-subtle-foreground text-xs">{byline}</p>}
@@ -105,7 +105,7 @@ export function Stage({
 					<X size={16} strokeWidth={1.75} />
 				</IconButton>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-[calc(var(--tab-bar-space,0px)+0.75rem)]">
+			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-tab-bar-offset-3">
 				{children}
 			</div>
 		</section>
@@ -119,7 +119,7 @@ export function StageMark({ children }: { children: ReactNode }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-7 shrink-0 place-items-center rounded-[7px] bg-chip text-muted-foreground [&_svg]:size-[15px]"
+			className="grid size-7 shrink-0 place-items-center rounded-sm bg-chip text-muted-foreground [&_svg]:size-3.75"
 		>
 			{children}
 		</span>

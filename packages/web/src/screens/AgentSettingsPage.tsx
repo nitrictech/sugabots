@@ -257,7 +257,7 @@ function EditableFace({
 				<span
 					aria-hidden
 					// Cut out of the face by a ring of the page's own colour.
-					className="absolute -right-1.5 -bottom-1.5 grid size-[22px] place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
+					className="absolute -right-1.5 -bottom-1.5 grid size-5.5 place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
 				>
 					<Pencil size={11} strokeWidth={2.2} />
 				</span>
@@ -337,12 +337,12 @@ function LookEditor({
 		return (
 			<DialogContent
 				showCloseButton={false}
-				className="inset-0 flex h-[var(--visible-height,100dvh)] max-h-none max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0"
+				className="inset-0 flex h-visible max-h-none max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0"
 			>
 				<DialogTitle className="sr-only">{agent.name}'s look</DialogTitle>
 				<form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
 					<header
-						className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2"
+						className="grid shrink-0 grid-cols-centered items-center gap-3 px-4 pt-safe-or-3 pb-2"
 						style={stage}
 					>
 						<span className="flex justify-self-start">
@@ -350,12 +350,12 @@ function LookEditor({
 								<X aria-hidden size={20} strokeWidth={2.25} />
 							</button>
 						</span>
-						<span className="font-semibold text-[17px] text-foreground">Look</span>
+						<span className="font-semibold text-base text-foreground">Look</span>
 						<span className="flex justify-self-end">
 							<Button
 								type="submit"
 								size="sm"
-								className="h-11 rounded-full px-5 text-[15px]"
+								className="h-11 rounded-full px-5 text-sm"
 								disabled={!changed || savePending}
 							>
 								{savePending ? "Saving…" : "Save"}
@@ -377,17 +377,14 @@ function LookEditor({
 	return (
 		<DialogContent
 			showCloseButton={false}
-			className="max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-[680px]"
+			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-170"
 		>
 			<DialogTitle className="sr-only">{agent.name}'s look</DialogTitle>
 			<form
 				onSubmit={submit}
-				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-[460px] md:flex-row"
+				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-115 md:flex-row"
 			>
-				<div
-					className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-[260px]"
-					style={stage}
-				>
+				<div className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-65" style={stage}>
 					<div className="grid flex-1 place-items-center py-2">
 						<AgentAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
 					</div>
@@ -494,7 +491,7 @@ function ProfileField({
 		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
 			<label
 				htmlFor={id}
-				className={cn("text-[13px] text-foreground", wide ? "w-24 shrink-0" : "flex-1")}
+				className={cn("text-sm text-foreground", wide ? "w-24 shrink-0" : "flex-1")}
 			>
 				{label}
 			</label>
@@ -511,12 +508,12 @@ function ProfileField({
 					placeholder={placeholder}
 					maxLength={maxLength}
 					className={cn(
-						"h-8 min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-[13px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring",
-						wide ? "flex-1" : "w-60 max-w-[50%]",
+						"h-8 min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring",
+						wide ? "flex-1" : "w-60 max-w-1/2",
 					)}
 				/>
 			) : (
-				<span id={id} className={cn("min-w-0 text-[13px] text-muted-foreground", wide && "flex-1")}>
+				<span id={id} className={cn("min-w-0 text-xs text-muted-foreground", wide && "flex-1")}>
 					{value || "None yet"}
 				</span>
 			)}
@@ -571,7 +568,7 @@ function Instructions({
 					readOnly={!editable}
 					maxLength={PROMPT_MAX_LENGTH}
 					placeholder="No instructions yet."
-					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[13px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="block min-h-95 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsGroup>
 			{editable && (
@@ -610,7 +607,7 @@ function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
 				<Link
 					{...podSettingsPageLink(pod, "connections")}
 					state={backToAgent}
-					className="focus-ring flex items-center gap-0.5 rounded-sm text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+					className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
 				>
 					Edit in {pod.name}
 					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />

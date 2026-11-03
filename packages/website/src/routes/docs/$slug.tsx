@@ -60,7 +60,7 @@ function DocsPage() {
 						<PageLinks {...neighbours(page)} />
 					</article>
 				</main>
-				<aside className="sticky top-(--site-header-height) hidden max-h-[calc(100svh-var(--site-header-height))] w-52 shrink-0 flex-col gap-6 overflow-y-auto py-10 xl:flex">
+				<aside className="sticky top-(--site-header-height) hidden max-h-below-header w-52 shrink-0 flex-col gap-6 overflow-y-auto py-10 xl:flex">
 					<CopyPageButton markdown={page.markdown} />
 					<OnThisPage headings={page.headings} />
 				</aside>

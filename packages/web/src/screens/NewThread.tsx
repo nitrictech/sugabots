@@ -116,9 +116,9 @@ export function NewThread({
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
 				{header}
-				<div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-[12%]">
+				<div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-24">
 					{chosen && (
-						<div className="flex w-full max-w-[640px] flex-col items-center gap-6">
+						<div className="flex w-full max-w-160 flex-col items-center gap-6">
 							<div className="flex flex-col items-center gap-2 text-center">
 								<AgentAvatar
 									color={chosen.color}
@@ -127,11 +127,11 @@ export function NewThread({
 									size={64}
 									className="mb-3"
 								/>
-								<h2 className="m-0 font-semibold text-[18px] text-foreground">
+								<h2 className="m-0 font-semibold text-lg text-foreground">
 									What should {chosen.name} work on?
 								</h2>
 								{chosen.description && (
-									<p className="m-0 text-[13px] text-muted-foreground">{chosen.description}</p>
+									<p className="m-0 text-xs text-muted-foreground">{chosen.description}</p>
 								)}
 							</div>
 							{composer}
@@ -147,8 +147,8 @@ export function NewThread({
 			{header}
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-4 overflow-y-auto px-5 pt-6 pb-4">
 				<div className="flex flex-col gap-1.5">
-					<h2 className="m-0 font-bold text-[22px] text-foreground leading-tight">{title}</h2>
-					<p className="m-0 text-[14px] text-muted-foreground">
+					<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{title}</h2>
+					<p className="m-0 text-sm text-muted-foreground">
 						Name a bot to start the thread with it, or write to the people here.
 					</p>
 				</div>
@@ -159,7 +159,7 @@ export function NewThread({
 								<button
 									type="button"
 									onClick={() => setDraft((current) => `@${bot.handle} ${current.trimStart()}`)}
-									className="focus-ring flex h-8 items-center gap-2 rounded-[8px] border border-border-strong pr-3 pl-1.5 font-medium text-[13.5px] text-foreground transition-colors hover:bg-row-hover"
+									className="focus-ring flex h-8 items-center gap-2 rounded-md border border-border-strong pr-3 pl-1.5 font-medium text-xs text-foreground transition-colors hover:bg-row-hover"
 								>
 									<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />
 									{bot.name}
@@ -169,10 +169,10 @@ export function NewThread({
 					</ul>
 				)}
 			</div>
-			<div className="shrink-0 px-4 max-md:pb-[var(--tab-bar-space,0px)] md:px-5">
+			<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 				{composer}
-				<div className="flex h-[26px] items-center">
-					<p className="m-0 px-1 text-[12.5px] text-muted-foreground">
+				<div className="flex h-6.5 items-center">
+					<p className="m-0 px-1 text-xs text-muted-foreground">
 						{threadWith
 							? `Sending starts a thread with ${threadWith.name}.`
 							: "Sending starts a thread with the people here."}

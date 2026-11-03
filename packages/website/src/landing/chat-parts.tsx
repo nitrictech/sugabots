@@ -39,7 +39,7 @@ export function PersonAvatar({ person, className }: { person: Person; className?
 	return (
 		<span
 			className={cn(
-				"grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-landing-button text-[11px] font-semibold text-landing-secondary",
+				"grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-landing-button text-xs font-semibold text-landing-secondary",
 				className,
 			)}
 		>
@@ -68,7 +68,7 @@ function MessageByline({ name, time, isBot }: { name: string; time: string; isBo
 		<span className="flex items-center gap-2">
 			<span className="text-sm font-semibold text-landing-text">{name}</span>
 			{isBot && (
-				<span className="rounded-[4px] bg-landing-chip px-[5px] py-px text-[10.5px]/[1.4] font-semibold text-landing-muted">
+				<span className="rounded bg-landing-chip px-1.25 py-px text-xs/snug font-semibold text-landing-muted">
 					Bot
 				</span>
 			)}
@@ -93,7 +93,7 @@ export function MessageRow({ author, time, text, children, className }: MessageR
 			<AuthorAvatar author={author} />
 			<div className="flex min-w-0 flex-col gap-0.5">
 				<MessageByline name={authorName(author)} time={time} isBot={author.kind === "bot"} />
-				<p className="text-sm/[1.5] text-pretty text-landing-message">{text}</p>
+				<p className="text-sm/normal text-pretty text-landing-message">{text}</p>
 				{children}
 			</div>
 		</div>

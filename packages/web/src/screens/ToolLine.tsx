@@ -54,7 +54,7 @@ export function ToolLine({
 				aria-expanded={open}
 				aria-controls={listId}
 				onClick={() => setOpen(!open)}
-				className="focus-ring flex max-w-full items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
+				className="focus-ring flex max-w-full items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-xs transition-colors hover:text-soft-foreground"
 			>
 				<span className="min-w-0 truncate">{toolLineText(calls, looks)}</span>
 				<ChevronRight
@@ -70,14 +70,14 @@ export function ToolLine({
 			{open && (
 				<ul
 					id={listId}
-					className="m-0 mb-2 flex w-full max-w-[560px] list-none flex-col border-hover border-l-[1.5px] py-0.5 pl-3.5"
+					className="m-0 mb-2 flex w-full max-w-140 list-none flex-col border-hover border-l-2 py-0.5 pl-3.5"
 				>
 					{runs.flatMap((run, index) => [
 						run.narration && (
 							<li
 								key={`narration@${run.calls[0]?.id}`}
 								className={cn(
-									"text-[13px] text-muted-foreground leading-snug",
+									"text-xs text-muted-foreground leading-snug",
 									index > 0 && "pt-2",
 									"pb-0.5",
 								)}
@@ -123,7 +123,7 @@ function ToolCallRow({
 				aria-expanded={open}
 				aria-controls={detailsId}
 				onClick={() => setOpen(!open)}
-				className="focus-ring -mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-[3px] text-left transition-colors hover:bg-hover"
+				className="focus-ring -mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.75 text-left transition-colors hover:bg-hover"
 			>
 				{handle === BUILT_IN_HANDLE ? (
 					// Built into every bot, so it has no app's mark: a tool's.
@@ -136,7 +136,7 @@ function ToolCallRow({
 				) : (
 					<ConnectionMark presetId={look?.presetId} name={appOf(call, look)} size="xs" />
 				)}
-				<span className="flex min-w-0 items-baseline gap-1.5 text-[13px]">
+				<span className="flex min-w-0 items-baseline gap-1.5 text-xs">
 					<span className="shrink-0 font-medium text-soft-foreground">{action}</span>
 					{subject && (
 						<span
@@ -144,7 +144,7 @@ function ToolCallRow({
 							className={cn(
 								"min-w-0 truncate",
 								subject.asCode
-									? "font-mono text-[12.5px] text-subtle-foreground"
+									? "font-mono text-xs text-subtle-foreground"
 									: "text-muted-foreground",
 							)}
 						>
@@ -156,7 +156,7 @@ function ToolCallRow({
 					<span
 						title={note.text}
 						className={cn(
-							"min-w-0 max-w-[40%] shrink-0 truncate text-[12px]",
+							"min-w-0 max-w-2/5 shrink-0 truncate text-xs",
 							note.failed ? "text-destructive-text" : "text-subtle-foreground",
 						)}
 					>
@@ -165,7 +165,7 @@ function ToolCallRow({
 				)}
 				<span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
 					{call.finishedAt && (
-						<span className="font-mono text-[11.5px] text-subtle-foreground">
+						<span className="font-mono text-2xs text-subtle-foreground">
 							{formatDuration(durationOf(call))}
 						</span>
 					)}
@@ -196,7 +196,7 @@ function CallDetails({
 }) {
 	return (
 		<div id={id} className="flex flex-col gap-2 pt-1 pb-2 pl-6">
-			<p className="m-0 flex items-baseline gap-1.5 text-[11.5px] text-subtle-foreground">
+			<p className="m-0 flex items-baseline gap-1.5 text-2xs text-subtle-foreground">
 				<span className="font-medium">Tool</span>
 				<code className="font-mono text-soft-foreground">{call.tool}</code>
 			</p>
@@ -211,7 +211,7 @@ function CallDetails({
 				)
 			)}
 			{details.input === undefined && details.output === undefined && !call.error && (
-				<p className="m-0 text-[12px] text-subtle-foreground">
+				<p className="m-0 text-xs text-subtle-foreground">
 					{call.status === "running" ? "Still running" : "Nothing to show"}
 				</p>
 			)}
@@ -237,11 +237,11 @@ function DetailBlock({
 	const labelId = useId();
 	return (
 		<figure aria-labelledby={labelId} className="m-0 flex min-w-0 flex-col gap-1">
-			<figcaption id={labelId} className="font-medium text-[11.5px] text-subtle-foreground">
+			<figcaption id={labelId} className="font-medium text-2xs text-subtle-foreground">
 				{label}
 			</figcaption>
 			<ToolCallValue value={value} otherArguments={otherArguments} failed={failed} />
-			{footnote && <p className="m-0 text-[11.5px] text-subtle-foreground">{footnote}</p>}
+			{footnote && <p className="m-0 text-2xs text-subtle-foreground">{footnote}</p>}
 		</figure>
 	);
 }

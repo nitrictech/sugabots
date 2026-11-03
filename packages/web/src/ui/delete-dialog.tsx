@@ -3,7 +3,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog.tsx";
 
 const choice =
-	"focus-ring flex-1 p-[13px] text-[15px] transition-colors hover:bg-chip disabled:cursor-default disabled:opacity-50";
+	"focus-ring flex-1 p-3.25 text-sm transition-colors hover:bg-chip disabled:cursor-default disabled:opacity-50";
 
 /** A confirmation with Cancel and a red action side by side, like a phone's alert. */
 export function DeleteDialog({
@@ -38,7 +38,7 @@ export function DeleteDialog({
 			<DialogContent
 				showCloseButton={false}
 				initialFocus={cancel}
-				className="max-w-[min(360px,calc(100%-20px))] gap-0 overflow-hidden rounded-[20px] p-0 text-center sm:max-w-[360px]"
+				className="max-w-dialog-sm gap-0 overflow-hidden rounded-3xl p-0 text-center sm:max-w-90"
 			>
 				<form
 					className="contents"
@@ -47,9 +47,9 @@ export function DeleteDialog({
 						void onDelete();
 					}}
 				>
-					<div className="flex flex-col items-center gap-2 px-[22px] pt-6 pb-[18px]">
-						<DialogTitle className="text-base">{title}</DialogTitle>
-						<DialogDescription className="text-[13.5px] text-pretty leading-[1.55]">
+					<div className="flex flex-col items-center gap-2 px-5.5 pt-6 pb-4.5">
+						<DialogTitle className="text-sm">{title}</DialogTitle>
+						<DialogDescription className="text-xs text-pretty leading-normal">
 							{description}
 						</DialogDescription>
 						{error && <Alert className="mt-2 text-left">{error}</Alert>}

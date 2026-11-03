@@ -10,7 +10,7 @@ import type { ComponentProps } from "react";
  * is the failure mode this is here to prevent.
  */
 export function Alert({ className, ...props }: ComponentProps<"p">) {
-	return <p role="alert" className={cn("text-md text-destructive-text", className)} {...props} />;
+	return <p role="alert" className={cn("text-xs text-destructive-text", className)} {...props} />;
 }
 
 /** Something worked, said where it was tried, and announced to screen readers. */
@@ -18,7 +18,7 @@ export function Success({ className, children, ...props }: ComponentProps<"p">) 
 	return (
 		<p
 			role="status"
-			className={cn("flex items-center gap-1.5 font-medium text-md text-success-text", className)}
+			className={cn("flex items-center gap-1.5 font-medium text-xs text-success-text", className)}
 			{...props}
 		>
 			<CircleCheck aria-hidden size={16} className="shrink-0" />

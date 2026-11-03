@@ -12,14 +12,14 @@ export function ConnectionRow({
 }) {
 	return (
 		<div className="flex min-h-14 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="w-[110px] shrink-0 text-[14px] text-muted-foreground">{label}</span>
+			<span className="w-27.5 shrink-0 text-sm text-muted-foreground">{label}</span>
 			<span className="min-w-0 flex-1">{children}</span>
 			{action}
 		</div>
 	);
 }
 
-export const valueText = "block truncate font-mono text-[13px] text-foreground";
+export const valueText = "block truncate font-mono text-xs text-foreground";
 
 /** What stands for a saved key, which the API never sends back. */
 export const savedKeyMask = "••••••••";

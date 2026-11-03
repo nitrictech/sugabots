@@ -5,9 +5,9 @@ const MAX_COUNTED = 99;
 
 const sizes = {
 	/** In a tab, beside its name. */
-	sm: "h-4 min-w-[18px] px-[5px] text-[10.5px]",
+	sm: "h-4 min-w-4.5 px-1.25 text-2xs",
 	/** At the end of a list row. */
-	md: "h-[18px] min-w-5 px-1.5 text-[11px]",
+	md: "h-4.5 min-w-5 px-1.5 text-2xs",
 } as const;
 
 /**

@@ -21,7 +21,7 @@ export function EmptyState({
 }) {
 	return (
 		<div className={cn("grid flex-1 place-items-center p-6", className)}>
-			<div className="flex max-w-[400px] flex-col items-center gap-2.5 text-center">
+			<div className="flex max-w-100 flex-col items-center gap-2.5 text-center">
 				{icon && (
 					<span
 						aria-hidden
@@ -30,9 +30,9 @@ export function EmptyState({
 						{icon}
 					</span>
 				)}
-				<div className="font-semibold text-foreground text-xl">{title}</div>
+				<div className="font-semibold text-foreground text-base">{title}</div>
 				{children !== undefined && (
-					<div className="text-md text-muted-foreground leading-relaxed">{children}</div>
+					<div className="text-xs text-muted-foreground leading-relaxed">{children}</div>
 				)}
 			</div>
 		</div>

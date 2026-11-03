@@ -143,8 +143,8 @@ function ConnectionRow({
 					name={connection.name}
 					size="tile"
 				/>
-				<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-					<span className="truncate text-[13px] text-foreground">{connection.name}</span>
+				<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+					<span className="truncate text-sm text-foreground">{connection.name}</span>
 					<span
 						className={`text-pretty text-xs ${failing || error ? "line-clamp-2 text-destructive-text" : "text-subtle-foreground"}`}
 					>
@@ -250,7 +250,7 @@ function AppList({
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 			<DialogFormHeader title={`Add to ${podName}`} />
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
@@ -258,10 +258,10 @@ function AppList({
 						onChange={(event) => setQuery(event.target.value)}
 						placeholder="Search apps"
 						aria-label="Search apps"
-						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
 					/>
 				</label>
-				<div className="-mx-1 flex max-h-[min(480px,60vh)] flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{(gitHubShown || shown.length > 0) && (
 						<SettingsGroup>
 							{gitHubShown && (
@@ -286,14 +286,14 @@ function AppList({
 						</SettingsGroup>
 					)}
 					{!gitHubShown && shown.length === 0 && needle !== "" && (
-						<p className="m-0 px-1 text-muted-foreground text-sm">
+						<p className="m-0 px-1 text-muted-foreground text-xs">
 							No app matches “{query.trim()}”.
 						</p>
 					)}
 					<SettingsGroup label="Something else">
 						<SettingsRow
 							icon={
-								<SettingsRowIcon className="size-[34px] rounded-[10px]">
+								<SettingsRowIcon className="size-8.5 rounded-lg">
 									<Code size={15} strokeWidth={2.2} />
 								</SettingsRowIcon>
 							}
@@ -304,7 +304,7 @@ function AppList({
 						/>
 						<SettingsRow
 							icon={
-								<SettingsRowIcon className="size-[34px] rounded-[10px]">
+								<SettingsRowIcon className="size-8.5 rounded-lg">
 									<Globe size={15} strokeWidth={2.2} />
 								</SettingsRowIcon>
 							}
@@ -355,7 +355,7 @@ function AppStep({
 			<DialogFormBody>
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
 					<ConnectionMark presetId={preset.id} name={preset.name} />
-					<span className="text-[13.5px] text-muted-foreground">{preset.description}</span>
+					<span className="text-xs text-muted-foreground">{preset.description}</span>
 				</div>
 				{actions.connect.error && <Alert>{failureMessage(actions.connect.error)}</Alert>}
 				<Button
@@ -367,7 +367,7 @@ function AppStep({
 					Connect {preset.name}
 					<ArrowUpRight aria-hidden />
 				</Button>
-				<p className="m-0 text-center text-[12.5px] text-subtle-foreground">
+				<p className="m-0 text-center text-xs text-subtle-foreground">
 					You'll sign in to {preset.name} next.
 				</p>
 			</DialogFormBody>

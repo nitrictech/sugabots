@@ -47,7 +47,7 @@ function SystemModelLink({ children }: { children: ReactNode }) {
 export function SystemAgentsNotSetUp() {
 	const mayConfigure = useCanConfigureBuiltInAgents();
 	return (
-		<p className="m-0 pt-3 text-muted-foreground text-base leading-relaxed">
+		<p className="m-0 pt-3 text-muted-foreground text-sm leading-relaxed">
 			The system agents write these, and they have no model yet.{" "}
 			{mayConfigure ? (
 				<>

@@ -62,14 +62,14 @@ export function SiteFooter({ homeHref = "/" }: SiteFooterProps) {
 					<div className="flex max-w-xs flex-col gap-4">
 						<a href={homeHref} className={cn("flex items-center gap-2.5 self-start", colours.text)}>
 							<SugabotsMark className="size-7" />
-							<span className="text-[17px] font-bold tracking-[-0.01em]">Sugabots</span>
+							<span className="text-base font-bold tracking-normal">Sugabots</span>
 						</a>
 						<div className="flex gap-1.5">
 							<IconLink href={siteLinks.github} label="GitHub" cta="github">
-								<GitHubIcon className="size-[17px]" />
+								<GitHubIcon className="size-4.25" />
 							</IconLink>
 							<IconLink href={siteLinks.discord} label="Discord" cta="discord">
-								<DiscordIcon className="size-[17px]" />
+								<DiscordIcon className="size-4.25" />
 							</IconLink>
 						</div>
 					</div>
@@ -93,7 +93,7 @@ export function SiteFooter({ homeHref = "/" }: SiteFooterProps) {
 				</div>
 				<div
 					className={cn(
-						"flex flex-wrap justify-between gap-x-6 gap-y-2 border-t pt-6 text-[13px]",
+						"flex flex-wrap justify-between gap-x-6 gap-y-2 border-t pt-6 text-xs",
 						colours.line,
 						colours.fineprint,
 					)}

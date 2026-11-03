@@ -48,7 +48,7 @@ export const Hero = meta.story({
 	render: () => (
 		<SettingsPage
 			hero={
-				<span className="grid size-[88px] place-items-center rounded-[26px] bg-foreground font-extrabold text-[34px] text-background">
+				<span className="grid size-22 place-items-center rounded-3xl bg-foreground font-extrabold text-4xl text-background">
 					N
 				</span>
 			}

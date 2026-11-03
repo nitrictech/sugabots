@@ -115,7 +115,7 @@ export function ChatThreadPanel({
 		),
 	};
 	const body = query.isPending ? (
-		<div className="grid flex-1 place-content-center text-muted-foreground text-sm">
+		<div className="grid flex-1 place-content-center text-muted-foreground text-xs">
 			Loading thread…
 		</div>
 	) : !details ||
@@ -133,7 +133,7 @@ export function ChatThreadPanel({
 				<button
 					type="button"
 					onClick={() => onOpenThread(parentRoutine.threadId)}
-					className="focus-ring mx-[18px] mt-3 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-sm"
+					className="focus-ring mx-4.5 mt-3 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-xs"
 				>
 					<ChevronLeft aria-hidden size={14} />
 					Back to Routine
@@ -148,7 +148,7 @@ export function ChatThreadPanel({
 				className="focus-ring min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-2 pb-2"
 			>
 				{query.loadOlderError && (
-					<p role="alert" className="m-0 px-[18px] pb-3 text-destructive-text text-sm">
+					<p role="alert" className="m-0 px-4.5 pb-3 text-destructive-text text-xs">
 						Earlier messages could not be loaded.
 					</p>
 				)}
@@ -187,7 +187,7 @@ export function ChatThreadPanel({
 				<ThreadNotices notices={notices} />
 			</div>
 			{frame.kind === "sidebar" && type === "collaboration" && mine && (
-				<p className="m-0 shrink-0 border-border border-t px-[18px] py-3 text-[12.5px] text-subtle-foreground leading-normal">
+				<p className="m-0 shrink-0 border-border border-t px-4.5 py-3 text-xs text-subtle-foreground leading-normal">
 					Bots talk here on their own. To weigh in, message {mine.name} in the main chat.
 				</p>
 			)}
@@ -206,7 +206,7 @@ export function ChatThreadPanel({
 			onClose={frame.onClose}
 			sheet
 			// Wider than Details: it holds a whole conversation.
-			className="w-[560px] md:max-xl:w-[min(600px,100%)]"
+			className="w-140 md:max-xl:w-150 max-w-full"
 		>
 			{body}
 		</ChatSidebar>
@@ -235,20 +235,18 @@ function ThreadPage({
 }) {
 	return (
 		<section aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
-			<header className="relative flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-4 pl-6 max-md:gap-3 max-md:pl-4">
+			<header className="relative flex h-13 shrink-0 items-center gap-2 border-border border-b pr-4 pl-6 max-md:gap-3 max-md:pl-4">
 				<HeaderBack back={back} />
 				<div className="flex min-w-0 flex-1 items-baseline gap-2">
 					<h1
 						ref={headingRef}
 						tabIndex={-1}
-						className="m-0 min-w-0 shrink-0 truncate font-medium text-[14px] text-foreground outline-none max-md:shrink"
+						className="m-0 min-w-0 shrink-0 truncate font-medium text-sm text-foreground outline-none max-md:shrink"
 					>
 						{heading}
 					</h1>
 					{subheading && (
-						<span className="min-w-0 truncate text-[13px] text-subtle-foreground">
-							{subheading}
-						</span>
+						<span className="min-w-0 truncate text-xs text-subtle-foreground">{subheading}</span>
 					)}
 				</div>
 				{actions}
@@ -282,16 +280,16 @@ function RoutineHeaderActions({
 						<Braces aria-hidden size={15} strokeWidth={2.4} />
 					</IconButton>
 					{/* Hangs from the sidebar's top right corner, so it opens leftwards. */}
-					<div className="absolute right-0 z-20 mt-2 w-[min(328px,calc(100vw-2rem))] overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
+					<div className="absolute right-0 z-20 mt-2 w-thread-popover overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
 						{execution.trigger.idempotencyKey && (
-							<div className="flex items-baseline gap-2 border-border border-b px-4 py-2.5 text-[13px]">
+							<div className="flex items-baseline gap-2 border-border border-b px-4 py-2.5 text-xs">
 								<span className="text-muted-foreground">Idempotency key</span>
 								<code className="truncate font-mono text-foreground">
 									{execution.trigger.idempotencyKey}
 								</code>
 							</div>
 						)}
-						<pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[12.5px] text-soft-foreground leading-relaxed">
+						<pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs text-soft-foreground leading-relaxed">
 							{JSON.stringify(execution.trigger.payload, null, 2)}
 						</pre>
 					</div>

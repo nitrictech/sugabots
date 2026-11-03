@@ -206,7 +206,7 @@ export function MentionEditor({
 				// On a phone, as big as the field under it, which types at 16px there; see app.css.
 				<span
 					aria-hidden
-					className="pointer-events-none absolute inset-x-0 top-0 truncate py-[3px] text-[15px] text-subtle-foreground max-md:text-[16px] leading-[22px]"
+					className="pointer-events-none absolute inset-x-0 top-0 truncate py-0.75 text-sm text-subtle-foreground max-md:text-base leading-5.5"
 				>
 					{placeholder}
 				</span>
@@ -279,7 +279,7 @@ export function MentionEditor({
 				}}
 				onBlur={onBlur}
 				className={cn(
-					"block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-[3px] text-[15px] text-foreground leading-[22px] outline-none",
+					"block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.75 text-sm text-foreground leading-5.5 outline-none",
 					className,
 				)}
 			/>

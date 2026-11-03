@@ -110,7 +110,7 @@ export function DesktopStage({
 			<section
 				aria-label={`${agent.name}'s computer`}
 				{...phoneKeys}
-				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-[max(12px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]"
+				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-safe-or-3 pb-safe-or-4"
 			>
 				<div className="shrink-0 px-4">
 					<button type="button" aria-label="Close" onClick={onClose} className={BACK_BUTTON}>
@@ -166,8 +166,8 @@ function ComputerScreen({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
-			<div className="@container-[size] flex min-h-0 w-full flex-1 items-center justify-center">
-				<div className="w-[min(100cqw,calc(100cqh*4/3))]">
+			<div className="@container-size flex min-h-0 w-full flex-1 items-center justify-center">
+				<div className="w-desktop-screen">
 					<DesktopScreen
 						threadId={threadId}
 						agentId={agent.id}
@@ -176,7 +176,7 @@ function ComputerScreen({
 					/>
 				</div>
 			</div>
-			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
+			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-xs">
 				<AgentAvatar
 					color={agent.color}
 					face={agent.face}
@@ -233,7 +233,7 @@ export function LiveDesktopCard({
 	return (
 		<article
 			aria-label={`${agentName}'s screen`}
-			className="overflow-hidden rounded-[12px] border border-border bg-panel"
+			className="overflow-hidden rounded-xl border border-border bg-panel"
 		>
 			<div className="relative">
 				{/* Covered by the button that opens the desktop, which reconnects there. */}
@@ -245,7 +245,7 @@ export function LiveDesktopCard({
 					className="focus-ring absolute inset-0 cursor-zoom-in"
 				/>
 			</div>
-			<p className="m-0 flex items-center gap-2 px-3 py-2 text-[12.5px] text-muted-foreground">
+			<p className="m-0 flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
 				<span aria-hidden className="relative flex size-2">
 					<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
 					<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
@@ -398,10 +398,10 @@ export function DesktopScreen({
 	}, [threadId, agentId, attempt]);
 
 	return (
-		<div className="relative aspect-[4/3] w-full overflow-hidden rounded-panel bg-list">
+		<div className="relative aspect-4/3 w-full overflow-hidden rounded-panel bg-list">
 			<div ref={screen} className="absolute inset-0" />
 			{standing !== "connected" && (
-				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-sm">
+				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-xs">
 					<p>{STANDING_TEXT[standing]}</p>
 					{offersReconnect && (standing === "idle" || standing === "ended") && (
 						<Button variant="outline" onClick={() => setAttempt((count) => count + 1)}>

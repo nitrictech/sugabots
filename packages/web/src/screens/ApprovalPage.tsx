@@ -70,11 +70,11 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 			to="./approvals"
 			aria-label="Back to Approvals"
 			className={cn(
-				"focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-sm",
+				"focus-ring inline-flex items-center gap-1 self-start rounded-sm font-medium text-link text-xs",
 				BACK_ON_PHONE,
 			)}
 		>
-			<ChevronLeft aria-hidden size={16} className="max-md:size-[22px]" />
+			<ChevronLeft aria-hidden size={16} className="max-md:size-5.5" />
 			<span className={BACK_LABEL_ON_PHONE}>Approvals</span>
 		</Link>,
 	);
@@ -83,7 +83,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
 			<article
 				aria-label={`Approval request: ${toolTitle(call.tool)}`}
-				className="mx-auto flex w-full max-w-[880px] flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))]"
+				className="mx-auto flex w-full max-w-220 flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-safe-or-3"
 			>
 				{backToApprovals}
 				<header className="flex flex-col gap-3">
@@ -93,11 +93,11 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						</span>
 						{/* On a phone, the title first, then one line of who asked, for what, where and when. */}
 						<div className="flex min-w-0 flex-col max-md:flex-col-reverse max-md:gap-1">
-							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-[14px]">
+							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-sm">
 								{agent.name} wants to use {appName}
 								<span className="md:hidden"> · {askedIn}</span>
 							</span>
-							<h1 className="m-0 truncate font-bold text-[20px] text-foreground leading-tight tracking-[-0.01em] max-md:whitespace-normal max-md:font-semibold max-md:text-[22px]">
+							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold max-md:text-xl">
 								{action}
 							</h1>
 						</div>
@@ -124,7 +124,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 							pinned={phone}
 						/>
 					) : (
-						<p className="m-0 text-[13px] text-muted-foreground">
+						<p className="m-0 text-xs text-muted-foreground">
 							No longer waiting: {agent.name} stopped before it was answered.
 						</p>
 					)}
@@ -135,7 +135,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 								{ pod, conversationId: request.conversationId },
 								request.threadId === request.conversationId ? {} : { thread: request.threadId },
 							)}
-							className="focus-ring rounded-sm font-medium text-[13px] text-link max-md:self-center max-md:py-2 max-md:text-[15px]"
+							className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 						>
 							Open conversation
 						</Link>
@@ -158,7 +158,7 @@ function AnswerGiven({
 	return (
 		<p
 			role={announced ? "status" : undefined}
-			className="m-0 flex items-center gap-1.5 text-[13px] text-muted-foreground"
+			className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground"
 		>
 			{allowed ? (
 				<Check aria-hidden size={13} strokeWidth={2.8} />
@@ -175,9 +175,9 @@ function AnswerGiven({
 /** One field of the request: its name, then its value; on a phone, the name over the value. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
 	return (
-		<div className="grid grid-cols-[140px_minmax(0,1fr)] gap-4 border-border border-b px-3.5 py-2.5 last:border-b-0 max-md:grid-cols-1 max-md:gap-1 max-md:py-3">
-			<dt className="text-[13px] text-subtle-foreground max-md:text-[14px]">{label}</dt>
-			<dd className="m-0 min-w-0 text-[13px] text-foreground max-md:text-[15px]">{children}</dd>
+		<div className="grid grid-cols-label gap-4 border-border border-b px-3.5 py-2.5 last:border-b-0 max-md:grid-cols-1 max-md:gap-1 max-md:py-3">
+			<dt className="text-xs text-subtle-foreground max-md:text-sm">{label}</dt>
+			<dd className="m-0 min-w-0 text-xs text-foreground max-md:text-sm">{children}</dd>
 		</div>
 	);
 }

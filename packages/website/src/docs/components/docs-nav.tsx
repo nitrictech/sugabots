@@ -27,7 +27,7 @@ function DocsLinks() {
 								<Link
 									to="/docs/$slug"
 									params={{ slug }}
-									className="block rounded-full px-3 py-1.5 text-[0.95rem] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+									className="block rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
 									activeProps={{ className: "bg-secondary text-foreground font-semibold" }}
 								>
 									{findDocPage(slug)?.title}
@@ -46,7 +46,7 @@ export function DocsSidebar() {
 	return (
 		<nav
 			aria-label="Docs"
-			className="sticky top-(--site-header-height) hidden max-h-[calc(100svh-var(--site-header-height))] w-60 shrink-0 overflow-y-auto py-10 pr-2 lg:block"
+			className="sticky top-(--site-header-height) hidden max-h-below-header w-60 shrink-0 overflow-y-auto py-10 pr-2 lg:block"
 		>
 			<DocsLinks />
 		</nav>
@@ -70,14 +70,14 @@ export function DocsMenu() {
 				aria-label={open ? "Close the docs menu" : "Open the docs menu"}
 				aria-expanded={open}
 				onClick={() => setOpen((isOpen) => !isOpen)}
-				className="ml-1 grid size-9 place-items-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				className="ml-1 grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 			>
 				{open ? <XIcon className="size-5" /> : <MenuIcon className="size-5" />}
 			</button>
 			{open && (
 				<nav
 					aria-label="Docs"
-					className="absolute inset-x-0 top-full max-h-[calc(100svh-var(--site-header-height))] overflow-y-auto border-b bg-background px-3 py-6 shadow-2xl"
+					className="absolute inset-x-0 top-full max-h-below-header overflow-y-auto border-b bg-background px-3 py-6 shadow-2xl"
 				>
 					<DocsLinks />
 				</nav>

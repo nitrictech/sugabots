@@ -29,7 +29,7 @@ export function SegmentedControl<Value extends string>({
 		<fieldset
 			disabled={disabled}
 			className={cn(
-				"m-0 flex shrink-0 rounded-[10px] border-0 bg-chip p-0.5 disabled:opacity-50",
+				"m-0 flex shrink-0 rounded-lg border-0 bg-chip p-0.5 disabled:opacity-50",
 				className,
 			)}
 		>
@@ -38,7 +38,7 @@ export function SegmentedControl<Value extends string>({
 				<label
 					key={option.value}
 					className={cn(
-						"cursor-pointer rounded-[8px] has-disabled:cursor-default px-[11px] py-[5px] font-medium text-sm transition-colors has-checked:bg-person-avatar has-checked:text-foreground",
+						"cursor-pointer rounded-md has-disabled:cursor-default px-2.75 py-1.25 font-medium text-xs transition-colors has-checked:bg-person-avatar has-checked:text-foreground",
 						"text-muted-foreground has-focus-visible:shadow-(--ring-shadow)",
 					)}
 				>

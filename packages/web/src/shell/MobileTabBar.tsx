@@ -33,11 +33,11 @@ export function MobileTabBar({ className }: { className?: string }) {
 			className={cn(
 				// Named apart from the page, so it stays still while a page slides past. It floats
 				// over the page, which scrolls on under it; only the bar itself takes a tap.
-				"pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] [view-transition-name:tabs] md:hidden",
+				"pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden",
 				className,
 			)}
 		>
-			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-[32px] p-[5px]">
+			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-4xl p-1.25">
 				{/*
 				 * The highlight behind the open tab, one for the bar, so it slides
 				 * from tab to tab rather than one going dark as another lights.
@@ -46,7 +46,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 				 */}
 				<span
 					aria-hidden
-					className="absolute inset-y-[5px] left-[5px] w-[calc((100%-16px)/4)] rounded-[26px] bg-hover transition-transform duration-300 ease-out motion-reduce:transition-none"
+					className="absolute inset-y-1.25 left-1.25 w-tab rounded-3xl bg-hover transition-transform duration-300 ease-out motion-reduce:transition-none"
 					style={{ transform: `translateX(calc(${TABS.indexOf(tab)} * (100% + 2px)))` }}
 				/>
 				<TabLink
@@ -96,7 +96,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 							<PersonAvatar
 								person={user}
 								size={24}
-								className={cn(tab === "you" && "ring-[1.5px] ring-foreground")}
+								className={cn(tab === "you" && "ring-2 ring-foreground")}
 							/>
 						) : (
 							<span className="size-6 rounded-full bg-person-avatar" />
@@ -128,7 +128,7 @@ function TabLink({
 		props: {
 			"aria-current": current ? "page" : undefined,
 			className: cn(
-				"focus-ring relative flex h-[50px] flex-col items-center justify-center gap-[3px] rounded-[26px] font-medium text-[10px] transition-colors [&>svg]:size-6 [&>svg]:stroke-[1.75]",
+				"focus-ring relative flex h-12.5 flex-col items-center justify-center gap-0.75 rounded-3xl font-medium text-3xs transition-colors [&>svg]:size-6 [&>svg]:stroke-2",
 				current ? "text-foreground" : "text-muted-foreground",
 			),
 			children: (
@@ -136,7 +136,7 @@ function TabLink({
 					{icon}
 					{label}
 					{count && (
-						<span className="absolute top-0.5 left-[calc(50%+6px)] rounded-full ring-2 ring-glass-ring">
+						<span className="absolute top-0.5 left-1/2 ml-1.5 rounded-full ring-2 ring-glass-ring">
 							{count}
 						</span>
 					)}

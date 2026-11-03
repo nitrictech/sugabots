@@ -57,14 +57,14 @@ export function FileDropTarget({
 			{filesOver && (
 				<div
 					aria-hidden
-					className="pointer-events-none absolute inset-0 z-40 flex bg-drop-veil px-5 pt-4 pb-[42px]"
+					className="pointer-events-none absolute inset-0 z-40 flex bg-drop-veil px-5 pt-4 pb-10.5"
 				>
-					<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-[1.5px] border-ring border-dashed bg-drop-target px-4 text-center">
+					<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-ring border-dashed bg-drop-target px-4 text-center">
 						<span className="mb-1 grid size-12 place-items-center rounded-tile bg-primary text-primary-foreground">
 							<Upload size={22} strokeWidth={2.2} />
 						</span>
-						<span className="font-semibold text-[17px] text-foreground">Drop files to attach</span>
-						<span className="text-[13.5px] text-muted-foreground">
+						<span className="font-semibold text-base text-foreground">Drop files to attach</span>
+						<span className="text-xs text-muted-foreground">
 							Up to {MAX_ATTACHMENTS_PER_MESSAGE} files, {MAX_ATTACHMENT_MEGABYTES} MB each
 						</span>
 					</div>

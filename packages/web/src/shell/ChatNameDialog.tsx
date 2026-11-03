@@ -57,7 +57,7 @@ export function ChatNameDialog({
 						maxLength={CHAT_NAME_MAX_LENGTH}
 					/>
 				</SettingsGroup>
-				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
+				<p className="m-0 px-1 text-xs text-subtle-foreground leading-normal">
 					Everyone in the pod can read and write in it.
 				</p>
 				{failure !== undefined && (

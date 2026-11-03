@@ -93,7 +93,7 @@ export function SettingsLayout({
 				 */}
 				<main
 					data-scroll-restoration-id="settings"
-					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background [scrollbar-gutter:stable] max-md:[scrollbar-gutter:auto]"
+					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
 				>
 					{!index && (
 						<CompactPageBackBar
@@ -310,11 +310,11 @@ function NavigationGroup({
  * What sits at a line's right: a count, a pod's chevron, the + beside Pods.
  * One width for all, centred in it, so they line up down the navigation.
  */
-const TRAILING_SLOT = "grid w-[22px] shrink-0 place-items-center";
+const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** One line of the navigation, picked out when it is the open page. */
 const NAVIGATION_ITEM =
-	"focus-ring flex h-8 min-w-0 items-center rounded-[6px] pr-1.5 pl-2 text-[14px] transition-colors";
+	"focus-ring flex h-8 min-w-0 items-center rounded-sm pr-1.5 pl-2 text-sm transition-colors";
 
 function navigationItemState(selected: boolean) {
 	return selected
@@ -358,7 +358,7 @@ function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
 				aria-controls={listId}
 				onClick={() => setChosenOpen(!open)}
 				className={cn(
-					"focus-ring flex h-8 items-center gap-2.5 rounded-[6px] pr-1.5 pl-2 text-left text-[14px] transition-colors hover:bg-row-hover hover:text-foreground",
+					"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-left text-sm transition-colors hover:bg-row-hover hover:text-foreground",
 					openPage ? "text-foreground" : "text-muted-foreground",
 				)}
 			>
@@ -462,7 +462,7 @@ function NewPodButton() {
 					onClick={() => setCreating(true)}
 					className={cn(
 						TRAILING_SLOT,
-						"focus-ring h-[22px] rounded-[5px] text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground",
+						"focus-ring h-5.5 rounded-xs text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground",
 					)}
 				>
 					<Plus size={13} strokeWidth={2} />
@@ -489,11 +489,9 @@ function CompactSettingsList() {
 	return (
 		<nav
 			aria-label="Settings sections"
-			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-[620px] *:shrink-0 md:px-8 md:pt-9 lg:hidden"
+			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-155 *:shrink-0 md:px-8 md:pt-9 lg:hidden"
 		>
-			<h1 className="m-0 font-semibold text-[28px] text-foreground tracking-[-0.025em]">
-				Settings
-			</h1>
+			<h1 className="m-0 font-semibold text-3xl text-foreground tracking-tight">Settings</h1>
 			<SettingsListGroups />
 		</nav>
 	);
@@ -531,8 +529,8 @@ export function SettingsListGroups({
 				>
 					<PersonAvatar person={user} size={64} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate font-semibold text-[20px] text-foreground">{user.name}</span>
-						<span className="truncate text-[14px] text-subtle-foreground">
+						<span className="truncate font-semibold text-xl text-foreground">{user.name}</span>
+						<span className="truncate text-sm text-subtle-foreground">
 							Profile and notifications
 						</span>
 					</span>
@@ -595,11 +593,11 @@ function SettingsTrail({ className }: { className: string }) {
 		<nav
 			aria-label="Breadcrumb"
 			className={cn(
-				"flex h-[52px] shrink-0 items-center justify-center border-border border-b px-[72px]",
+				"flex h-13 shrink-0 items-center justify-center border-border border-b px-18",
 				className,
 			)}
 		>
-			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-[13px]">
+			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-xs">
 				{crumbs.map((crumb, index) => {
 					const last = index === crumbs.length - 1;
 					return (

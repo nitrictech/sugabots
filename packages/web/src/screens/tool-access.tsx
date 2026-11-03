@@ -65,9 +65,7 @@ export function AccessToggle({
 	onChange: (access: ConnectionAccess) => void;
 }) {
 	if (!canManage) {
-		return (
-			<span className="shrink-0 text-[13px] text-muted-foreground">{ACCESS_WORDS[value]}</span>
-		);
+		return <span className="shrink-0 text-xs text-muted-foreground">{ACCESS_WORDS[value]}</span>;
 	}
 	return <SegmentedControl label={label} options={toolOptions} value={value} onChange={onChange} />;
 }

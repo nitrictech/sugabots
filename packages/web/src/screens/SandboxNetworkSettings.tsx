@@ -148,7 +148,7 @@ export function AddedHostRow({
 	const by = added.addedByName ?? "someone who has left";
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13px]">{added.host}</span>}
+			label={<span className="font-mono text-xs">{added.host}</span>}
 			sub={
 				blockedBy ? `Blocked for the workspace by ${blockedBy}. Added by ${by}` : `Added by ${by}`
 			}
@@ -174,7 +174,7 @@ function BlockedHostRow({
 }) {
 	return (
 		<SettingsRow
-			label={<span className="font-mono text-[13px]">{blocked.host}</span>}
+			label={<span className="font-mono text-xs">{blocked.host}</span>}
 			sub={`Blocked by ${blocked.blockedByName ?? "someone who has left"}`}
 			trailing={
 				<IconButton label={`Unblock ${blocked.host}`} disabled={disabled} onClick={onUnblock}>
@@ -218,12 +218,12 @@ export function AddHostRow({
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
 					placeholder="api.example.com or *.example.com"
-					className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+					className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
 				/>
 				<button
 					type="submit"
 					disabled={disabled || draft.trim() === ""}
-					className="focus-ring shrink-0 rounded-md font-medium text-[13px] text-link disabled:opacity-50"
+					className="focus-ring shrink-0 rounded-md font-medium text-xs text-link disabled:opacity-50"
 				>
 					{action}
 				</button>

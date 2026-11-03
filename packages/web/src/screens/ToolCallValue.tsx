@@ -30,7 +30,7 @@ export function ToolCallValue({
 	return (
 		<div
 			className={cn(
-				"min-w-0 overflow-hidden rounded-md bg-chip text-[12.5px]",
+				"min-w-0 overflow-hidden rounded-md bg-chip text-xs",
 				failed ? "text-destructive-text" : "text-soft-foreground",
 			)}
 		>
@@ -64,7 +64,7 @@ function Value({ value, depth }: { value: unknown; depth: number }) {
 	if (typeof value === "string") return <Text text={value} />;
 	if (typeof value !== "object") return <span className="font-mono">{String(value)}</span>;
 	if (depth >= NESTED_FIELDS_DEPTH) {
-		return <span className="break-all font-mono text-[12px]">{JSON.stringify(value)}</span>;
+		return <span className="break-all font-mono text-xs">{JSON.stringify(value)}</span>;
 	}
 	if (Array.isArray(value)) return <Items items={value} depth={depth} />;
 	return <Fields fields={value as Record<string, unknown>} depth={depth} />;
@@ -74,7 +74,7 @@ function Fields({ fields, depth }: { fields: Record<string, unknown>; depth: num
 	const entries = Object.entries(fields);
 	if (entries.length === 0) return <Empty />;
 	return (
-		<dl className="m-0 grid min-w-0 grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1.5">
+		<dl className="m-0 grid min-w-0 grid-cols-fit-label gap-x-4 gap-y-1.5">
 			{entries.map(([key, value]) => (
 				<div key={key} className="contents">
 					<dt title={key} className="max-w-40 break-words text-muted-foreground">
@@ -133,7 +133,7 @@ function TextBlock({ text, className }: { text: string; className: string }) {
 			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must be reachable by keyboard.
 			tabIndex={0}
 			className={cn(
-				"focus-ring m-0 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed",
+				"focus-ring m-0 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
 				className,
 			)}
 		>

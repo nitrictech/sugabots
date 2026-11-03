@@ -59,7 +59,7 @@ export function CodeBlock({
 				ref={code}
 				// Shiki sets the theme's background inline; the card supplies it instead.
 				style={{ ...style, backgroundColor: undefined }}
-				className="overflow-x-auto px-5 py-4 font-mono text-[0.85rem] leading-relaxed"
+				className="overflow-x-auto px-5 py-4 font-mono text-sm leading-relaxed"
 				{...props}
 			>
 				{children}

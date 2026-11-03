@@ -83,7 +83,7 @@ function ArtifactCard({
 }
 
 /** A card showing only its header. */
-const COLLAPSED_WIDTH = "max-w-[560px]";
+const COLLAPSED_WIDTH = "max-w-140";
 
 /**
  * An artifact among the messages: a header that says which bot made it, so a
@@ -117,21 +117,21 @@ export function ArtifactCardView({
 			<article
 				aria-label={artifact.title}
 				className={cn(
-					"flex items-center gap-2.5 rounded-[12px] border border-border border-dashed px-3 py-2.5",
+					"flex items-center gap-2.5 rounded-xl border border-border border-dashed px-3 py-2.5",
 					COLLAPSED_WIDTH,
 				)}
 			>
 				<span
 					aria-hidden
-					className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-chip text-subtle-foreground [&_svg]:size-4"
+					className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-subtle-foreground [&_svg]:size-4"
 				>
 					<kind.Icon strokeWidth={2} />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-muted-foreground text-sm line-through">
+					<span className="truncate font-medium text-muted-foreground text-xs line-through">
 						{artifact.title}
 					</span>
-					<span className="truncate text-[12.5px] text-subtle-foreground">
+					<span className="truncate text-xs text-subtle-foreground">
 						{kind.label} by {botName}, deleted
 					</span>
 				</span>
@@ -142,7 +142,7 @@ export function ArtifactCardView({
 		<article
 			aria-label={artifact.title}
 			className={cn(
-				"overflow-hidden rounded-[12px] border border-border bg-panel",
+				"overflow-hidden rounded-xl border border-border bg-panel",
 				showsContent ? kind.cardWidth : COLLAPSED_WIDTH,
 			)}
 		>
@@ -155,9 +155,9 @@ export function ArtifactCardView({
 				<StageMark>
 					<kind.Icon strokeWidth={2} />
 				</StageMark>
-				<span className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-foreground text-sm">{artifact.title}</span>
-					<span className="truncate text-[12.5px] text-muted-foreground">
+				<span className="flex min-w-card-name flex-1 flex-col gap-px">
+					<span className="truncate font-medium text-foreground text-xs">{artifact.title}</span>
+					<span className="truncate text-xs text-muted-foreground">
 						{kind.label} by {botName}
 					</span>
 				</span>

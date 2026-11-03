@@ -18,7 +18,7 @@ const meta = preview.meta({
 	args: { context: context(48_200) },
 	decorators: [
 		(Story) => (
-			<div className="w-[320px] overflow-hidden rounded-xl border border-border bg-list">
+			<div className="w-80 overflow-hidden rounded-xl border border-border bg-list">
 				<Story />
 			</div>
 		),

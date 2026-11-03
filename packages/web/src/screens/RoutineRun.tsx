@@ -144,8 +144,8 @@ export function RunMessage({
 			</span>
 			<div className="flex min-w-0 flex-1 flex-col items-start">
 				<div className="flex items-center gap-2 pb-px">
-					<span className="font-semibold text-[15px] text-foreground">{agent.name}</span>
-					<span className="rounded-[4px] bg-chip px-[5px] py-px font-semibold text-[10.5px] text-muted-foreground leading-[1.4]">
+					<span className="font-semibold text-sm text-foreground">{agent.name}</span>
+					<span className="rounded bg-chip px-1.25 py-px font-semibold text-2xs text-muted-foreground leading-snug">
 						Bot
 					</span>
 					<span className="text-subtle-foreground text-xs">
@@ -154,7 +154,7 @@ export function RunMessage({
 					{!report && <RunStatus outcome={outcome} />}
 				</div>
 				{report ? (
-					<div className="min-w-0 self-stretch break-words text-[15px] text-body-foreground leading-[1.5]">
+					<div className="min-w-0 self-stretch break-words text-sm text-body-foreground leading-normal">
 						<MessageMarkdown text={report} mentionable={mentionable} />
 					</div>
 				) : outcome === "running" ? (
@@ -164,7 +164,7 @@ export function RunMessage({
 						<i />
 					</span>
 				) : (
-					<p className="m-0 text-[15px] text-body-foreground leading-[1.5]">
+					<p className="m-0 text-sm text-body-foreground leading-normal">
 						{item.error ??
 							(outcome === "cancelled" ? "The run was stopped." : "It posted nothing.")}
 					</p>

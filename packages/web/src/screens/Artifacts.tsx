@@ -103,7 +103,7 @@ export function ArtifactListView({
 			<Page title="Artifacts" place={{ kind: "pod", pod }}>
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
 					// As tall as the page leaves above the tabs, so there is nothing to scroll.
-					<div className="flex h-[calc(100%-var(--tab-bar-space,0px))] pb-[10%]">
+					<div className="flex h-above-tab-bar pb-20">
 						<EmptyState
 							title={`No artifacts in ${pod.name} yet`}
 							icon={<FileText strokeWidth={1.75} />}
@@ -153,7 +153,7 @@ export function ArtifactListView({
 					style={
 						width === undefined ? undefined : ({ "--pane-width": `${width}px` } as CSSProperties)
 					}
-					className="flex min-h-0 min-w-0 border-border md:relative md:w-[clamp(360px,var(--pane-width,58%),calc(100%_-_320px))] md:shrink-0 md:border-l"
+					className="flex min-h-0 min-w-0 border-border md:relative md:w-artifact-pane md:shrink-0 md:border-l"
 				>
 					<ResizeHandle
 						label="Resize the artifact"
@@ -187,13 +187,13 @@ function ArtifactRow({
 			{...artifactLink(pod, artifact.id)}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				"focus-ring flex items-center gap-3 rounded-[10px] p-2 transition-colors",
+				"focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-message-hover",
 			)}
 		>
 			<KindMark kind={artifact.kind} />
 			<span className="flex min-w-0 flex-1 flex-col leading-snug">
-				<span className="truncate font-medium text-[13px] text-foreground">{artifact.title}</span>
+				<span className="truncate font-medium text-xs text-foreground">{artifact.title}</span>
 				<span className="truncate text-subtle-foreground text-xs">
 					{[kind.label, `v${artifact.version}`, artifact.createdBy?.name ?? "A removed bot"].join(
 						", ",
@@ -391,9 +391,9 @@ function VersionPicker({
 			<DropdownMenuTrigger
 				aria-label={`Version ${shown.number} of ${artifact.version}`}
 				className={cn(
-					"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-strong pr-2 pl-2.5 text-xs transition-colors hover:bg-row-hover",
+					"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border-strong pr-2 pl-2.5 text-xs transition-colors hover:bg-row-hover",
 					// Round on glass on a phone, beside its ⋯.
-					"max-md:glass max-md:h-11 max-md:rounded-full max-md:border-0 max-md:pr-3 max-md:pl-3.5 max-md:text-sm max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong",
+					"max-md:glass max-md:h-11 max-md:rounded-full max-md:border-0 max-md:pr-3 max-md:pl-3.5 max-md:text-xs max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong",
 					isCurrent ? "text-soft-foreground" : "text-foreground",
 				)}
 			>
@@ -417,7 +417,7 @@ function VersionPicker({
 							Version {version.number}
 							<span className="text-muted-foreground"> {byline(version.author)}</span>
 						</span>
-						<time dateTime={version.createdAt} className="text-sm text-subtle-foreground">
+						<time dateTime={version.createdAt} className="text-xs text-subtle-foreground">
 							{formatListTime(new Date(version.createdAt), now)}
 						</time>
 					</DropdownMenuItem>
@@ -490,7 +490,7 @@ function KindMark({ kind }: { kind: ArtifactSummary["kind"] }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-chip text-muted-foreground"
+			className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-muted-foreground"
 		>
 			<Icon size={16} strokeWidth={1.75} />
 		</span>

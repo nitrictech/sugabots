@@ -120,7 +120,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 
 	return (
 		<>
-			<Note className="-mt-6 rounded-xl border border-settings-card-border bg-settings-card text-[13px]">
+			<Note className="-mt-6 rounded-xl border border-settings-card-border bg-settings-card text-xs">
 				Computers are experimental. How they work, and what they keep, may change between releases.
 			</Note>
 			<SettingsGroup
@@ -255,9 +255,7 @@ function ProviderChoice({
 	const name = useId();
 	return (
 		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-0.5 pb-2.5 font-medium text-[13px] text-muted-foreground">
-				Provider
-			</legend>
+			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">Provider</legend>
 			<div className={SETTINGS_CARD}>
 				{sandboxProviderCatalog.map((candidate) => (
 					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
@@ -270,8 +268,8 @@ function ProviderChoice({
 							className="sr-only"
 						/>
 						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
-						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-							<span className="truncate font-medium text-[13px] text-foreground">
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+							<span className="truncate font-medium text-sm text-foreground">
 								{candidate.name}
 								{candidate.id === enabled && (
 									<span className="ml-2 font-normal text-subtle-foreground text-xs">In use</span>

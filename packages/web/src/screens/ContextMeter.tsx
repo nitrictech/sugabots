@@ -30,16 +30,16 @@ export function ContextMeter({ context }: { context: ThreadContext }) {
 			<div
 				aria-hidden
 				className={cn(
-					"relative h-[3px] rounded-full bg-chip-strong",
+					"relative h-0.75 rounded-full bg-chip-strong",
 					compactedSinceMeasured && "opacity-40",
 				)}
 			>
 				<div
-					className="absolute inset-y-0 left-0 rounded-full bg-meter transition-[width]"
+					className="absolute inset-y-0 left-0 rounded-full bg-meter transition-all"
 					style={{ width: `${usedPercent}%` }}
 				/>
 				<div
-					className="absolute -top-[3px] h-[9px] w-px bg-muted-foreground"
+					className="absolute -top-0.75 h-2.25 w-px bg-muted-foreground"
 					style={{ left: `${linePercent}%` }}
 				/>
 			</div>

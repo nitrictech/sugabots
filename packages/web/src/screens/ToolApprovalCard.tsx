@@ -100,14 +100,14 @@ export function ToolApprovalCard({
 			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
 			className="flex animate-rise motion-reduce:animate-none"
 		>
-			<div className="flex min-w-0 max-w-[460px] flex-1 flex-col gap-2.5 rounded-[6px_20px_20px_20px] bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
+			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble rounded-tl-tail bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
-				<div className="min-w-0 md:ml-[34px]">
+				<div className="min-w-0 md:ml-8.5">
 					<FoldedRequest input={call.input} />
 				</div>
 				<div
 					className={cn(
-						"flex min-w-0 flex-col gap-2 md:ml-[34px]",
+						"flex min-w-0 flex-col gap-2 md:ml-8.5",
 						// On a wide screen an answered request has nothing here; only a phone's See request is.
 						!answerable && !status && "md:hidden",
 					)}
@@ -120,13 +120,13 @@ export function ToolApprovalCard({
 					)}
 					<div className="md:hidden">
 						{answerable ? (
-							<Button className="h-11 w-full text-[15px]" onClick={() => setReviewing(true)}>
+							<Button className="h-11 w-full text-sm" onClick={() => setReviewing(true)}>
 								Review
 							</Button>
 						) : (
 							<Button
 								variant="secondary"
-								className="h-11 w-full text-[15px]"
+								className="h-11 w-full text-sm"
 								onClick={() => setReviewing(true)}
 							>
 								See request
@@ -176,7 +176,7 @@ function Outcome({
 			role={announced ? "status" : undefined}
 			className="m-0 flex items-start gap-1.5 text-muted-foreground text-xs leading-normal"
 		>
-			<span className="mt-[3px] flex shrink-0">{icon}</span>
+			<span className="mt-0.75 flex shrink-0">{icon}</span>
 			<span>{children}</span>
 		</p>
 	);
@@ -193,7 +193,7 @@ interface Step {
 }
 
 const MARK_SIZES = {
-	md: { box: "size-6 rounded-[7px]", icon: 14 },
+	md: { box: "size-6 rounded-sm", icon: 14 },
 	sm: { box: "size-8 rounded-lg", icon: 16 },
 } as const;
 
@@ -223,8 +223,8 @@ function StepHeading({ step }: { step: Step }) {
 				<StepMark step={step} size="md" />
 			</span>
 			<span className="flex min-w-0 flex-col gap-0.5">
-				<span className="text-muted-foreground text-xs leading-[1.4]">{step.who}</span>
-				<span className="text-pretty font-medium text-[14px] leading-[1.4] [overflow-wrap:anywhere]">
+				<span className="text-muted-foreground text-xs leading-snug">{step.who}</span>
+				<span className="text-pretty font-medium text-sm leading-snug wrap-anywhere">
 					{step.action}
 				</span>
 			</span>
@@ -268,7 +268,7 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 					folded && FOLDED_CLASSES,
 					foldable &&
 						open &&
-						"md:max-h-[min(168px,40vh)] md:overflow-y-auto md:overscroll-contain md:pr-1.5 md:[scrollbar-width:thin]",
+						"md:max-h-tool-input md:overflow-y-auto md:overscroll-contain md:pr-1.5 md:scrollbar-thin",
 				)}
 			>
 				<div ref={content}>
@@ -281,7 +281,7 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 					aria-expanded={open}
 					aria-controls={bodyId}
 					onClick={() => setOpen(!open)}
-					className="focus-ring flex cursor-pointer items-center gap-[5px] rounded-md py-1.5 font-medium text-link text-xs max-md:hidden"
+					className="focus-ring flex cursor-pointer items-center gap-1.25 rounded-md py-1.5 font-medium text-link text-xs max-md:hidden"
 				>
 					{open ? "See less" : "See more"}
 					<ChevronDown
@@ -295,10 +295,8 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 	);
 }
 
-const FOLDED_CLASSES =
-	"max-h-[66px] overflow-hidden [mask-image:linear-gradient(#000_55%,transparent)]";
-const FOLDED_CLASSES_ON_PHONE =
-	"max-md:max-h-[66px] max-md:overflow-hidden max-md:[mask-image:linear-gradient(#000_55%,transparent)]";
+const FOLDED_CLASSES = "max-h-16.5 overflow-hidden mask-b-from-55%";
+const FOLDED_CLASSES_ON_PHONE = "max-md:max-h-16.5 max-md:overflow-hidden max-md:mask-b-from-55%";
 
 /**
  * The whole request on a phone, full screen: what is asked at the top, every
@@ -334,12 +332,12 @@ function ReviewSheet({
 				initialFocus={top}
 				aria-labelledby={headingId}
 				style={botColorVariables(agent.color)}
-				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-[min(38rem,calc(100dvh-4rem))] md:max-w-[36rem] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
+				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-approval md:max-w-144 md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
 			>
 				<div
 					ref={top}
 					tabIndex={-1}
-					className="flex shrink-0 justify-end px-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] outline-none max-md:justify-start max-md:px-4"
+					className="flex shrink-0 justify-end px-3.5 pt-safe-or-4 outline-none max-md:justify-start max-md:px-4"
 				>
 					<CloseButton render={<DialogClose />} />
 				</div>
@@ -349,7 +347,7 @@ function ReviewSheet({
 						<RequestValue value={input} depth={0} />
 					</div>
 				</ScrollArea>
-				<footer className="shrink-0 border-border-subtle border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+				<footer className="shrink-0 border-border-subtle border-t px-4 pt-3 pb-safe-or-4">
 					{children}
 				</footer>
 			</DialogContent>
@@ -375,17 +373,17 @@ function ReviewHeading({
 		<div className="flex flex-col items-center gap-1 pb-2 text-center">
 			<span aria-hidden className="relative mb-2.5 inline-flex">
 				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
-				<span className="absolute -right-2 -bottom-1 rounded-[10px] ring-[3px] ring-panel">
+				<span className="absolute -right-2 -bottom-1 rounded-lg ring-3 ring-panel">
 					<StepMark step={step} size="sm" />
 				</span>
 			</span>
 			<h2
 				id={headingId}
-				className="m-0 text-balance font-bold text-[20px] text-foreground leading-tight [overflow-wrap:anywhere]"
+				className="m-0 text-balance font-bold text-xl text-foreground leading-tight wrap-anywhere"
 			>
 				{step.action}
 			</h2>
-			<p className="m-0 text-pretty text-[14px] text-muted-foreground">{step.who}</p>
+			<p className="m-0 text-pretty text-sm text-muted-foreground">{step.who}</p>
 		</div>
 	);
 }
@@ -414,7 +412,7 @@ export function Answer({
 			disabled={pending}
 			onClick={() => onDecide("allow_once")}
 			aria-label={`Allow: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+			className={pinned ? "h-11 flex-1 text-sm" : "h-7.75 px-4 text-xs"}
 		>
 			Allow
 		</Button>
@@ -425,7 +423,7 @@ export function Answer({
 			disabled={pending}
 			onClick={() => onDecide("deny")}
 			aria-label={`Deny: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+			className={pinned ? "h-11 flex-1 text-sm" : "h-7.75 px-4 text-xs"}
 		>
 			Deny
 		</Button>
@@ -494,7 +492,7 @@ export function RequestValue({ value, depth }: { value: unknown; depth: number }
 	if (isRecordList(value) && depth < MAX_DEPTH) return <EntryList entries={value} depth={depth} />;
 	if (value !== null && typeof value === "object" && !isPlainList(value)) {
 		return (
-			<pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md bg-list px-2.5 py-2 font-mono text-2xs">
+			<pre className="m-0 whitespace-pre-wrap wrap-anywhere rounded-md bg-list px-2.5 py-2 font-mono text-2xs">
 				{JSON.stringify(value, null, 2)}
 			</pre>
 		);
@@ -510,7 +508,7 @@ export function RequestValue({ value, depth }: { value: unknown; depth: number }
  */
 function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 	return (
-		<dl className="m-0 flex flex-col gap-3 md:grid md:grid-cols-[fit-content(min(180px,40%))_minmax(0,1fr)] md:gap-x-2.5 md:gap-y-0.5">
+		<dl className="m-0 flex flex-col gap-3 md:grid md:grid-cols-capped-label md:gap-x-2.5 md:gap-y-0.5">
 			{fields.map(([key, value]) => {
 				const nested = hasStructure(value);
 				return (
@@ -518,7 +516,7 @@ function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 						key={key}
 						className="flex min-w-0 flex-col gap-0.5 md:col-span-2 md:grid md:grid-cols-subgrid md:gap-0"
 					>
-						<dt className="text-[14px] text-muted-foreground leading-normal md:min-w-[76px]">
+						<dt className="text-sm text-muted-foreground leading-normal md:min-w-19">
 							{wordsFromKey(key)}
 						</dt>
 						{nested ? (
@@ -619,7 +617,7 @@ function EntryTable({ columns, rows }: { columns: string[]; rows: Record<string,
 						<th
 							key={column}
 							scope="col"
-							className="pr-4 pb-1 text-left font-normal text-[14px] text-muted-foreground"
+							className="pr-4 pb-1 text-left font-normal text-sm text-muted-foreground"
 						>
 							{wordsFromKey(column)}
 						</th>
@@ -671,8 +669,8 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 		<p className="m-0 leading-5">
 			{Object.entries(fields).map(([key, value], index) => (
 				<Fragment key={key}>
-					{index > 0 && <span className="text-[14px] text-muted-foreground">, </span>}
-					<span className="text-[14px] text-muted-foreground">{wordsFromKey(key)}</span>{" "}
+					{index > 0 && <span className="text-sm text-muted-foreground">, </span>}
+					<span className="text-sm text-muted-foreground">{wordsFromKey(key)}</span>{" "}
 					<PlainValue value={value} />
 				</Fragment>
 			))}
@@ -688,21 +686,21 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 function PlainValue({ value }: { value: unknown }) {
 	if (isPlainList(value)) {
 		if (value.length === 0) return <Quiet>None</Quiet>;
-		return <span className="text-[14px] leading-normal">{value.map(String).join(", ")}</span>;
+		return <span className="text-sm leading-normal">{value.map(String).join(", ")}</span>;
 	}
 	if (value === null || value === undefined || value === "") return <Quiet>Empty</Quiet>;
 	if (typeof value === "boolean") return <Quiet>{value ? "Yes" : "No"}</Quiet>;
 	if (typeof value === "number") {
-		return <span className="text-[14px] tabular-nums leading-normal">{value}</span>;
+		return <span className="text-sm tabular-nums leading-normal">{value}</span>;
 	}
 	if (fieldsOf(value) === undefined && typeof value === "object") return <Quiet>None</Quiet>;
 	return (
-		<span className="whitespace-pre-wrap text-pretty text-[14px] leading-normal [overflow-wrap:anywhere]">
+		<span className="whitespace-pre-wrap text-pretty text-sm leading-normal wrap-anywhere">
 			{String(value)}
 		</span>
 	);
 }
 
 function Quiet({ children }: { children: ReactNode }) {
-	return <span className="text-[14px] text-muted-foreground leading-normal">{children}</span>;
+	return <span className="text-sm text-muted-foreground leading-normal">{children}</span>;
 }

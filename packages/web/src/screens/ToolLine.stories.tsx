@@ -42,7 +42,7 @@ const meta = preview.meta({
 	args: { parts: hubspot, looks, fileNames: new Map() },
 	decorators: [
 		(Story) => (
-			<div className="max-w-[640px] pl-[50px]">
+			<div className="max-w-160 pl-12.5">
 				<Story />
 			</div>
 		),

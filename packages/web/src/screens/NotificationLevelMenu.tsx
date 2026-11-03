@@ -97,7 +97,7 @@ function MoreOptions({
 						<Bell />
 						<span className="flex flex-col">
 							Unmute
-							<span className="text-[13px] text-muted-foreground">
+							<span className="text-xs text-muted-foreground">
 								Muted until {formatUntil(mutedUntil)}
 							</span>
 						</span>
@@ -169,7 +169,7 @@ export function NotificationLevelPicker({
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				aria-label={`Notifications for ${name}`}
-				className="focus-ring flex shrink-0 items-center gap-1 rounded-md text-[14px] text-muted-foreground transition-colors hover:text-foreground"
+				className="focus-ring flex shrink-0 items-center gap-1 rounded-md text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				{chosen ? NOTIFICATION_LEVEL_LABELS[chosen] : "Default"}
 				<ChevronDown aria-hidden size={14} strokeWidth={2} />

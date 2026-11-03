@@ -19,7 +19,7 @@ const meta = preview.meta({
 	decorators: [
 		(Story) => (
 			<QueryClientProvider client={createQueryClient()}>
-				<div className="max-w-[720px] p-4">
+				<div className="max-w-180 p-4">
 					<Story />
 				</div>
 			</QueryClientProvider>
@@ -45,7 +45,7 @@ const openDesktop = fn();
 
 export const LiveCard = meta.story({
 	render: ({ threadId, agentId }) => (
-		<div className="max-w-[460px]">
+		<div className="max-w-115">
 			<LiveDesktopCard
 				threadId={threadId}
 				agentId={agentId}

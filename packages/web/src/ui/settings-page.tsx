@@ -19,7 +19,7 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
  * is, so Back lines up with the list's + beside it.
  */
 const PANEL_BACK_BAR =
-	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur max-md:bg-transparent max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2 max-md:backdrop-blur-none";
+	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur max-md:bg-transparent max-md:pt-safe-or-3 max-md:pb-2 max-md:backdrop-blur-none";
 
 /**
  * Where a page's add button goes on a phone: across from Back at the top,
@@ -29,12 +29,12 @@ const PANEL_BACK_BAR =
  * pushes it down. It takes no room of its own.
  */
 const PHONE_ACTION_ROW =
-	"pointer-events-none sticky top-[max(12px,env(safe-area-inset-top))] z-20 -mt-[52px] flex h-[52px] shrink-0 justify-end px-4";
+	"pointer-events-none sticky top-safe-or-3 z-20 -mt-13 flex h-13 shrink-0 justify-end px-4";
 
 const PANEL_BACK_LINK =
-	"focus-ring inline-flex min-h-[30px] min-w-0 items-center gap-1 rounded-md font-medium text-[14px] text-link";
+	"focus-ring inline-flex min-h-7.5 min-w-0 items-center gap-1 rounded-md font-medium text-sm text-link";
 
-const PAGE_TITLE = "m-0 font-semibold text-2xl text-foreground leading-[30px] tracking-[-0.025em]";
+const PAGE_TITLE = "m-0 font-semibold text-base text-foreground leading-7.5 tracking-tight";
 
 /** A settings page: its title and what it is for, then its groups. */
 export function SettingsPage({
@@ -87,7 +87,7 @@ export function SettingsPage({
 			)}
 			<div
 				className={cn(
-					"mx-auto flex w-full max-w-[760px] flex-col gap-8 px-4 pb-20 md:px-8",
+					"mx-auto flex w-full max-w-190 flex-col gap-8 px-4 pb-20 md:px-8",
 					// Close under its Back; on a wide screen, as high as any other page.
 					// On a phone every page has a Back above it, the frame's or its own.
 					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
@@ -98,11 +98,9 @@ export function SettingsPage({
 					<div className="flex flex-wrap items-center gap-x-3.5 gap-y-3">
 						{/* One size of slot for every picture, so moving between pages never moves the title. */}
 						<span className="grid size-11 shrink-0 place-items-center">{hero}</span>
-						<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5">
+						<div className="flex min-w-field flex-1 flex-col gap-0.5">
 							{title && <h2 className={cn(PAGE_TITLE, "truncate")}>{title}</h2>}
-							{description && (
-								<p className="m-0 text-[13px] text-muted-foreground">{description}</p>
-							)}
+							{description && <p className="m-0 text-xs text-muted-foreground">{description}</p>}
 						</div>
 						{besideTitle}
 					</div>
@@ -110,10 +108,10 @@ export function SettingsPage({
 					(title || description) && (
 						// The actions wrap under the title when they leave it too narrow, as on a phone.
 						<div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-							<div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-1">
+							<div className="flex min-w-field-wide flex-1 flex-col gap-1">
 								{title && <h2 className={PAGE_TITLE}>{title}</h2>}
 								{description && (
-									<p className="m-0 text-pretty text-[13px] text-muted-foreground leading-normal">
+									<p className="m-0 text-pretty text-xs text-muted-foreground leading-normal">
 										{description}
 									</p>
 								)}
@@ -153,13 +151,13 @@ export function SettingsAddButton({
 			onClick,
 			disabled,
 			className: cn(
-				"focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border-strong pr-3 pl-2.5 font-medium text-[13px] text-foreground transition-colors hover:border-border-dashed hover:bg-row-hover disabled:cursor-default disabled:opacity-50",
+				"focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border-strong pr-3 pl-2.5 font-medium text-xs text-foreground transition-colors hover:border-border-dashed hover:bg-row-hover disabled:cursor-default disabled:opacity-50",
 				// On a phone, the round + a phone's page has at its top right.
 				"max-md:glass max-md:size-11 max-md:justify-center max-md:rounded-full max-md:border-0 max-md:p-0 max-md:active:bg-hover-strong",
 			),
 			children: (
 				<>
-					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-[22px]" />
+					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-5.5" />
 					<span className="max-md:sr-only">{children}</span>
 				</>
 			),
@@ -199,7 +197,7 @@ export function SettingsGroup({
 					{label && (
 						<Heading
 							id={headingId}
-							className="m-0 min-w-0 flex-1 font-medium text-[13px] text-muted-foreground"
+							className="m-0 min-w-0 flex-1 font-medium text-xs text-muted-foreground"
 						>
 							{label}
 						</Heading>
@@ -208,13 +206,13 @@ export function SettingsGroup({
 				</div>
 			)}
 			{description && (
-				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-[13px]">
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
 					{description}
 				</p>
 			)}
 			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-[13px]">
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
 					{note}
 				</div>
 			)}
@@ -269,13 +267,9 @@ export function SettingsRow({
 			children: (
 				<>
 					{icon}
-					<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[1.4]">
-						<span className="truncate text-[13px] text-foreground max-lg:text-[16px]">{label}</span>
-						{sub && (
-							<span className="text-pretty text-subtle-foreground text-xs max-lg:text-[13px]">
-								{sub}
-							</span>
-						)}
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+						<span className="truncate text-sm text-foreground max-lg:text-base">{label}</span>
+						{sub && <span className="text-pretty text-subtle-foreground text-xs">{sub}</span>}
 					</span>
 					{trailing}
 					{chevron && (
@@ -324,7 +318,7 @@ export function SettingsFieldRow({
 				placeholder={placeholder}
 				maxLength={maxLength}
 				className={cn(
-					"min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle-foreground",
+					"min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground",
 					mono && "font-mono",
 				)}
 			/>
@@ -376,11 +370,11 @@ export function SettingsNameRow({
 						if (event.key === "Escape") setDraft(name);
 					}}
 					maxLength={maxLength}
-					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-[13px] text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
+					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
 				/>
 			</SettingsControlRow>
 			{error && (
-				<Alert className="border-border border-b px-4 py-2.5 text-[13px] last:border-b-0">
+				<Alert className="border-border border-b px-4 py-2.5 text-xs last:border-b-0">
 					{error}
 				</Alert>
 			)}
@@ -465,8 +459,7 @@ export function SettingsFieldLabel({
 	htmlFor?: string;
 	children: ReactNode;
 }) {
-	const className =
-		"min-w-24 shrink-0 whitespace-nowrap text-[13px] text-foreground max-lg:text-[16px]";
+	const className = "min-w-24 shrink-0 whitespace-nowrap text-sm text-foreground max-lg:text-base";
 	return htmlFor ? (
 		<label htmlFor={htmlFor} className={className}>
 			{children}
@@ -479,7 +472,7 @@ export function SettingsFieldLabel({
 /** The value at a row's end, in the muted colour. */
 export function SettingsValue({ children }: { children: ReactNode }) {
 	return (
-		<span className="shrink-0 whitespace-nowrap text-[13px] text-muted-foreground max-lg:text-[15px]">
+		<span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground max-lg:text-sm">
 			{children}
 		</span>
 	);
@@ -500,7 +493,7 @@ export function SettingsRowButton({
 			type="button"
 			onClick={onClick}
 			disabled={disabled}
-			className="focus-ring h-[30px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-[13px] text-foreground transition-colors hover:bg-row-hover active:bg-row-selected disabled:cursor-default disabled:opacity-50"
+			className="focus-ring h-7.5 shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-xs text-foreground transition-colors hover:bg-row-hover active:bg-row-selected disabled:cursor-default disabled:opacity-50"
 		>
 			{children}
 		</button>
@@ -549,7 +542,7 @@ export function SettingsTestOutcome({ good, children }: { good: boolean; childre
 /** A row's state as a small green pill with a dot, for something working: Connected. */
 export function SettingsStatusBadge({ children }: { children: ReactNode }) {
 	return (
-		<span className="flex h-[22px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-success/12 px-2 font-medium text-success-text text-xs">
+		<span className="flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-success/12 px-2 font-medium text-success-text text-xs">
 			<span aria-hidden className="size-1.5 rounded-full bg-success" />
 			{children}
 		</span>
@@ -568,7 +561,7 @@ export function SettingsRowIcon({
 		<span
 			aria-hidden
 			className={cn(
-				"grid size-7 shrink-0 place-items-center rounded-[7px] border border-border-strong font-semibold text-soft-foreground text-xs",
+				"grid size-7 shrink-0 place-items-center rounded-sm border border-border-strong font-semibold text-soft-foreground text-xs",
 				className,
 			)}
 		>
@@ -589,7 +582,7 @@ export function SettingsAddRow({ label, onClick }: { label: string; onClick: () 
 			)}
 		>
 			<SettingsAddMark />
-			<span className="text-[13px] text-muted-foreground">{label}</span>
+			<span className="text-sm text-muted-foreground">{label}</span>
 		</button>
 	);
 }
@@ -628,9 +621,9 @@ export function SettingsDanger({
 				"flex min-h-14 flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3",
 			)}
 		>
-			<div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5 leading-[1.4]">
-				<span className="text-[13px] text-foreground max-lg:text-[16px]">{label}</span>
-				<span className="text-pretty text-subtle-foreground text-xs max-lg:text-[13px]">
+			<div className="flex min-w-field flex-1 flex-col gap-0.5 leading-snug">
+				<span className="text-sm text-foreground max-lg:text-base">{label}</span>
+				<span className="text-pretty text-subtle-foreground text-xs">
 					{disabledReason ?? description}
 				</span>
 			</div>
@@ -639,7 +632,7 @@ export function SettingsDanger({
 				onClick={onClick}
 				disabled={disabledReason !== undefined}
 				aria-label={label}
-				className="focus-ring -mr-1.5 h-[30px] shrink-0 whitespace-nowrap rounded-lg px-3 font-medium text-[13px] text-destructive-text transition-colors hover:bg-destructive-hover disabled:cursor-not-allowed disabled:opacity-50"
+				className="focus-ring -mr-1.5 h-7.5 shrink-0 whitespace-nowrap rounded-lg px-3 font-medium text-xs text-destructive-text transition-colors hover:bg-destructive-hover disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{action}
 			</button>
@@ -662,7 +655,7 @@ export function PageBackLink({ label, render }: BackTarget) {
 			className: cn(PANEL_BACK_LINK, BACK_ON_PHONE),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-[22px]" />
+					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
 					<span className={cn("min-w-0 truncate", BACK_LABEL_ON_PHONE)}>{label}</span>
 				</>
 			),
@@ -682,12 +675,12 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 		render: backLink,
 		props: {
 			className: cn(
-				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link",
+				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link",
 				BACK_ON_PHONE,
 			),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-[22px]" />
+					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-5.5" />
 					<span className={BACK_LABEL_ON_PHONE}>{label}</span>
 				</>
 			),
@@ -698,7 +691,7 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 			className={cn(
 				"sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur",
 				// A phone's Back floats on its own, at a page's inset, over nothing.
-				"max-md:h-auto max-md:bg-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2 max-md:backdrop-blur-none",
+				"max-md:h-auto max-md:bg-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2 max-md:backdrop-blur-none",
 				className,
 			)}
 		>

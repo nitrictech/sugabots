@@ -227,3 +227,49 @@ html[data-os="windows"] [data-for-os="windows"],
 html[data-os="linux"] [data-for-os="linux"] {
 	display: contents;
 }
+
+/*
+ * Sizes that depend on the page at runtime, such as the height of the site's
+ * header, which no standard utility can express.
+ */
+@utility max-h-below-header {
+	max-height: calc(100svh - var(--site-header-height));
+}
+@utility scroll-mt-below-header {
+	scroll-margin-top: calc(var(--site-header-height) + 24px);
+}
+@utility top-pinned {
+	/* Centred in the room under the header, but never under it. */
+	top: max(
+		var(--site-header-height),
+		calc((100svh + var(--site-header-height) - var(--pinned-height)) / 2)
+	);
+}
+@utility h-scroll-scene {
+	/* The scroll distance a pinned scene plays out over. */
+	height: 320vh;
+}
+@utility w-lightbox {
+	width: min(80vw, 1040px);
+}
+@utility max-w-lightbox {
+	max-width: min(96vw, calc(100vw - 9rem));
+}
+@utility max-h-lightbox {
+	max-height: calc(92vh - 5.5rem);
+}
+@utility grid-cols-plans {
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+@utility grid-cols-capped-label {
+	grid-template-columns: fit-content(min(180px, 40%)) minmax(0, 1fr);
+}
+@utility grid-cols-content-auto {
+	grid-template-columns: 1fr auto;
+}
+@utility grid-rows-collapsed {
+	grid-template-rows: 0fr;
+}
+@utility grid-rows-expanded {
+	grid-template-rows: 1fr;
+}

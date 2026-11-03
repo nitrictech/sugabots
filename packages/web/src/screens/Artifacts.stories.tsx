@@ -90,7 +90,7 @@ const meta = preview.meta({
 	decorators: [
 		(Story) => (
 			<QueryPreview>
-				<div className="flex h-[640px] min-w-0">
+				<div className="flex h-160 min-w-0">
 					<Story />
 				</div>
 			</QueryPreview>
@@ -294,7 +294,7 @@ export const InAThread = meta.story({
 	},
 	render: () => (
 		<QueryPreview>
-			<div className="p-6 pl-[50px]">
+			<div className="p-6 pl-12.5">
 				<ArtifactCards
 					parts={[written("artifact_edit", plan)]}
 					podId={revenue.id}
@@ -352,7 +352,7 @@ const asWritten = (summary: ArtifactSummary, title = summary.title): WrittenArti
 export const InlineDocument = meta.story({
 	args: { onOpen: fn() },
 	render: ({ onOpen }) => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(plan)}
@@ -377,7 +377,7 @@ export const InlineDocument = meta.story({
 /** A card whose artifact has been deleted keeps only its name, marked deleted, with nothing to open. */
 export const InlineDeleted = meta.story({
 	render: () => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(dashboard)}
@@ -396,7 +396,7 @@ export const InlineDeleted = meta.story({
 /** A card whose artifact could not be loaded still says what it is and opens it, with nothing to expand. */
 export const InlineFailed = meta.story({
 	render: () => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(plan)}
@@ -443,7 +443,7 @@ stages.forEach(([name, deals], index) => {
 /** A page a reply wrote, running in place under a header that says which bot made it. */
 export const InlinePage = meta.story({
 	render: () => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(dashboard)}
@@ -467,7 +467,7 @@ export const InlinePage = meta.story({
 /** Loading the page a reply wrote. */
 export const InlinePageLoading = meta.story({
 	render: () => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(dashboard)}
@@ -491,7 +491,7 @@ const tallPage = `<!doctype html><html><body style="padding: 16px">${Array.from(
 /** A page taller than the frame: clipped, shown all, then clipped again. */
 export const InlinePageTall = meta.story({
 	render: () => (
-		<div className="w-full max-w-[620px] p-6 pl-[50px]">
+		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
 				podId={revenue.id}
 				artifact={asWritten(dashboard, "Every deal")}
@@ -535,7 +535,7 @@ export const PageFromContentOrigin = meta.story({
 	},
 	render: () => (
 		<ContentOriginPreview>
-			<div className="w-full max-w-[620px] p-6 pl-[50px]">
+			<div className="w-full max-w-155 p-6 pl-12.5">
 				<ArtifactCardView
 					podId={revenue.id}
 					artifact={asWritten(dashboard)}
