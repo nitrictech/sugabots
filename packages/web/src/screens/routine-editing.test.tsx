@@ -291,9 +291,10 @@ describe("a pod's routines", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
 		await addTrigger("Schedule");
 		fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
-		while (screen.getByRole("status", { name: "On the" }).textContent !== "last day") {
-			fireEvent.click(screen.getByRole("button", { name: "A day later" }));
-		}
+		// Found once: a role query reads the whole page, and the loop can click a month's worth of days.
+		const day = screen.getByRole("status", { name: "On the" });
+		const dayLater = screen.getByRole("button", { name: "A day later" });
+		while (day.textContent !== "last day") fireEvent.click(dayLater);
 		fireEvent.click(screen.getByRole("button", { name: "Further apart" }));
 		fireEvent.click(screen.getByRole("button", { name: "Further apart" }));
 		fireEvent.click(screen.getByRole("button", { name: "Add a time" }));

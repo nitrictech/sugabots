@@ -92,6 +92,11 @@ export default defineConfig({
 					environment: "jsdom",
 					include: ["src/**/*.test.{ts,tsx}"],
 					setupFiles: ["src/test-setup.ts"],
+					// A test walks a screen through a whole flow, a second or two alone and
+					// several times that while every worker is busy. Each wait has its own,
+					// shorter limit (see test-setup.ts), so a missing element still fails
+					// with what was missing.
+					testTimeout: 15_000,
 				},
 			},
 		],
