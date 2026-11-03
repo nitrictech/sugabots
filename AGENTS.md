@@ -47,7 +47,9 @@ Follow `packages/core/src/email/email.ts`:
 
 ## UI development
 
+While the owner is still iterating on a design, make each change and hand it back. Don't add stories, run tests, or take screenshots between iterations. The story and verification steps below are for finishing a UI change, once the design is settled or it's going into a PR.
+
 - Start `bun run storybook` and use the `storybook` MCP's `docs-list` and `docs-show` to find existing components and verify their APIs. If the MCP is unavailable, inspect colocated stories and component types directly.
 - Use `get-storybook-story-instructions` before editing stories. Keep stories beside production components and cover meaningful states with deterministic fixtures.
 - Reuse the semantic tokens in `packages/web/src/app.css` and the controls in `packages/web/src/ui/`.
-- Verify changes with MCP `test-run` (or `bun run test:storybook` when MCP is unavailable), inspect relevant light/dark and narrow-viewport stories, and include preview links in the handoff.
+- When finishing, verify with MCP `test-run` (or `bun run test:storybook` when MCP is unavailable), inspect relevant light/dark and narrow-viewport stories, and include preview links in the handoff.
