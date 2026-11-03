@@ -95,6 +95,9 @@ function connection(handle: string, name: string, url: string): Connection {
 	};
 }
 
+/** Someone else in the pod, whom a person's `@here` or `@channel` would notify. */
+const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
+
 /** Renders the thread, and returns `update` to redraw it as a live thread would. */
 function show(
 	messages: Message[],
@@ -109,6 +112,8 @@ function show(
 				host={host}
 				isRunning={false}
 				participants={participants}
+				members={[podmate]}
+				threadType="conversation"
 				podId={POD}
 				onOpenThread={() => undefined}
 				dividers={false}

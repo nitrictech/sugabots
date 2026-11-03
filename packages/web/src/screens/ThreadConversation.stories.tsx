@@ -14,6 +14,8 @@ import { HttpResponse, http } from "msw";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
 
@@ -83,6 +85,8 @@ const meta = preview.meta({
 		host,
 		isRunning: false,
 		participants: [host, person],
+		members: [person, jay],
+		threadType: "conversation",
 		podId: POD,
 		onOpenThread: fn(),
 		fileUrlOf,
@@ -996,6 +1000,132 @@ export const Mentions = meta.story({
 		// Mentions add to Streamdown's markdown rather than replacing it.
 		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
 		await expect(canvas.getByText(/jay@example\.com and @nobody\./)).toBeInTheDocument();
+	},
+});
+
+/** The rest of the pod, so `@here` has more people to notify than its card lists. */
+const podmates = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
+	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
+);
+
+/** The workspace the bots below are in, whose roster holds what each does. */
+const workspace = {
+	id: growthDesk.workspaceId,
+	name: "Nitric",
+	slug: "nitric",
+	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+};
+
+/** Called by Escape in the panel `MentionCards` draws the conversation in. */
+const closePanel = fn();
+
+/**
+ * Clicking a mention, or pressing Enter or Space on it, opens a card: a
+ * person's face, name, role and handle; a bot's, with what it does; and for
+ * `@here`, who it notifies, leaving out its writer and every bot. Escape
+ * closes the card and leaves the panel the conversation is in open, and so
+ * does a click outside it.
+ */
+export const MentionCards = meta.story({
+	args: {
+		participants: [host, person, jay, ...podmates],
+		members: [person, jay, ...podmates],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000420",
+				jay,
+				"@sam-rivera can you pair with @issue-triager on the flaky test? @here the release waits on it. Not @nobody.",
+			),
+		],
+	},
+	decorators: [
+		function WithBots(Story) {
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connections", POD], []);
+				client.setQueryData(["workspaces"], [workspace]);
+				client.setQueryData(
+					["workspaces", workspace.id, "members"],
+					[
+						{
+							id: "0199a3a0-0000-7000-8000-000000000430",
+							role: "admin",
+							user: { id: person.id, email: person.email, name: person.name, image: null },
+							joinedAt: "2026-09-01T00:00:00.000Z",
+						},
+					],
+				);
+				client.setQueryData(
+					["agents", workspace.id],
+					[
+						{
+							...growthDesk,
+							id: host.id,
+							name: host.name,
+							handle: host.handle,
+							description: "Sorts new issues by area and urgency, and asks for what's missing.",
+						},
+					],
+				);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
+	],
+	beforeEach() {
+		closePanel.mockClear();
+	},
+	render: function InAPanel(args) {
+		const panel = usePanelKeys<HTMLDivElement>(closePanel);
+		return (
+			<div {...panel} className="outline-none">
+				<ThreadConversation {...args} />
+			</div>
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const page = within(document.body);
+		const sam = canvas.getByRole("button", { name: "@sam-rivera" });
+		await userEvent.click(sam);
+		const samCard = await page.findByRole("dialog", { name: /Sam Rivera/ });
+		await expect(within(samCard).getByText("@sam-rivera")).toBeVisible();
+		await expect(within(samCard).getByText("Admin")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+		await expect(sam).toHaveFocus();
+		await expect(closePanel).not.toHaveBeenCalled();
+
+		canvas.getByRole("button", { name: /Issue Triager/ }).focus();
+		await userEvent.keyboard("{Enter}");
+		const botCard = await page.findByRole("dialog", { name: /Issue Triager/ });
+		await expect(within(botCard).getByText("@issue-triager")).toBeVisible();
+		await expect(
+			await within(botCard).findByText(/Sorts new issues by area and urgency/),
+		).toBeVisible();
+		await userEvent.click(canvas.getByText(/the release waits on it/));
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		canvas.getByRole("button", { name: "@here" }).focus();
+		await userEvent.keyboard(" ");
+		const hereCard = await page.findByRole("dialog", { name: "@here" });
+		const notified = within(hereCard).getByRole("list", { name: "Notifies" });
+		// Sam and the six others: five named, then the rest counted. Not Jay, who wrote it.
+		await expect(within(notified).getAllByRole("listitem")).toHaveLength(5);
+		await expect(within(notified).getByText("Sam Rivera")).toBeVisible();
+		await expect(within(hereCard).queryByText("Jay Park")).toBeNull();
+		await expect(within(hereCard).getByText("and 2 more")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		// A handle nobody has is only text.
+		await expect(canvas.queryByRole("button", { name: "@nobody" })).toBeNull();
+		await expect(closePanel).not.toHaveBeenCalled();
 	},
 });
 

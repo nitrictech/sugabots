@@ -179,6 +179,8 @@ export function ChatThreadPanel({
 					// A notice says the reply is not coming, so nobody is shown typing it.
 					isRunning={details.thread.status === "running" && notices.length === 0}
 					participants={mentionableIn(details)}
+					members={details.members}
+					threadType={details.thread.type}
 					onOpenThread={onOpenThread}
 					onOpenArtifact={onOpenArtifact}
 					podId={details.thread.podId}

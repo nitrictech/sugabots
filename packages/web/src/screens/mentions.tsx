@@ -2,8 +2,10 @@ import {
 	type AgentParticipant,
 	GROUP_MENTION_HANDLES,
 	type GroupMentionHandle,
+	type MessageAuthor,
 	mentionedHandles,
 	NOTIFYING_THREAD_TYPES,
+	type PersonParticipant,
 	splitAroundMentions,
 	type ThreadDetails,
 	type ThreadParticipant,
@@ -11,11 +13,12 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
-import { type ComponentProps, createContext, type ReactNode, useContext } from "react";
+import { type ComponentProps, createContext, type ReactNode, useContext, useState } from "react";
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { MentionCard } from "./MentionCard.tsx";
 
 /*
  * `@handle` in a message, drawn as a chip for whoever it names. Plain text
@@ -57,28 +60,34 @@ export function firstBotNamed(
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
+	/**
+	 * The people it would notify: the pod's people but its writer, never a bot.
+	 * Each one's own notification settings can still hold theirs back.
+	 */
+	notifies: readonly PersonParticipant[];
 }
 
 /** Whom a mention can name: a person or a bot, or with `@here` or `@channel`, everyone. */
 export type MentionTarget = ThreadParticipant | GroupMention;
 
-export const GROUP_MENTIONS: readonly GroupMention[] = GROUP_MENTION_HANDLES.map((handle) => ({
-	kind: "group",
-	handle,
-}));
+/** Who writes a message, as far as `@here` and `@channel` care: a person, by id, or not a person. */
+type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["kind"], "person"> };
 
 /**
- * `mentionable`, and after it `@here` and `@channel` where a person writing in
- * a thread of `threadType` would notify somebody with them.
+ * `@here` and `@channel` as `writer` can use them in a thread of `threadType`,
+ * each notifying `members`, the pod's people, but the writer. None where they
+ * would notify nobody, so they stay text: written by a bot or a routine, in a
+ * thread that notifies nobody, or in a pod with nobody else in it.
  */
-export function withGroupMentions(
-	mentionable: readonly ThreadParticipant[],
+export function groupMentionsBy(
+	writer: Writer,
+	members: readonly PersonParticipant[],
 	threadType: ThreadType,
-): MentionTarget[] {
-	const notifiesSomebody =
-		NOTIFYING_THREAD_TYPES.has(threadType) &&
-		mentionable.some((candidate) => candidate.kind === "person");
-	return notifiesSomebody ? [...mentionable, ...GROUP_MENTIONS] : [...mentionable];
+): GroupMention[] {
+	if (writer.kind !== "person" || !NOTIFYING_THREAD_TYPES.has(threadType)) return [];
+	const notifies = members.filter((member) => member.id !== writer.id);
+	if (notifies.length === 0) return [];
+	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
 }
 
 /**
@@ -104,7 +113,8 @@ export function mentionTargetKey(target: MentionTarget): string {
 /**
  * A mention as a chip that stands off the words around it: a bot by its face
  * and name, a person or everyone by the handle. Sent messages and the composer
- * both draw it, so a mention looks the same before and after it is sent.
+ * both draw it, so a mention looks the same before and after it is sent, and
+ * both open its `MentionCard` from it.
  */
 export function MentionChip({
 	target,
@@ -115,7 +125,7 @@ export function MentionChip({
 		<span
 			{...rest}
 			className={cn(
-				"mx-px inline-flex items-baseline gap-1 rounded-xs bg-chip px-1 font-semibold text-foreground leading-normal",
+				"focus-ring mx-px inline-flex cursor-pointer items-baseline gap-1 rounded-xs bg-chip px-1 font-semibold text-foreground leading-normal hover:bg-hover",
 				className,
 			)}
 		>
@@ -148,11 +158,24 @@ export function textWithMentions(
 		const target = targetWithHandle(mentionable, part);
 		return target ? (
 			// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
-			<MentionChip key={index} target={target} />
+			<SentMention key={index} target={target} />
 		) : (
 			`@${part}`
 		);
 	});
+}
+
+/** A mention in a sent message: its chip, a button that opens its card. */
+function SentMention({ target }: { target: MentionTarget }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<MentionCard
+			target={target}
+			open={open}
+			onOpenChange={setOpen}
+			opensFrom={{ trigger: <MentionChip target={target} /> }}
+		/>
+	);
 }
 
 /** The element `remarkMentions` emits; `MarkdownMention` draws it. */
@@ -198,5 +221,5 @@ export function MarkdownMention({
 }: ExtraProps & { handle?: unknown; children?: unknown }) {
 	const mentionable = useContext(MentionableContext);
 	const target = typeof handle === "string" ? targetWithHandle(mentionable, handle) : undefined;
-	return target ? <MentionChip target={target} /> : (children as ReactNode);
+	return target ? <SentMention target={target} /> : (children as ReactNode);
 }
