@@ -561,7 +561,23 @@ describe("ongoing agent Chat", () => {
 		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(triager.name) })).toBeNull();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		expect(list.getAllByRole("option")).toHaveLength(2);
+		// After the people and bots come the two groups, which are not people the pod has.
+		expect(list.getByRole("option", { name: /@here/ })).toBeTruthy();
+		expect(list.getByRole("option", { name: /@channel/ })).toBeTruthy();
+		expect(list.getAllByRole("option")).toHaveLength(4);
+	});
+
+	it("offers no @here or @channel when nobody else could be notified", async () => {
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({ ...details(chat.id, "Chat", "bot_channel", [mainMessage]), members: [] }),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		writeDraft(composer, "@");
+
+		const list = within(await screen.findByRole("listbox"));
+		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
+		expect(list.queryByRole("option", { name: /@here|@channel/ })).toBeNull();
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {

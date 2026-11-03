@@ -1,9 +1,13 @@
 import {
 	type AgentParticipant,
+	GROUP_MENTION_HANDLES,
+	type GroupMentionHandle,
 	mentionedHandles,
+	NOTIFYING_THREAD_TYPES,
 	splitAroundMentions,
 	type ThreadDetails,
 	type ThreadParticipant,
+	type ThreadType,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
@@ -49,25 +53,64 @@ export function firstBotNamed(
 		.at(0);
 }
 
-/** Whom the handle `handle`, as a mention writes it, names among `mentionable`. */
-export function participantWithHandle(
+/** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
+export interface GroupMention {
+	kind: "group";
+	handle: GroupMentionHandle;
+}
+
+/** Whom a mention can name: a person or a bot, or with `@here` or `@channel`, everyone. */
+export type MentionTarget = ThreadParticipant | GroupMention;
+
+export const GROUP_MENTIONS: readonly GroupMention[] = GROUP_MENTION_HANDLES.map((handle) => ({
+	kind: "group",
+	handle,
+}));
+
+/**
+ * `mentionable`, and after it `@here` and `@channel` where a person writing in
+ * a thread of `threadType` would notify somebody with them.
+ */
+export function withGroupMentions(
 	mentionable: readonly ThreadParticipant[],
+	threadType: ThreadType,
+): MentionTarget[] {
+	const notifiesSomebody =
+		NOTIFYING_THREAD_TYPES.has(threadType) &&
+		mentionable.some((candidate) => candidate.kind === "person");
+	return notifiesSomebody ? [...mentionable, ...GROUP_MENTIONS] : [...mentionable];
+}
+
+/**
+ * Whom the handle `handle`, as a mention writes it, names among `mentionable`.
+ * A person whose handle is `here` or `channel` is mentioned with everyone else.
+ */
+export function targetWithHandle(
+	mentionable: readonly MentionTarget[],
 	handle: string,
-): ThreadParticipant | undefined {
+): MentionTarget | undefined {
 	const lowered = handle.toLowerCase();
-	return mentionable.find((candidate) => candidate.handle === lowered);
+	return (
+		mentionable.find((candidate) => candidate.kind === "group" && candidate.handle === lowered) ??
+		mentionable.find((candidate) => candidate.handle === lowered)
+	);
+}
+
+/** What tells `target` apart from the others in a list of them. */
+export function mentionTargetKey(target: MentionTarget): string {
+	return target.kind === "group" ? target.handle : `${target.kind}-${target.id}`;
 }
 
 /**
  * A mention as a chip that stands off the words around it: a bot by its face
- * and name, a person by their handle. Sent messages and the composer both
- * draw it, so a mention looks the same before and after it is sent.
+ * and name, a person or everyone by the handle. Sent messages and the composer
+ * both draw it, so a mention looks the same before and after it is sent.
  */
 export function MentionChip({
-	participant,
+	target,
 	className,
 	...rest
-}: { participant: ThreadParticipant } & ComponentProps<"span">) {
+}: { target: MentionTarget } & ComponentProps<"span">) {
 	return (
 		<span
 			{...rest}
@@ -76,33 +119,36 @@ export function MentionChip({
 				className,
 			)}
 		>
-			{participant.kind === "agent" ? (
+			{target.kind === "agent" ? (
 				<>
 					<AgentAvatar
-						color={participant.color}
-						face={participant.face}
-						shape={participant.shape}
+						color={target.color}
+						face={target.face}
+						shape={target.shape}
 						size={14}
 						className="shrink-0 self-center"
 					/>
 					<span className="sr-only">@</span>
-					{participant.name}
+					{target.name}
 				</>
 			) : (
-				`@${participant.handle}`
+				`@${target.handle}`
 			)}
 		</span>
 	);
 }
 
 /** Plain text with its mentions marked, for a bubble that is not markdown. */
-export function textWithMentions(content: string, mentionable: ThreadParticipant[]): ReactNode[] {
+export function textWithMentions(
+	content: string,
+	mentionable: readonly MentionTarget[],
+): ReactNode[] {
 	return splitAroundMentions(content).map((part, index) => {
 		if (index % 2 === 0) return part;
-		const participant = participantWithHandle(mentionable, part);
-		return participant ? (
+		const target = targetWithHandle(mentionable, part);
+		return target ? (
 			// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
-			<MentionChip key={index} participant={participant} />
+			<MentionChip key={index} target={target} />
 		) : (
 			`@${part}`
 		);
@@ -116,7 +162,8 @@ export const MENTION_TAG = "mention";
  * Everyone a mention in the markdown below could name. It arrives through
  * context rather than the renderer's props because Streamdown redraws only when
  * its text changes: someone who becomes mentionable after a reply is drawn is
- * still marked in it.
+ * still marked in it. Never `@here` or `@channel`: markdown is what bots,
+ * routines and artifacts write, and only a person's notifies anyone.
  */
 export const MentionableContext = createContext<ThreadParticipant[]>([]);
 
@@ -150,7 +197,6 @@ export function MarkdownMention({
 	children,
 }: ExtraProps & { handle?: unknown; children?: unknown }) {
 	const mentionable = useContext(MentionableContext);
-	const participant =
-		typeof handle === "string" ? participantWithHandle(mentionable, handle) : undefined;
-	return participant ? <MentionChip participant={participant} /> : (children as ReactNode);
+	const target = typeof handle === "string" ? targetWithHandle(mentionable, handle) : undefined;
+	return target ? <MentionChip target={target} /> : (children as ReactNode);
 }

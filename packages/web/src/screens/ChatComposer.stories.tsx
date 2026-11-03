@@ -14,6 +14,7 @@ import {
 	pricingPageUploading,
 } from "./attachment-story-fixtures.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
+import { GROUP_MENTIONS } from "./mentions.tsx";
 
 /** Files attached in a fixed state, with spies for what the composer asks of them. */
 function withFiles(items: readonly ComposerAttachment[], leftOut = 0) {
@@ -52,7 +53,7 @@ const meta = preview.meta({
 		onValueChange: fn(),
 		onSubmit: fn(),
 		submitLabel: "Send message",
-		mentionable,
+		mentionable: [...mentionable, ...GROUP_MENTIONS],
 		attachments: withFiles([]),
 	},
 	decorators: [
@@ -125,8 +126,9 @@ export const SelectMention = meta.story({
 	play: async ({ canvas, userEvent, args }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Ask @");
-		await expect(canvas.getByRole("listbox", { name: "People and bots to mention" })).toBeVisible();
-		await expect(canvas.getAllByRole("option")).toHaveLength(3);
+		await expect(canvas.getByRole("listbox", { name: "Who to mention" })).toBeVisible();
+		// The three people and bots, then @here and @channel.
+		await expect(canvas.getAllByRole("option")).toHaveLength(5);
 		await userEvent.type(input, "ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(2);
 		await userEvent.keyboard("{ArrowDown}");
@@ -144,6 +146,23 @@ export const SelectMention = meta.story({
 		await userEvent.clear(input);
 		await userEvent.type(input, "@Sam Ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+	},
+});
+
+/**
+ * `@here` and `@channel` are offered after the people and bots, written as
+ * typed, like a handle, and shown in the draft as a chip.
+ */
+export const SelectGroupMention = meta.story({
+	tags: ["ai-generated"],
+	play: async ({ canvas, userEvent, args }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "Heads up @cha");
+		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
+		await expect(within(input).getByText("@channel")).toHaveAttribute("data-mention", "@channel");
+		await expect(args.onSubmit).not.toHaveBeenCalled();
 	},
 });
 
@@ -208,9 +227,7 @@ export const MentionButton = meta.story({
 		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
 		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Can you ask @");
-		await expect(
-			await canvas.findByRole("listbox", { name: "People and bots to mention" }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("listbox", { name: "Who to mention" })).toBeVisible();
 	},
 });
 

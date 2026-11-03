@@ -4,7 +4,6 @@ import {
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	type MessageReplyTo,
 	messageAuthorName,
-	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
@@ -25,6 +24,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
+import { type MentionTarget, mentionTargetKey } from "./mentions.tsx";
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
 const toolButtonClassName =
@@ -76,8 +76,8 @@ export function ChatComposer({
 	sending?: boolean;
 	error?: ReactNode;
 	className?: string;
-	/** Who the draft can mention. */
-	mentionable: ThreadParticipant[];
+	/** Who the draft can mention, offered in this order. */
+	mentionable: readonly MentionTarget[];
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 	/** The files attached to the message, and what attaches, removes and retries them. */
@@ -152,8 +152,8 @@ export function ChatComposer({
 
 	function chooseSuggestion(open: SuggestionMenu, index: number): void {
 		if (open.kind === "mention") {
-			const participant = open.matches[index];
-			if (participant) replaceTyped(open.typed, `@${participant.handle}`);
+			const suggestion = open.matches[index];
+			if (suggestion) replaceTyped(open.typed, `@${suggestion.handle}`);
 			return;
 		}
 		const emoji = open.matches[index];
@@ -208,14 +208,14 @@ export function ChatComposer({
 				<SuggestionList
 					id={menuId}
 					title="Mention"
-					label="People and bots to mention"
+					label="Who to mention"
 					items={menu.matches}
-					keyOf={(participant) => `${participant.kind}-${participant.id}`}
+					keyOf={mentionTargetKey}
 					selected={selectedSuggestion}
 					onHighlight={setActiveSuggestion}
 					onChoose={(index) => chooseSuggestion(menu, index)}
 				>
-					{(participant) => <MentionOption participant={participant} />}
+					{(suggestion) => <MentionOption suggestion={suggestion} />}
 				</SuggestionList>
 			)}
 			{menu?.kind === "emoji" && (
@@ -494,7 +494,7 @@ interface TypedRange {
 
 /** What the menu over the draft offers for what is being typed. */
 type SuggestionMenu =
-	| { kind: "mention"; typed: TypedRange; matches: readonly ThreadParticipant[] }
+	| { kind: "mention"; typed: TypedRange; matches: readonly MentionTarget[] }
 	| { kind: "emoji"; typed: TypedRange; matches: readonly Emoji[] };
 
 /** The menu, unless it has nothing to offer or was closed where it was typed. */
@@ -545,7 +545,7 @@ function SuggestionList<Item>({
 				id={id}
 				role="listbox"
 				aria-label={label}
-				className="max-h-60 overflow-y-auto p-1 pt-0"
+				className="max-h-72 overflow-y-auto p-1 pt-0"
 			>
 				{items.map((item, index) => (
 					<button
@@ -569,7 +569,26 @@ function SuggestionList<Item>({
 	);
 }
 
-function MentionOption({ participant }: { participant: ThreadParticipant }) {
+function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
+	if (suggestion.kind === "group") {
+		return (
+			<>
+				<span
+					aria-hidden
+					className="grid size-[26px] shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
+				>
+					<AtSign size={14} />
+				</span>
+				<span className="flex min-w-0 flex-1 flex-col gap-px">
+					<span className="truncate font-medium text-[14px]">@{suggestion.handle}</span>
+					<span className="truncate text-muted-foreground text-xs">
+						Notify everyone who can see this
+					</span>
+				</span>
+			</>
+		);
+	}
+	const participant = suggestion;
 	return (
 		<>
 			{participant.kind === "agent" ? (
@@ -647,9 +666,10 @@ function mentionBeingTyped(value: string, cursor: number): TypedRange | undefine
 	return { start: typed.index, end: cursor + restOfHandle.length, query: typed[1] ?? "" };
 }
 
-function matchesQuery(participant: ThreadParticipant, query: string): boolean {
+function matchesQuery(suggestion: MentionTarget, query: string): boolean {
 	const lowered = query.toLocaleLowerCase();
 	return (
-		participant.name.toLocaleLowerCase().includes(lowered) || participant.handle.includes(lowered)
+		suggestion.handle.includes(lowered) ||
+		(suggestion.kind !== "group" && suggestion.name.toLocaleLowerCase().includes(lowered))
 	);
 }

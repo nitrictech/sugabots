@@ -34,6 +34,13 @@ export const threadTypeSchema = Schema.Literals([
 
 export type ThreadType = typeof threadTypeSchema.Type;
 
+/** The threads whose messages notify people: not a routine's feed, nor the threads bots work in. */
+export const NOTIFYING_THREAD_TYPES: ReadonlySet<ThreadType> = new Set([
+	"conversation",
+	"pod_chat",
+	"bot_channel",
+]);
+
 export const threadHistoryQuerySchema = Schema.Struct({
 	cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
 	limit: Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(
