@@ -1,50 +1,94 @@
-import type { Agent, Pod } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
-import { Plus, RefreshCcw } from "lucide-react";
-import { useChatList } from "@/lib/chats.ts";
-import { newRoutineLink } from "@/lib/links.ts";
+import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
+import { Plus, RefreshCcw, X } from "lucide-react";
+import { type ReactNode, useState } from "react";
+import { useChatList, useOpenRoutineFeed } from "@/lib/chats.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { RoutineRow } from "@/shell/Routines.tsx";
-import { Stage, StageMark } from "@/shell/Stage.tsx";
+import { Stage, StageMark, type StageParent } from "@/shell/Stage.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { ConversationChat, type StagedChange } from "./ConversationChat.tsx";
+import { NewRoutinePage } from "./RoutineEditor.tsx";
+
+interface RoutinesStageProps {
+	agent: Agent;
+	pod: Pod;
+	user: SessionUser;
+	view: RoutinesView;
+	onViewChange: (view: RoutinesView) => void;
+	/** Opens something else beside the bot's chat, such as an artifact from a routine's thread. */
+	onStagedChange: StagedChange;
+	onClose: () => void;
+}
+
+/** Which of a bot's routines are open beside its chat: all of them, one, or a new one being made. */
+export type RoutinesView =
+	| { kind: "list" }
+	| { kind: "routine"; routineId: string }
+	| { kind: "new" };
 
 /**
- * A bot's routines, open large beside its chat as its computer is, each
- * opening its own thread, with + to make another for whoever may manage them.
- * With none, it says how one is made.
+ * A bot's routines, open large beside its chat as its computer is: all of
+ * them, each opening its own thread in their place, or a new one being made.
+ * A routine or a new one is a level inside the list, and the Back before its
+ * name returns to the list, so the bot's chat stays in view throughout.
  */
 export function RoutinesStage({
 	agent,
 	pod,
+	user,
+	view,
+	onViewChange,
+	onStagedChange,
 	onClose,
-}: {
-	agent: Agent;
-	pod: Pod;
-	onClose: () => void;
-}) {
-	const list = useChatList(pod.slug);
-	const { workspace } = useWorkspace();
-	const full = useWorkspaceRoutines(workspace?.id);
-	const routineById = new Map(full.data?.items.map((item) => [item.routine.id, item.routine]));
-	const routines = list.data?.routines.filter((row) => row.agent.id === agent.id) ?? [];
+}: RoutinesStageProps) {
 	const title = `${agent.name}'s routines`;
+	const parent = { name: title, onBack: () => onViewChange({ kind: "list" }) };
+	if (view.kind === "routine") {
+		return (
+			<RoutineThread
+				key={view.routineId}
+				pod={pod}
+				agent={agent}
+				user={user}
+				routineId={view.routineId}
+				onStagedChange={onStagedChange}
+				parent={parent}
+				trailing={<CloseButton onClose={onClose} />}
+			/>
+		);
+	}
+	const mark = (
+		<StageMark>
+			<RefreshCcw strokeWidth={2} />
+		</StageMark>
+	);
+	if (view.kind === "new") {
+		return (
+			<Stage label="New routine" icon={mark} title="New routine" parent={parent} onClose={onClose}>
+				<div className="-mx-6 min-h-0 flex-1 overflow-y-auto max-md:-mx-3">
+					<NewRoutinePage
+						choices={[{ agent, pod }]}
+						initialAgentId={agent.id}
+						onCancel={() => onViewChange({ kind: "list" })}
+						onCreated={(routine) => onViewChange({ kind: "routine", routineId: routine.id })}
+					/>
+				</div>
+			</Stage>
+		);
+	}
 	return (
 		<Stage
 			label={title}
-			icon={
-				<StageMark>
-					<RefreshCcw strokeWidth={2} />
-				</StageMark>
-			}
+			icon={mark}
 			title={title}
 			actions={
 				pod.permissions.manageRoutines && (
 					<IconButton
 						label="New routine"
 						variant="bar"
-						render={<Link {...newRoutineLink(pod, agent)} />}
+						onClick={() => onViewChange({ kind: "new" })}
 					>
 						<Plus size={16} strokeWidth={1.75} />
 					</IconButton>
@@ -52,31 +96,120 @@ export function RoutinesStage({
 			}
 			onClose={onClose}
 		>
-			{list.isError ? (
-				<EmptyState title="Could not load these routines">
-					The API did not answer. Reload this page to try again.
-				</EmptyState>
-			) : list.isSuccess && routines.length === 0 ? (
-				<EmptyState
-					title={`No routines for ${agent.name} yet`}
-					icon={<RefreshCcw strokeWidth={1.75} />}
-				>
-					Ask {agent.name} to set some up for you.
+			<RoutineList
+				agent={agent}
+				pod={pod}
+				onOpen={(routineId) => onViewChange({ kind: "routine", routineId })}
+			/>
+		</Stage>
+	);
+}
+
+/** The bot's routines, each with how it stands, which opens it; with none, how one is made. */
+function RoutineList({
+	agent,
+	pod,
+	onOpen,
+}: {
+	agent: Agent;
+	pod: Pod;
+	onOpen: (routineId: string) => void;
+}) {
+	const list = useChatList(pod.slug);
+	const { workspace } = useWorkspace();
+	const full = useWorkspaceRoutines(workspace?.id);
+	const routineById = new Map(full.data?.items.map((item) => [item.routine.id, item.routine]));
+	const routines = list.data?.routines.filter((row) => row.agent.id === agent.id) ?? [];
+	if (list.isError) {
+		return (
+			<EmptyState title="Could not load these routines">
+				The API did not answer. Reload this page to try again.
+			</EmptyState>
+		);
+	}
+	if (list.isSuccess && routines.length === 0) {
+		return (
+			<EmptyState
+				title={`No routines for ${agent.name} yet`}
+				icon={<RefreshCcw strokeWidth={1.75} />}
+			>
+				Ask {agent.name} to set some up for you.
+			</EmptyState>
+		);
+	}
+	return (
+		<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-0">
+			{routines.map((row) => (
+				<li key={row.routine.id}>
+					<RoutineRow
+						pod={pod}
+						row={row}
+						routine={routineById.get(row.routine.id)}
+						selected={false}
+						render={<button type="button" onClick={() => onOpen(row.routine.id)} />}
+					/>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/**
+ * A routine's own thread, where its runs post, opened first when it has none,
+ * with its settings in its Details, Back to `parent` before its name, and
+ * `trailing` at the right of its header.
+ */
+function RoutineThread({
+	pod,
+	agent,
+	user,
+	routineId,
+	onStagedChange,
+	parent,
+	trailing,
+}: {
+	pod: Pod;
+	agent: Agent;
+	user: SessionUser;
+	routineId: string;
+	onStagedChange: StagedChange;
+	/** The bot's routines, which the Back before the routine's name returns to. */
+	parent: StageParent;
+	trailing: ReactNode;
+}) {
+	const opened = useOpenRoutineFeed(pod, routineId);
+	const [threadId, setThreadId] = useState<string>();
+	const [detailsOpen, setDetailsOpen] = useState(false);
+	return (
+		// In place of the list, and like it, covering the chat on a phone.
+		<div className="flex min-h-0 min-w-0 flex-1 bg-background max-md:absolute max-md:inset-0 max-md:z-40">
+			{opened.isError ? (
+				<EmptyState title="Could not open this routine">
+					It may have been removed. Reload this page to try again.
 				</EmptyState>
 			) : (
-				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-0">
-					{routines.map((row) => (
-						<li key={row.routine.id}>
-							<RoutineRow
-								pod={pod}
-								row={row}
-								routine={routineById.get(row.routine.id)}
-								selected={false}
-							/>
-						</li>
-					))}
-				</ul>
+				opened.data && (
+					<ConversationChat
+						conversation={{ kind: "botThread", agent }}
+						pod={pod}
+						conversationId={opened.data.id}
+						user={user}
+						threadId={threadId}
+						onThreadChange={setThreadId}
+						place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen, parent, trailing }}
+						onStagedChange={onStagedChange}
+					/>
+				)
 			)}
-		</Stage>
+		</div>
+	);
+}
+
+/** Closes the routines, as a stage's Close does. */
+function CloseButton({ onClose }: { onClose: () => void }) {
+	return (
+		<IconButton label="Close" variant="bar" onClick={onClose} className="max-md:hidden">
+			<X size={16} strokeWidth={1.75} />
+		</IconButton>
 	);
 }

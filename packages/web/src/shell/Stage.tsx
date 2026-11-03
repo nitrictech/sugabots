@@ -1,8 +1,8 @@
 import { cn } from "cn";
-import { X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { BACK_BUTTON, BackChevron, useLeave } from "@/ui/back-button.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * Closes a `Stage`, showing what was open under it. `replace` asks for that in
@@ -12,8 +12,37 @@ import { IconButton } from "@/ui/icon-button.tsx";
 export type CloseStage = (how?: { replace: boolean }) => void;
 
 /**
+ * The level a view inside a stage was opened from, such as a bot's routines
+ * above one of them, which its Back returns to.
+ */
+export interface StageParent {
+	/** Where Back goes, as a screen reader hears it: "Back to" this. */
+	name: string;
+	onBack: () => void;
+}
+
+/**
+ * Back to `parent`, before the title of a view inside a stage, on any screen,
+ * so going into the view and back out reads as moving down and up a level.
+ */
+export function StageBack({ parent }: { parent: StageParent }) {
+	return (
+		<IconButton
+			label={`Back to ${parent.name}`}
+			variant="bar"
+			onClick={parent.onBack}
+			className={cn("-ml-1.5 text-muted-foreground hover:text-foreground", FLOATING_ON_PHONE)}
+		>
+			<ChevronLeft size={18} strokeWidth={2} />
+		</IconButton>
+	);
+}
+
+/**
  * Something a bot made or is doing, opened large beside its chat or a list so
  * it can be talked about while it is looked at. On a phone it covers them.
+ * With `parent`, it is a view inside another, and its Back, before the
+ * title, returns there.
  */
 export function Stage({
 	label,
@@ -21,6 +50,7 @@ export function Stage({
 	title,
 	byline,
 	actions,
+	parent,
 	onClose,
 	children,
 }: {
@@ -33,6 +63,8 @@ export function Stage({
 	byline?: ReactNode;
 	/** Controls for what is shown, before Close. */
 	actions?: ReactNode;
+	/** The view this one was opened from, when it is one level inside another. */
+	parent?: StageParent;
 	onClose: CloseStage;
 	children: ReactNode;
 }) {
@@ -46,19 +78,22 @@ export function Stage({
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background max-md:absolute max-md:inset-0 max-md:z-40"
 		>
 			<header className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
+				{parent && <StageBack parent={parent} />}
 				{/* On a phone it covers the page it was opened from, so it goes back to it, as a phone's pages do. */}
-				<button
-					type="button"
-					aria-label="Back"
-					onClick={() => {
-						// Opened first, it is replaced, so Back from what shows does not return to it.
-						leave(() => onClose({ replace: true }));
-					}}
-					className={cn(BACK_BUTTON, "md:hidden")}
-				>
-					<BackChevron />
-				</button>
-				<span className="contents max-md:hidden">{icon}</span>
+				{!parent && (
+					<button
+						type="button"
+						aria-label="Back"
+						onClick={() => {
+							// Opened first, it is replaced, so Back from what shows does not return to it.
+							leave(() => onClose({ replace: true }));
+						}}
+						className={cn(BACK_BUTTON, "md:hidden")}
+					>
+						<BackChevron />
+					</button>
+				)}
+				{!parent && <span className="contents max-md:hidden">{icon}</span>}
 				<div className="flex min-w-0 flex-1 flex-col pl-1 leading-snug">
 					<h2 className="m-0 truncate font-medium text-[14px] text-foreground max-md:font-semibold max-md:text-[17px]">
 						{title}
