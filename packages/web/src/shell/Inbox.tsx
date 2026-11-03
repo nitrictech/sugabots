@@ -293,9 +293,8 @@ function collaborationState(
 ): ActivityState {
 	switch (status) {
 		case "waiting":
-			return "running";
 		case "pending":
-			return "waiting_on_you";
+			return "running";
 		case "answered":
 			return "done";
 		default:

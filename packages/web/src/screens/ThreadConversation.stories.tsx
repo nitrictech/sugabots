@@ -560,8 +560,8 @@ export const CollaborationThread = meta.story({
 			name: /^Open Collaboration: Issue Triager and Linear Handler/,
 		});
 		await expect(line).toHaveTextContent("Asked Linear Handler");
-		await expect(line).toHaveTextContent("Needs approval");
-		await expect(line).toHaveAccessibleName(/Last reply \d/);
+		await expect(line).toHaveAccessibleName(/, Working, Last reply \d/);
+		await expect(line).not.toHaveTextContent("Needs approval");
 		await userEvent.click(line);
 		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000313");
 	},
