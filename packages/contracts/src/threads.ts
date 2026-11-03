@@ -145,13 +145,13 @@ export function splitAroundMentions(content: string): string[] {
 }
 
 /**
- * A pattern matching a mention of any of `handles` as `mentionedHandles` reads
- * one, in syntax that JavaScript and Postgres regular expressions both accept.
- * Match it case-insensitively. Handles are lowercase letters, digits and
- * hyphens, so none needs escaping.
+ * A pattern matching a mention of `handle` or any of `more` as
+ * `mentionedHandles` reads one, in syntax that JavaScript and Postgres regular
+ * expressions both accept. Match it case-insensitively. Handles are lowercase
+ * letters, digits and hyphens, so none needs escaping.
  */
-export function mentionPattern(...handles: string[]): string {
-	return `(?<!${NOT_BEFORE_MENTION.source})@(?:${handles.join("|")})(?![a-z0-9]|-[a-z0-9])`;
+export function mentionPattern(handle: string, ...more: string[]): string {
+	return `(?<!${NOT_BEFORE_MENTION.source})@(?:${[handle, ...more].join("|")})(?![a-z0-9]|-[a-z0-9])`;
 }
 
 /**
