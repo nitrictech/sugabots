@@ -37,6 +37,7 @@ const agentErrors = {
 	ModelNotEnabled: BadRequest,
 	EmptyAgentUpdate: BadRequest,
 	AgentNameTaken: Conflict,
+	AgentHandleReserved: BadRequest,
 	AgentGone: NotFound,
 	SystemAgentImmutable: BadRequest,
 	PodOutsideWorkspace: BadRequest,

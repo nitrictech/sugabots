@@ -160,6 +160,19 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		).rejects.toMatchObject({ _tag: "AgentNameTaken", field: "handle" });
 	});
 
+	it("refuses @here and @channel as a handle, given or taken from the name", async () => {
+		await expect(
+			create(adminId, { podId, name: "Sorter", handle: "here", model: "model" }),
+		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "here" });
+		await expect(create(adminId, { podId, name: "Channel", model: "model" })).rejects.toMatchObject(
+			{ _tag: "AgentHandleReserved", handle: "channel" },
+		);
+		const sorter = await create(adminId, { podId, name: "Sorter", model: "model" });
+		await expect(
+			repository.update(workspaceId, sorter.id, { handle: "channel" }),
+		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "channel" });
+	});
+
 	it("says which name a renaming clashes on", async () => {
 		await create(adminId, { podId, name: "Triage", model: "model" });
 		const other = await create(adminId, { podId, name: "Sorter", model: "model" });

@@ -58,13 +58,6 @@ describe("a person's message", () => {
 		});
 	});
 
-	it("does not take a bot's handle of 'here' or 'channel' for a mention of it", () => {
-		const crew = [{ id: scout, handle: "channel" }];
-		expect(
-			decideFloor(input({ threadType: "routine_feed", content: "@channel report?", crew })),
-		).toEqual({ kind: "nobody" });
-	});
-
 	it("goes to the conversation's bot, not to the bots mentioned", () => {
 		// The conversation's bot brings a mentioned bot in by collaborating.
 		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({

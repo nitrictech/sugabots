@@ -3,7 +3,9 @@ export * as AgentRepository from "./agent-repository.ts";
 import {
 	type AgentUpdate,
 	colorFromText,
+	type GroupMentionHandle,
 	handleFromName,
+	isGroupMentionHandle,
 	type NewAgent,
 	type SystemAgentKey,
 } from "@sugabots/contracts";
@@ -41,12 +43,15 @@ export interface Interface {
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; agent: NewAgent },
-	) => Effect.Effect<CrewAgentRow, AgentNameTaken | PodOutsideWorkspace>;
+	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentHandleReserved | PodOutsideWorkspace>;
 	readonly update: (
 		workspaceId: string,
 		agentId: string,
 		changes: AgentUpdate,
-	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentGone | SystemAgentImmutable>;
+	) => Effect.Effect<
+		CrewAgentRow,
+		AgentNameTaken | AgentHandleReserved | AgentGone | SystemAgentImmutable
+	>;
 	readonly remove: (
 		workspaceId: string,
 		agentId: string,
@@ -161,6 +166,7 @@ export const make = Effect.gen(function* () {
 						}
 
 						const handle = input.handle ?? handleFromName(input.name);
+						if (isGroupMentionHandle(handle)) return yield* new AgentHandleReserved({ handle });
 						const [row] = yield* queryCatching(
 							(db) =>
 								db
@@ -201,6 +207,9 @@ export const make = Effect.gen(function* () {
 					// workspace and is set through `setSystemAgentModel`.
 					if (yield* isSystemAgent(workspaceId, agentId)) {
 						return yield* new SystemAgentImmutable();
+					}
+					if (changes.handle !== undefined && isGroupMentionHandle(changes.handle)) {
+						return yield* new AgentHandleReserved({ handle: changes.handle });
 					}
 					const [row] = yield* queryCatching(
 						(db) =>
@@ -336,6 +345,19 @@ export class AgentNameTaken
 		return this.field === "name"
 			? userText`Another agent in this pod already has that name`
 			: userText`Another agent in this pod already has that handle`;
+	}
+}
+
+/** `@here` and `@channel` mention everyone, so no agent may take either as its handle. */
+export class AgentHandleReserved
+	extends Data.TaggedError("AgentHandleReserved")<{ readonly handle: GroupMentionHandle }>
+	implements UserFacing
+{
+	override get message() {
+		return `"${this.handle}" is reserved for mentioning everyone`;
+	}
+	get userMessage() {
+		return userText`@${this.handle} mentions everyone, so it can't be an agent's handle`;
 	}
 }
 

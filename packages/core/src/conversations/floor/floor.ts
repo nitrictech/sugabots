@@ -1,4 +1,4 @@
-import { isGroupMentionHandle, mentionedHandles, type ThreadType } from "@sugabots/contracts";
+import { mentionedHandles, type ThreadType } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor, QueryFailure } from "../../database/database.ts";
@@ -56,10 +56,7 @@ const NOBODY: FloorDecision = { kind: "nobody" };
 
 export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
-	// `@here` and `@channel` address people, even if a bot has been given one of those handles.
-	const mentionedAgents = input.crew.filter(
-		(member) => mentioned.includes(member.handle) && !isGroupMentionHandle(member.handle),
-	);
+	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
 	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
 	const { hostAgentId } = input;
 	if (hostAgentId === null || mentionsOnlyPeople) return NOBODY;
