@@ -8,6 +8,7 @@ import {
 	type Message,
 	mentionedHandles,
 	messageAuthorName,
+	type PersonParticipant,
 	type Pod,
 	quotedPreview,
 	type SessionUser,
@@ -92,13 +93,7 @@ import {
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import {
-	firstBotNamed,
-	GROUP_MENTIONS,
-	mentionableIn,
-	textWithMentions,
-	withGroupMentions,
-} from "./mentions.tsx";
+import { firstBotNamed, groupMentionsBy, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
@@ -255,14 +250,18 @@ export function ConversationChat({
 	const composerMentionable = useMemo(
 		() =>
 			details
-				? withGroupMentions(
-						mentionableIn(details).filter(
+				? [
+						...mentionableIn(details).filter(
 							(candidate) =>
 								candidate.id !== user.id &&
 								(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
 						),
-						details.thread.type,
-					)
+						...groupMentionsBy(
+							{ kind: "person", id: user.id },
+							details.members,
+							details.thread.type,
+						),
+					]
 				: [],
 		[details, user.id, isPodChat, host?.id],
 	);
@@ -656,6 +655,8 @@ export function ConversationChat({
 											host={host}
 											isRunning={false}
 											participants={mentionable}
+											members={details.members}
+											threadType={details.thread.type}
 											dividers={false}
 											onOpenThread={openThread}
 											onOpenArtifact={openArtifact}
@@ -1193,7 +1194,11 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 				{formatListTime(new Date(thread.createdAt), new Date())}
 			</p>
 			{details.startedFrom && (
-				<StartedFrom message={details.startedFrom} mentionable={mentionableIn(details)} />
+				<StartedFrom
+					message={details.startedFrom}
+					mentionable={mentionableIn(details)}
+					members={details.members}
+				/>
 			)}
 		</div>
 	);
@@ -1207,9 +1212,12 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 function StartedFrom({
 	message,
 	mentionable,
+	members,
 }: {
 	message: Message;
 	mentionable: ThreadParticipant[];
+	/** The pod's people, whom its writer's `@here` or `@channel` would notify. */
+	members: readonly PersonParticipant[];
 }) {
 	const attached = message.parts
 		.filter(isAttached)
@@ -1221,10 +1229,11 @@ function StartedFrom({
 			</span>
 			{message.content !== "" && (
 				<p className="m-0 whitespace-pre-wrap break-words text-sm text-soft-foreground leading-normal">
-					{textWithMentions(
-						message.content,
-						message.author.kind === "person" ? [...mentionable, ...GROUP_MENTIONS] : mentionable,
-					)}
+					{textWithMentions(message.content, [
+						...mentionable,
+						// Written in a pod's chat or a bot's channel, as every message a thread starts from is.
+						...groupMentionsBy(message.author, members, "pod_chat"),
+					])}
 				</p>
 			)}
 			{attached.length > 0 && (

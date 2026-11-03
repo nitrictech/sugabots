@@ -583,7 +583,8 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
-						Notify everyone who can see this
+						Notifies {suggestion.notifies.length}{" "}
+						{suggestion.notifies.length === 1 ? "person" : "people"}
 					</span>
 				</span>
 			</>

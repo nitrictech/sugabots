@@ -10,6 +10,7 @@ import {
 	type PersonParticipant,
 	type RoutineResultOf,
 	type ThreadParticipant,
+	type ThreadType,
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
@@ -31,7 +32,7 @@ import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
-import { GROUP_MENTIONS, textWithMentions } from "./mentions.tsx";
+import { groupMentionsBy, textWithMentions } from "./mentions.tsx";
 import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
@@ -68,6 +69,8 @@ export function ThreadConversation({
 	host,
 	isRunning,
 	participants,
+	members,
+	threadType,
 	dividers = true,
 	onOpenThread,
 	onOpenArtifact,
@@ -102,6 +105,10 @@ export function ThreadConversation({
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: ThreadParticipant[];
+	/** The pod's people, whom a person's `@here` or `@channel` would notify. */
+	members: readonly PersonParticipant[];
+	/** What kind of thread it is, which decides whether `@here` and `@channel` notify anyone. */
+	threadType: ThreadType;
 	/**
 	 * Day markers between messages. Off where the caller places its own, as the
 	 * chat does between these messages and its activity rows.
@@ -218,6 +225,8 @@ export function ThreadConversation({
 										: undefined
 								}
 								participants={participants}
+								members={members}
+								threadType={threadType}
 								looks={looks}
 								fileNames={fileNames}
 								podId={podId}
@@ -478,6 +487,8 @@ function MessageRow({
 	message,
 	startsGroup,
 	participants,
+	members,
+	threadType,
 	looks,
 	fileNames,
 	podId,
@@ -507,6 +518,8 @@ function MessageRow({
 	/** Whether it heads its author's group, so it carries their face and name. */
 	startsGroup: boolean;
 	participants: ThreadParticipant[];
+	members: readonly PersonParticipant[];
+	threadType: ThreadType;
 	looks: ReturnType<typeof useConnectionLooks>;
 	/** The thread's files by id, for the tool line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
@@ -551,7 +564,9 @@ function MessageRow({
 	// A tap is a touch screen's hover: it shows a follow-up's time, as hovering does.
 	function toggleTimeOnTouch(event: MouseEvent) {
 		if (startsGroup || !window.matchMedia(NO_HOVER).matches) return;
-		if (event.target instanceof Element && event.target.closest("a, button")) return;
+		// A tap in a mention's card, drawn elsewhere on the page, still reaches here through React.
+		if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
+		if (event.target.closest("a, button, [role=button]")) return;
 		setTimeTapped((shown) => !shown);
 	}
 	const agent = author.kind === "agent" ? author : undefined;
@@ -688,10 +703,10 @@ function MessageRow({
 								<MessageMarkdown text={segment.text} mentionable={participants} />
 							) : (
 								<p className="m-0 whitespace-pre-wrap">
-									{textWithMentions(
-										segment.text,
-										author.kind === "person" ? [...participants, ...GROUP_MENTIONS] : participants,
-									)}
+									{textWithMentions(segment.text, [
+										...participants,
+										...groupMentionsBy(author, members, threadType),
+									])}
 								</p>
 							)}
 						</div>
