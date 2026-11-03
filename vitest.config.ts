@@ -52,6 +52,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "ios",
+					root: "apps/ios",
+					environment: "node",
+					include: ["scripts/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "sdk",
 					root: "packages/sdk",
 					environment: "node",

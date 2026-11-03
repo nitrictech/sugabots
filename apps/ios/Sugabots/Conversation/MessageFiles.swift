@@ -1,0 +1,250 @@
+import SwiftUI
+import UIKit
+
+/// The files on a message, as the web's `MessageFiles`: pictures as tiles,
+/// which open over the screen, and other files as chips with their kind,
+/// size and Download.
+@MainActor
+struct MessageFiles: View {
+	let files: [FilePart]
+	let conversationId: String
+	/// Whether the server has them yet; a message being sent has none to show.
+	let sent: Bool
+
+	var body: some View {
+		let images = files.filter { FileLook.of($0) == .image }
+		let others = files.filter { FileLook.of($0) != .image }
+		VStack(alignment: .leading, spacing: 6) {
+			if images.count == 1, let only = images.first {
+				ImageTile(file: only, conversationId: conversationId, sent: sent, fit: .fit)
+					.aspectRatio(4 / 3, contentMode: .fit)
+					.frame(maxWidth: 360)
+			} else if !images.isEmpty {
+				let columns = images.count == 2 ? 2 : 3
+				LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
+					ForEach(images) { file in
+						ImageTile(file: file, conversationId: conversationId, sent: sent, fit: .fill)
+							.aspectRatio(4 / 3, contentMode: .fit)
+					}
+				}
+				.frame(maxWidth: images.count == 2 ? 320 : 482)
+			}
+			ForEach(others) { file in
+				FileChip(file: file, conversationId: conversationId, sent: sent)
+			}
+		}
+		.padding(.top, 6)
+	}
+}
+
+/// How a file is drawn, by its media type and name.
+enum FileLook: Equatable {
+	case image, pdf, sheet, other
+
+	private static let sheetExtensions: Set<String> = ["csv", "tsv", "xls", "xlsx", "ods", "numbers"]
+
+	static func of(_ file: FilePart) -> FileLook {
+		let type = file.contentType.split(separator: ";").first.map(String.init)?.lowercased() ?? ""
+		if type.hasPrefix("image/") { return .image }
+		let ext = extensionOf(file.name)
+		if type == "application/pdf" || ext == "pdf" { return .pdf }
+		if type == "text/csv" || sheetExtensions.contains(ext) { return .sheet }
+		return .other
+	}
+
+	static func extensionOf(_ name: String) -> String {
+		guard let dot = name.lastIndex(of: "."), dot > name.startIndex else { return "" }
+		return name[name.index(after: dot)...].lowercased()
+	}
+
+	/// `512 B`, `40 KB`, `1.2 MB`.
+	static func sizeLabel(_ bytes: Int) -> String {
+		if bytes < 1024 { return "\(bytes) B" }
+		let kilobytes = Int((Double(bytes) / 1024).rounded())
+		if kilobytes < 1024 { return "\(kilobytes) KB" }
+		return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+	}
+
+	var icon: Lucide {
+		switch self {
+		case .pdf: .fileText
+		case .sheet: .fileSpreadsheet
+		default: .fileIcon
+		}
+	}
+}
+
+/// A file's bytes, fetched with the person's token, kept on disk under its name so it can be shared or opened.
+@MainActor
+enum ChatFiles {
+	private static var cache: [String: URL] = [:]
+
+	static func local(_ file: FilePart, in conversationId: String, client: APIClient) async throws -> URL {
+		if let cached = cache[file.id] { return cached }
+		let data = try await client.chats.file(conversationId: conversationId, fileId: file.id)
+		let folder = FileManager.default.temporaryDirectory.appending(path: file.id)
+		try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		let url = folder.appending(path: file.name)
+		try data.write(to: url)
+		cache[file.id] = url
+		return url
+	}
+}
+
+@MainActor
+private struct ImageTile: View {
+	let file: FilePart
+	let conversationId: String
+	let sent: Bool
+	let fit: ContentMode
+	@Environment(WorkspaceStore.self) private var store
+	@State private var image: UIImage?
+	@State private var undrawable = false
+	@State private var viewing = false
+
+	var body: some View {
+		Button { viewing = true } label: {
+			ZStack {
+				Palette.tile
+				if let image {
+					Image(uiImage: image).resizable().aspectRatio(contentMode: fit)
+				} else if undrawable || !sent {
+					VStack(spacing: 4) {
+						Icon(.fileIcon, size: 18)
+						Text(file.name).font(Typeface.rubik(11)).lineLimit(1).truncationMode(.middle)
+					}
+					.foregroundStyle(Palette.mutedForeground)
+					.padding(.horizontal, 8)
+				}
+			}
+			.clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+			.overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Palette.border))
+		}
+		.buttonStyle(.plain)
+		.disabled(!sent)
+		.accessibilityLabel("Open \(file.name)")
+		.task(id: sent) {
+			guard sent, image == nil else { return }
+			guard let url = try? await ChatFiles.local(file, in: conversationId, client: store.client) else { return undrawable = true }
+			image = UIImage(contentsOfFile: url.path())
+			undrawable = image == nil
+		}
+		.fullScreenCover(isPresented: $viewing) {
+			ImageViewer(file: file, image: image, conversationId: conversationId)
+		}
+	}
+}
+
+/// A picture over the whole screen on black: Close at the left, its name, and Download at the right.
+private struct ImageViewer: View {
+	let file: FilePart
+	let image: UIImage?
+	let conversationId: String
+	@Environment(\.dismiss) private var dismiss
+
+	var body: some View {
+		VStack(spacing: 12) {
+			HStack(spacing: 12) {
+				GlassRoundButton(icon: .x, label: "Close", iconSize: 20) { dismiss() }
+				Text(file.name)
+					.font(Typeface.rubik(15))
+					.foregroundStyle(.white)
+					.lineLimit(1)
+					.truncationMode(.middle)
+					.frame(maxWidth: .infinity)
+				DownloadButton(file: file, conversationId: conversationId, round: true)
+			}
+			.padding(.horizontal, 16)
+			.pageTopPadding()
+			Group {
+				if let image {
+					Image(uiImage: image).resizable().scaledToFit()
+				} else {
+					Text("This picture can't be shown here. Download it to open it.")
+						.font(Typeface.rubik(14))
+						.foregroundStyle(Palette.mutedForeground)
+						.multilineTextAlignment(.center)
+						.padding(.horizontal, 16)
+				}
+			}
+			.frame(maxWidth: .infinity, maxHeight: .infinity)
+		}
+		.padding(.bottom, 16)
+		.background(Color.black.ignoresSafeArea())
+		.environment(\.colorScheme, .dark)
+	}
+}
+
+/// A file that isn't a picture: its kind's mark, its name, its kind and size, and Download.
+private struct FileChip: View {
+	let file: FilePart
+	let conversationId: String
+	let sent: Bool
+
+	var body: some View {
+		let ext = FileLook.extensionOf(file.name).uppercased()
+		HStack(spacing: 10) {
+			Icon(FileLook.of(file).icon, size: 16)
+				.foregroundStyle(Palette.softForeground)
+				.frame(width: 32, height: 32)
+				.background(Palette.tile, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+			VStack(alignment: .leading, spacing: 1) {
+				Text(file.name).font(Typeface.rubik(14, .medium)).foregroundStyle(Palette.foreground).lineLimit(1).truncationMode(.middle)
+				Text((ext.isEmpty ? "" : "\(ext) · ") + FileLook.sizeLabel(file.size))
+					.font(Typeface.rubik(12))
+					.foregroundStyle(Palette.subtleForeground)
+			}
+			.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+			if sent { DownloadButton(file: file, conversationId: conversationId, round: false) }
+		}
+		.padding(.vertical, 8)
+		.padding(.leading, 10)
+		.padding(.trailing, 8)
+		.background(Palette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+		.overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border))
+	}
+}
+
+/// Download: fetches the file, then offers it to save or share, as a phone downloads.
+@MainActor
+private struct DownloadButton: View {
+	let file: FilePart
+	let conversationId: String
+	let round: Bool
+	@Environment(WorkspaceStore.self) private var store
+	@Environment(Toaster.self) private var toaster
+	@State private var local: SavedFile?
+
+	var body: some View {
+		Button(action: fetch) {
+			Icon(.download, size: round ? 20 : 16, strokeWidth: 2)
+				.foregroundStyle(round ? Palette.foreground : Palette.mutedForeground)
+				.frame(width: round ? 44 : 30, height: round ? 44 : 30)
+				.contentShape(Circle())
+		}
+		.buttonStyle(.plain)
+		.modifier(GlassIf(on: round))
+		.accessibilityLabel("Download \(file.name)")
+		.sheet(item: $local) { saved in
+			ShareSheet(items: [saved.url])
+		}
+	}
+
+	private func fetch() {
+		Task {
+			do {
+				local = SavedFile(url: try await ChatFiles.local(file, in: conversationId, client: store.client))
+			} catch {
+				toaster.show(error.localizedDescription)
+			}
+		}
+	}
+}
+
+private struct GlassIf: ViewModifier {
+	let on: Bool
+
+	func body(content: Content) -> some View {
+		if on { content.glass(in: Circle()) } else { content }
+	}
+}

@@ -16,7 +16,9 @@
 			"!packages/web/.storybook/public/mockServiceWorker.js",
 			"!packages/website/src/routeTree.gen.ts",
 			"!packages/emoji/src/emoji.json",
-			"!packages/contracts/openapi.json"
+			"!packages/contracts/openapi.json",
+			"!apps/ios/**/*.xcassets",
+			"!apps/ios/Sugabots/Resources/Emoji.json"
 		]
 	},
 	"formatter": {

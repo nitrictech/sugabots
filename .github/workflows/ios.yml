@@ -1,0 +1,46 @@
+name: iOS
+
+# Builds the iOS app whenever it or the API it's generated from changes, so a
+# change to the API that the app hasn't caught up with fails here, and runs the
+# web's shared rule cases against the app's Swift copies of those rules. That
+# the generated files match their sources is checked by the `ios` and
+# `contracts` tests in CI's Test job.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - "packages/contracts/**"
+      - "packages/web/src/lib/*.cases.json"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - "packages/contracts/**"
+      - "packages/web/src/lib/*.cases.json"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    # The Xcode the app is made with; GitHub's macOS 14 image has it by default.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build for the simulator
+        run: >-
+          xcodebuild build
+          -project apps/ios/Sugabots.xcodeproj
+          -scheme Sugabots
+          -destination "generic/platform=iOS Simulator"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Check the rules copied from the web
+        run: apps/ios/scripts/check-rules.sh
