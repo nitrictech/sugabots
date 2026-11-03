@@ -1,14 +1,15 @@
 import { Effect, Schema } from "effect";
+import isISO8601 from "validator/lib/isISO8601.js";
 import { agentSchema } from "./agents.ts";
 import { repositoryEventSchema, repositoryPathSchema } from "./github.ts";
 import { podSlugSchema } from "./pods.ts";
+import { MAX_TIMEZONE_CHARACTERS } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 export const MAX_ROUTINE_NAME_CHARACTERS = 80;
 export const MAX_ROUTINE_INSTRUCTIONS_CHARACTERS = 20_000;
 export const MAX_CRON_EXPRESSION_CHARACTERS = 200;
-export const MAX_TIMEZONE_CHARACTERS = 100;
 export const MAX_IDEMPOTENCY_KEY_CHARACTERS = 200;
 export const MAX_ROUTINE_SCHEDULE_TIMES = 8;
 export const MAX_EVERY_DAYS = 30;
@@ -193,8 +194,13 @@ const scheduleTimesSchema = Schema.Array(minutesPastMidnightSchema).check(
 export const weekdaySchema = Schema.Literals(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 export type Weekday = typeof weekdaySchema.Type;
 
-/** A calendar date, as `YYYY-MM-DD`. */
-const calendarDateSchema = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/));
+/** A calendar date that exists, as `YYYY-MM-DD`. */
+const calendarDateSchema = Schema.String.check(
+	Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/),
+	Schema.makeFilter((date) => isISO8601(date, { strict: true }), {
+		message: "Expected a date that exists",
+	}),
+);
 
 const everySchema = (maximum: number) =>
 	Schema.Int.check(Schema.isBetween({ minimum: 1, maximum }));

@@ -1,5 +1,6 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
+	AGENT_NAME_MAX_LENGTH,
 	type Agent,
 	type AgentColor,
 	type AgentFace,
@@ -605,7 +606,7 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 				aria-label="Name"
 				value={name}
 				onChange={(event) => setName(event.target.value)}
-				maxLength={64}
+				maxLength={AGENT_NAME_MAX_LENGTH}
 				placeholder="Give it a name"
 				className={fieldClass}
 			/>

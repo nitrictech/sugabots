@@ -1,7 +1,10 @@
 import {
 	connectionToolKey,
 	connectionToolMutating,
+	headerNameSchema,
+	headerValueSchema,
 	isClientOwnedHeader,
+	MAX_URL_CHARACTERS,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { asSchema, type Tool, tool } from "ai";
@@ -107,10 +110,17 @@ const requestFields = {
 		Schema.isPattern(/^\//, { message: "Start the path with /" }),
 		Schema.isMaxLength(4_096),
 	).annotate({ description: "The path under the connection's address, starting with /" }),
-	query: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
+	query: Schema.optional(
+		Schema.Record(
+			Schema.String.check(Schema.isMaxLength(MAX_URL_CHARACTERS)),
+			Schema.String.check(Schema.isMaxLength(MAX_URL_CHARACTERS)),
+		).check(Schema.isMaxProperties(100)),
+	).annotate({
 		description: "Query parameters to add to the address",
 	}),
-	headers: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
+	headers: Schema.optional(
+		Schema.Record(headerNameSchema, headerValueSchema).check(Schema.isMaxProperties(20)),
+	).annotate({
 		description: "Request headers",
 	}),
 };

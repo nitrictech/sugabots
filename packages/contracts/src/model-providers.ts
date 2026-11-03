@@ -1,4 +1,4 @@
-import { Effect, Result, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { modelIdSchema } from "./agents.ts";
 import {
 	presetRequiresApiKey,
@@ -7,6 +7,7 @@ import {
 	providerPresetIdSchema,
 } from "./provider-catalog.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
+import { httpUrlSchema } from "./urls.ts";
 import { uuidSchema } from "./uuid.ts";
 
 export const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
@@ -91,17 +92,22 @@ export const headerNameSchema = Schema.Trim.check(
 	Schema.isPattern(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, { message: "Use a valid HTTP header name" }),
 );
 
+export const headerValueSchema = Schema.String.check(
+	Schema.isMaxLength(2048),
+	Schema.makeFilter((value) => !/[\r\n]/.test(value), { message: "Header value is invalid" }),
+);
+
 export const providerHeaderSchema = Schema.Struct({
 	name: headerNameSchema.check(
 		Schema.makeFilter((name) => !isReservedProviderHeader(name), {
 			message: "Header name is reserved",
 		}),
 	),
-	value: Schema.String.check(
-		Schema.isMaxLength(2048),
-		Schema.makeFilter((value) => !/[\r\n]/.test(value), { message: "Header value is invalid" }),
-	),
+	value: headerValueSchema,
 });
+
+/** The most models a provider may list, or one change may reach. */
+export const MAX_PROVIDER_MODELS = 2_000;
 
 /*
  * The shape of a provider URL, which is all a schema can judge. Whether the API
@@ -109,11 +115,7 @@ export const providerHeaderSchema = Schema.Struct({
  * is the installation's network policy, which the API applies in one place to
  * every provider alike.
  */
-export const providerUrlSchema = Schema.Trim.check(
-	Schema.makeFilter((value) => Result.isSuccess(Schema.decodeResult(Schema.URLFromString)(value)), {
-		message: "Invalid URL",
-	}),
-	Schema.makeFilter((value) => /^https?:\/\//i.test(value), { message: "Use an HTTP URL" }),
+export const providerUrlSchema = httpUrlSchema.check(
 	Schema.makeFilter(
 		(value) =>
 			!value
@@ -324,7 +326,10 @@ export function effectiveCapabilities(
 }
 
 export const bulkProviderModelUpdateSchema = Schema.Struct({
-	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(Schema.isMinLength(1)),
+	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_PROVIDER_MODELS),
+	),
 	enabled: Schema.Boolean,
 });
 

@@ -1,6 +1,11 @@
 export * as Authentication from "./authentication.ts";
 
-import { type SessionUser, USER_NAME_MAX_LENGTH, userNameSchema } from "@sugabots/contracts";
+import {
+	httpUrlSchema,
+	type SessionUser,
+	USER_NAME_MAX_LENGTH,
+	userNameSchema,
+} from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
@@ -117,6 +122,7 @@ export const make = Effect.gen(function* () {
 				create: {
 					before: async (creating, context) => {
 						const name = validUserName(creating.name);
+						const image = validUserImage(creating.image);
 						const { referredBy } = await run(
 							Effect.mapError(
 								accounts.admit({
@@ -130,13 +136,18 @@ export const make = Effect.gen(function* () {
 									}),
 							),
 						);
-						return { data: { ...creating, name, referredBy } };
+						return { data: { ...creating, name, image, referredBy } };
 					},
 				},
 				update: {
 					before: async (updating) => {
-						if (updating.name === undefined) return;
-						return { data: { ...updating, name: validUserName(updating.name) } };
+						return {
+							data: {
+								...updating,
+								...(updating.name !== undefined && { name: validUserName(updating.name) }),
+								...(updating.image !== undefined && { image: validUserImage(updating.image) }),
+							},
+						};
 					},
 				},
 			},
@@ -233,10 +244,32 @@ function validUserName(name: unknown): string {
 	);
 }
 
-/** `referralCode` from a sign-up's body, which better-auth passes on without looking at it. */
+/** `image` as an HTTP address, or a refusal the caller is shown. Null, or none, is no picture. */
+function validUserImage(image: unknown): string | null | undefined {
+	if (image === null || image === undefined) return image;
+	return Option.getOrThrowWith(
+		Schema.decodeUnknownOption(httpUrlSchema)(image),
+		() =>
+			new APIError("BAD_REQUEST", {
+				code: "INVALID_IMAGE",
+				message: "Your picture needs to be an HTTP address.",
+			}),
+	);
+}
+
+/** What better-auth passes on from a sign-up's body without looking at it. */
+const signUpExtrasSchema = Schema.Struct({
+	referralCode: Schema.String,
+});
+
+/** `referralCode` from a sign-up's body. */
 function referralCodeIn(body: unknown): string | undefined {
-	if (typeof body !== "object" || body === null || !("referralCode" in body)) return undefined;
-	return typeof body.referralCode === "string" ? body.referralCode : undefined;
+	return Option.getOrUndefined(
+		Option.map(
+			Schema.decodeUnknownOption(signUpExtrasSchema)(body),
+			(extras) => extras.referralCode,
+		),
+	);
 }
 
 export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{

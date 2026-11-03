@@ -2,6 +2,7 @@ import { Popover } from "@base-ui/react/popover";
 import {
 	canStartMention,
 	MAX_ATTACHMENTS_PER_MESSAGE,
+	MESSAGE_MAX_LENGTH,
 	type MessageReplyTo,
 	messageAuthorName,
 } from "@sugabots/contracts";
@@ -267,7 +268,7 @@ export function ChatComposer({
 						placeholder={placeholder}
 						value={value}
 						mentionable={mentionable}
-						maxLength={20_000}
+						maxLength={MESSAGE_MAX_LENGTH}
 						onValueChange={(next, caret) => {
 							if (completeShortcode(next, caret)) return;
 							onValueChange(next);

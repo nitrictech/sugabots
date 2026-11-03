@@ -23,7 +23,7 @@ import { Session } from "../middleware.ts";
 const root = "/workspaces/:workspace/model-providers";
 const workspace = { workspace: workspaceIdOrSlugSchema };
 const provider = { workspace: workspaceIdOrSlugSchema, providerId: uuidSchema };
-const model = { ...provider, modelId: Schema.String };
+const model = { ...provider, modelId: uuidSchema };
 
 /** How many models a change reached. */
 const updatedCountSchema = Schema.Struct({
