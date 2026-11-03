@@ -3,12 +3,12 @@ import {
 	type LivelyBehaviour,
 	LivelyBotFace,
 	type LivelyFace,
-	type MoodLoop,
 	useGroupTurn,
 	useMoodLoop,
 } from "@sugabots/avatars";
 import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
 import type { Ref } from "react";
+import { WATCHING_MOODS } from "@/lib/face-moods.ts";
 
 /*
  * An agent's face.
@@ -90,16 +90,6 @@ interface AgentLook {
 	face: AgentFace;
 	shape: AgentShape;
 }
-
-/**
- * How a bot's face carries itself while someone writes to it: watching them,
- * now and then briefly pleased or excited.
- */
-const WATCHING_MOODS: MoodLoop = [
-	{ mood: "idle", weight: 1, seconds: { least: 25, most: 60 } },
-	{ mood: "happy", weight: 2, seconds: { least: 1.5, most: 2.5 } },
-	{ mood: "excited", weight: 1, seconds: { least: 1, most: 1.5 } },
-];
 
 /**
  * The face of a bot someone is talking to: thinking while the bot is `busy`;

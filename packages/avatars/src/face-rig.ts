@@ -93,58 +93,71 @@ export interface FaceDrawing {
  * as depth.
  */
 /** How far the eyes slide sideways, and up or down, looking all the way. */
-const EYE_TRAVEL_X = 5;
-const EYE_TRAVEL_Y = 3;
+export const EYE_TRAVEL_X = 5;
+export const EYE_TRAVEL_Y = 3;
 /** How far the eyes dip as they near the side, so they follow the head's curve rather than a straight line. */
-const EYE_EDGE_DIP = 0.8;
+export const EYE_EDGE_DIP = 0.8;
 /** How much narrower the eyes get looking all the way to one side, as if turned away on a ball. */
-const EYE_FORESHORTENING = 0.18;
-const HEAD_TRAVEL_X = 1.2;
-const HEAD_TRAVEL_Y = 0.6;
-const HEAD_TILT_DEGREES = 4;
+export const EYE_FORESHORTENING = 0.18;
+export const HEAD_TRAVEL_X = 1.2;
+export const HEAD_TRAVEL_Y = 0.6;
+export const HEAD_TILT_DEGREES = 4;
 
 /** Eyes jump to what they look at almost at once; they never drift. */
-const EYES_SPRING = { stiffness: 1000, damping: 60 };
+export const EYES_SPRING = { stiffness: 1000, damping: 60 };
 /** The head follows the eyes late, and overshoots a little before it settles. */
-const HEAD_SPRING = { stiffness: 140, damping: 13 };
+export const HEAD_SPRING = { stiffness: 140, damping: 13 };
 /** How a mood settles in when it changes: gently, without overshoot. */
-const MOOD_SPRING = { stiffness: 120, damping: 20 };
+export const MOOD_SPRING = { stiffness: 120, damping: 20 };
 /**
  * The same, for the eyes' shapes, which ease in script: they stop once within
  * `restDelta` of where they're going and slower than `restSpeed`, far below
  * what shows even on a large face.
  */
-const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 };
+export const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 };
 
-/** How far a blink squeezes an eye, and its timing: quick to shut, a beat closed, slower to open. */
-const BLINK_CLOSED = 0.1;
-const BLINK = { duration: 0.24, times: [0, 0.33, 0.5, 1] };
+/**
+ * How far a blink squeezes an eye, and its timing: quick to shut, a beat
+ * closed, slower to open; a double blink waits `repeatDelay` between the two.
+ */
+export const BLINK_CLOSED = 0.1;
+export const BLINK = { duration: 0.24, times: [0, 0.33, 0.5, 1], repeatDelay: 0.08 };
 /** Once the pointer and typing have rested this long, idle glances take over again. */
-const WATCHING_REST_MS = 4000;
-/** How far open a sleepy bot's eyes flutter, and how long the flutter takes. */
-const FLUTTER_OPEN = 0.5;
-const FLUTTER_SECONDS = 1.2;
+export const WATCHING_REST_MS = 4000;
+/** How far open a sleepy bot's eyes flutter, how long the flutter takes, and when it's widest: quickly open, slowly shut. */
+export const FLUTTER_OPEN = 0.5;
+export const FLUTTER_SECONDS = 1.2;
+export const FLUTTER_TIMES = [0, 0.3, 1];
+export const FLUTTER_EASE: Easing[] = ["easeOut", "easeIn"];
 /** The width a face is taken to have, in CSS pixels, while it can't be measured. */
 const UNMEASURED_FACE_PIXELS = 128;
 /** How long a face's measured size is trusted before it's measured again. */
 const FACE_SIZE_TRUSTED_MS = 500;
 
 /** How far a wiggle leans the head to each side, in degrees and viewbox units, and how long one there and back takes. */
-const WIGGLE_DEGREES = 6;
-const WIGGLE_SHIFT = 0.6;
-const WIGGLE_SECONDS = 0.7;
+export const WIGGLE_DEGREES = 6;
+export const WIGGLE_SHIFT = 0.6;
+export const WIGGLE_SECONDS = 0.7;
 /** Side to side and back: centre, right, centre, left, centre. */
-const WIGGLE_SIDES = [0, 1, 0, -1, 0];
-const WIGGLE_TIMES = [0, 0.25, 0.5, 0.75, 1];
+export const WIGGLE_SIDES = [0, 1, 0, -1, 0];
+export const WIGGLE_TIMES = [0, 0.25, 0.5, 0.75, 1];
 
 /** How high a thinking dot rises against its own height, and its timing, like the app's typing dots. */
-const DOT_RISE_SHARE = 2.6 / (THINKING_DOT_RADIUS * 2);
-const DOT_CYCLE_SECONDS = 1.2;
-const DOT_STAGGER_SECONDS = 0.15;
-const DOT_BRIGHTEST = 1;
+export const DOT_RISE_SHARE = 2.6 / (THINKING_DOT_RADIUS * 2);
+export const DOT_CYCLE_SECONDS = 1.2;
+export const DOT_STAGGER_SECONDS = 0.15;
+export const DOT_BRIGHTEST = 1;
+/** When in each rise a dot is at its height and back down, as shares of the cycle; it rests for the rest. */
+export const DOT_RISE_TIMES = [0, 0.3, 0.6, 1];
+/**
+ * How far the mood has turned to thinking when the outer dots, and then the
+ * middle one, start and finish growing, from 0 to 1; the middle one comes last.
+ */
+export const OUTER_DOTS_GROW = [0, 0.6];
+export const MIDDLE_DOT_GROWS = [0.4, 1];
 
 /** How quickly a wiggle or the thinking dots ease back to rest when they stop. */
-const STILLING_SECONDS = 0.25;
+export const STILLING_SECONDS = 0.25;
 
 const easeEachWay = (segments: number): Easing[] =>
 	Array.from({ length: segments }, () => "easeInOut");
@@ -224,7 +237,6 @@ export function useFaceRig(
 			animate(blink, [1, BLINK_CLOSED, BLINK_CLOSED, 1], {
 				...BLINK,
 				repeat: twice ? 1 : 0,
-				repeatDelay: 0.08,
 			});
 		},
 		hop(size = 1) {
@@ -264,8 +276,8 @@ export function useFaceRig(
 					{
 						kind: "keyframes",
 						frames: [resting, risen, resting, resting],
-						times: [0, 0.3, 0.6, 1],
-						ease: easeEachWay(3),
+						times: DOT_RISE_TIMES,
+						ease: easeEachWay(DOT_RISE_TIMES.length - 1),
 						seconds: DOT_CYCLE_SECONDS,
 					},
 					{ repeat: true, delaySeconds: index * DOT_STAGGER_SECONDS },
@@ -278,8 +290,8 @@ export function useFaceRig(
 		flutter() {
 			animate(flutter, [0, FLUTTER_OPEN, 0], {
 				duration: FLUTTER_SECONDS,
-				times: [0, 0.3, 1],
-				ease: ["easeOut", "easeIn"],
+				times: FLUTTER_TIMES,
+				ease: FLUTTER_EASE,
 			});
 		},
 	}));
@@ -295,8 +307,8 @@ export function useFaceRig(
 		eyesShrink: useTransform(dots, (shown) => 1 - shown),
 		smile,
 		arcsFlat,
-		outerDotsGrow: useTransform(dots, [0, 0.6], [0, 1]),
-		middleDotGrows: useTransform(dots, [0.4, 1], [0, 1]),
+		outerDotsGrow: useTransform(dots, OUTER_DOTS_GROW, [0, 1]),
+		middleDotGrows: useTransform(dots, MIDDLE_DOT_GROWS, [0, 1]),
 	};
 	return { controls, drawing };
 }

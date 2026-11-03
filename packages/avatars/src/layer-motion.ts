@@ -118,15 +118,15 @@ export type Path =
 /** Half a device pixel: no finer move could show. */
 const STEP_PIXELS = 0.5;
 /** The shared clock's ticks, which every change falls on: a video's frame rate. */
-const TICK_SECONDS = 1 / 30;
+export const TICK_SECONDS = 1 / 30;
 /** How finely a spring is stepped through to find when it settles. */
-const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
+export const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
 /** A spring is cut off by this long at the latest, wherever it has got to. */
-const LONGEST_SPRING_MILLISECONDS = 3000;
+export const LONGEST_SPRING_MILLISECONDS = 3000;
 /** How far ahead a layer's path is looked at to tell how fast it's moving. */
-const VELOCITY_SECONDS = 1 / 240;
+export const VELOCITY_SECONDS = 1 / 240;
 /** How long a repeating path takes to ease to where it starts, from wherever the layer is. */
-const LEAD_IN_SECONDS = 0.25;
+export const LEAD_IN_SECONDS = 0.25;
 
 interface Playing {
 	animation: Animation;
@@ -141,13 +141,16 @@ interface Playing {
 export class LayerMotion {
 	private values: Values;
 	private playing: Playing | undefined;
+	private readonly layer: RefObject<HTMLElement | null>;
+	private readonly kind: LayerKind;
+	/** The face's width in device pixels, read when a path starts. */
+	private readonly facePixels: () => number;
 
-	constructor(
-		private readonly layer: RefObject<HTMLElement | null>,
-		private readonly kind: LayerKind,
-		/** The face's width in device pixels, read when a path starts. */
-		private readonly facePixels: () => number,
-	) {
+	// Fields set by hand rather than as parameter properties, so Node can load this file as it is, as the iOS app's generator does.
+	constructor(layer: RefObject<HTMLElement | null>, kind: LayerKind, facePixels: () => number) {
+		this.layer = layer;
+		this.kind = kind;
+		this.facePixels = facePixels;
 		this.values = kind.rest;
 	}
 

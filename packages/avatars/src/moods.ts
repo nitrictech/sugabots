@@ -109,7 +109,7 @@ function glanceOrBlink(face: FaceControls): void {
 }
 
 /** How big a happy bot's little bounces are, against a full hop. */
-const HAPPY_BOUNCE = 0.4;
+export const HAPPY_BOUNCE = 0.4;
 
 function bounceOrBlink(face: FaceControls): void {
 	const roll = Math.random();
@@ -120,8 +120,8 @@ function bounceOrBlink(face: FaceControls): void {
 }
 
 /** How big an excited bot's bounces on the spot are against a full hop, and how often one is a full hop instead. */
-const EXCITED_BOUNCE: Span = { least: 0.25, most: 0.5 };
-const EXCITED_FULL_HOP_CHANCE = 0.3;
+export const EXCITED_BOUNCE: Span = { least: 0.25, most: 0.5 };
+export const EXCITED_FULL_HOP_CHANCE = 0.3;
 
 function bounceOrHop(face: FaceControls): void {
 	// Never cuts a hop short in the air.
