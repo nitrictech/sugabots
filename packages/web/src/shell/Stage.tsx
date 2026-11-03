@@ -1,6 +1,7 @@
 import { cn } from "cn";
 import { ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BACK_BUTTON, BackChevron, useLeave } from "@/ui/back-button.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
@@ -42,7 +43,7 @@ export function StageBack({ parent }: { parent: StageParent }) {
  * Something a bot made or is doing, opened large beside its chat or a list so
  * it can be talked about while it is looked at. On a phone it covers them.
  * With `parent`, it is a view inside another, and its Back, before the
- * title, returns there.
+ * title, returns there, as Escape does; without, Escape closes it.
  */
 export function Stage({
 	label,
@@ -69,13 +70,12 @@ export function Stage({
 	children: ReactNode;
 }) {
 	const { leave } = useLeave();
+	const keys = usePanelKeys<HTMLElement>(() => (parent ? parent.onBack() : onClose()));
 	return (
 		<section
 			aria-label={label}
-			onKeyDown={(event) => {
-				if (event.key === "Escape") onClose();
-			}}
-			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background max-md:absolute max-md:inset-0 max-md:z-40"
+			{...keys}
+			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
 		>
 			<header className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
 				{parent && <StageBack parent={parent} />}
