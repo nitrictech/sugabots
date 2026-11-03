@@ -5,7 +5,7 @@ import { useChatList, useOpenRoutineFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
-import { RoutineRow } from "@/shell/Routines.tsx";
+import { NoRoutines, RoutineRow } from "@/shell/Routines.tsx";
 import { Stage, StageMark, type StageParent } from "@/shell/Stage.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -111,6 +111,7 @@ export function RoutinesStage({
 				agent={agent}
 				pod={pod}
 				onOpen={(routineId) => onViewChange({ kind: "routine", routineId })}
+				onNew={() => onViewChange({ kind: "new" })}
 			/>
 		</Stage>
 	);
@@ -121,10 +122,12 @@ function RoutineList({
 	agent,
 	pod,
 	onOpen,
+	onNew,
 }: {
 	agent: Agent;
 	pod: Pod;
 	onOpen: (routineId: string) => void;
+	onNew: () => void;
 }) {
 	const list = useChatList(pod.slug);
 	const { workspace } = useWorkspace();
@@ -140,12 +143,19 @@ function RoutineList({
 	}
 	if (list.isSuccess && routines.length === 0) {
 		return (
-			<EmptyState
+			<NoRoutines
 				title={`No routines for ${agent.name} yet`}
-				icon={<RefreshCcw strokeWidth={1.75} />}
-			>
-				Ask {agent.name} to set some up for you.
-			</EmptyState>
+				pod={pod}
+				create={
+					pod.permissions.manageRoutines
+						? {
+								newRoutine: <button type="button" onClick={onNew} />,
+								// Not linked: the bot's chat is already open beside this panel.
+								whoToAsk: agent.name,
+							}
+						: undefined
+				}
+			/>
 		);
 	}
 	return (
