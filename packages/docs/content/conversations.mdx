@@ -17,8 +17,10 @@ Mentions use a person's or bot's handle at the start of a word, like
 `@budget-keeper`. Email addresses don't count as mentions.
 
 `@here` and `@channel` mention everyone who can see the conversation, and
-notify each of them as a mention does. They are for people: a bot only answers
-when its own handle is used.
+notify each of them as a mention does. They are for people: a message with
+`@here` or `@channel` gets an answer from a bot only if it names that bot too.
+A bot can't use them to notify anyone, and no bot can take `here` or `channel`
+as its handle.
 
 ## Bots asking bots
 
