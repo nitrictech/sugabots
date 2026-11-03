@@ -762,9 +762,12 @@ function RoutineResultLink({
 	);
 }
 
-/** How a collaboration's line says where it stands, once it has settled or needs somebody. */
+/**
+ * How a collaboration's line says where it stands once it has settled. Until
+ * then it is working: `pending` means the asking bot moved on to be resumed
+ * by the answer, which waits on nobody's approval.
+ */
 const COLLABORATION_STATUS: Partial<Record<CollaborationPart["status"], SideThreadStatus>> = {
-	pending: { text: "Needs approval", urgent: true },
 	answered: { text: "Done", done: true },
 	failed: { text: "Stopped" },
 };

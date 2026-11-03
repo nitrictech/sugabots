@@ -1,5 +1,6 @@
 import type {
 	AgentParticipant,
+	CollaborationPart,
 	Connection,
 	Message,
 	MessagePart,
@@ -291,29 +292,40 @@ describe("a reply that opens by asking another bot", () => {
 		name: "Sentry Scout",
 		handle: "sentry-scout",
 	};
-	const asked = reply([
-		{
-			type: "collaboration",
-			id: "0199a3a0-0000-7000-8000-0000000000c2",
-			agentId: helper.id,
-			agentName: helper.name,
-			threadId: "0199a3a0-0000-7000-8000-0000000000c3",
-			brief: "Check Sentry",
-			status: "answered",
-			answer: "41 events",
-			atOffset: 0,
-		},
-		{ type: "text", text: "Sentry Scout found 41 events." },
-	]);
+	const asked = (status: CollaborationPart["status"], answer: string | null = null) =>
+		reply([
+			{
+				type: "collaboration",
+				id: "0199a3a0-0000-7000-8000-0000000000c2",
+				agentId: helper.id,
+				agentName: helper.name,
+				threadId: "0199a3a0-0000-7000-8000-0000000000c3",
+				brief: "Check Sentry",
+				status,
+				answer,
+				atOffset: 0,
+			},
+			{ type: "text", text: "Sentry Scout found 41 events." },
+		]);
 
 	it("puts the collaboration under the words that led to it, as a thread line", async () => {
-		show([asked], { participants: [host, helper] });
+		show([asked("answered", "41 events")], { participants: [host, helper] });
 
 		const line = await screen.findByRole("button", {
 			name: `Open Collaboration: ${host.name} and ${helper.name}, Done`,
 		});
 		const name = screen.getByText(host.name, { selector: "span" });
 		expect(name.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	// `pending` is the asking bot having moved on to be resumed by the answer; nobody has anything to approve.
+	it.each(["waiting", "pending"] as const)("says it is working while %s", async (status) => {
+		show([asked(status)], { participants: [host, helper] });
+
+		const line = await screen.findByRole("button", {
+			name: `Open Collaboration: ${host.name} and ${helper.name}, Working`,
+		});
+		expect(line.textContent).not.toContain("Needs approval");
 	});
 });
 
