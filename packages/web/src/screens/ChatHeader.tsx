@@ -167,10 +167,9 @@ export function ChatHeader({
 			</div>
 			{done ? (
 				<>
-					{/* A phone has room for one control beside a thread's title, which holds both. */}
+					{/* A phone has room for one control beside a thread's title, which holds the computer and done. */}
 					<span className="contents max-md:hidden">
 						<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
-						<DoneButton {...done} />
 					</span>
 					<ThreadMenu done={done} back={back} onOpenDesktop={openComputer} />
 				</>
@@ -178,6 +177,11 @@ export function ChatHeader({
 				<ChatSandbox agent={agent} threadId={conversationId} onOpen={openComputer} />
 			)}
 			<RoutinesButton onOpen={onOpenRoutines} />
+			{done && (
+				<span className="contents max-md:hidden">
+					<DoneButton {...done} />
+				</span>
+			)}
 			{details && <DetailsButton {...details} />}
 			{trailing}
 			{pod && (
