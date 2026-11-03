@@ -31,7 +31,7 @@ import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
-import { textWithMentions } from "./mentions.tsx";
+import { GROUP_MENTIONS, textWithMentions } from "./mentions.tsx";
 import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
@@ -621,7 +621,10 @@ function MessageRow({
 								<MessageMarkdown text={segment.text} mentionable={participants} />
 							) : (
 								<p className="m-0 whitespace-pre-wrap">
-									{textWithMentions(segment.text, participants)}
+									{textWithMentions(
+										segment.text,
+										author.kind === "person" ? [...participants, ...GROUP_MENTIONS] : participants,
+									)}
 								</p>
 							)}
 						</div>

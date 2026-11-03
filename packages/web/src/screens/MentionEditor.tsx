@@ -1,4 +1,4 @@
-import { splitAroundMentions, type ThreadParticipant } from "@sugabots/contracts";
+import { splitAroundMentions } from "@sugabots/contracts";
 import { cn } from "cn";
 import {
 	type ClipboardEvent,
@@ -14,12 +14,17 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { MentionChip, participantWithHandle } from "./mentions.tsx";
+import {
+	MentionChip,
+	type MentionTarget,
+	mentionTargetKey,
+	targetWithHandle,
+} from "./mentions.tsx";
 
 /*
  * A message box whose text is plain, with `@handle` for a mention, but which
- * draws each finished mention of somebody it knows as a chip: their face and
- * name, kept whole, removed with one Backspace. A mention is finished once
+ * draws each finished mention of somebody it knows, or of everyone, as a chip:
+ * kept whole, removed with one Backspace. A mention is finished once
  * whitespace follows it, so one still being typed stays text for the mention
  * menu to complete.
  *
@@ -45,7 +50,7 @@ export interface TextRange {
 }
 
 /** A finished mention's `@handle` in the text, and whom it names. */
-type Segment = { kind: "text"; text: string } | { kind: "mention"; participant: ThreadParticipant };
+type Segment = { kind: "text"; text: string } | { kind: "mention"; target: MentionTarget };
 
 /** Marks a chip, holding the `@handle` it stands for. */
 const MENTION_ATTRIBUTE = "data-mention";
@@ -84,7 +89,7 @@ export function MentionEditor({
 	/** Where the caret moved to in the text, while the box has the focus. */
 	onCaretChange: (caret: number) => void;
 	/** Who a mention can name, drawn as a chip when it is finished. */
-	mentionable: readonly ThreadParticipant[];
+	mentionable: readonly MentionTarget[];
 	maxLength: number;
 	onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 	/** Called first; text is pasted as plain text unless this prevents it. */
@@ -279,11 +284,11 @@ export function MentionEditor({
 				)}
 			/>
 			{createPortal(
-				mentionable.map((participant) => (
+				mentionable.map((target) => (
 					<MentionChip
-						key={participant.id}
-						participant={participant}
-						{...{ [MENTION_ATTRIBUTE]: `@${participant.handle}` }}
+						key={mentionTargetKey(target)}
+						target={target}
+						{...{ [MENTION_ATTRIBUTE]: `@${target.handle}` }}
 						contentEditable={false}
 						className="select-none"
 					/>
@@ -301,7 +306,7 @@ export function MentionEditor({
  */
 function segmentsOf(
 	text: string,
-	mentionable: readonly ThreadParticipant[],
+	mentionable: readonly MentionTarget[],
 	{ endFinishes }: { endFinishes: boolean },
 ): Segment[] {
 	const parts = splitAroundMentions(text);
@@ -311,11 +316,11 @@ function segmentsOf(
 			pushText(segments, part);
 			continue;
 		}
-		const participant = participantWithHandle(mentionable, part);
+		const target = targetWithHandle(mentionable, part);
 		const after = parts[index + 1] ?? "";
 		const finished =
 			/^\s/.test(after) || (endFinishes && index === parts.length - 2 && after === "");
-		if (participant && finished) segments.push({ kind: "mention", participant });
+		if (target && finished) segments.push({ kind: "mention", target });
 		else pushText(segments, `@${part}`);
 	}
 	return segments;
@@ -325,7 +330,7 @@ function segmentsOf(
  * What the edited box holds: the chips it has, kept while whoever they name
  * can still be mentioned, and its text with the mentions finished in it.
  */
-function segmentsOfBox(root: HTMLElement, mentionable: readonly ThreadParticipant[]): Segment[] {
+function segmentsOfBox(root: HTMLElement, mentionable: readonly MentionTarget[]): Segment[] {
 	const segments: Segment[] = [];
 	let run = "";
 	const endRun = () => {
@@ -337,13 +342,13 @@ function segmentsOfBox(root: HTMLElement, mentionable: readonly ThreadParticipan
 	};
 	root.childNodes.forEach((node, index) => {
 		const handle = node instanceof HTMLElement ? node.getAttribute(MENTION_ATTRIBUTE) : null;
-		const participant = handle && participantWithHandle(mentionable, handle.slice(1));
-		if (!participant) {
+		const target = handle && targetWithHandle(mentionable, handle.slice(1));
+		if (!target) {
 			run += textOfNode(node, index);
 			return;
 		}
 		endRun();
-		segments.push({ kind: "mention", participant });
+		segments.push({ kind: "mention", target });
 	});
 	endRun();
 	return segments;
@@ -359,7 +364,7 @@ function pushText(segments: Segment[], text: string) {
 function signatureOf(segments: readonly Segment[]): string {
 	return JSON.stringify({
 		drawn: segments.map((segment) =>
-			segment.kind === "text" ? segment.text : { mention: segment.participant.handle },
+			segment.kind === "text" ? segment.text : { mention: segment.target.handle },
 		),
 		filler: needsFiller(segments),
 	});
@@ -401,10 +406,8 @@ function drawnSignatureOf(root: HTMLElement): string {
 function drawSegments(root: HTMLElement, segments: readonly Segment[], templates: HTMLElement) {
 	const nodes: Node[] = segments.map((segment) => {
 		if (segment.kind === "text") return document.createTextNode(segment.text);
-		const template = templates.querySelector(
-			`[${MENTION_ATTRIBUTE}="@${segment.participant.handle}"]`,
-		);
-		return template?.cloneNode(true) ?? document.createTextNode(`@${segment.participant.handle}`);
+		const template = templates.querySelector(`[${MENTION_ATTRIBUTE}="@${segment.target.handle}"]`);
+		return template?.cloneNode(true) ?? document.createTextNode(`@${segment.target.handle}`);
 	});
 	if (needsFiller(segments)) {
 		const filler = document.createElement("br");

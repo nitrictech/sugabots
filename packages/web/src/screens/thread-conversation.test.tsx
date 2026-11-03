@@ -191,11 +191,19 @@ describe("what people and bots write", () => {
 		expect(await screen.findByText("Issue Triager", { selector: "span" })).toBeDefined();
 	});
 
-	it("marks @here and @channel in a reply as mentions of everyone", async () => {
-		show([reply([{ type: "text", text: "@here the deploy is out, @channel please check." }])]);
+	it("marks a person's @here and @channel as mentions of everyone, but not a bot's", async () => {
+		show([
+			reply([{ type: "text", text: "@here the deploy is out, @channel please check." }], {
+				id: "0199a3a0-0000-7000-8000-0000000000c0",
+				author: testPerson({ id: user.id, name: user.name }),
+				createdAt: "2026-09-18T09:00:00.000Z",
+			}),
+			reply([{ type: "text", text: "Checked. @channel it is fine." }]),
+		]);
 
 		const chips = await screen.findAllByText(/^@(here|channel)$/, { selector: "span" });
 
+		// The bot's `@channel` is not among them.
 		expect(chips.map((chip) => chip.textContent)).toEqual(["@here", "@channel"]);
 	});
 });

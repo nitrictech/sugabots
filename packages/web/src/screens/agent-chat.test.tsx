@@ -567,6 +567,19 @@ describe("ongoing agent Chat", () => {
 		expect(list.getAllByRole("option")).toHaveLength(4);
 	});
 
+	it("offers no @here or @channel when nobody else could be notified", async () => {
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({ ...details(chat.id, "Chat", "bot_channel", [mainMessage]), members: [] }),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		writeDraft(composer, "@");
+
+		const list = within(await screen.findByRole("listbox"));
+		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
+		expect(list.queryByRole("option", { name: /@here|@channel/ })).toBeNull();
+	});
+
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),

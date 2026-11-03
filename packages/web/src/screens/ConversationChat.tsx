@@ -91,7 +91,13 @@ import {
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
+import {
+	firstBotNamed,
+	GROUP_MENTIONS,
+	mentionableIn,
+	textWithMentions,
+	withGroupMentions,
+} from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
@@ -243,10 +249,13 @@ export function ConversationChat({
 	const composerMentionable = useMemo(
 		() =>
 			details
-				? mentionableIn(details).filter(
-						(candidate) =>
-							candidate.id !== user.id &&
-							(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
+				? withGroupMentions(
+						mentionableIn(details).filter(
+							(candidate) =>
+								candidate.id !== user.id &&
+								(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
+						),
+						details.thread.type,
 					)
 				: [],
 		[details, user.id, isPodChat, host?.id],
@@ -1197,7 +1206,10 @@ function StartedFrom({
 			</span>
 			{message.content !== "" && (
 				<p className="m-0 whitespace-pre-wrap break-words text-[15px] text-soft-foreground leading-[1.5]">
-					{textWithMentions(message.content, mentionable)}
+					{textWithMentions(
+						message.content,
+						message.author.kind === "person" ? [...mentionable, ...GROUP_MENTIONS] : mentionable,
+					)}
 				</p>
 			)}
 			{attached.length > 0 && (

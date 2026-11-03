@@ -4,7 +4,6 @@ import {
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	type MessageReplyTo,
 	messageAuthorName,
-	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
@@ -25,7 +24,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
-import { GROUP_MENTIONS, type MentionSuggestion } from "./mentions.tsx";
+import { type MentionTarget, mentionTargetKey } from "./mentions.tsx";
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
 const toolButtonClassName =
@@ -77,8 +76,8 @@ export function ChatComposer({
 	sending?: boolean;
 	error?: ReactNode;
 	className?: string;
-	/** Who the draft can mention. */
-	mentionable: ThreadParticipant[];
+	/** Who the draft can mention, offered in this order. */
+	mentionable: readonly MentionTarget[];
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 	/** The files attached to the message, and what attaches, removes and retries them. */
@@ -107,9 +106,7 @@ export function ChatComposer({
 			: mentionTyped && {
 					kind: "mention",
 					typed: mentionTyped,
-					matches: [...mentionable, ...GROUP_MENTIONS].filter((candidate) =>
-						matchesQuery(candidate, mentionTyped.query),
-					),
+					matches: mentionable.filter((candidate) => matchesQuery(candidate, mentionTyped.query)),
 				},
 		dismissedMenuAt,
 	);
@@ -211,11 +208,9 @@ export function ChatComposer({
 				<SuggestionList
 					id={menuId}
 					title="Mention"
-					label="People and bots to mention"
+					label="Who to mention"
 					items={menu.matches}
-					keyOf={(suggestion) =>
-						suggestion.kind === "group" ? suggestion.handle : `${suggestion.kind}-${suggestion.id}`
-					}
+					keyOf={mentionTargetKey}
 					selected={selectedSuggestion}
 					onHighlight={setActiveSuggestion}
 					onChoose={(index) => chooseSuggestion(menu, index)}
@@ -499,7 +494,7 @@ interface TypedRange {
 
 /** What the menu over the draft offers for what is being typed. */
 type SuggestionMenu =
-	| { kind: "mention"; typed: TypedRange; matches: readonly MentionSuggestion[] }
+	| { kind: "mention"; typed: TypedRange; matches: readonly MentionTarget[] }
 	| { kind: "emoji"; typed: TypedRange; matches: readonly Emoji[] };
 
 /** The menu, unless it has nothing to offer or was closed where it was typed. */
@@ -574,7 +569,7 @@ function SuggestionList<Item>({
 	);
 }
 
-function MentionOption({ suggestion }: { suggestion: MentionSuggestion }) {
+function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 	if (suggestion.kind === "group") {
 		return (
 			<>
@@ -587,7 +582,7 @@ function MentionOption({ suggestion }: { suggestion: MentionSuggestion }) {
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-[14px]">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
-						Notify everyone in this conversation
+						Notify everyone who can see this
 					</span>
 				</span>
 			</>
@@ -671,7 +666,7 @@ function mentionBeingTyped(value: string, cursor: number): TypedRange | undefine
 	return { start: typed.index, end: cursor + restOfHandle.length, query: typed[1] ?? "" };
 }
 
-function matchesQuery(suggestion: MentionSuggestion, query: string): boolean {
+function matchesQuery(suggestion: MentionTarget, query: string): boolean {
 	const lowered = query.toLocaleLowerCase();
 	return (
 		suggestion.handle.includes(lowered) ||
