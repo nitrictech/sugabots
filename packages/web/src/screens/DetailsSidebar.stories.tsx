@@ -141,6 +141,7 @@ const meta = preview.meta({
 			],
 			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
 		},
+		onOpenRoutines: fn(),
 		onClose: fn(),
 	},
 	decorators: [

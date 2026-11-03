@@ -67,8 +67,7 @@ it("keeps the sidebar, with the bot open, while the new thread screen loads", as
 	mount(`/suga/pods/suga-team/threads/new?agent=${linear.handle}`);
 
 	const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-	// Open, its Routines show under it.
-	expect(await within(sidebar).findByRole("link", { name: "Routines" })).toBeDefined();
+	expect(await within(sidebar).findByRole("link", { name: linear.name })).toBeDefined();
 
 	await act(async () => {
 		newThreadModule.resolve();

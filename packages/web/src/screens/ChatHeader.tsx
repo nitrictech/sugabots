@@ -29,6 +29,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
+import { CHAT_HEADER_CONTAINER, HeaderButton } from "./HeaderButton.tsx";
 import { ChatSandbox } from "./SandboxButton.tsx";
 
 /** Where a page's Back on a phone returns to: the list it covers, or for a thread, where the thread lives. */
@@ -67,8 +68,9 @@ export interface DetailsToggle {
 
 /**
  * The bar across the top of a bot's chat: its name, the way into its
- * sandbox's desktop when it has one, and, with `details`, the way into its
- * Details: the ⓘ, or the name, which is how a phone reaches them.
+ * sandbox's desktop when it has one, the way into its routines, and, with
+ * `details`, the way into its Details: the ⓘ, or the name, which is how a
+ * phone reaches them.
  */
 export function ChatHeader({
 	agent,
@@ -77,6 +79,7 @@ export function ChatHeader({
 	done,
 	conversationId,
 	onOpenDesktop,
+	onOpenRoutines,
 	back,
 	trailing,
 	details,
@@ -90,6 +93,8 @@ export function ChatHeader({
 	done?: DoneToggle;
 	conversationId: string;
 	onOpenDesktop: () => void;
+	/** Opens the bot's routines beside the chat. */
+	onOpenRoutines: () => void;
 }) {
 	const name = title ?? agent.name;
 	const modelName = useModelName(agent.model);
@@ -163,6 +168,7 @@ export function ChatHeader({
 			) : (
 				<ChatSandbox agent={agent} threadId={conversationId} onOpen={openComputer} />
 			)}
+			<RoutinesButton onOpen={onOpenRoutines} />
 			{details && <DetailsButton {...details} />}
 			{trailing}
 			{pod && (
@@ -260,7 +266,12 @@ function HeaderBar({
 	children: ReactNode;
 }) {
 	return (
-		<header className="relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2">
+		<header
+			className={cn(
+				CHAT_HEADER_CONTAINER,
+				"relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
+			)}
+		>
 			<div className="flex shrink-0 md:hidden">
 				<HeaderBack back={back} />
 			</div>
@@ -389,6 +400,18 @@ function BadgeDetail({ inPersonalPod, children }: { inPersonalPod: boolean; chil
 			{ONLY_YOU}
 			{children && <> · {children}</>}
 		</>
+	);
+}
+
+/** Opens the bot's routines beside its chat. A phone reaches them from the bot's Details instead. */
+function RoutinesButton({ onOpen }: { onOpen: () => void }) {
+	return (
+		<HeaderButton
+			label="Routines"
+			icon={<RefreshCcw size={16} strokeWidth={1.75} />}
+			onClick={onOpen}
+			className="max-md:hidden"
+		/>
 	);
 }
 

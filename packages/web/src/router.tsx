@@ -1217,6 +1217,8 @@ interface ConversationSearch {
 	version?: number;
 	/** The bot's sandbox desktop open large beside the chat, when no artifact is. */
 	desktop?: true;
+	/** The bot's routines open large beside the chat, when nothing else is. */
+	routines?: true;
 }
 
 const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
@@ -1227,7 +1229,9 @@ const validateConversationSearch = (search: Record<string, unknown>): Conversati
 			? { artifact, ...validateArtifactSearch(search) }
 			: search.desktop === true
 				? { desktop: true }
-				: {}),
+				: search.routines === true
+					? { routines: true }
+					: {}),
 	};
 };
 
@@ -1237,12 +1241,15 @@ const stagedOf = (search: ConversationSearch): Staged | undefined =>
 		? { kind: "artifact", artifactId: search.artifact, version: search.version }
 		: search.desktop
 			? { kind: "desktop" }
-			: undefined;
+			: search.routines
+				? { kind: "routines" }
+				: undefined;
 
 const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
 	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
 	version: staged?.kind === "artifact" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
+	routines: staged?.kind === "routines" ? true : undefined,
 });
 
 /**

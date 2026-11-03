@@ -95,6 +95,7 @@ import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
+import { RoutinesStage } from "./RoutinesStage.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
 import {
 	DaySeparator,
@@ -117,11 +118,12 @@ const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try a
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
- * `version` is absent, or the bot's sandbox desktop.
+ * `version` is absent, the bot's sandbox desktop, or the bot's routines.
  */
 export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
-	| { kind: "desktop" };
+	| { kind: "desktop" }
+	| { kind: "routines" };
 
 /** Opens `staged` large beside a chat, or closes it as a `Stage` asks, as `how` says; see `CloseStage`. */
 export type StagedChange = (staged: Staged | undefined, how?: { replace: boolean }) => void;
@@ -155,6 +157,7 @@ export function ConversationChat({
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
+	const openRoutines = () => onStagedChange({ kind: "routines" });
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
 	const mainThread = useThread(conversationId);
@@ -459,6 +462,7 @@ export function ConversationChat({
 				done={done}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
+				onOpenRoutines={openRoutines}
 			/>
 		) : conversation.kind === "podChat" ? (
 			<PeopleChatHeader
@@ -775,6 +779,8 @@ export function ConversationChat({
 					mayUse={pod.permissions.useDesktops}
 					onClose={() => onStagedChange(undefined)}
 				/>
+			) : staged?.kind === "routines" && agent ? (
+				<RoutinesStage agent={agent} pod={pod} onClose={() => onStagedChange(undefined)} />
 			) : threadId && agent && selectedEntry?.type !== "routine" ? (
 				<ChatThreadPanel
 					conversationId={conversationId}
@@ -818,6 +824,7 @@ export function ConversationChat({
 						threadId={details.thread.id}
 						user={user}
 						contents={contents}
+						onOpenRoutines={openRoutines}
 						onClose={() => place.onDetailsChange(false)}
 					/>
 				) : (

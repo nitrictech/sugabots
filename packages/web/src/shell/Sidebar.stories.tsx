@@ -48,10 +48,7 @@ const threads: ChatListItem[] = [growthDesk, accountManager, leadResearcher].map
 const revenueList = (
 	<ConversationListView
 		pod={revenue}
-		chats={{
-			list: [{ conversation: storyPodChatFor(revenue), unreadMessages: 0 }],
-			onNew: fn(),
-		}}
+		chats={[{ conversation: storyPodChatFor(revenue), unreadMessages: 0 }]}
 		bots={[accountManager, growthDesk, leadResearcher]}
 		rows={threads}
 		status="ready"
@@ -189,31 +186,22 @@ export const Pods = meta.story({
 	},
 });
 
-/**
- * A pod's Channels and Bots fold away under their names, like a pod. Folded,
- * Bots counts what is unread in its threads.
- */
-export const FoldingSections = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		const bots = canvas.getByRole("button", { name: "Bots" });
-		await userEvent.click(bots);
-		await expect(bots).toHaveAttribute("aria-expanded", "false");
-		await expect(canvas.queryByRole("button", { name: "Account Manager" })).toBeNull();
-		await expect(canvas.getByRole("heading", { name: /^Bots/ })).toHaveTextContent(
-			"3 unread messages",
-		);
-
-		const chats = canvas.getByRole("button", { name: "Channels" });
-		await userEvent.click(chats);
-		await expect(canvas.queryByRole("link", { name: "General" })).toBeNull();
-		await userEvent.click(chats);
-		await expect(canvas.getByRole("link", { name: "General" })).toBeVisible();
+/** A pod lists its channels and then its bots in one list, with no sections to fold. */
+export const ChannelsThenBots = meta.story({
+	play: async ({ canvas }) => {
+		await expect(canvas.queryByRole("button", { name: "Bots" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Channels" })).toBeNull();
+		const revenuePod = canvas.getByRole("group", { name: "Revenue" });
+		const names = within(revenuePod)
+			.getAllByRole("link")
+			.map((link) => link.textContent);
+		await expect(names.indexOf("General")).toBeLessThan(names.indexOf(accountManager.name));
 	},
 });
 
 /**
  * Personal open: each of its bots opens its channel with you, and shows its
- * Routines and threads under it while it is open, as a shared pod's do, bold
+ * threads under it while it is open, as a shared pod's do, bold
  * while something there is new. Its name says only you see into it, and
  * with the pointer over that, that admins don't either.
  */
@@ -260,7 +248,6 @@ export const PersonalPod = meta.story({
 		// The bot's row comes first, before its conversation, which goes by its name too.
 		const [channel] = within(personalPod).getAllByRole("link", { name: leadResearcher.name });
 		await expect(channel).toHaveAttribute("aria-current", "page");
-		await expect(within(personalPod).getByRole("link", { name: /^Routines/ })).toBeVisible();
 
 		const toggle = within(personalPod).getByRole("button", { name: "Personal Only you" });
 		await expect(toggle).toHaveAccessibleDescription(
@@ -274,11 +261,10 @@ export const PersonalPod = meta.story({
 });
 
 /**
- * Every bot has Routines as its first row while it is open, whether it runs
- * any yet or not, which opens its Routines page, with a red dot while one
- * failed its latest run; folded, the bot shows the dot itself.
+ * Routines are reached from the bot's own page, not the sidebar, so a bot
+ * whose routine failed its latest run shows a red dot at its row's end.
  */
-export const BotRoutines = meta.story({
+export const BotWithAFailedRoutine = meta.story({
 	beforeEach: () => {
 		localStorage.setItem(
 			"sugabots-folded",
@@ -315,14 +301,9 @@ export const BotRoutines = meta.story({
 	},
 	play: async ({ canvas }) => {
 		const revenuePod = canvas.getByRole("group", { name: "Revenue" });
-		const routines = within(revenuePod).getAllByRole("link", { name: /^Routines/ });
-		await expect(routines).toHaveLength(1);
-		const [desk] = routines;
-		await expect(desk).toHaveAttribute(
-			"href",
-			expect.stringMatching(new RegExp(`routines\\?bot=${growthDesk.handle}$`)),
-		);
-		await expect(desk).toHaveTextContent("Latest run failed");
+		await expect(within(revenuePod).queryByRole("link", { name: /^Routines/ })).toBeNull();
+		const [desk] = within(revenuePod).getAllByRole("link", { name: growthDesk.name });
+		await expect(desk?.closest("li")).toHaveTextContent("Latest run failed");
 	},
 });
 

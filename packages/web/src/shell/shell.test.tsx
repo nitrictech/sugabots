@@ -461,11 +461,12 @@ describe("the sidebar", () => {
 		);
 	});
 
-	it("makes a new bot in the pod shown from its + beside Bots", async () => {
+	it("makes a new bot in the pod shown from the + beside its name", async () => {
 		mount(linearPage);
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		fireEvent.click(await within(sidebar).findByRole("button", { name: "New bot in Suga-Team" }));
+		fireEvent.click(await within(sidebar).findByRole("button", { name: "New in Suga-Team" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "New bot" }));
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		expect(within(dialog).queryByRole("button", { name: /^Pod:/ })).toBeNull();
 	});
@@ -518,7 +519,8 @@ describe("the pod's conversations", () => {
 		expect(within(sidebar).getByRole("link", { name: "General" })).toBeDefined();
 		// The open channel's bot shows its threads; the others keep theirs folded away.
 		expect(within(sidebar).getByRole("link", { name: threadWith(linear).title })).toBeDefined();
-		expect(within(sidebar).getAllByRole("link", { name: "Routines" })).toHaveLength(1);
+		// Routines open beside the bot's chat, so the sidebar has no row for them.
+		expect(within(sidebar).queryByRole("link", { name: "Routines" })).toBeNull();
 		expect(client.api.chats.list).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 			query: { pod: pods[0]?.slug },
@@ -608,8 +610,11 @@ describe("the pod's conversations", () => {
 		mount("/suga/pods/suga-team");
 
 		const sidebar = await screen.findByRole("group", { name: "Suga-Team" });
-		await within(sidebar).findByRole("heading", { name: "Bots" });
-		expect(within(sidebar).queryByRole("button", { name: /^New bot/ })).toBeNull();
+		await within(sidebar).findByRole("link", { name: linear.name });
+		// A shared pod still offers a new channel, but no new bot.
+		fireEvent.click(within(sidebar).getByRole("button", { name: "New in Suga-Team" }));
+		expect(await screen.findByRole("menuitem", { name: "New channel" })).toBeDefined();
+		expect(screen.queryByRole("menuitem", { name: "New bot" })).toBeNull();
 	});
 });
 

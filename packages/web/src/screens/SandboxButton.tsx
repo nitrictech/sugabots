@@ -1,9 +1,8 @@
 import type { Agent } from "@sugabots/contracts";
-import { cn } from "cn";
 import { Monitor } from "lucide-react";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
-import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { HeaderButton } from "./HeaderButton.tsx";
 
 /**
  * The bot's computer, for the top of its chat: always there, so it opens to
@@ -60,13 +59,10 @@ export function SandboxButton({
 			<Monitor aria-hidden size={17} strokeWidth={2} className="md:hidden" />
 		</button>
 	) : (
-		<IconButton
+		<HeaderButton
 			label="Computer"
-			variant="bar"
+			icon={<Monitor size={16} strokeWidth={1.75} />}
 			onClick={onOpen}
-			className={cn("text-muted-foreground hover:text-foreground", FLOATING_ON_PHONE)}
-		>
-			<Monitor size={16} strokeWidth={1.75} />
-		</IconButton>
+		/>
 	);
 }
