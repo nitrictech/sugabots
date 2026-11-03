@@ -7,6 +7,7 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
+import { differenceInCalendarDays } from "date-fns";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
@@ -207,7 +208,6 @@ function Invitations({
 }) {
 	const invite = useInviteWorkspaceMember(workspaceId);
 	const cancel = useCancelWorkspaceInvitation(workspaceId);
-	const [resent, setResent] = useState<ReadonlySet<string>>(new Set());
 	const failure = invite.error ?? cancel.error;
 
 	return (
@@ -219,7 +219,7 @@ function Invitations({
 						<PersonAvatar person={{ name: invitation.email, email: invitation.email }} size={32} />
 					}
 					label={invitation.email}
-					sub={resent.has(invitation.id) ? "Sent again" : expiryText(invitation.expiresAt)}
+					sub={invitedText(invitation.sentAt, invitation.expiresAt)}
 					trailing={
 						canManage && (
 							<span className="flex shrink-0 items-center gap-1">
@@ -228,14 +228,11 @@ function Invitations({
 									size="sm"
 									disabled={invite.isPending}
 									onClick={() =>
-										invite.mutate(
-											{
-												email: invitation.email,
-												role: invitation.role,
-												resend: true,
-											},
-											{ onSuccess: () => setResent((sent) => new Set(sent).add(invitation.id)) },
-										)
+										invite.mutate({
+											email: invitation.email,
+											role: invitation.role,
+											resend: true,
+										})
 									}
 								>
 									Resend
@@ -264,15 +261,15 @@ function Invitations({
 
 /** How long an invitation link lasts: the auth library's default, which the server keeps. */
 const INVITE_LIFETIME_DAYS = 2;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whole days left, so a link with a day and a half to go says one day rather than two. */
-function expiryText(expiresAt: string): string {
-	const left = new Date(expiresAt).getTime() - Date.now();
-	if (left <= 0) return "Expired";
-	const days = Math.floor(left / DAY_MS);
-	if (days === 0) return "Expires within a day";
-	return days === 1 ? "Expires in 1 day" : `Expires in ${days} days`;
+function invitedText(sentAt: string, expiresAt: string): string {
+	const now = new Date();
+	const expired = new Date(expiresAt).getTime() <= now.getTime();
+	// Clamp against clock skew: a sentAt slightly in the future would otherwise read as "-1 days ago".
+	const days = Math.max(0, differenceInCalendarDays(now, new Date(sentAt)));
+	const age = days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+	const label = `Invited ${age}`;
+	return expired ? `${label}, expired` : label;
 }
 
 function MemberPage({

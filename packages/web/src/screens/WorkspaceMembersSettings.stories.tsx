@@ -48,11 +48,13 @@ const inPod = (member: typeof ryan) => ({
 	removable: member.role !== "owner" && member.role !== "admin",
 });
 
-/** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */
+/** Sent yesterday at noon, so the age stays the same regardless of today's time. */
+const now = new Date();
 const alex = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	email: "alex@nitric.io",
 	role: "member",
+	sentAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12).toISOString(),
 	expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
 };
 
@@ -132,7 +134,7 @@ export const Managing = meta.story({
 		await expect(canvas.getByRole("link", { name: /Ryan Eyes/ })).toHaveTextContent("(you)");
 		// People and invitations are two requests, so the invitation is awaited.
 		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
-		await expect(canvas.getByText("Expires within a day")).toBeInTheDocument();
+		await expect(canvas.getByText("Invited yesterday")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Resend" })).toBeInTheDocument();
 	},
 });

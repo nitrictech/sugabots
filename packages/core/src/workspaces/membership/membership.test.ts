@@ -411,14 +411,35 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		).toEqual({
 			failed: "AlreadyInvited",
 		});
-		expect(
-			await run(ada.id, (m) =>
-				m.invite({
-					workspace: workspace.id,
-					invitation: { email: bob.email, role: "viewer", resend: true },
-				}),
-			),
-		).toMatchObject({ id: first.id, role: "viewer" });
+		const resent = await run(ada.id, (m) =>
+			m.invite({
+				workspace: workspace.id,
+				invitation: { email: bob.email, role: "viewer", resend: true },
+			}),
+		);
+		if ("failed" in resent) throw new Error(resent.failed);
+		expect(resent).toMatchObject({ id: first.id, role: "viewer" });
+		expect(resent.sentAt > first.sentAt).toBe(true);
+		await onDatabase((db) =>
+			db
+				.update(workspaceInvite)
+				.set({ expiresAt: new Date(Date.now() - 1) })
+				.where(eq(workspaceInvite.id, first.id)),
+		);
+		const replacement = await run(ada.id, (m) =>
+			m.invite({
+				workspace: workspace.id,
+				invitation: { email: bob.email, role: "viewer", resend: true },
+			}),
+		);
+		if ("failed" in replacement) throw new Error(replacement.failed);
+		expect(replacement.id).not.toBe(first.id);
+		expect(await run(ada.id, (m) => m.invitations({ workspace: workspace.id }))).toEqual([
+			replacement,
+		]);
+		expect(await run(bob.id, (m) => m.invitation({ invitationId: first.id }))).toEqual({
+			failed: "ResourceHidden",
+		});
 		expect(
 			await run(ada.id, (m) =>
 				m.invite({

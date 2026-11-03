@@ -2032,7 +2032,17 @@ describe("workspace settings", () => {
 	});
 
 	it("sends an invitation again without retyping it", async () => {
-		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
+		const resent = {
+			id: "0199a3a0-0000-7000-8000-0000000000e2",
+			email: "dana@example.com",
+			role: "viewer" as const,
+			sentAt: new Date().toISOString(),
+			expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+		};
+		client.api.workspaces.invite.mockImplementation(() => {
+			client.api.workspaces.invitations.mockReturnValue(Effect.succeed([resent]));
+			return Effect.succeed(resent);
+		});
 		mount("/suga/settings/members");
 
 		await screen.findByText("dana@example.com");
@@ -2044,7 +2054,8 @@ describe("workspace settings", () => {
 				payload: { email: "dana@example.com", role: "viewer", resend: true },
 			});
 		});
-		expect(await screen.findByText("Sent again")).toBeDefined();
+		expect(await screen.findByText("Invited today")).toBeDefined();
+		expect(screen.getAllByText("dana@example.com")).toHaveLength(1);
 	});
 
 	it("shows a member who holds what, and no way to change it", async () => {

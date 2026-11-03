@@ -13,7 +13,7 @@ import type {
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, asc, eq, gt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, lte, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
@@ -449,6 +449,7 @@ export const make = Effect.gen(function* () {
 								id: workspaceInvite.id,
 								email: workspaceInvite.email,
 								role: workspaceInvite.role,
+								createdAt: workspaceInvite.createdAt,
 								expiresAt: workspaceInvite.expiresAt,
 							})
 							.from(workspaceInvite)
@@ -512,12 +513,31 @@ export const make = Effect.gen(function* () {
 								),
 						);
 						if (outstanding && !input.invitation.resend) return yield* new AlreadyInvited();
+						// Replacing an expired link retires its roster entry without reviving the link.
+						yield* query((db) =>
+							db
+								.update(workspaceInvite)
+								.set({ status: "canceled" })
+								.where(
+									and(
+										eq(workspaceInvite.workspaceId, workspaceId),
+										eq(workspaceInvite.email, address),
+										eq(workspaceInvite.status, "pending"),
+										lte(workspaceInvite.expiresAt, DateTime.toDate(now)),
+									),
+								),
+						);
 
 						const [row] = outstanding
 							? yield* query((db) =>
 									db
 										.update(workspaceInvite)
-										.set({ role: input.invitation.role, expiresAt, inviterId })
+										.set({
+											role: input.invitation.role,
+											expiresAt,
+											inviterId,
+											createdAt: DateTime.toDate(now),
+										})
 										.where(eq(workspaceInvite.id, outstanding.id))
 										.returning(),
 								)
@@ -842,7 +862,14 @@ function invitationView(row: {
 	id: string;
 	email: string;
 	role: AssignableWorkspaceRole;
+	createdAt: Date;
 	expiresAt: Date;
 }): WorkspaceInvitation {
-	return { id: row.id, email: row.email, role: row.role, expiresAt: row.expiresAt.toISOString() };
+	return {
+		id: row.id,
+		email: row.email,
+		role: row.role,
+		sentAt: row.createdAt.toISOString(),
+		expiresAt: row.expiresAt.toISOString(),
+	};
 }

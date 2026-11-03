@@ -70,6 +70,7 @@ export const workspaceInvitationSchema = Schema.Struct({
 	id: uuidSchema,
 	email: emailSchema,
 	role: assignableWorkspaceRoleSchema,
+	sentAt: isoTimestampSchema,
 	expiresAt: isoTimestampSchema,
 });
 export type WorkspaceInvitation = typeof workspaceInvitationSchema.Type;
