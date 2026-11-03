@@ -62,9 +62,7 @@ struct ConversationHeader: View {
 				bareFace(.hash)
 			}
 		case .peopleThread:
-			TitleRow(name: title, line: (startedIn.map { "#\($0)" } ?? pod?.name).map { "In \($0)" }, open: openDetails) {
-				bareFace(.users)
-			}
+			TitleRow(name: title, line: (startedIn.map { "#\($0)" } ?? pod?.name).map { "In \($0)" }, open: openDetails)
 		}
 	}
 
@@ -215,7 +213,8 @@ private struct TitleRow<Face: View>: View {
 				.lineLimit(1)
 				Spacer(minLength: 0)
 			}
-			.padding(.leading, 4)
+			// A face sits close to the pill's round end; text alone gets the same inset as the other end.
+			.padding(.leading, Face.self == EmptyView.self ? 16 : 4)
 			.padding(.trailing, 16)
 			.frame(height: 44)
 			.glass(in: Capsule())
@@ -223,6 +222,13 @@ private struct TitleRow<Face: View>: View {
 		}
 		.buttonStyle(.plain)
 		.accessibilityLabel([name, line].compactMap { $0 }.joined(separator: ", ") + ", details")
+	}
+}
+
+extension TitleRow where Face == EmptyView {
+	/// A title with nothing beside it, for a thread among people, which has no face of its own.
+	init(name: String, line: String?, open: @escaping () -> Void) {
+		self.init(name: name, line: line, open: open) { EmptyView() }
 	}
 }
 
