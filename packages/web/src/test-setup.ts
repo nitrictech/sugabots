@@ -4,7 +4,8 @@ import { configure } from "@testing-library/react";
  * The router loads each screen lazily, so the first test in a file waits for
  * its screen's code to be compiled before anything appears. On a busy CI
  * runner that takes longer than Testing Library's default second. This stays
- * under Vitest's five-second limit per test, so a real miss still fails.
+ * under the web tests' limit per test, in the root vitest.config.ts, so a real
+ * miss fails saying what it could not find.
  */
 configure({ asyncUtilTimeout: 4_000 });
 
