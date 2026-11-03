@@ -28,6 +28,7 @@ const revenueRows: ChatListItem[] = [
 			authorUserId: null,
 			at: minutesAgo(3),
 		},
+		participants: [],
 		waitingOn: "gmail__send_email",
 	},
 	{
@@ -41,6 +42,7 @@ const revenueRows: ChatListItem[] = [
 			authorUserId: null,
 			at: daysAgo(1),
 		},
+		participants: [],
 		waitingOn: null,
 	},
 	{
@@ -54,6 +56,7 @@ const revenueRows: ChatListItem[] = [
 			authorUserId: "0199a3a0-0000-7000-8000-000000000009",
 			at: daysAgo(3),
 		},
+		participants: [],
 		waitingOn: null,
 	},
 ];
@@ -271,6 +274,7 @@ const peopleThread: ChatListItem = {
 	needsApproval: false,
 	mentionsYou: false,
 	lastMessage: null,
+	participants: [],
 	waitingOn: null,
 };
 
@@ -309,6 +313,8 @@ const accountManagerThreads: ChatListItem[] = [
 	"Churn interviews summary",
 	"Onboarding email audit",
 	"Pricing page teardown",
+	"Expansion plan for Initech",
+	"Support escalations",
 ].map((title, index) => ({
 	...(revenueRows[1] as ChatListItem),
 	conversation: {
@@ -331,24 +337,27 @@ const doneThreads: ChatListItem[] = ["Renewal deck", "Halcyon intro"].map((title
 }));
 
 /**
- * An open bot shows its first four threads, and the open one wherever it is,
- * then how many more there are. Done threads are not listed.
+ * An open bot shows its newest six threads, and the open one wherever it is,
+ * then All threads, which opens all of them, done ones included, beside its
+ * channel. Done threads are not listed.
  */
-export const ShowMore = meta.story({
+export const AllThreads = meta.story({
 	args: {
 		selected: {
 			kind: "conversation",
-			conversationId: (accountManagerThreads[5] as ChatListItem).conversation.id,
+			conversationId: (accountManagerThreads[7] as ChatListItem).conversation.id,
 		},
 		rows: [...accountManagerThreads, ...doneThreads],
 	},
-	play: async ({ canvas, userEvent }) => {
-		await expect(canvas.getByRole("link", { name: /Churn interviews summary/ })).toBeVisible();
-		await expect(canvas.queryByRole("link", { name: /Onboarding email audit/ })).toBeNull();
+	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /Pricing page teardown/ })).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Show 1 more" }));
-		await expect(canvas.getByRole("link", { name: /Onboarding email audit/ })).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: /Expansion plan for Initech/ })).toBeNull();
+		await expect(canvas.getByRole("link", { name: /Support escalations/ })).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: /Renewal deck/ })).toBeNull();
+		await expect(canvas.getByRole("link", { name: "All threads" })).toHaveAttribute(
+			"href",
+			expect.stringMatching(/threads=open/),
+		);
 	},
 });
 

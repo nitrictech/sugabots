@@ -103,7 +103,7 @@ export function activityThreadLink({ pod, conversationId }: ConversationInPod, t
 /** A conversation, with `thread` open beside it, or `artifact` open large. */
 export function conversationLink(
 	{ pod, conversationId }: ConversationInPod,
-	search: { thread?: string; artifact?: string } = {},
+	search: { thread?: string; artifact?: string; threads?: ThreadsTab } = {},
 ) {
 	return linkOptions({
 		from: "/$workspace",
@@ -153,7 +153,7 @@ export function podChatLink(pod: Pick<Pod, "slug">) {
  */
 export function agentChatLink(
 	{ pod, agent }: AgentInPod,
-	search: { thread?: string; artifact?: string } = {},
+	search: { thread?: string; artifact?: string; threads?: ThreadsTab } = {},
 ) {
 	return linkOptions({
 		from: "/$workspace",
@@ -179,3 +179,6 @@ export function memberSettingsLink(membership: { id: string }) {
 		params: { member: membership.id },
 	});
 }
+
+/** Which of a bot's threads are open beside its channel: those still going, or those done. */
+export type ThreadsTab = "open" | "done";

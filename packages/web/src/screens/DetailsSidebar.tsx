@@ -32,6 +32,7 @@ import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChannelActions, type ChannelToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
+import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
 /** How many rows a list shows before Show more. */
 const FILES_SHOWN = 3;
@@ -275,7 +276,6 @@ function InThisThread({
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const open = opened || phone;
 	if (participants.length === 0) return null;
-	const hidden = participants.length - FACES_SHOWN;
 	return (
 		<SidebarSection
 			title="In this thread"
@@ -288,18 +288,11 @@ function InThisThread({
 						onClick={() => setOpened(!opened)}
 						className="focus-ring -mr-1 flex items-center gap-2 rounded-md py-0.5 pr-1 pl-2 hover:bg-row-hover"
 					>
-						<span aria-hidden className="flex pl-1.5">
-							{participants.slice(0, FACES_SHOWN).map((participant) => (
-								<span key={participant.id} className="-ml-1.5 rounded-full ring-2 ring-background">
-									<Face participant={participant} size={20} />
-								</span>
-							))}
-							{hidden > 0 && (
-								<span className="-ml-1.5 grid size-5 place-items-center rounded-full bg-chip font-semibold text-3xs text-muted-foreground ring-2 ring-background">
-									+{hidden}
-								</span>
-							)}
-						</span>
+						<ParticipantFaces
+							participants={participants}
+							shown={FACES_SHOWN}
+							surface="var(--aside)"
+						/>
 						<span aria-hidden className="text-muted-foreground text-xs">
 							{participants.length}
 						</span>

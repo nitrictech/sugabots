@@ -42,6 +42,7 @@ import {
 	podLink,
 	podSettingsPageLink,
 	routineThreadLink,
+	type ThreadsTab,
 } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
@@ -1223,6 +1224,8 @@ interface ConversationSearch {
 	 * of them, one by its id, or a new one being made.
 	 */
 	routines?: string;
+	/** The bot's threads open large beside the chat, those still going or those done, when nothing else is. */
+	threads?: ThreadsTab;
 }
 
 const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
@@ -1235,7 +1238,9 @@ const validateConversationSearch = (search: Record<string, unknown>): Conversati
 				? { desktop: true }
 				: typeof search.routines === "string" && isRoutinesView(search.routines)
 					? { routines: search.routines }
-					: {}),
+					: search.threads === "open" || search.threads === "done"
+						? { threads: search.threads }
+						: {}),
 	};
 };
 
@@ -1264,13 +1269,16 @@ const stagedOf = (search: ConversationSearch): Staged | undefined =>
 			? { kind: "desktop" }
 			: search.routines
 				? { kind: "routines", view: routinesViewFromSearch(search.routines) }
-				: undefined;
+				: search.threads
+					? { kind: "threads", tab: search.threads }
+					: undefined;
 
 const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
 	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
 	version: staged?.kind === "artifact" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
 	routines: staged?.kind === "routines" ? routinesViewSearch(staged.view) : undefined,
+	threads: staged?.kind === "threads" ? staged.tab : undefined,
 });
 
 /**

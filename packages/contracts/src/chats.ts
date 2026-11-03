@@ -132,6 +132,8 @@ export const chatListItemSchema = Schema.Struct({
 			at: isoTimestampSchema,
 		}),
 	),
+	/** Who has written in it lately, most recently active first, as its own details list them. */
+	participants: Schema.Array(threadParticipantSchema),
 	/**
 	 * The tool the conversation's newest reply waiting for approval would run first, or
 	 * null. Such a reply may have written nothing at all, so this stands in for
