@@ -1,5 +1,7 @@
 import {
+	AGENT_NAME_MAX_LENGTH,
 	type CollaborationPart,
+	MESSAGE_MAX_LENGTH,
 	threadChannel,
 	threadUpdateEventSchema,
 } from "@sugabots/contracts";
@@ -62,8 +64,13 @@ export function collaborateTool({
 		description:
 			"Collaborate with another agent in this pod. Write a self-contained brief: the collaborator sees only what you write here, not this conversation. You get their answer back, or a note that it is still coming.",
 		inputSchema: Schema.Struct({
-			to: Schema.String.annotate({ description: "The other agent's name, exactly as listed" }),
-			brief: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
+			to: Schema.String.check(Schema.isMaxLength(AGENT_NAME_MAX_LENGTH)).annotate({
+				description: "The other agent's name, exactly as listed",
+			}),
+			brief: Schema.String.check(
+				Schema.isMinLength(1),
+				Schema.isMaxLength(MESSAGE_MAX_LENGTH),
+			).annotate({
 				description: "What you need from them, with all the context they need",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),

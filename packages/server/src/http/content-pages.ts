@@ -1,3 +1,4 @@
+import { MAX_URL_CHARACTERS } from "@sugabots/contracts";
 import {
 	PAGE_CONTENT_POLICY,
 	PAGE_HEIGHT_REPORT,
@@ -6,7 +7,7 @@ import {
 } from "@sugabots/contracts/artifact-pages";
 import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { Installation } from "@sugabots/core/installation/installation";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 /**
@@ -69,11 +70,17 @@ export const contentPageRoutes = Layer.effectDiscard(
 	}),
 );
 
+/** A page's sealed token: one path segment, no longer than an address may be. */
+const pageTokenSchema = Schema.String.check(
+	Schema.isMaxLength(MAX_URL_CHARACTERS),
+	Schema.isPattern(/^[^/]+$/),
+);
+
 /** The token in a page's path, `/pages/<token>`, without any query. */
 function tokenIn(url: string): string | undefined {
 	const path = url.split("?")[0] ?? "";
 	const token = path.slice(`${ArtifactPages.PAGE_PATH}/`.length);
-	return token && !token.includes("/") ? token : undefined;
+	return Option.getOrUndefined(Schema.decodeUnknownOption(pageTokenSchema)(token));
 }
 
 /**

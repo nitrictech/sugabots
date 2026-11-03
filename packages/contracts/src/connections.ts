@@ -237,7 +237,12 @@ export const connectionUpdateSchema = Schema.Struct({
 	/** Sets every tool the connection lists. */
 	access: Schema.optional(connectionAccessSchema),
 	/** Sets the tools named, by the server's name for each. Every name must be one the connection lists. */
-	toolAccess: Schema.optional(Schema.Record(Schema.String, connectionAccessSchema)),
+	toolAccess: Schema.optional(
+		Schema.Record(
+			Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+			connectionAccessSchema,
+		).check(Schema.isMaxProperties(1_000)),
+	),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
 	Schema.makeFilter((value) => value.access === undefined || value.toolAccess === undefined, {

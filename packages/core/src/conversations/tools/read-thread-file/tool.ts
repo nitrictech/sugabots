@@ -82,7 +82,7 @@ export function readThreadFileTool({
 	return tool({
 		description: `Read a file in this thread: one a person attached, or a tool result too large to have been given to you whole, which named its file and how to read on. For a text file, returns up to ${DEFAULT_LINES} lines from \`offset\`, each after its line number, with the file's total lines and, when there is more, the line to continue from. Give \`pattern\` to get only the lines containing it instead.${acceptsImages ? ` A ${SHOWN_IMAGE_FORMATS} image is shown to you instead.` : ""}`,
 		inputSchema: Schema.Struct({
-			file: Schema.String.annotate({ description: "The file's id." }),
+			file: Schema.String.check(Schema.isUUID()).annotate({ description: "The file's id." }),
 			offset: Schema.optional(
 				Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
 					description: "The line to start at, counting from 1. Defaults to the first.",

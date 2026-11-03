@@ -1,5 +1,6 @@
 import { botColors } from "@sugabots/avatars";
 import {
+	AGENT_NAME_MAX_LENGTH,
 	type Agent,
 	type AgentUpdate,
 	type BuiltInToolKey,
@@ -443,9 +444,6 @@ function AddedByRow({ agent }: { agent: Agent }) {
 		/>
 	);
 }
-
-/** How long a name may be, as New bot holds it. */
-const AGENT_NAME_MAX_LENGTH = 64;
 
 /**
  * A line of the bot's profile in a field at the row's end, which saves trimmed

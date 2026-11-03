@@ -185,7 +185,13 @@ export const agentSchema = Schema.Struct({
 
 export type Agent = typeof agentSchema.Type;
 
-const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64));
+/** How long a bot's name may be. */
+export const AGENT_NAME_MAX_LENGTH = 64;
+
+const nameSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(AGENT_NAME_MAX_LENGTH),
+);
 const toolKeysSchema = Schema.mutable(
 	Schema.Array(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
 ).check(Schema.isMaxLength(32), Schema.isUnique({ message: "Tool keys must be unique" }));

@@ -1,5 +1,6 @@
 import { botColors, type LivelyFace, type MoodLoop, useMoodLoop } from "@sugabots/avatars";
 import {
+	AGENT_NAME_MAX_LENGTH,
 	type Agent,
 	type AgentColor,
 	type AgentFace,
@@ -186,7 +187,7 @@ export function NewAgentDialog({
 								value={name}
 								onChange={(event) => setName(event.target.value)}
 								placeholder="Name your bot"
-								maxLength={64}
+								maxLength={AGENT_NAME_MAX_LENGTH}
 								autoComplete="off"
 								// biome-ignore lint/a11y/noAutofocus: naming the bot is the one thing the dialog cannot guess.
 								autoFocus
@@ -356,7 +357,7 @@ function PhoneNewBot({
 							onFocus={() => setNaming(true)}
 							onBlur={() => setNaming(false)}
 							placeholder="Name your bot"
-							maxLength={64}
+							maxLength={AGENT_NAME_MAX_LENGTH}
 							autoComplete="off"
 							className="h-12 w-full rounded-xl border border-border-strong bg-panel px-4 text-base text-foreground outline-none placeholder:text-subtle-foreground focus:border-primary-tint-border"
 						/>

@@ -102,7 +102,7 @@ export const presenceSchema = Schema.Struct({
 	clientId: uuidSchema,
 	conversationId: Schema.NullOr(uuidSchema),
 	/** Counts up with each report from the tab, so one that arrives late cannot undo a newer one. */
-	sequence: Schema.Int,
+	sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 export type Presence = typeof presenceSchema.Type;

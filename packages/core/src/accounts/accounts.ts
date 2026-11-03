@@ -184,13 +184,16 @@ function referralLinks(webAppUrl: string) {
 
 		/** The member whose link carries `code`, while they still have an account and have not reset it since. */
 		referrerOf: (code: string) =>
-			query((db) =>
-				db.select({ id: user.id }).from(user).where(eq(user.referralCode, code.toLowerCase())),
-			).pipe(
-				Effect.flatMap(([referrer]) =>
-					referrer ? Effect.succeed(referrer.id) : Effect.fail(new ReferralLinkInvalid()),
-				),
-			),
+			// Longer than any code, such as a link pasted with a character after it.
+			code.length > REFERRAL_CODE_LENGTH
+				? Effect.fail(new ReferralLinkInvalid())
+				: query((db) =>
+						db.select({ id: user.id }).from(user).where(eq(user.referralCode, code.toLowerCase())),
+					).pipe(
+						Effect.flatMap(([referrer]) =>
+							referrer ? Effect.succeed(referrer.id) : Effect.fail(new ReferralLinkInvalid()),
+						),
+					),
 	};
 }
 

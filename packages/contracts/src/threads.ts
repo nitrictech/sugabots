@@ -681,10 +681,13 @@ export const threadActivitySchema = Schema.Struct({
 
 export type ThreadActivity = typeof threadActivitySchema.Type;
 
+/** How long a message may be. */
+export const MESSAGE_MAX_LENGTH = 20_000;
+
 export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,
 	/** May be empty when the message carries files. */
-	message: Schema.Trim.check(Schema.isMaxLength(20_000)),
+	message: Schema.Trim.check(Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 	/** Files the sender uploaded to the conversation and has not sent yet. They show in the order listed. */
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),

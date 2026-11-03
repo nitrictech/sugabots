@@ -11,6 +11,7 @@ import {
 import {
 	agentParticipantSchema,
 	collaborationStatusSchema,
+	MESSAGE_MAX_LENGTH,
 	messageSchema,
 	threadParticipantSchema,
 	toolCallPartSchema,
@@ -337,7 +338,7 @@ export type ChatList = typeof chatListSchema.Type;
 /** A message that starts a thread from a pod's chat, and the bot it is for, if one. */
 export const newThreadSchema = Schema.Struct({
 	id: uuidSchema,
-	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
+	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 	/** Files the sender uploaded to the pod's chat and has not sent yet, which move to the thread. */
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),

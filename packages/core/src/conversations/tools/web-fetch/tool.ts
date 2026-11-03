@@ -1,3 +1,4 @@
+import { MAX_URL_CHARACTERS } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Schema } from "effect";
 import type { FetchPage } from "./fetch-page.ts";
@@ -16,7 +17,10 @@ export function webFetchTool({ fetchPage }: { fetchPage: FetchPage }) {
 		description:
 			"Read a public web page. Give it the full address of a page a person shared, one you know, or one from a search result, and you get the page's title and main content as Markdown to quote or summarise. Pages are fetched over HTTPS; it cannot sign in, run scripts, or reach private networks. When your reply relies on what a page says, name its URL.",
 		inputSchema: Schema.Struct({
-			url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)).annotate({
+			url: Schema.String.check(
+				Schema.isMinLength(1),
+				Schema.isMaxLength(MAX_URL_CHARACTERS),
+			).annotate({
 				description: "The full http or https address of the page",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
