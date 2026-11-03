@@ -26,8 +26,10 @@ export const workspaceSchema = Schema.Struct({
 });
 export type Workspace = typeof workspaceSchema.Type;
 
+export const WORKSPACE_NAME_MAX_LENGTH = 64;
+
 export const workspaceDetailsSchema = Schema.Struct({
-	name: Schema.Trim.check(Schema.isMinLength(1)),
+	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(WORKSPACE_NAME_MAX_LENGTH)),
 	slug: workspaceSlugSchema,
 });
 export type WorkspaceDetails = typeof workspaceDetailsSchema.Type;

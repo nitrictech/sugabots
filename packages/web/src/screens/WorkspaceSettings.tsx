@@ -3,6 +3,7 @@ import {
 	type Agent,
 	type Pod,
 	USER_NAME_MAX_LENGTH,
+	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
@@ -19,6 +20,7 @@ import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
+	useUpdateWorkspace,
 	useWorkspace,
 	useWorkspaceMembers,
 	useWorkspacePermissions,
@@ -203,6 +205,7 @@ function GeneralSettings({
 	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const deleteWorkspace = useDeleteWorkspace();
+	const update = useUpdateWorkspace(workspace?.id);
 	const navigate = useNavigate();
 	if (!workspace) return null;
 
@@ -218,7 +221,18 @@ function GeneralSettings({
 	return (
 		<SettingsPage title="General" description={workspaceSummary(members?.length, pods?.length)}>
 			<SettingsGroup>
-				<SettingsRow label="Name" trailing={<SettingsValue>{workspace.name}</SettingsValue>} />
+				{canUpdate ? (
+					// Keeps the slug: it is in every link to the workspace, which nothing redirects from.
+					<SettingsNameRow
+						name={workspace.name}
+						maxLength={WORKSPACE_NAME_MAX_LENGTH}
+						savePending={update.isPending}
+						error={update.error ? failureMessage(update.error) : undefined}
+						onCommit={(name) => update.mutateAsync({ name, slug: workspace.slug })}
+					/>
+				) : (
+					<SettingsRow label="Name" trailing={<SettingsValue>{workspace.name}</SettingsValue>} />
+				)}
 				<SettingsRow
 					label="Time zone"
 					sub="Routines run on this clock"
