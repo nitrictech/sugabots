@@ -15,7 +15,7 @@ import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
-import { agentSettingsLink, routineThreadLink } from "@/lib/links.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
@@ -60,8 +60,8 @@ export function DetailsSidebar({
 	user: SessionUser;
 	/** Who is in the thread, and the files shared in it. */
 	contents: ThreadContents;
-	/** Opens the bot's routines beside the chat, in place of these Details. */
-	onOpenRoutines: () => void;
+	/** Opens the bot's routines beside the chat, in place of these Details: all of them, or the one `routineId` names. */
+	onOpenRoutines: (routineId?: string) => void;
 	onClose: () => void;
 }) {
 	const backToChat = useBackToHere("Chat");
@@ -103,7 +103,7 @@ export function DetailsSidebar({
 							label="Settings"
 						/>
 						<RoundAction
-							render={<button type="button" onClick={onOpenRoutines} />}
+							render={<button type="button" onClick={() => onOpenRoutines()} />}
 							icon={<RefreshCcw size={20} strokeWidth={1.75} />}
 							label="Routines"
 						/>
@@ -122,7 +122,7 @@ export function DetailsSidebar({
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}
-				<Routines pod={pod} agent={agent} onOpenAll={onOpenRoutines} />
+				<Routines pod={pod} agent={agent} onOpen={onOpenRoutines} />
 				<Tools pod={pod} agent={agent} />
 				<InThisThread participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
@@ -428,19 +428,19 @@ function ParticipantRow({
 }
 
 /**
- * The bot's routines, each opening its page with its runs, with a switch to
+ * The bot's routines, each opening beside the chat with its runs, with a switch to
  * pause or resume it for whoever may manage them, and See all, which opens
  * them all beside the chat.
  */
 function Routines({
 	pod,
 	agent,
-	onOpenAll,
+	onOpen,
 }: {
 	pod: Pod;
 	agent: Agent;
-	/** Opens all of the bot's routines beside the chat. */
-	onOpenAll: () => void;
+	/** Opens the bot's routines beside the chat: all of them, or the one `routineId` names. */
+	onOpen: (routineId?: string) => void;
 }) {
 	const routines = useRoutines(agent.id);
 	const actions = useRoutineActions();
@@ -452,7 +452,7 @@ function Routines({
 			end={
 				<button
 					type="button"
-					onClick={onOpenAll}
+					onClick={() => onOpen()}
 					className="focus-ring rounded-sm text-subtle-foreground text-xs hover:text-foreground max-md:text-sm"
 				>
 					See all
@@ -462,9 +462,10 @@ function Routines({
 			<Expandable items={list} shown={ROUTINES_SHOWN}>
 				{(routine) => (
 					<li key={routine.id} className="flex items-center gap-3 py-1 max-md:min-h-11">
-						<Link
-							{...routineThreadLink(pod, routine.id)}
-							className="focus-ring flex min-w-0 flex-1 flex-col rounded-sm leading-snug hover:[&>span:first-child]:underline"
+						<button
+							type="button"
+							onClick={() => onOpen(routine.id)}
+							className="focus-ring flex min-w-0 flex-1 flex-col rounded-sm text-left leading-snug hover:[&>span:first-child]:underline"
 						>
 							<span className="truncate text-[13px] text-foreground max-md:text-[15px]">
 								{routine.name}
@@ -474,7 +475,7 @@ function Routines({
 									{scheduleLabel(routine)}
 								</span>
 							)}
-						</Link>
+						</button>
 						<Toggle
 							label={`${routine.name} on`}
 							checked={routine.state === "enabled"}

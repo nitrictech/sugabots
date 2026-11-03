@@ -18,6 +18,7 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LockGlyph, ONLY_YOU, OnlyYou } from "@/shell/PersonalPrivacy.tsx";
+import { StageBack, type StageParent } from "@/shell/Stage.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -47,7 +48,15 @@ export type BackTo =
  * header has a Back to where it was opened from, and a way to the chat itself.
  */
 export type ChatPlace =
-	| { kind: "own"; detailsOpen: boolean; onDetailsChange: (open: boolean) => void }
+	| {
+			kind: "own";
+			detailsOpen: boolean;
+			onDetailsChange: (open: boolean) => void;
+			/** At the right of the header, such as a stage's Close. */
+			trailing?: ReactNode;
+			/** The level the chat was opened from inside a stage, which its header's Back returns to. */
+			parent?: StageParent;
+	  }
 	| { kind: "away"; back: BackTo; trailing: ReactNode };
 
 /** What a chat's header does around its title: where Back goes, what is at its right, and its Details. */
@@ -58,6 +67,8 @@ export interface HeaderPlace {
 	trailing?: ReactNode;
 	/** Whether its Details are open, and what opens or closes them; absent where it has none. */
 	details?: DetailsToggle;
+	/** The level the chat was opened from inside a stage, which its Back returns to in place of `back`. */
+	parent?: StageParent;
 }
 
 /** Whether a chat's Details are open, and what opens or closes them. */
@@ -257,10 +268,12 @@ const PHONE_FACE_SIZE_PX = 32;
  */
 function HeaderBar({
 	back,
+	parent,
 	badge,
 	children,
 }: {
 	back: BackTo;
+	parent?: StageParent;
 	/** What a phone shows after Back: a `FaceBadge` or a `ThreadBadge`. */
 	badge: ReactNode;
 	children: ReactNode;
@@ -272,9 +285,13 @@ function HeaderBar({
 				"relative flex h-[52px] shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-[max(12px,env(safe-area-inset-top))] max-md:pb-2",
 			)}
 		>
-			<div className="flex shrink-0 md:hidden">
-				<HeaderBack back={back} />
-			</div>
+			{parent ? (
+				<StageBack parent={parent} />
+			) : (
+				<div className="flex shrink-0 md:hidden">
+					<HeaderBack back={back} />
+				</div>
+			)}
 			<div className="flex min-w-0 flex-1 md:hidden">{badge}</div>
 			<div className="contents max-md:flex max-md:shrink-0 max-md:items-center max-md:gap-2">
 				{children}
@@ -442,6 +459,7 @@ export function PeopleChatHeader({
 	within,
 	mark = "channel",
 	back,
+	parent,
 	trailing,
 	details,
 }: HeaderPlace & {
@@ -459,6 +477,7 @@ export function PeopleChatHeader({
 	return (
 		<HeaderBar
 			back={back}
+			parent={parent}
 			badge={
 				// A thread can be marked done; a channel or a routine goes by its name.
 				done ? (

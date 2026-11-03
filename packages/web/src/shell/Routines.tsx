@@ -1,3 +1,4 @@
+import { useRender } from "@base-ui/react/use-render";
 import type { ListedRoutine, Pod, Routine } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -141,67 +142,73 @@ export function RoutinesPage({
  * A routine: the bot that runs it, its name, when it last ran, and under it
  * how it stands: paused, or how its last run went, or when it runs before it
  * has. A paused one is greyer; one whose thread mentions the viewer is bright.
- * It opens the routine's own thread.
+ * It opens the routine's own thread, or does what `render` does instead.
  */
 export function RoutineRow({
 	pod,
 	row,
 	routine,
 	selected,
+	render,
 }: {
 	pod: Pod;
 	row: ListedRoutine;
 	/** The routine in full, for when it runs, once the workspace's routines are loaded. */
 	routine: Routine | undefined;
 	selected: boolean;
+	/** The element the row is, such as a button that opens the routine where the list is. */
+	render?: useRender.RenderProp;
 }) {
 	const lastRun = useRecentRuns({ agentId: row.agent.id, routineId: row.routine.id }).data
 		?.items[0];
 	const paused = row.routine.state === "paused";
-	return (
-		<Link
-			{...routineThreadLink(pod, row.routine.id)}
-			aria-current={selected ? "page" : undefined}
-			className={cn(
-				"focus-ring flex gap-2.5 rounded-lg p-2.5 transition-colors",
+	return useRender({
+		render: render ?? <Link {...routineThreadLink(pod, row.routine.id)} />,
+		props: {
+			"aria-current": selected ? "page" : undefined,
+			className: cn(
+				"focus-ring flex w-full gap-2.5 rounded-lg p-2.5 text-left transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
-			)}
-		>
-			<AgentAvatar
-				color={row.agent.color}
-				face={row.agent.face}
-				shape={row.agent.shape}
-				size={20}
-				className={cn("shrink-0", paused && "opacity-50")}
-			/>
-			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="flex min-w-0 items-baseline gap-2">
-					<span
-						className={cn(
-							"min-w-0 flex-1 truncate-fade text-[13px]",
-							selected || row.mentionsYou
-								? "text-foreground"
-								: paused
-									? "text-subtle-foreground"
-									: "text-muted-foreground",
-							row.mentionsYou && "font-semibold",
+			),
+			children: (
+				<>
+					<AgentAvatar
+						color={row.agent.color}
+						face={row.agent.face}
+						shape={row.agent.shape}
+						size={20}
+						className={cn("shrink-0", paused && "opacity-50")}
+					/>
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<span className="flex min-w-0 items-baseline gap-2">
+							<span
+								className={cn(
+									"min-w-0 flex-1 truncate-fade text-[13px]",
+									selected || row.mentionsYou
+										? "text-foreground"
+										: paused
+											? "text-subtle-foreground"
+											: "text-muted-foreground",
+									row.mentionsYou && "font-semibold",
+								)}
+							>
+								{row.routine.name}
+								{row.mentionsYou && <span className="sr-only">, mentions you</span>}
+							</span>
+							{lastRun && <ListTime at={lastRun.acceptedAt} />}
+						</span>
+						{paused ? (
+							<RunStatus outcome="paused" />
+						) : lastRun ? (
+							<RunStatus outcome={outcomeOf(lastRun.state)} />
+						) : (
+							<span className="truncate text-subtle-foreground text-xs">
+								{(routine && scheduleLabel(routine)) ?? "Not run yet"}
+							</span>
 						)}
-					>
-						{row.routine.name}
-						{row.mentionsYou && <span className="sr-only">, mentions you</span>}
 					</span>
-					{lastRun && <ListTime at={lastRun.acceptedAt} />}
-				</span>
-				{paused ? (
-					<RunStatus outcome="paused" />
-				) : lastRun ? (
-					<RunStatus outcome={outcomeOf(lastRun.state)} />
-				) : (
-					<span className="truncate text-subtle-foreground text-xs">
-						{(routine && scheduleLabel(routine)) ?? "Not run yet"}
-					</span>
-				)}
-			</span>
-		</Link>
-	);
+				</>
+			),
+		},
+	});
 }

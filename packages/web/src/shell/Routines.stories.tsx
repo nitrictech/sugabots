@@ -1,11 +1,12 @@
 import type { ChatList, Routine, RoutineExecution } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, within } from "storybook/test";
+import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, leadResearcher, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
+	chatPath,
 	StoryApp,
 	storyChatDetails,
 	storyPodChatFor,
@@ -393,5 +394,41 @@ export const BotWithNone = meta.story({
 		const making = within(list).getAllByRole("link", { name: "New routine" });
 		await expect(making).toHaveLength(2);
 		for (const link of making) await expect(link).toBeVisible();
+	},
+});
+
+/**
+ * Beside the bot's chat, as its computer opens: its routines, then one of
+ * them in their place, its runs and all, and the Back before its name to the list,
+ * with the bot's chat in view throughout.
+ */
+export const BesideTheBotsChat = meta.story({
+	render: () => <StoryApp path={`${chatPath(growthDesk)}?routines=all`} />,
+	play: async ({ canvas, userEvent }) => {
+		const routines = await canvas.findByRole(
+			"region",
+			{ name: `${growthDesk.name}'s routines` },
+			{ timeout: 10_000 },
+		);
+		await userEvent.click(
+			await within(routines).findByRole("button", { name: /^Overnight outbound/ }),
+		);
+		// Its runs, in its own chat beside the bot's.
+		await waitFor(
+			() =>
+				expect(
+					canvas
+						.getAllByRole("log", { name: "Chat messages" })
+						.some((log) => log.textContent?.includes("Queued 38 leads. Nobody replied overnight.")),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Back to ${growthDesk.name}'s routines` }),
+		);
+		await expect(
+			await canvas.findByRole("region", { name: `${growthDesk.name}'s routines` }),
+		).toBeVisible();
+		await expect(canvas.getByRole("heading", { name: growthDesk.name, level: 1 })).toBeVisible();
 	},
 });

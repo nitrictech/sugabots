@@ -62,6 +62,7 @@ import {
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { ArtifactsPage } from "@/screens/Artifacts.tsx";
 import type { Staged } from "@/screens/ConversationChat.tsx";
+import type { RoutinesView } from "@/screens/RoutinesStage.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
@@ -1217,8 +1218,11 @@ interface ConversationSearch {
 	version?: number;
 	/** The bot's sandbox desktop open large beside the chat, when no artifact is. */
 	desktop?: true;
-	/** The bot's routines open large beside the chat, when nothing else is. */
-	routines?: true;
+	/**
+	 * The bot's routines open large beside the chat, when nothing else is: all
+	 * of them, one by its id, or a new one being made.
+	 */
+	routines?: string;
 }
 
 const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
@@ -1229,11 +1233,28 @@ const validateConversationSearch = (search: Record<string, unknown>): Conversati
 			? { artifact, ...validateArtifactSearch(search) }
 			: search.desktop === true
 				? { desktop: true }
-				: search.routines === true
-					? { routines: true }
+				: typeof search.routines === "string" && isRoutinesView(search.routines)
+					? { routines: search.routines }
 					: {}),
 	};
 };
+
+/** How the address says which of a bot's routines are open beside its chat. */
+const ALL_ROUTINES = "all";
+const NEW_ROUTINE = "new";
+
+const isRoutinesView = (value: string) =>
+	value === ALL_ROUTINES || value === NEW_ROUTINE || isUuid(value);
+
+const routinesViewFromSearch = (value: string): RoutinesView =>
+	value === NEW_ROUTINE
+		? { kind: "new" }
+		: value === ALL_ROUTINES
+			? { kind: "list" }
+			: { kind: "routine", routineId: value };
+
+const routinesViewSearch = (view: RoutinesView): string =>
+	view.kind === "new" ? NEW_ROUTINE : view.kind === "list" ? ALL_ROUTINES : view.routineId;
 
 /** What `search` opens beside a chat, and the search that opens `staged`. */
 const stagedOf = (search: ConversationSearch): Staged | undefined =>
@@ -1242,14 +1263,14 @@ const stagedOf = (search: ConversationSearch): Staged | undefined =>
 		: search.desktop
 			? { kind: "desktop" }
 			: search.routines
-				? { kind: "routines" }
+				? { kind: "routines", view: routinesViewFromSearch(search.routines) }
 				: undefined;
 
 const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
 	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
 	version: staged?.kind === "artifact" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
-	routines: staged?.kind === "routines" ? true : undefined,
+	routines: staged?.kind === "routines" ? routinesViewSearch(staged.view) : undefined,
 });
 
 /**

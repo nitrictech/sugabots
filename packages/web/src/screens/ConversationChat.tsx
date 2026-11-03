@@ -95,7 +95,7 @@ import { firstBotNamed, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
-import { RoutinesStage } from "./RoutinesStage.tsx";
+import { RoutinesStage, type RoutinesView } from "./RoutinesStage.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
 import {
 	DaySeparator,
@@ -118,12 +118,13 @@ const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try a
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
- * `version` is absent, the bot's sandbox desktop, or the bot's routines.
+ * `version` is absent, the bot's sandbox desktop, or the bot's routines, at
+ * the view of them that is open.
  */
 export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
 	| { kind: "desktop" }
-	| { kind: "routines" };
+	| { kind: "routines"; view: RoutinesView };
 
 /** Opens `staged` large beside a chat, or closes it as a `Stage` asks, as `how` says; see `CloseStage`. */
 export type StagedChange = (staged: Staged | undefined, how?: { replace: boolean }) => void;
@@ -157,7 +158,8 @@ export function ConversationChat({
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
-	const openRoutines = () => onStagedChange({ kind: "routines" });
+	const openRoutines = (view: RoutinesView = { kind: "list" }) =>
+		onStagedChange({ kind: "routines", view });
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
 	const mainThread = useThread(conversationId);
@@ -446,6 +448,8 @@ export function ConversationChat({
 			? { back: place.back, trailing: place.trailing }
 			: {
 					back,
+					trailing: place.trailing,
+					parent: place.parent,
 					details: staged
 						? undefined
 						: { open: place.detailsOpen, onChange: place.onDetailsChange },
@@ -462,7 +466,7 @@ export function ConversationChat({
 				done={done}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
-				onOpenRoutines={openRoutines}
+				onOpenRoutines={() => openRoutines()}
 			/>
 		) : conversation.kind === "podChat" ? (
 			<PeopleChatHeader
@@ -780,7 +784,15 @@ export function ConversationChat({
 					onClose={() => onStagedChange(undefined)}
 				/>
 			) : staged?.kind === "routines" && agent ? (
-				<RoutinesStage agent={agent} pod={pod} onClose={() => onStagedChange(undefined)} />
+				<RoutinesStage
+					agent={agent}
+					pod={pod}
+					user={user}
+					view={staged.view}
+					onViewChange={openRoutines}
+					onStagedChange={onStagedChange}
+					onClose={() => onStagedChange(undefined)}
+				/>
 			) : threadId && agent && selectedEntry?.type !== "routine" ? (
 				<ChatThreadPanel
 					conversationId={conversationId}
@@ -824,7 +836,9 @@ export function ConversationChat({
 						threadId={details.thread.id}
 						user={user}
 						contents={contents}
-						onOpenRoutines={openRoutines}
+						onOpenRoutines={(routineId) =>
+							openRoutines(routineId ? { kind: "routine", routineId } : undefined)
+						}
 						onClose={() => place.onDetailsChange(false)}
 					/>
 				) : (
