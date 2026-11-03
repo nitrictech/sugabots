@@ -1,0 +1,354 @@
+{
+	"formatTime": [
+		{ "given": [0], "expect": "0:00" },
+		{ "given": [540], "expect": "9:00" },
+		{ "given": [1110], "expect": "18:30" },
+		{ "given": [1439], "expect": "23:59" }
+	],
+	"formatDayOfMonth": [
+		{ "given": [1], "expect": "1st" },
+		{ "given": [2], "expect": "2nd" },
+		{ "given": [3], "expect": "3rd" },
+		{ "given": [4], "expect": "4th" },
+		{ "given": [11], "expect": "11th" },
+		{ "given": [12], "expect": "12th" },
+		{ "given": [13], "expect": "13th" },
+		{ "given": [21], "expect": "21st" },
+		{ "given": [22], "expect": "22nd" },
+		{ "given": [28], "expect": "28th" },
+		{ "given": ["last"], "expect": "last day" }
+	],
+	"stepTime": [
+		{ "given": [540, 30], "expect": 570 },
+		{ "given": [1425, 30], "expect": 15 },
+		{ "given": [10, -30], "expect": 1420 }
+	],
+	"nextTime": [
+		{ "given": [[]], "expect": 780 },
+		{ "given": [[540]], "expect": 780 },
+		{ "given": [[540, 780]], "expect": 1020 },
+		{ "given": [[1320]], "expect": 120 },
+		{ "given": [[540, 1020, 780]], "expect": 1050 }
+	],
+	"formatEvery": [
+		{
+			"given": [{ "repeat": "daily", "every": 1, "times": [540], "startsOn": "2026-01-05" }],
+			"expect": "1 day"
+		},
+		{
+			"given": [
+				{
+					"repeat": "weekly",
+					"every": 3,
+					"days": ["mon"],
+					"times": [540],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "3 weeks"
+		},
+		{
+			"given": [
+				{
+					"repeat": "monthly",
+					"every": 2,
+					"dayOfMonth": 1,
+					"times": [540],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "2 months"
+		}
+	],
+	"scheduleSummary": [
+		{
+			"given": [{ "repeat": "daily", "every": 1, "times": [540], "startsOn": "2026-01-05" }],
+			"expect": "every day at 9:00"
+		},
+		{
+			"given": [{ "repeat": "daily", "every": 2, "times": [1050, 540], "startsOn": "2026-01-05" }],
+			"expect": "every 2 days at 9:00 and 17:30"
+		},
+		{
+			"given": [
+				{ "repeat": "daily", "every": 1, "times": [540, 780, 1020], "startsOn": "2026-01-05" }
+			],
+			"expect": "every day at 9:00, 13:00 and 17:00"
+		},
+		{
+			"given": [
+				{
+					"repeat": "weekly",
+					"every": 1,
+					"days": ["fri", "mon", "tue", "wed", "thu"],
+					"times": [540],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every weekday at 9:00"
+		},
+		{
+			"given": [
+				{
+					"repeat": "weekly",
+					"every": 2,
+					"days": ["mon", "tue", "wed", "thu", "fri"],
+					"times": [540],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every 2 weeks on Mon, Tue, Wed, Thu and Fri at 9:00"
+		},
+		{
+			"given": [
+				{
+					"repeat": "weekly",
+					"every": 2,
+					"days": ["thu", "mon"],
+					"times": [540, 1050],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every 2 weeks on Mon and Thu at 9:00 and 17:30"
+		},
+		{
+			"given": [
+				{
+					"repeat": "weekly",
+					"every": 1,
+					"days": ["sun", "sat"],
+					"times": [600],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every week on Sat and Sun at 10:00"
+		},
+		{
+			"given": [
+				{
+					"repeat": "monthly",
+					"every": 1,
+					"dayOfMonth": "last",
+					"times": [600],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every month on the last day at 10:00"
+		},
+		{
+			"given": [
+				{
+					"repeat": "monthly",
+					"every": 3,
+					"dayOfMonth": 22,
+					"times": [600],
+					"startsOn": "2026-01-05"
+				}
+			],
+			"expect": "every 3 months on the 22nd at 10:00"
+		}
+	],
+	"triggerLabel": [
+		{ "given": [{ "kind": "webhook", "auth": { "kind": "stripe" } }], "expect": "Webhook" },
+		{
+			"given": [
+				{
+					"kind": "github",
+					"connectionId": "c1",
+					"repository": "acme/web",
+					"events": ["pull_request_opened"]
+				}
+			],
+			"expect": "On acme/web"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "daily", "every": 1, "times": [1320], "startsOn": "2026-01-05" }
+				}
+			],
+			"expect": "Daily at 22:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": {
+						"repeat": "daily",
+						"every": 1,
+						"times": [540, 780, 1020],
+						"startsOn": "2026-01-05"
+					}
+				}
+			],
+			"expect": "Daily, 3 times"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": {
+						"repeat": "weekly",
+						"every": 1,
+						"days": ["mon", "tue", "wed", "thu", "fri"],
+						"times": [540],
+						"startsOn": "2026-01-05"
+					}
+				}
+			],
+			"expect": "Weekdays at 9:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": {
+						"repeat": "weekly",
+						"every": 1,
+						"days": ["fri", "wed", "mon"],
+						"times": [540, 1020, 1200],
+						"startsOn": "2026-01-05"
+					}
+				}
+			],
+			"expect": "Mon Wed Fri, 3 times"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": {
+						"repeat": "monthly",
+						"every": 3,
+						"dayOfMonth": 1,
+						"times": [600],
+						"startsOn": "2026-01-05"
+					}
+				}
+			],
+			"expect": "Every 3 months at 10:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": {
+						"repeat": "monthly",
+						"every": 1,
+						"dayOfMonth": "last",
+						"times": [600],
+						"startsOn": "2026-01-05"
+					}
+				}
+			],
+			"expect": "Monthly at 10:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 * * *" }
+				}
+			],
+			"expect": "Daily at 9:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "  30 7 * * 1-5 " }
+				}
+			],
+			"expect": "Weekdays at 7:30"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 * * 1,3,5" }
+				}
+			],
+			"expect": "Mon Wed Fri at 9:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 * * 7" }
+				}
+			],
+			"expect": "Sun at 9:00"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "15 8-23 * * *" }
+				}
+			],
+			"expect": "Every hour from 8:15"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 1 * *" }
+				}
+			],
+			"expect": "Custom schedule"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "*/15 * * * *" }
+				}
+			],
+			"expect": "Custom schedule"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 24 * * *" }
+				}
+			],
+			"expect": "Custom schedule"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 * * 1,9" }
+				}
+			],
+			"expect": "Custom schedule"
+		},
+		{
+			"given": [
+				{
+					"kind": "cron",
+					"timezone": "UTC",
+					"schedule": { "repeat": "cron", "expression": "0 9 * * * *" }
+				}
+			],
+			"expect": "Custom schedule"
+		}
+	]
+}
