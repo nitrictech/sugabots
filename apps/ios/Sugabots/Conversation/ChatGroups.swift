@@ -75,6 +75,28 @@ enum ChatGroups {
 
 	/// Whether `message` starts a group under its author's face and name: a new
 	/// author, an hour's quiet, a reply, whose quote sits over its author's name,
+
+	/// Where the face of the bot answering is drawn, and whether it's typing now.
+	struct AnsweringFace {
+		let messageId: String
+		let botTyping: Bool
+	}
+
+	/// The face that stands for the bot that wrote the newest message, as the
+	/// web's `findAnsweringFace`: the last face drawn for that bot, in `runs`,
+	/// the messages as they're drawn, each run starting afresh. A reply just
+	/// begun shows only as its typing line, so its face may be on the bot's reply before.
+	static func answeringFace(in runs: [[Message]]) -> AnsweringFace? {
+		guard let newest = runs.last?.last, case let .agent(bot) = newest.author else { return nil }
+		let drawn = runs.flatMap { run in
+			run.indices.filter { index in
+				let message = run[index]
+				guard case let .agent(author) = message.author, author.id == bot.id else { return false }
+				return startsGroup(index > 0 ? run[index - 1] : nil, message) && !Segments.showsNothingYet(message)
+			}.map { run[$0] }
+		}.last
+		return drawn.map { AnsweringFace(messageId: $0.id, botTyping: isTyping(newest)) }
+	}
 	/// or a message after one that opened a collaboration, whose thread line ends that group.
 	static func startsGroup(_ previous: Message?, _ message: Message) -> Bool {
 		guard let previous, sameAuthor(previous, message), message.replyTo == nil else { return true }

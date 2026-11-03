@@ -88,6 +88,8 @@ struct ConversationList: View {
 				.padding(.leading, Self.nestedIndent)
 			}
 		}
+		// The bots' faces take turns to move, so the list never fidgets all at once.
+		.livelyGroup()
 		.sheet(isPresented: $namingChannel) {
 			NameSheet.channel(title: "New channel", action: "Create") { name in
 				let chat = try await store.startChat(in: pod, named: name)
@@ -298,7 +300,7 @@ private struct BotItem: View {
 				NavigationLink(value: destination) {
 					HStack(spacing: 12) {
 						if let agent = group.agent {
-							BotFace(look: agent.look, size: 18)
+							TurnTakingFace(look: agent.look, size: 18)
 						} else {
 							Icon(.users, size: 16, strokeWidth: 1.75).padding(.horizontal, 1)
 						}

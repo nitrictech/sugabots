@@ -14,6 +14,8 @@ struct MentionEditor: UIViewRepresentable {
 	var maxLength = 20_000
 	/// How many lines it grows to before it scrolls.
 	var maxLines = 8
+	/// Told where, in the window's points, each edit leaves the caret, for faces that watch typing.
+	var typed: (CGPoint) -> Void = { _ in }
 
 	private static let font = UIFont(name: "Rubik", size: 16) ?? .systemFont(ofSize: 16)
 
@@ -92,10 +94,21 @@ struct MentionEditor: UIViewRepresentable {
 			let plain = Self.plainText(of: view.attributedText)
 			let caret = Self.plainOffset(of: view.attributedText, at: view.selectedRange.location)
 			parent.text = plain
+			parent.typed(Self.caretPoint(in: view))
 			// Draw any mention finished by this edit as a chip.
 			if Self.segments(of: plain, mentionable: parent.mentionable).contains(where: \.isMention) {
 				render(plain, in: view, caret: caret)
 			}
+		}
+
+		/// Where the caret is, in the window's points: its left edge, halfway down, as the web's `typingPoint`; else the middle of the field.
+		static func caretPoint(in view: UITextView) -> CGPoint {
+			guard let caret = view.selectedTextRange?.end else {
+				let field = view.convert(view.bounds, to: nil)
+				return CGPoint(x: field.midX, y: field.midY)
+			}
+			let rect = view.convert(view.caretRect(for: caret), to: nil)
+			return CGPoint(x: rect.minX, y: rect.midY)
 		}
 
 		/// Draws `plain` with its finished mentions as chips, and puts the caret back where it was in the text.

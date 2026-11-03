@@ -188,6 +188,9 @@ private struct ConversationContent: View {
 			let routineFeed = model.isRoutineFeed
 			let byMessage = Self.threadsByMessage(items)
 			let groups = ChatGroups.of(items, byRun: routineFeed, under: Set(byMessage.values.flatMap { $0 }.map(\.id)))
+			// Found across all the runs, not in each, or each run would bring a face of its own alive.
+			let answering = ChatGroups.answeringFace(in: groups.compactMap { if case let .messages(messages) = $0.content { messages } else { nil } })
+			let viewerWriting = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 			let context = messageContext(details: details, pod: pod)
 			let actions = messageActions(kind: kind, pod: pod, scroller: scroller)
 			if model.messagesFailed {
@@ -224,7 +227,8 @@ private struct ConversationContent: View {
 									AnyView(ForEach(threads) { thread in
 										ThreadLine(item: thread, startedBy: message.author) { openThread(thread) }
 									})
-								}
+								},
+								liveFace: answering?.messageId == message.id ? LiveFace(botTyping: answering?.botTyping ?? false, viewerWriting: viewerWriting) : nil
 							)
 							.id(message.id)
 						}
