@@ -55,8 +55,8 @@ type LivelyBotFaceProps = BotLook &
  * A bot's face that seems alive, in a mood (see `moods`), and playing actions
  * through its `ref`. Its eyes slide across the head and narrow towards its
  * edge while the head leans after them, which makes the flat head read as
- * round. Sized like `BotFace`. Where faces may not move (see `useLiveliness`)
- * it is the still `BotFace`, and off screen it holds still.
+ * round. It hops when pressed. Sized like `BotFace`. Where faces may not move
+ * (see `useLiveliness`) it is the still `BotFace`, and off screen it holds still.
  */
 export function LivelyBotFace(props: LivelyBotFaceProps) {
 	if (useLiveliness() === "off") {
@@ -116,6 +116,8 @@ function AnimatedBotFace({
 		<span
 			ref={root}
 			aria-hidden
+			// Pressed, it hops; it's only a face, so this is play, not an action anyone needs.
+			onPointerDown={() => controls.hop()}
 			className={cn("relative inline-block shrink-0", className)}
 			style={{ width, height }}
 		>

@@ -1,5 +1,14 @@
-import { BotFace, type LivelyBehaviour, LivelyBotFace } from "@sugabots/avatars";
+import {
+	BotFace,
+	type LivelyBehaviour,
+	LivelyBotFace,
+	type LivelyFace,
+	type MoodLoop,
+	useGroupTurn,
+	useMoodLoop,
+} from "@sugabots/avatars";
 import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
+import type { Ref } from "react";
 
 /*
  * An agent's face.
@@ -70,6 +79,82 @@ export function AgentAvatar({
 			width={size}
 			height={size}
 			ring={ringed === true ? RING : ringed || undefined}
+			className={className}
+		/>
+	);
+}
+
+/** A bot's look: what `AgentAvatar` draws. */
+interface AgentLook {
+	color: AgentColor;
+	face: AgentFace;
+	shape: AgentShape;
+}
+
+/**
+ * How a bot's face carries itself while someone writes to it: watching them,
+ * now and then briefly pleased or excited.
+ */
+const WATCHING_MOODS: MoodLoop = [
+	{ mood: "idle", weight: 1, seconds: { least: 25, most: 60 } },
+	{ mood: "happy", weight: 2, seconds: { least: 1.5, most: 2.5 } },
+	{ mood: "excited", weight: 1, seconds: { least: 1, most: 1.5 } },
+];
+
+/**
+ * The face of a bot someone is talking to: thinking while the bot is `busy`;
+ * else, while `watching`, following the pointer and the typing; else still.
+ */
+export function WatchingAvatar({
+	bot,
+	size,
+	busy,
+	watching,
+	className,
+}: {
+	bot: AgentLook;
+	size: number;
+	busy: boolean;
+	watching: boolean;
+	className?: string;
+}) {
+	const watchingMood = useMoodLoop(WATCHING_MOODS, watching && !busy);
+	const mood = busy ? "thinking" : watching ? watchingMood : "still";
+	return (
+		<AgentAvatar
+			color={bot.color}
+			face={bot.face}
+			shape={bot.shape}
+			size={size}
+			lively={{ mood, watchPointer: true, watchTyping: true }}
+			className={className}
+		/>
+	);
+}
+
+/**
+ * A bot's face among others in a `LivelyGroup`: still except on its turn to
+ * move, and hopping when played through `faceRef`.
+ */
+export function TurnTakingAvatar({
+	bot,
+	size,
+	faceRef,
+	className,
+}: {
+	bot: AgentLook;
+	size: number;
+	faceRef: Ref<LivelyFace>;
+	className?: string;
+}) {
+	const movingTurn = useGroupTurn();
+	return (
+		<AgentAvatar
+			color={bot.color}
+			face={bot.face}
+			shape={bot.shape}
+			size={size}
+			lively={{ mood: movingTurn ? "idle" : "still", watchPointer: true, ref: faceRef }}
 			className={className}
 		/>
 	);

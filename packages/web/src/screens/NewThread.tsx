@@ -1,6 +1,7 @@
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import type { AgentParticipant, Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAgents, useModelName } from "@/lib/agents.ts";
 import {
 	THREAD_NOT_STARTED,
@@ -11,7 +12,7 @@ import {
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { useThread } from "@/lib/threads.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { TurnTakingAvatar, WatchingAvatar } from "@/shell/Agent.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { PeopleChatHeader } from "./ChatHeader.tsx";
@@ -120,11 +121,12 @@ export function NewThread({
 					{chosen && (
 						<div className="flex w-full max-w-160 flex-col items-center gap-6">
 							<div className="flex flex-col items-center gap-2 text-center">
-								<AgentAvatar
-									color={chosen.color}
-									face={chosen.face}
-									shape={chosen.shape}
+								{/* It watches the question being written, and thinks while the thread starts. */}
+								<WatchingAvatar
+									bot={chosen}
 									size={64}
+									busy={threads.isPending}
+									watching
 									className="mb-3"
 								/>
 								<h2 className="m-0 font-semibold text-lg text-foreground">
@@ -153,20 +155,19 @@ export function NewThread({
 					</p>
 				</div>
 				{bots && bots.length > 0 && (
-					<ul aria-label="Bots" className="m-0 flex list-none flex-wrap gap-2 p-0">
-						{bots.map((bot) => (
-							<li key={bot.id}>
-								<button
-									type="button"
-									onClick={() => setDraft((current) => `@${bot.handle} ${current.trimStart()}`)}
-									className="focus-ring flex h-8 items-center gap-2 rounded-md border border-border-strong pr-3 pl-1.5 font-medium text-xs text-foreground transition-colors hover:bg-row-hover"
-								>
-									<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />
-									{bot.name}
-								</button>
-							</li>
-						))}
-					</ul>
+					// The bots' faces take turns to move, so the row never fidgets all at once.
+					<LivelyGroup>
+						<ul aria-label="Bots" className="m-0 flex list-none flex-wrap gap-2 p-0">
+							{bots.map((bot) => (
+								<li key={bot.id}>
+									<BotChip
+										bot={bot}
+										onClick={() => setDraft((current) => `@${bot.handle} ${current.trimStart()}`)}
+									/>
+								</li>
+							))}
+						</ul>
+					</LivelyGroup>
 				)}
 			</div>
 			<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
@@ -180,5 +181,21 @@ export function NewThread({
 				</div>
 			</div>
 		</div>
+	);
+}
+
+/** A bot to name in the thread, its face hopping as the pointer comes onto it. */
+function BotChip({ bot, onClick }: { bot: AgentParticipant; onClick: () => void }) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			onPointerEnter={() => face.current?.play("hop")}
+			className="focus-ring flex h-8 items-center gap-2 rounded-md border border-border-strong pr-3 pl-1.5 font-medium text-xs text-foreground transition-colors hover:bg-row-hover"
+		>
+			<TurnTakingAvatar bot={bot} size={20} faceRef={face} />
+			{bot.name}
+		</button>
 	);
 }
