@@ -1,4 +1,4 @@
-import { botColorVariables } from "@sugabots/avatars";
+import { botColorVariables, type MoodLoop, useMoodLoop } from "@sugabots/avatars";
 import {
 	type CollaborationPart,
 	type FilePart,
@@ -90,6 +90,8 @@ export function ThreadConversation({
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
+	answeringFace,
+	viewerWriting = false,
 }: {
 	messages: Message[];
 	/** The bot the thread is with; none in a pod's chat. */
@@ -174,6 +176,10 @@ export function ThreadConversation({
 	 * shows its files without links, as the API can't serve them until it has it.
 	 */
 	fileUrlOf: (fileId: string) => string;
+	/** The face that comes alive for the bot answering, as `findAnsweringFace` finds it; none unless given. */
+	answeringFace?: AnsweringFace;
+	/** Whether the viewer is writing a reply, which the answering face watches. */
+	viewerWriting?: boolean;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -189,6 +195,7 @@ export function ThreadConversation({
 				const previous = messages[index - 1];
 				const next = messages[index + 1];
 				const divider = dividers && startsNewDay(previous?.createdAt, message.createdAt);
+				const headsRun = startsRun(previous, message, dividers);
 				// One note for each person's run of waiting messages, under the last of them.
 				const queuedNote =
 					queued.has(message.id) &&
@@ -204,7 +211,12 @@ export function ThreadConversation({
 						) : (
 							<MessageRow
 								message={message}
-								startsGroup={divider || startsGroup(previous, message)}
+								startsGroup={headsRun}
+								liveFace={
+									message.id === answeringFace?.messageId
+										? { botTyping: answeringFace.botTyping, viewerWriting }
+										: undefined
+								}
 								participants={participants}
 								looks={looks}
 								fileNames={fileNames}
@@ -264,6 +276,82 @@ export function typersAfter(
 	const last = messages.at(-1);
 	if (last?.author.kind === "agent" && isTyping(last)) return [last.author, ...peopleTyping];
 	return [...peopleTyping];
+}
+
+/**
+ * How the face of the bot answering carries itself while the viewer writes
+ * back: watching them, now and then briefly pleased or excited.
+ */
+const WATCHING_MOODS: MoodLoop = [
+	{ mood: "idle", weight: 1, seconds: { least: 25, most: 60 } },
+	{ mood: "happy", weight: 2, seconds: { least: 1.5, most: 2.5 } },
+	{ mood: "excited", weight: 1, seconds: { least: 1, most: 1.5 } },
+];
+
+interface AnsweringFaceState {
+	botTyping: boolean;
+	viewerWriting: boolean;
+}
+
+/**
+ * The face of the bot answering: thinking while the bot is typing, as the
+ * typing line says; watching the viewer while they write back; else still.
+ */
+function AnsweringAvatar({
+	author,
+	size,
+	botTyping,
+	viewerWriting,
+}: AnsweringFaceState & {
+	author: Extract<Message["author"], { kind: "agent" }>;
+	size: number;
+}) {
+	const watching = viewerWriting && !botTyping;
+	const watchingMood = useMoodLoop(WATCHING_MOODS, watching);
+	const mood = botTyping ? "thinking" : watching ? watchingMood : "still";
+	return (
+		<AgentAvatar
+			color={author.color}
+			face={author.face}
+			shape={author.shape}
+			size={size}
+			lively={{ mood, watchPointer: true, watchTyping: true }}
+		/>
+	);
+}
+
+/** Where the face of the bot answering is drawn, and whether it's typing now. */
+export interface AnsweringFace {
+	messageId: string;
+	botTyping: boolean;
+}
+
+/**
+ * The face that stands for the bot that wrote the newest message: the last
+ * face drawn for that bot. A reply just begun shows only as its typing line,
+ * so its face may be on the bot's reply before.
+ */
+export function findAnsweringFace(
+	messages: readonly Message[],
+	dividers: boolean,
+): AnsweringFace | undefined {
+	const newest = messages.at(-1);
+	if (newest?.author.kind !== "agent") return undefined;
+	const drawn = messages.findLast(
+		(message, index) =>
+			sameAuthor(message, newest) &&
+			startsRun(messages[index - 1], message, dividers) &&
+			!showsNothingYet(message),
+	);
+	return drawn && { messageId: drawn.id, botTyping: isTyping(newest) };
+}
+
+/** Whether `message` heads a run drawn with its author's face: after a day marker, or as `startsGroup` says. */
+function startsRun(previous: Message | undefined, message: Message, dividers: boolean): boolean {
+	return (
+		(dividers && startsNewDay(previous?.createdAt, message.createdAt)) ||
+		startsGroup(previous, message)
+	);
 }
 
 /**
@@ -353,12 +441,22 @@ type Segment =
 	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
 
+/** Whether a reply being written has nothing settled to show yet, so shows only as its typing line. */
+function showsNothingYet(message: Message): boolean {
+	if (message.status !== "streaming") return false;
+	const shows =
+		message.parts.some((part) => part.type === "tool_call" || part.type === "file") ||
+		segmentsOf(message).some((segment) => segment.type !== "text" || segment.text);
+	return !shows;
+}
+
 /**
  * The message's parts as things to draw, leaving out narration and every tool
  * call but those somebody was asked to approve. A reply still being written shows
  * only those, its collaborations, and text that something has followed: the
  * run it is still writing waits until it is finished.
  */
+
 function segmentsOf(message: Message): Segment[] {
 	const finished = message.status !== "streaming";
 	// A text run is keyed by where in the message it starts; a collaboration or
@@ -440,6 +538,7 @@ function MessageRow({
 	onOpenArtifact,
 	onOpenDesktop,
 	previews,
+	liveFace,
 }: {
 	message: Message;
 	/** Whether it heads its author's group, so it carries their face and name. */
@@ -476,6 +575,8 @@ function MessageRow({
 	onOpenArtifact?: (artifactId: string) => void;
 	onOpenDesktop?: () => void;
 	previews: boolean;
+	/** Given only where the face of the bot answering is drawn: whether it's typing, and whether the viewer is writing back. */
+	liveFace?: AnsweringFaceState;
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
@@ -498,12 +599,8 @@ function MessageRow({
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
-	const showsSomething =
-		calls.length > 0 ||
-		files.length > 0 ||
-		segments.some((segment) => segment.type !== "text" || segment.text);
 	// A reply with nothing settled yet is only its typing line, under the last message.
-	if (message.status === "streaming" && !showsSomething) return null;
+	if (showsNothingYet(message)) return null;
 	const finished = message.status === "complete" && !sending;
 	const replyable = onReply !== undefined && finished;
 	const threadable = onStartThread !== undefined && finished;
@@ -530,7 +627,9 @@ function MessageRow({
 			>
 				{startsGroup ? (
 					<span aria-hidden className="mt-0.5 flex">
-						{author.kind === "agent" ? (
+						{author.kind === "agent" && liveFace ? (
+							<AnsweringAvatar author={author} size={size.face} {...liveFace} />
+						) : author.kind === "agent" ? (
 							<AgentAvatar
 								color={author.color}
 								face={author.face}

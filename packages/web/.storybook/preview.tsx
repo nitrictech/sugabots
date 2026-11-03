@@ -1,6 +1,7 @@
 import addonA11y from "@storybook/addon-a11y";
 import addonDocs from "@storybook/addon-docs";
 import { definePreview } from "@storybook/react-vite";
+import { LivelinessContext, livelinessLevels } from "@sugabots/avatars";
 import {
 	createMemoryHistory,
 	createRootRoute,
@@ -39,8 +40,17 @@ export default definePreview({
 				dynamicTitle: true,
 			},
 		},
+		liveliness: {
+			description: "How much bots' faces move",
+			toolbar: {
+				icon: "lightning",
+				items: [...livelinessLevels],
+				dynamicTitle: true,
+			},
+		},
 	},
-	initialGlobals: { theme: "dark" },
+	// Faces stay still unless a story or the toolbar asks, so runs are repeatable.
+	initialGlobals: { theme: "dark", liveliness: "off" },
 	parameters: {
 		layout: "padded",
 		backgrounds: { disable: true },
@@ -79,7 +89,9 @@ export default definePreview({
 			}, [context.globals.theme]);
 			return (
 				<TooltipProvider>
-					<Story />
+					<LivelinessContext value={context.globals.liveliness}>
+						<Story />
+					</LivelinessContext>
 				</TooltipProvider>
 			);
 		},

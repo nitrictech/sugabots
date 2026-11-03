@@ -106,6 +106,7 @@ import { RoutinesStage, type RoutinesView } from "./RoutinesStage.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
 import {
 	DaySeparator,
+	findAnsweringFace,
 	startsNewDay,
 	ThreadConversation,
 	typersAfter,
@@ -223,6 +224,8 @@ export function ConversationChat({
 	const newest = items.at(-1);
 	useMarkReadWhileSeen(conversationId, newest, latestInView);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+	// Found across all the messages, not in each part they're shown in, or each part would bring a face of its own alive.
+	const answeringFace = findAnsweringFace(shownMessages, false);
 	// The routine runs the messages shown are the results of, by the run's thread.
 	const runsResulting = new Map(
 		shownMessages.flatMap((message) =>
@@ -664,6 +667,8 @@ export function ConversationChat({
 											queued={queued}
 											sending={sending}
 											showsTyping={false}
+											answeringFace={answeringFace}
+											viewerWriting={draft.trim() !== ""}
 											highlightedMessageId={jump.pointedOut}
 											threadActivityAt={threadActivityAt}
 											authorLinkOf={authorLinkOf}

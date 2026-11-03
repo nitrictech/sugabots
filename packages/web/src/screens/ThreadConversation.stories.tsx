@@ -15,7 +15,7 @@ import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { ThreadConversation } from "./ThreadConversation.tsx";
+import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
 
 const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	kind: "agent",
@@ -322,6 +322,54 @@ export const TimeOnHover = meta.story({
 				createdAt: "2025-08-05T05:46:46.000Z",
 			},
 		],
+	},
+});
+
+const watchedMessages = [
+	message("0199a3a0-0000-7000-8000-000000000300", host, "Overnight outbound is queued."),
+	message("0199a3a0-0000-7000-8000-000000000301", person, "Can you check the overnight queue?"),
+	message("0199a3a0-0000-7000-8000-000000000302", host, "Done: 38 leads queued, six replied."),
+];
+
+/**
+ * WatchedWhileWriting shows a bot's newest reply while the viewer writes back:
+ * the face heading its run comes alive and watches them, while the face on its
+ * earlier reply stays still.
+ */
+export const WatchedWhileWriting = meta.story({
+	globals: { liveliness: "sometimes" },
+	args: {
+		messages: watchedMessages,
+		answeringFace: findAnsweringFace(watchedMessages, true),
+		viewerWriting: true,
+	},
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText(/six replied/)).toBeVisible());
+	},
+});
+
+const typingMessages = [
+	message("0199a3a0-0000-7000-8000-000000000310", host, "Outbound is queued for tonight."),
+	message("0199a3a0-0000-7000-8000-000000000311", person, "Can you check the overnight queue?"),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000312", host, ""),
+		status: "streaming" as const,
+		parts: [],
+	},
+];
+
+/**
+ * ThinkingWhileTyping shows a bot writing a reply that has nothing to show yet:
+ * the face on its reply before thinks, as the typing line says it's typing.
+ */
+export const ThinkingWhileTyping = meta.story({
+	globals: { liveliness: "often" },
+	args: {
+		messages: typingMessages,
+		answeringFace: findAnsweringFace(typingMessages, true),
+	},
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText(/is typing/)).toBeVisible());
 	},
 });
 
