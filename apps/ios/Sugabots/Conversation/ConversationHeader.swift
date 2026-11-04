@@ -22,7 +22,6 @@ struct ConversationHeader: View {
 	@Environment(Toaster.self) private var toaster
 	@Environment(\.dismiss) private var dismiss
 
-	/// How big a face is in the title row.
 	/// A face in the title pill: 6 points inside its rounded end, and 6 over and under in its 44.
 	private static let faceSize: CGFloat = 32
 

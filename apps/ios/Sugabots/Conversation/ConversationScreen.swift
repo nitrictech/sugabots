@@ -76,15 +76,16 @@ private struct ConversationContent: View {
 	private static let typingSignalInterval: TimeInterval = 3
 	private static let foot = "foot"
 
-	private func openDetails() {
-		openPage(.details(model))
-	}
 	/// The space between the composer and the keyboard, over the hint row's own.
 	private static let keyboardGap: CGFloat = 8
 	/// How long a message jumped to stays highlighted.
 	private static let pointedOutFor: Duration = .seconds(2)
 	/// The space over the first message, under the floating header.
 	private static let headerRoom: CGFloat = 64
+
+	private func openDetails() {
+		openPage(.details(model))
+	}
 
 	var body: some View {
 		let kind = kind
@@ -141,7 +142,8 @@ private struct ConversationContent: View {
 		.onAppear {
 			if attachments == nil { attachments = ComposerAttachments(conversationId: model.conversationId, client: store.client) }
 			#if DEBUG
-			// `SUGABOTS_DETAILS=1` opens Details over the first conversation at launch, for screenshots.
+			// `SUGABOTS_TYPING=1` gives the first conversation's composer the keyboard at launch, and
+			// `SUGABOTS_DETAILS=1` opens Details over it, for screenshots.
 			if DebugLaunch.takeComposerFocusing() {
 				Task {
 					try? await Task.sleep(for: .seconds(1.5))

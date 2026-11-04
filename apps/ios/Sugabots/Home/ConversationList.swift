@@ -417,9 +417,6 @@ private struct ThreadTree: View {
 	}
 }
 
-/// At a row's end: a dot while it waits on the person, as a decision or a
-/// mention does. Unread messages show in the row's bold name, so they are
-/// only counted for VoiceOver.
 /// The red dot for a routine whose latest run failed.
 struct FailedRoutineDot: View {
 	var body: some View {
@@ -427,6 +424,9 @@ struct FailedRoutineDot: View {
 	}
 }
 
+/// At a row's end: a dot while it waits on the person, as a decision or a
+/// mention does. Unread messages show in the row's bold name, so they are
+/// only counted for VoiceOver.
 struct UnreadMarker: View {
 	let unreadMessages: Int
 	let needsYou: Bool
