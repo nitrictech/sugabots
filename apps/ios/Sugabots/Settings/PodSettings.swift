@@ -244,7 +244,7 @@ private struct PodBotsPage: View {
 	let record: Pod
 	@Environment(WorkspaceStore.self) private var store
 	@State private var creating = false
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		let bots = store.bots(in: pod)
@@ -270,10 +270,9 @@ private struct PodBotsPage: View {
 		.fullScreenCover(isPresented: $creating) {
 			NewBotScreen(pod: pod) { made in
 				creating = false
-				opened = .settings(.agent(pod, made))
+				openPage(.settings(.agent(pod, made)))
 			}
 		}
-		.navigationDestination(item: $opened) { RouteDestination(route: $0) }
 	}
 }
 

@@ -101,11 +101,11 @@ private struct PodRail: View {
 private struct PodPanel: View {
 	let pod: Pod
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
 
 	var body: some View {
 		VStack(spacing: 0) {
-			Button { openUnderYou(.podSettings(pod)) } label: {
+			// Pushed on Home, so Back comes straight back here, rather than opened under You.
+			NavigationLink(value: Route.podSettings(pod)) {
 				HStack(spacing: 6) {
 					Text(pod.name)
 						.font(Typeface.rubik(22, .semibold))

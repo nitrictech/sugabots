@@ -71,7 +71,7 @@ struct BotToolsSection: View {
 	let pod: Pod
 	let agent: Agent
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 	@State private var connections: [Connection] = []
 
 	var body: some View {
@@ -80,7 +80,7 @@ struct BotToolsSection: View {
 				DetailsSection(title: "Tools") {
 					VStack(alignment: .leading, spacing: 0) {
 						ForEach(connections) { connection in
-							Button { openUnderYou(.settings(.agent(pod, agent))) } label: {
+							Button { openPage(.settings(.agent(pod, agent))) } label: {
 								HStack(spacing: 12) {
 									ConnectionMark(presetId: connection.presetId, name: connection.name, size: .md)
 									Text(connection.name).font(Typeface.rubik(15)).foregroundStyle(Palette.foreground).lineLimit(1)

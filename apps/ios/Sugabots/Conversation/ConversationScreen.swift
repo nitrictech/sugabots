@@ -62,10 +62,9 @@ private struct ConversationContent: View {
 	@State private var sending = false
 	@State private var sendError: String?
 	@State private var lastTypingSignal = Date.distantPast
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 	@State private var sideThread: SideThread?
 	@State private var showingComputer = false
-	@State private var showingDetails = false
 	@State private var highlighted: String?
 	@State private var latestInView = true
 	/// The pod's connections, by handle, for naming and marking a bot's steps.
@@ -76,6 +75,10 @@ private struct ConversationContent: View {
 	/// How often a person still typing says so again, as the web's composer does.
 	private static let typingSignalInterval: TimeInterval = 3
 	private static let foot = "foot"
+
+	private func openDetails() {
+		openPage(.details(DetailsOf(model: model, kind: kind)))
+	}
 	/// The space between the composer and the keyboard, over the hint row's own.
 	private static let keyboardGap: CGFloat = 8
 	/// How long a message jumped to stays highlighted.
@@ -118,20 +121,15 @@ private struct ConversationContent: View {
 				kind: kind,
 				pod: pod,
 				fallbackTitle: fallbackTitle,
-				openDetails: { showingDetails = true },
+				openDetails: openDetails,
 				openComputer: { showingComputer = true },
 				openRoutines: {
-					if let pod, let agent = kind.agent { opened = .routines(pod, agent: agent) }
+					if let pod, let agent = kind.agent { openPage(.routines(pod, agent: agent)) }
 				}
 			)
 		}
 		.safeAreaInset(edge: .bottom, spacing: 0) { foot(kind: kind, pod: pod) }
 		.toolbar(.hidden, for: .navigationBar)
-		.navigationDestination(item: $opened) { RouteDestination(route: $0) }
-		.navigationDestination(isPresented: $showingDetails) {
-			ConversationDetails(model: model, kind: kind)
-				.toolbar(.hidden, for: .navigationBar)
-		}
 		.sheet(item: $sideThread) { side in
 			SideThreadSheet(threadId: side.id, conversationId: model.conversationId, entry: model.entries.first { $0.threadId == side.id }, chatAgentId: kind.agent?.id) {
 				openSideThread($0)
@@ -153,7 +151,7 @@ private struct ConversationContent: View {
 			if DebugLaunch.takeDetailsOpening() {
 				Task {
 					try? await Task.sleep(for: .seconds(1.5))
-					showingDetails = true
+					openDetails()
 				}
 			}
 			#endif
@@ -322,7 +320,7 @@ private struct ConversationContent: View {
 			startThread: channel ? { message in startThread(from: message) } : nil,
 			react: { message, emoji in Task { await model.toggleReaction(emoji, on: message) } },
 			openThread: { openSideThread($0) },
-			openArtifact: { artifactId in opened = .artifact(podId: pod.id, artifactId: artifactId, version: nil) },
+			openArtifact: { artifactId in openPage(.artifact(podId: pod.id, artifactId: artifactId, version: nil)) },
 			openDesktop: { showingComputer = true },
 			jumpTo: { messageId in
 				withAnimation { scroller.scrollTo(messageId, anchor: .center) }
@@ -480,7 +478,7 @@ private struct ConversationContent: View {
 		Task {
 			do {
 				let thread = try await model.thread(from: message)
-				opened = .conversation(threadId: thread.id, title: thread.title)
+				openPage(.conversation(threadId: thread.id, title: thread.title))
 			} catch {
 				sendError = "The thread was not started. Try again."
 			}
@@ -516,7 +514,7 @@ private struct ConversationContent: View {
 	}
 
 	private func openThread(_ thread: ChatMessageItem.Thread) {
-		opened = .conversation(threadId: thread.threadId, title: thread.title)
+		openPage(.conversation(threadId: thread.threadId, title: thread.title))
 	}
 
 	/// A collaboration or a run, which opens in a sheet over the conversation.
@@ -790,12 +788,12 @@ enum ActivityState {
 private struct AgentNotSetUp: View {
 	let agent: Agent
 	let pod: Pod
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		Group {
 			if pod.permissions.updateAgents {
-				Button { openUnderYou(.settings(.agent(pod, agent))) } label: {
+				Button { openPage(.settings(.agent(pod, agent))) } label: {
 					(Text("\(agent.name) has no model yet, so it cannot answer. ")
 						+ Text("Choose a model").foregroundStyle(Palette.foreground).fontWeight(.medium)
 						+ Text(" to start chatting."))

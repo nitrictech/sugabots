@@ -99,11 +99,8 @@ struct MainTabs: View {
 			}
 		}
 		.environment(\.tabBarRoom, keyboardUp ? 0 : TabBar.room)
-		// Settings pages are You's, as the web's `useMobileTab` counts them, wherever they're opened from.
-		.environment(\.openUnderYou, OpenUnderYou { route in
-			tab = .you
-			paths[.you] = [route]
-		})
+		// Every page opens on the open tab's own stack, so Back returns to where it was opened from.
+		.environment(\.openPage, OpenPage { route in paths[tab, default: []].append(route) })
 		#if DEBUG
 		.debugOpen(tab: $tab)
 		#endif
@@ -165,6 +162,7 @@ struct RouteDestination: View {
 		case let .artifacts(pod): ArtifactsScreen(pod: pod)
 		case let .artifact(podId, artifactId, version): ArtifactScreen(podId: podId, artifactId: artifactId, version: version)
 		case let .settings(place): SettingsDestination(place: place)
+		case let .details(of): ConversationDetails(model: of.model, kind: of.kind)
 		}
 	}
 }
@@ -279,20 +277,22 @@ extension View {
 	}
 }
 
-/// Opens a page under the You tab, as a settings page opened from elsewhere is.
-struct OpenUnderYou {
+/// Pushes a page onto the open tab's stack. Pages open this way, not with a
+/// `navigationDestination` of their own: a page pushed beside the stack's path
+/// can't push onto that path itself, so its links would do nothing.
+struct OpenPage {
 	let open: (Route) -> Void
 
 	func callAsFunction(_ route: Route) { open(route) }
 }
 
-private struct OpenUnderYouKey: EnvironmentKey {
-	static let defaultValue = OpenUnderYou { _ in }
+private struct OpenPageKey: EnvironmentKey {
+	static let defaultValue = OpenPage { _ in }
 }
 
 extension EnvironmentValues {
-	var openUnderYou: OpenUnderYou {
-		get { self[OpenUnderYouKey.self] }
-		set { self[OpenUnderYouKey.self] = newValue }
+	var openPage: OpenPage {
+		get { self[OpenPageKey.self] }
+		set { self[OpenPageKey.self] = newValue }
 	}
 }

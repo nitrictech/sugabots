@@ -135,7 +135,7 @@ private struct BotDetails: View {
 	let pod: Pod
 	let threadId: String
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 	@State private var activity: ThreadActivity?
 	@State private var summaryOpen = false
 	/// Whether the system agent that writes summaries has a model; nil until known.
@@ -149,7 +149,7 @@ private struct BotDetails: View {
 			BotFace(look: agent.look, size: 88)
 		} actions: {
 			RoundAction(icon: .settings, label: "Settings") { label in
-				Button { openUnderYou(.settings(.agent(pod, agent))) } label: { label }.buttonStyle(.plain)
+				Button { openPage(.settings(.agent(pod, agent))) } label: { label }.buttonStyle(.plain)
 			}
 			RoundAction(icon: .refreshCcw, label: "Routines") { label in
 				NavigationLink(value: Route.routines(pod, agent: agent)) { label }.buttonStyle(.plain)
@@ -355,13 +355,13 @@ private struct SharedFiles: View {
 @MainActor
 private struct SystemAgentsNotSetUp: View {
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		let may = store.permissions?.configureBuiltInAgents ?? false
 		Group {
 			if may {
-				Button { openUnderYou(.settings(.systemModel)) } label: {
+				Button { openPage(.settings(.systemModel)) } label: {
 					(Text("The system agents write these, and they have no model yet. ") + Text("Choose their model").foregroundStyle(Palette.foreground).fontWeight(.medium) + Text("."))
 						.multilineTextAlignment(.leading)
 				}

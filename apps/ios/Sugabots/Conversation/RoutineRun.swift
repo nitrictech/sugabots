@@ -12,7 +12,7 @@ struct RunMessage: View {
 	let latest: Bool
 	let mentionable: [ThreadParticipant]
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 	@Environment(Toaster.self) private var toaster
 	@State private var retrying = false
 
@@ -42,7 +42,7 @@ struct RunMessage: View {
 				if latest, outcome == .failed {
 					HStack(spacing: 8) {
 						Button("Retry", action: retry).buttonStyle(WebButtonStyle(size: .small)).disabled(retrying)
-						Button("Fix connection") { openUnderYou(.podSettings(pod)) }.buttonStyle(WebButtonStyle(variant: .secondary, size: .small))
+						Button("Fix connection") { openPage(.podSettings(pod)) }.buttonStyle(WebButtonStyle(variant: .secondary, size: .small))
 					}
 					.padding(.top, 8)
 				}

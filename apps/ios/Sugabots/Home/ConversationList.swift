@@ -11,7 +11,7 @@ struct ConversationList: View {
 	@AppStorage("foldedSections") private var foldedSections = ""
 	@State private var namingChannel = false
 	@State private var makingBot = false
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		let list = store.chatLists[pod.id]
@@ -89,17 +89,14 @@ struct ConversationList: View {
 			NameSheet.channel(title: "New channel", action: "Create") { name in
 				let chat = try await store.startChat(in: pod, named: name)
 				namingChannel = false
-				opened = .conversation(threadId: chat.id, title: chat.title)
+				openPage(.conversation(threadId: chat.id, title: chat.title))
 			}
 		}
 		.fullScreenCover(isPresented: $makingBot) {
 			NewBotScreen(pod: pod) { made in
 				makingBot = false
-				opened = .botChannel(pod, made)
+				openPage(.botChannel(pod, made))
 			}
-		}
-		.navigationDestination(item: $opened) { route in
-			RouteDestination(route: route)
 		}
 	}
 
@@ -275,7 +272,7 @@ private struct BotItem: View {
 	let group: BotGroup
 	let routines: [ListedRoutine]
 	@Environment(WorkspaceStore.self) private var store
-	@Environment(\.openUnderYou) private var openUnderYou
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		let channel = group.channel
@@ -328,7 +325,7 @@ private struct BotItem: View {
 			.frame(height: 44)
 			.contextMenu {
 				if let place, let settings = store.notificationSettings {
-					NotificationMenu(place: place, settings: settings) { openUnderYou(.settings(.notifications)) }
+					NotificationMenu(place: place, settings: settings) { openPage(.settings(.notifications)) }
 				}
 			}
 			if !group.threads.isEmpty {

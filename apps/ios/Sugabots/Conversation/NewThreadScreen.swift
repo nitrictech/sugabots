@@ -16,7 +16,7 @@ struct NewThreadScreen: View {
 	@State private var attachments: ComposerAttachments?
 	@State private var starting = false
 	@State private var failed = false
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 	/// Whether the composer has the keyboard, as `Composer.focused` says.
 	@State private var composing = false
 
@@ -39,7 +39,6 @@ struct NewThreadScreen: View {
 			}
 		}
 		.background(Palette.background.ignoresSafeArea())
-		.navigationDestination(item: $opened) { RouteDestination(route: $0) }
 		.task(id: pod.id) { await open() }
 	}
 
@@ -155,7 +154,7 @@ struct NewThreadScreen: View {
 			do {
 				let started = try await startsFrom.startThread(text, with: threadWith, replyTo: nil, files: files)
 				draft = ""
-				opened = .conversation(threadId: started.conversation.id, title: started.conversation.title)
+				openPage(.conversation(threadId: started.conversation.id, title: started.conversation.title))
 			} catch {
 				failed = true
 			}

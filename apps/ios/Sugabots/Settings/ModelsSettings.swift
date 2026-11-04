@@ -14,7 +14,7 @@ struct ModelsSettingsScreen: View {
 	@State private var failure: String?
 	/// The provider to start adding with, or `""` for the whole list.
 	@State private var adding: String?
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
 		let all = providers ?? []
@@ -70,10 +70,9 @@ struct ModelsSettingsScreen: View {
 		.fullScreenCover(item: Binding(get: { adding.map(AddingItem.init) }, set: { adding = $0?.preset })) { item in
 			AddProviderSheet(providers: providers ?? [], startWith: item.preset.isEmpty ? nil : item.preset) { provider in
 				adding = nil
-				opened = .settings(.provider(id: provider.id))
+				openPage(.settings(.provider(id: provider.id)))
 			}
 		}
-		.navigationDestination(item: $opened) { RouteDestination(route: $0) }
 		.task { await load() }
 	}
 

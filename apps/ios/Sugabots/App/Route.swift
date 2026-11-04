@@ -28,4 +28,15 @@ enum Route: Hashable {
 	case podSettings(Pod)
 	/// A settings page, as the web's `/settings` and `/you` paths name them.
 	case settings(SettingsPlace)
+	/// An open conversation's Details, over it.
+	case details(DetailsOf)
+}
+
+/// The conversation a Details page shows, the open one's own model so the two stay as one.
+struct DetailsOf: Hashable {
+	let model: ConversationModel
+	let kind: ConversationKind
+
+	static func == (lhs: Self, rhs: Self) -> Bool { lhs.model === rhs.model }
+	func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(model)) }
 }

@@ -21,7 +21,7 @@ struct RoutinePanel: View {
 	@State private var pending = false
 	@State private var failure: String?
 	@State private var dialog: Dialog?
-	@State private var opened: Route?
+	@Environment(\.openPage) private var openPage
 	@Environment(\.debugDialog) private var debugDialog
 
 	private enum Dialog: Identifiable {
@@ -143,7 +143,6 @@ struct RoutinePanel: View {
 			try await store.deleteRoutine(standing.id, agentId: agent.id)
 			dismiss()
 		}
-		.navigationDestination(item: $opened) { RouteDestination(route: $0) }
 	}
 
 	private func moreMenu(_ routine: Routine) -> some View {
@@ -338,7 +337,7 @@ struct RoutinePanel: View {
 		control {
 			let copy = routine.copy(siblingNames: (routines ?? []).map(\.name))
 			let created = try await store.createRoutine(agentId: agent.id, routine: copy)
-			opened = .routine(pod, routineId: created.routine.id)
+			openPage(.routine(pod, routineId: created.routine.id))
 		}
 	}
 }
