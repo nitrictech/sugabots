@@ -554,8 +554,7 @@
 }
 
 /* A link in a bot's message wears the bot's accent, so it reads as a link against the words around it. */
-.message-markdown a,
-.message-markdown [data-streamdown="link"] {
+.message-markdown a {
 	color: var(--bot-mono, currentColor);
 	text-decoration: underline;
 	text-underline-offset: 2px;

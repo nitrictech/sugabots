@@ -1003,6 +1003,41 @@ export const Mentions = meta.story({
 	},
 });
 
+/**
+ * A link in a bot's reply is a real link: hovering shows where it goes, and a
+ * middle or Ctrl-click opens it in a new tab. A plain click on one off the app
+ * asks first, showing the whole address; one back into the app opens unasked.
+ */
+export const Links = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000501",
+				host,
+				"The timeout is tracked in [the checkout issue](https://linear.app/nitric/issue/CHK-12). The run that hit it is [in Routines](/routines).",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		const external = canvas.getByRole("link", { name: "the checkout issue" });
+		await expect(external).toHaveAttribute("href", "https://linear.app/nitric/issue/CHK-12");
+		await expect(canvas.getByRole("link", { name: "in Routines" })).toHaveAttribute(
+			"href",
+			"/routines",
+		);
+		await userEvent.click(external);
+		const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+		await expect(within(warning).getByRole("link", { name: "Open link" })).toHaveAttribute(
+			"href",
+			"https://linear.app/nitric/issue/CHK-12",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	},
+});
+
 /** The rest of the pod, so `@here` has more people to notify than its card lists. */
 const podmates = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
 	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
