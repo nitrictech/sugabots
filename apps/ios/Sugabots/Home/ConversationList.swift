@@ -11,6 +11,10 @@ struct ConversationList: View {
 	@AppStorage("foldedSections") private var foldedSections = ""
 	@State private var namingChannel = false
 	@State private var makingBot = false
+	/// The channel held for renaming, or for archiving once confirmed.
+	@State private var renaming: ChatList.Chat?
+	@State private var archiving: ChatList.Chat?
+	@State private var archiveFailed = false
 	@Environment(\.openPage) private var openPage
 
 	var body: some View {
@@ -48,6 +52,7 @@ struct ConversationList: View {
 								unread: chat.unreadMessages,
 								route: .conversation(threadId: chat.conversation.id, title: chat.conversation.title)
 							)
+							.contextMenu { channelMenu(chat) }
 							if let under = byChat[chat.conversation.id] {
 								ThreadTree(pod: pod, threads: under)
 							}
@@ -92,6 +97,27 @@ struct ConversationList: View {
 				openPage(.conversation(threadId: chat.id, title: chat.title))
 			}
 		}
+		.sheet(item: $renaming) { chat in
+			NameSheet.channel(title: "Rename channel", name: chat.conversation.title, action: "Save") { renamed in
+				try await store.renameChat(chat.conversation.id, to: renamed, in: pod)
+				renaming = nil
+			}
+		}
+		.confirmationDialog(
+			"Archive \(archiving?.conversation.title ?? "")?",
+			isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil } }),
+			titleVisibility: .visible,
+			presenting: archiving
+		) { chat in
+			Button("Archive", role: .destructive) {
+				Task {
+					do { try await store.archiveChat(chat.conversation.id, in: pod) } catch { archiveFailed = true }
+				}
+			}
+		} message: { _ in
+			Text("It leaves the pod's list for everyone. Threads started from it stay.")
+		}
+		.alert("The channel was not archived. Try again.", isPresented: $archiveFailed) {}
 		.fullScreenCover(isPresented: $makingBot) {
 			NewBotScreen(pod: pod) { made in
 				makingBot = false
@@ -102,6 +128,16 @@ struct ConversationList: View {
 
 	/// How far the rows sit in from their section's name, on a phone's width.
 	static let nestedIndent: CGFloat = 12
+
+	/// What holding a channel offers, as its Details does: Rename, and Archive for any but the first.
+	@ViewBuilder private func channelMenu(_ chat: ChatList.Chat) -> some View {
+		if pod.permissions.rename {
+			Button { renaming = chat } label: { Label("Rename", systemImage: "pencil") }
+			if !chat.conversation.main {
+				Button(role: .destructive) { archiving = chat } label: { Label("Archive", systemImage: "archivebox") }
+			}
+		}
+	}
 
 	private func channelRow(name: String, unread: Int, route: Route) -> some View {
 		NavigationLink(value: route) {
