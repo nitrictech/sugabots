@@ -242,7 +242,13 @@ function routinesAnswer(items: WorkspaceRoutine[]) {
 				routines: items
 					.filter((item) => item.pod.slug === pod || item.pod.id === pod)
 					.map(({ routine, agent, pod }) => ({
-						routine: { id: routine.id, name: routine.name, state: routine.state, failed: false },
+						routine: {
+							id: routine.id,
+							name: routine.name,
+							state: routine.state,
+							failed: false,
+							pausedAfterFailures: false,
+						},
 						agent,
 						conversation: {
 							kind: "routine_feed",

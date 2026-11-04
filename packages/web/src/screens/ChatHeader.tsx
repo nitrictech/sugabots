@@ -12,11 +12,12 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
-import { useAttentionCounts } from "@/lib/chats.ts";
+import { useAttentionCounts, useChatList } from "@/lib/chats.ts";
 import { activityLink, agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { FAILED_DOT_LABEL, FailedDot } from "@/shell/FailedDot.tsx";
 import { LockGlyph, ONLY_YOU, OnlyYou } from "@/shell/PersonalPrivacy.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
@@ -176,7 +177,7 @@ export function ChatHeader({
 			) : (
 				<ChatSandbox agent={agent} threadId={conversationId} onOpen={openComputer} />
 			)}
-			<RoutinesButton onOpen={onOpenRoutines} />
+			<RoutinesButton agent={agent} onOpen={onOpenRoutines} />
 			{done && (
 				<span className="contents max-md:hidden">
 					<DoneButton {...done} />
@@ -420,13 +421,21 @@ function BadgeDetail({ inPersonalPod, children }: { inPersonalPod: boolean; chil
 	);
 }
 
-/** Opens the bot's routines beside its chat. A phone reaches them from the bot's Details instead. */
-function RoutinesButton({ onOpen }: { onOpen: () => void }) {
+/**
+ * Opens the bot's routines beside its chat, with a red dot while one of them
+ * failed its latest run. A phone reaches them from the bot's Details instead.
+ */
+function RoutinesButton({ agent, onOpen }: { agent: Agent; onOpen: () => void }) {
+	const pod = usePods().data?.find((candidate) => candidate.id === agent.podId);
+	const failed = useChatList(pod?.slug).data?.routines.some(
+		(row) => row.agent.id === agent.id && row.routine.failed,
+	);
 	return (
 		<HeaderButton
 			label="Routines"
 			icon={<RefreshCcw size={16} strokeWidth={1.75} />}
 			onClick={onOpen}
+			mark={failed ? { dot: <FailedDot labelled={false} />, label: FAILED_DOT_LABEL } : undefined}
 			className="max-md:hidden"
 		/>
 	);

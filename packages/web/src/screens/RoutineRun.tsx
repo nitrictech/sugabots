@@ -28,7 +28,13 @@ import { formatDay } from "./ThreadConversation.tsx";
 type RunItem = Extract<ChatMessageItem, { kind: "routine" }>;
 
 /** How a run went, or that its routine is paused, as the dot beside it says it. */
-export type RunOutcome = "passed" | "failed" | "running" | "cancelled" | "paused";
+export type RunOutcome =
+	| "passed"
+	| "failed"
+	| "running"
+	| "cancelled"
+	| "paused"
+	| "pausedAfterFailures";
 
 const OUTCOME_LABEL: Record<RunOutcome, string> = {
 	passed: "Passed",
@@ -36,6 +42,7 @@ const OUTCOME_LABEL: Record<RunOutcome, string> = {
 	running: "Running",
 	cancelled: "Cancelled",
 	paused: "Paused",
+	pausedAfterFailures: "Paused after failures",
 };
 
 const OUTCOME_DOT: Record<RunOutcome, string> = {
@@ -44,10 +51,13 @@ const OUTCOME_DOT: Record<RunOutcome, string> = {
 	running: "bg-subtle-foreground",
 	cancelled: "bg-disabled-foreground",
 	paused: "bg-disabled-foreground",
+	pausedAfterFailures: "bg-destructive-text",
 };
 
 /** A run's state, as the dot beside it says it. */
-export function outcomeOf(state: RunItem["state"]): Exclude<RunOutcome, "paused"> {
+export function outcomeOf(
+	state: RunItem["state"],
+): Exclude<RunOutcome, "paused" | "pausedAfterFailures"> {
 	if (state === "completed") return "passed";
 	if (state === "failed") return "failed";
 	if (state === "cancelled") return "cancelled";

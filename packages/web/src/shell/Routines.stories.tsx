@@ -139,7 +139,13 @@ const chatList: ChatList = {
 	threads: [],
 	routines: [
 		{
-			routine: { id: outbound.id, name: "Overnight outbound", state: "enabled", failed: true },
+			routine: {
+				id: outbound.id,
+				name: "Overnight outbound",
+				state: "enabled",
+				failed: true,
+				pausedAfterFailures: false,
+			},
 			agent: growthDesk,
 			conversation: {
 				kind: "routine_feed",
@@ -155,7 +161,13 @@ const chatList: ChatList = {
 			mentionsYou: false,
 		},
 		{
-			routine: { id: renewals.id, name: "Renewal reminders", state: "paused", failed: false },
+			routine: {
+				id: renewals.id,
+				name: "Renewal reminders",
+				state: "paused",
+				failed: false,
+				pausedAfterFailures: false,
+			},
 			agent: accountManager,
 			conversation: null,
 			mentionsYou: false,

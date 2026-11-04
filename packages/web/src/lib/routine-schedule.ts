@@ -237,7 +237,7 @@ function isWeekdays(days: readonly Weekday[]): boolean {
 }
 
 /**
- * A cron expression in parts, where it says a time each day or on some days
+ * A cron expression in parts, where it says times each day or on some days
  * of the week; anything else is kept as written, by a name.
  */
 function readCron(expression: string): ScheduleReading {
@@ -250,10 +250,17 @@ function readCron(expression: string): ScheduleReading {
 		const from = Number(hour.split("-")[0]) * 60 + Number(minute);
 		return written(`Every hour from ${formatTime(from)}`);
 	}
-	if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return written("Custom schedule");
-	const time = Number(hour) * 60 + Number(minute);
-	if (time >= MINUTES_PER_DAY) return written("Custom schedule");
-	const base = { every: 1, times: [time], startsOn: today() };
+	if (!/^\d+$/.test(minute) || !/^\d+(?:,\d+)*$/.test(hour)) return written("Custom schedule");
+	const times = hour.split(",").map((each) => Number(each) * 60 + Number(minute));
+	// Only times a picked schedule can hold: each once, and no more than it allows.
+	if (
+		times.some((time) => time >= MINUTES_PER_DAY) ||
+		new Set(times).size < times.length ||
+		times.length > MAX_ROUTINE_SCHEDULE_TIMES
+	) {
+		return written("Custom schedule");
+	}
+	const base = { every: 1, times, startsOn: today() };
 	if (dayOfWeek === "*") return { kind: "picked", schedule: { repeat: "daily", ...base } };
 	const days = dayOfWeek === "1-5" ? WEEKDAYS : cronDays(dayOfWeek);
 	if (!days) return written("Custom schedule");

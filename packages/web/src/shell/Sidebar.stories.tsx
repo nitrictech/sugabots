@@ -287,6 +287,7 @@ export const BotWithAFailedRoutine = meta.story({
 								name: "Overnight outbound",
 								state: "enabled",
 								failed: true,
+								pausedAfterFailures: false,
 							},
 							agent: growthDesk,
 							conversation: null,
