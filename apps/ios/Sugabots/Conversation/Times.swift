@@ -52,13 +52,14 @@ enum Times {
 		return "\(months / monthsInYear)y"
 	}
 
-	/// `Today`, `Yesterday`, `Mar 3`, or `Mar 3, 2025` in another year: where a conversation moves on to a new day.
-	static func day(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+	/// `Today`, `Yesterday`, `Mar 3`, or `Mar 3, 2025` in another year: where a conversation moves on to a new day, as `formatDay`.
+	static func day(_ date: Date, now: Date = .now, locale: Locale = .current, calendar: Calendar = .current) -> String {
 		let days = daysAgo(date, now: now, calendar: calendar)
 		if days == 0 { return "Today" }
 		if days == 1 { return yesterday }
 		let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-		return sameYear ? date.formatted(.dateTime.month(.abbreviated).day()) : date.formatted(.dateTime.month(.abbreviated).day().year())
+		let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).month(.abbreviated).day()
+		return date.formatted(sameYear ? style : style.year())
 	}
 
 	/// How many days before `now`'s day `date`'s day is: 0 today, 1 yesterday, negative in the future.

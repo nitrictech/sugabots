@@ -20,6 +20,7 @@
 		9C216A6C86C34BDD8A25634F /* YouScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9126239CAE2BD0FA71AF54CD /* YouScreen.swift */; };
 		F2227571606E4A3AF3546F8E /* ConversationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D83A730B36A4354C35075EB /* ConversationModel.swift */; };
 		7D4D1DC292CC3DEA99BF9194 /* ConversationScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BEF89D5AF9F65699B2ABBF5 /* ConversationScreen.swift */; };
+		A44EF09279B3B3415595620D /* ChatGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = F69069503089209E71755A2E /* ChatGroups.swift */; };
 		6856F0E8D319A3609E8C4687 /* ComputerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BFED9759698A4C6228B7364 /* ComputerSheet.swift */; };
 		24D76B53130BC87F537F22D1 /* ToolNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569580027B199748BFE2298 /* ToolNames.swift */; };
 		001DD58515BC4998332D5581 /* BotLooks.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CF3D0257661908A10B1289 /* BotLooks.generated.swift */; };
@@ -42,6 +43,7 @@
 		87630CC3F40AD712F923A612 /* ApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21D5D43F8CA3FD7804B9A0 /* ApprovalCard.swift */; };
 		ECE190D9BABE1D1FDF850C3B /* MessageMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B5643F53167BF6E1494838 /* MessageMarkdown.swift */; };
 		9601D5A24437AEA5B5B7240B /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32D3548CAD2D2050E423B07 /* MessageRow.swift */; };
+		B5DA939D7B51FB165B391AD0 /* Segments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F3E9AAB97BE3118ABCA11A /* Segments.swift */; };
 		EB3361094F8F4A5A4C812EDA /* MessageFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFBB9352631DD57ACB1E2FE /* MessageFiles.swift */; };
 		F7716B1C4577DC5139268799 /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB21A5D56BBEE882143AABD3 /* Composer.swift */; };
 		E205780B7F664F3AA03D2408 /* ConversationHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC56AFFDD7DF0B39B412DD8 /* ConversationHeader.swift */; };
@@ -131,6 +133,7 @@
 		9126239CAE2BD0FA71AF54CD /* YouScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouScreen.swift; sourceTree = "<group>"; };
 		8D83A730B36A4354C35075EB /* ConversationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModel.swift; sourceTree = "<group>"; };
 		8BEF89D5AF9F65699B2ABBF5 /* ConversationScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationScreen.swift; sourceTree = "<group>"; };
+		F69069503089209E71755A2E /* ChatGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGroups.swift; sourceTree = "<group>"; };
 		3BFED9759698A4C6228B7364 /* ComputerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerSheet.swift; sourceTree = "<group>"; };
 		2569580027B199748BFE2298 /* ToolNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolNames.swift; sourceTree = "<group>"; };
 		C3CF3D0257661908A10B1289 /* BotLooks.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotLooks.generated.swift; sourceTree = "<group>"; };
@@ -152,6 +155,7 @@
 		CD21D5D43F8CA3FD7804B9A0 /* ApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCard.swift; sourceTree = "<group>"; };
 		E4B5643F53167BF6E1494838 /* MessageMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageMarkdown.swift; sourceTree = "<group>"; };
 		C32D3548CAD2D2050E423B07 /* MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRow.swift; sourceTree = "<group>"; };
+		59F3E9AAB97BE3118ABCA11A /* Segments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Segments.swift; sourceTree = "<group>"; };
 		6DFBB9352631DD57ACB1E2FE /* MessageFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFiles.swift; sourceTree = "<group>"; };
 		CB21A5D56BBEE882143AABD3 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
 		5EC56AFFDD7DF0B39B412DD8 /* ConversationHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationHeader.swift; sourceTree = "<group>"; };
@@ -338,6 +342,7 @@
 				CB21A5D56BBEE882143AABD3 /* Composer.swift */,
 				6DFBB9352631DD57ACB1E2FE /* MessageFiles.swift */,
 				C32D3548CAD2D2050E423B07 /* MessageRow.swift */,
+				59F3E9AAB97BE3118ABCA11A /* Segments.swift */,
 				E4B5643F53167BF6E1494838 /* MessageMarkdown.swift */,
 				CD21D5D43F8CA3FD7804B9A0 /* ApprovalCard.swift */,
 				343115024B02F8B39DE8BA3A /* ToolSteps.swift */,
@@ -345,6 +350,7 @@
 				2937D7959A0F3A95E8669D7C /* ToolLine.swift */,
 				8D83A730B36A4354C35075EB /* ConversationModel.swift */,
 				8BEF89D5AF9F65699B2ABBF5 /* ConversationScreen.swift */,
+				F69069503089209E71755A2E /* ChatGroups.swift */,
 				3BFED9759698A4C6228B7364 /* ComputerSheet.swift */,
 				2569580027B199748BFE2298 /* ToolNames.swift */,
 			);
@@ -583,6 +589,7 @@
 				F7716B1C4577DC5139268799 /* Composer.swift in Sources */,
 				EB3361094F8F4A5A4C812EDA /* MessageFiles.swift in Sources */,
 				9601D5A24437AEA5B5B7240B /* MessageRow.swift in Sources */,
+				B5DA939D7B51FB165B391AD0 /* Segments.swift in Sources */,
 				ECE190D9BABE1D1FDF850C3B /* MessageMarkdown.swift in Sources */,
 				87630CC3F40AD712F923A612 /* ApprovalCard.swift in Sources */,
 				F010B03F5C4A8D71A952421A /* ToolSteps.swift in Sources */,
@@ -649,6 +656,7 @@
 				9C216A6C86C34BDD8A25634F /* YouScreen.swift in Sources */,
 				F2227571606E4A3AF3546F8E /* ConversationModel.swift in Sources */,
 				7D4D1DC292CC3DEA99BF9194 /* ConversationScreen.swift in Sources */,
+				A44EF09279B3B3415595620D /* ChatGroups.swift in Sources */,
 				6856F0E8D319A3609E8C4687 /* ComputerSheet.swift in Sources */,
 				24D76B53130BC87F537F22D1 /* ToolNames.swift in Sources */,
 				001DD58515BC4998332D5581 /* BotLooks.generated.swift in Sources */,

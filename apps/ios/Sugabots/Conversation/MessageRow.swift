@@ -61,11 +61,11 @@ struct MessageRow: View {
 	var body: some View {
 		let agent: AgentParticipant? = if case let .agent(agent) = message.author { agent } else { nil }
 		let segments = Segments.of(message)
-		let calls = message.parts.compactMap { if case let .toolCall(call) = $0 { call } else { nil } }
 		let files = message.files
-		let shows = !calls.isEmpty || !files.isEmpty || segments.contains { !$0.isEmptyText }
-		let held = heldActions(words: segments.compactMap(\.text).joined(separator: "\n\n"))
-		if message.status != .streaming || shows {
+		let held = heldActions(words: segments.compactMap(\.text).joined(separator: "
+
+"))
+		if !Segments.showsNothingYet(message) {
 			HStack(alignment: .top, spacing: compact ? 12 : 14) {
 				face
 				VStack(alignment: .leading, spacing: 0) {
@@ -351,63 +351,6 @@ extension MessageAuthor {
 		case let .agent(agent): .agent(agent)
 		default: nil
 		}
-	}
-}
-
-/// A message's parts in the order it says them, as the web's `segmentsOf`:
-/// its words, the collaborations it started, and the requests it put to
-/// somebody. Narration before a step is left to the step's line.
-enum Segments {
-	struct Segment: Identifiable {
-		enum Kind {
-			case text(String)
-			case collaboration(CollaborationPart)
-			case toolCall(ToolCallPart)
-		}
-
-		let id: String
-		let kind: Kind
-
-		var text: String? {
-			if case let .text(text) = kind, !text.isEmpty { text } else { nil }
-		}
-
-		var isEmptyText: Bool {
-			if case let .text(text) = kind { text.isEmpty } else { false }
-		}
-	}
-
-	static func of(_ message: Message) -> [Segment] {
-		let finished = message.status != .streaming
-		var written = 0
-		var segments: [Segment] = []
-		for (index, part) in message.parts.enumerated() {
-			switch part {
-			case let .collaboration(collaboration):
-				segments.append(Segment(id: collaboration.id, kind: .collaboration(collaboration)))
-			case let .toolCall(call):
-				// Only a call put to somebody shows as its own card; the rest are steps.
-				if let approval = call.approval?.status, [.pending, .allowed, .denied].contains(approval) {
-					segments.append(Segment(id: call.id, kind: .toolCall(call)))
-				}
-			case let .text(part):
-				let text = part.text
-				let later = message.parts.dropFirst(index + 1)
-				let followed = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && later.contains { if case .file = $0 { false } else { true } }
-				let narration: Bool = if case .toolCall? = later.first { true } else { false }
-				if (finished || followed) && !narration {
-					segments.append(Segment(id: "text@\(written)", kind: .text(text)))
-				}
-				written += text.utf16.count
-			default:
-				break
-			}
-		}
-		// A finished reply that said nothing still shows, so its notes have a row.
-		if finished && !segments.contains(where: { $0.text != nil }) && !segments.contains(where: { if case .text = $0.kind { true } else { false } }) {
-			segments.append(Segment(id: "text@\(written)", kind: .text("")))
-		}
-		return segments
 	}
 }
 

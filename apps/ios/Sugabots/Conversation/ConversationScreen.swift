@@ -418,7 +418,7 @@ private struct ConversationContent: View {
 
 	private func typersAfter() -> [String] {
 		let last = model.items.last?.message
-		if let last, last.author.agentParticipant != nil, Self.isTyping(last) {
+		if let last, last.author.agentParticipant != nil, ChatGroups.isTyping(last) {
 			return [last.author.name] + model.peopleTyping.map(\.name)
 		}
 		return model.peopleTyping.map(\.name)
@@ -528,12 +528,6 @@ private struct ConversationContent: View {
 		"sugabots-\(kind):\(store.user.id):\(model.thread?.podId ?? ""):\(model.conversationId)"
 	}
 
-	static func isTyping(_ message: Message) -> Bool {
-		if case .collaboration? = message.parts.last { return false }
-		let awaiting = message.parts.contains { if case let .toolCall(call) = $0 { call.awaitsApproval } else { false } }
-		return message.status == .streaming && !awaiting
-	}
-
 	/// The threads started from each message, by the message's id.
 	static func threadsByMessage(_ items: [ChatMessageItem]) -> [String: [ChatMessageItem.Thread]] {
 		let messageIds = Set(items.compactMap(\.message?.id))
@@ -576,86 +570,6 @@ extension MessageAuthor {
 extension AgentParticipant {
 	init(_ agent: Agent) {
 		self.init(id: agent.id, name: agent.name, handle: agent.handle, color: agent.color, face: agent.face, shape: agent.shape)
-	}
-}
-
-/// A conversation's items in groups, as the web's `chatGroupsOf`: runs of
-/// messages, and each other item on its own, each marked where a new day
-/// (or in a routine's thread, a new run) starts.
-enum ChatGroups {
-	struct Group: Identifiable {
-		enum Content {
-			case messages([Message])
-			case thread(ChatMessageItem.Thread)
-			case paused(Date)
-			case run(ChatMessageItem.Routine)
-		}
-
-		let id: String
-		let at: Date
-		let separated: Bool
-		var content: Content
-	}
-
-	/// How long a quiet spell is before the same author starts a new group.
-	private static let longQuiet: TimeInterval = 60 * 60
-
-	static func of(_ items: [ChatMessageItem], byRun: Bool, under: Set<String>) -> [Group] {
-		var groups: [Group] = []
-		var previousAt: Date?
-		for item in items {
-			if case let .thread(thread) = item, under.contains(thread.id) { continue }
-			let at = item.createdAt
-			let separated = byRun ? startsRun(item) : startsNewDay(previousAt, at)
-			previousAt = at
-			switch item {
-			case let .message(messageItem):
-				let message = messageItem.message
-				if !separated, let last = groups.last, case var .messages(messages) = last.content {
-					messages.append(message)
-					groups[groups.count - 1].content = .messages(messages)
-				} else {
-					groups.append(Group(id: item.id, at: at, separated: separated, content: .messages([message])))
-				}
-			case let .thread(thread):
-				groups.append(Group(id: item.id, at: at, separated: separated, content: .thread(thread)))
-			case let .routinePaused(paused):
-				groups.append(Group(id: item.id, at: at, separated: separated, content: .paused(paused.createdAt)))
-			case let .routine(run):
-				groups.append(Group(id: item.id, at: at, separated: separated, content: .run(run)))
-			case .unknown:
-				continue
-			}
-		}
-		return groups
-	}
-
-	static func startsNewDay(_ previous: Date?, _ at: Date) -> Bool {
-		guard let previous else { return true }
-		return !Calendar.current.isDate(previous, inSameDayAs: at)
-	}
-
-	private static func startsRun(_ item: ChatMessageItem) -> Bool {
-		switch item {
-		case .routine: true
-		case let .message(item): item.message.routineResultOf != nil
-		default: false
-		}
-	}
-
-	/// Whether `message` starts a group under its author's face and name.
-	static func startsGroup(_ previous: Message?, _ message: Message) -> Bool {
-		guard let previous, sameAuthor(previous, message), message.replyTo == nil else { return true }
-		if previous.parts.contains(where: { if case .collaboration = $0 { true } else { false } }) { return true }
-		return message.createdAt.timeIntervalSince(previous.createdAt) >= longQuiet
-	}
-
-	private static func sameAuthor(_ left: Message, _ right: Message) -> Bool {
-		switch (left.author, right.author) {
-		case let (.person(a), .person(b)): a.id == b.id
-		case let (.agent(a), .agent(b)): a.id == b.id
-		default: false
-		}
 	}
 }
 
