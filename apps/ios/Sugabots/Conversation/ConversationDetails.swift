@@ -227,9 +227,7 @@ private struct ChannelHeading: View {
 	let name: String
 	@Environment(WorkspaceStore.self) private var store
 	@Environment(\.dismiss) private var dismiss
-	@State private var renaming = false
-	@State private var archiving = false
-	@State private var archiveFailed = false
+	@State private var change: ChannelChange?
 
 	var body: some View {
 		let listed = store.podChat(model.conversationId, in: pod.id)
@@ -237,38 +235,20 @@ private struct ChannelHeading: View {
 		DetailsHeading(name: name, line: "\(people), \(bots)") {
 			ChannelFace(size: 88)
 		} actions: {
-			if listed != nil, pod.permissions.rename {
-				RoundAction(icon: .pencil, label: "Rename") { label in
-					Button { renaming = true } label: { label }.buttonStyle(.plain)
+			if let listed {
+				if ChannelChange.mayRename(in: pod) {
+					RoundAction(icon: .pencil, label: "Rename") { label in
+						Button { change = .rename(listed) } label: { label }.buttonStyle(.plain)
+					}
 				}
-				if listed?.main == false {
+				if ChannelChange.mayArchive(listed, in: pod) {
 					RoundAction(icon: .archive, label: "Archive") { label in
-						Button { archiving = true } label: { label }.buttonStyle(.plain)
+						Button { change = .archive(listed) } label: { label }.buttonStyle(.plain)
 					}
 				}
 			}
 		}
-		.sheet(isPresented: $renaming) {
-			NameSheet.channel(title: "Rename channel", name: name, action: "Save") { renamed in
-				try await store.renameChat(model.conversationId, to: renamed, in: pod)
-				renaming = false
-			}
-		}
-		.confirmationDialog("Archive \(name)?", isPresented: $archiving, titleVisibility: .visible) {
-			Button("Archive", role: .destructive) {
-				Task {
-					do {
-						try await store.archiveChat(model.conversationId, in: pod)
-						dismiss()
-					} catch {
-						archiveFailed = true
-					}
-				}
-			}
-		} message: {
-			Text("It leaves the pod's list for everyone. Threads started from it stay.")
-		}
-		.alert("The channel was not archived. Try again.", isPresented: $archiveFailed) {}
+		.channelChange($change, in: pod) { dismiss() }
 	}
 }
 

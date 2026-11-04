@@ -70,6 +70,69 @@ extension NameSheet {
 	}
 }
 
+/// Renaming or archiving one of a pod's channels, which holding it on Home
+/// and its Details both offer.
+enum ChannelChange {
+	case rename(PodChat)
+	case archive(PodChat)
+
+	/// Whether the person may rename the channels of `pod`.
+	static func mayRename(in pod: Pod) -> Bool { pod.permissions.rename }
+
+	/// Whether the person may archive `channel`: as renaming it, but never the pod's first.
+	static func mayArchive(_ channel: PodChat, in pod: Pod) -> Bool { mayRename(in: pod) && !channel.main }
+}
+
+extension View {
+	/// The sheet that renames a channel and the dialog that archives it, open
+	/// while `change` names one. `archived` runs once a channel is archived
+	/// and its dialog has closed.
+	func channelChange(_ change: Binding<ChannelChange?>, in pod: Pod, archived: @escaping () -> Void = {}) -> some View {
+		modifier(ChannelChangeDialogs(change: change, pod: pod, archived: archived))
+	}
+}
+
+@MainActor
+private struct ChannelChangeDialogs: ViewModifier {
+	@Binding var change: ChannelChange?
+	let pod: Pod
+	let archived: () -> Void
+	@Environment(WorkspaceStore.self) private var store
+	/// Whether the dialog closes on a channel it archived, so `archived` runs once it has gone.
+	@State private var archivedOne = false
+
+	func body(content: Content) -> some View {
+		content
+			.sheet(item: Binding(get: { if case let .rename(channel) = change { channel } else { nil } }, set: { if $0 == nil { change = nil } })) { channel in
+				NameSheet.channel(title: "Rename channel", name: channel.title, action: "Save") { renamed in
+					try await store.renameChat(channel.id, to: renamed, in: pod)
+					change = nil
+				}
+			}
+			.confirmDelete(
+				isPresented: Binding(get: { archiving != nil }, set: { presented in
+					guard !presented else { return }
+					change = nil
+					if archivedOne {
+						archivedOne = false
+						archived()
+					}
+				}),
+				title: "Archive \(archiving?.title ?? "")?",
+				description: "It leaves the pod's list for everyone. Threads started from it stay.",
+				confirmLabel: "Archive"
+			) {
+				guard let archiving else { return }
+				try await store.archiveChat(archiving.id, in: pod)
+				archivedOne = true
+			}
+	}
+
+	private var archiving: PodChat? {
+		if case let .archive(channel) = change { channel } else { nil }
+	}
+}
+
 /// Making a pod, as the web's `NewPodDialog`: its name and colour, over a preview of its tile.
 @MainActor
 struct NewPodSheet: View {
