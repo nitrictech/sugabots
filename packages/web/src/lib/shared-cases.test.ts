@@ -1,6 +1,7 @@
 import {
 	type CalendarSchedule,
 	canStartMention,
+	type Message,
 	type MessagePart,
 	mentionedHandles,
 	messagePreview,
@@ -21,6 +22,9 @@ import nameListCases from "../../../contracts/cases/name-list.cases.json" with {
 import routineScheduleCases from "../../../contracts/cases/routine-schedule.cases.json" with {
 	type: "json",
 };
+import threadLayoutCases from "../../../contracts/cases/thread-layout.cases.json" with {
+	type: "json",
+};
 import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
 import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
 import {
@@ -30,6 +34,15 @@ import {
 	targetWithHandle,
 	withGroupMentions,
 } from "../screens/mentions.tsx";
+import {
+	findAnsweringFace,
+	formatDay,
+	isTyping,
+	segmentsOf,
+	showsNothingYet,
+	startsGroup,
+	startsNewDay,
+} from "../screens/thread-layout.ts";
 import { durationOf, formatDuration, formatTotal } from "../screens/tool-activity.ts";
 import {
 	describeStep,
@@ -122,6 +135,28 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 				const target = targetWithHandle(mentionable, handle);
 				return target && mentionTargetKey(target);
 			},
+		},
+	},
+	{
+		// A segment is its type, its key and a text's words; a time with no offset is local, as in list-time's cases.
+		file: "thread-layout.cases.json",
+		cases: threadLayoutCases,
+		rules: {
+			segmentsOf: (message: Message) =>
+				segmentsOf(message).map((segment) =>
+					segment.type === "text"
+						? { type: segment.type, key: segment.key, text: segment.text }
+						: { type: segment.type, key: segment.key },
+				),
+			showsNothingYet,
+			isTyping,
+			startsGroup: (previous: Message | null, message: Message) =>
+				startsGroup(previous ?? undefined, message),
+			startsNewDay: (previousAt: string | null, at: string) =>
+				startsNewDay(previousAt ?? undefined, at),
+			formatDay: (date: string, now: string, locale: string) =>
+				formatDay(new Date(date), { now: new Date(now), locale }),
+			findAnsweringFace,
 		},
 	},
 	{

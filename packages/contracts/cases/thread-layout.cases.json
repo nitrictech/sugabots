@@ -1,0 +1,1593 @@
+{
+	"//": [
+		"Times given as a local date-time, with no offset, are read in the reader's own time zone; a message's createdAt is as the API sends it.",
+		"Dates are written in each platform's own locale data, which can differ between them (en-GB's September is Sept in Node and Sep on Apple's); a locale where they differ is left out.",
+		"findAnsweringFace: the iOS app draws no face coming alive for the bot answering yet, so it doesn't copy the rule."
+	],
+	"segmentsOf": [
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000001",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Hello there" }],
+					"content": "Hello there",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@0", "text": "Hello there" }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000003",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Let me look:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000002",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z"
+						},
+						{ "type": "text", "text": "Found it." }
+					],
+					"content": "Let me look:Found it.",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@12", "text": "Found it." }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000005",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Checking:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000004",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z"
+						}
+					],
+					"content": "Checking:",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@9", "text": "" }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000007",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000006",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z"
+						}
+					],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@0", "text": "" }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000009",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Asking first:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000008",
+							"tool": "linear__create_issue",
+							"input": {},
+							"output": null,
+							"status": "awaiting_approval",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "pending", "decidedByName": null, "decidedAt": null }
+						},
+						{ "type": "text", "text": "Done." }
+					],
+					"content": "Asking first:Done.",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [
+				{ "type": "tool_call", "key": "00000000-0000-4000-8000-000000000008" },
+				{ "type": "text", "key": "text@13", "text": "Done." }
+			]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000013",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Ok " },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000010",
+							"tool": "linear__create_issue",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "allowed", "decidedByName": null, "decidedAt": null }
+						},
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000011",
+							"tool": "linear__create_issue",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "denied", "decidedByName": null, "decidedAt": null }
+						},
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000012",
+							"tool": "x__y",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "automatic", "decidedByName": null, "decidedAt": null }
+						}
+					],
+					"content": "Ok ",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [
+				{ "type": "tool_call", "key": "00000000-0000-4000-8000-000000000010" },
+				{ "type": "tool_call", "key": "00000000-0000-4000-8000-000000000011" },
+				{ "type": "text", "key": "text@3", "text": "" }
+			]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000014",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Before " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "answered",
+							"answer": null,
+							"atOffset": 0
+						},
+						{ "type": "text", "text": "after" }
+					],
+					"content": "Before after",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [
+				{ "type": "text", "key": "text@0", "text": "Before " },
+				{ "type": "collaboration", "key": "c-1" },
+				{ "type": "text", "key": "text@7", "text": "after" }
+			]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000015",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Héllo 👋 " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "answered",
+							"answer": null,
+							"atOffset": 0
+						},
+						{ "type": "text", "text": "after" }
+					],
+					"content": "Héllo 👋 after",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [
+				{ "type": "text", "key": "text@0", "text": "Héllo 👋 " },
+				{ "type": "collaboration", "key": "c-1" },
+				{ "type": "text", "key": "text@9", "text": "after" }
+			]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000016",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Here it is" },
+						{ "type": "file", "id": "f-1", "name": "a.png", "contentType": "image/png", "size": 10 }
+					],
+					"content": "Here it is",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@0", "text": "Here it is" }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000017",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Writing so far" },
+						{ "type": "file", "id": "f-1", "name": "a.png", "contentType": "image/png", "size": 10 }
+					],
+					"content": "Writing so far",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000018",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [{ "type": "text", "text": "Writing so far" }],
+					"content": "Writing so far",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000019",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Settled " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "waiting",
+							"answer": null,
+							"atOffset": 0
+						},
+						{ "type": "text", "text": "still going" }
+					],
+					"content": "Settled still going",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [
+				{ "type": "text", "key": "text@0", "text": "Settled " },
+				{ "type": "collaboration", "key": "c-1" }
+			]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000020",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Settled " },
+						{
+							"type": "artifact",
+							"artifactId": "a-1",
+							"kind": "document",
+							"title": "Plan",
+							"version": 1
+						}
+					],
+					"content": "Settled ",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000021",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "   " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "waiting",
+							"answer": null,
+							"atOffset": 0
+						}
+					],
+					"content": "   ",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "collaboration", "key": "c-1" }]
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000022",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000023",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "routine_trigger",
+						"executionId": "e-1",
+						"routineName": "Morning digest",
+						"triggerKind": "cron"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Run the digest" },
+						{
+							"type": "artifact",
+							"artifactId": "a-1",
+							"kind": "document",
+							"title": "Plan",
+							"version": 1
+						}
+					],
+					"content": "Run the digest",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": [{ "type": "text", "key": "text@0", "text": "Run the digest" }]
+		}
+	],
+	"showsNothingYet": [
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000024",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [{ "type": "text", "text": "Writing" }],
+					"content": "Writing",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000025",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000027",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Checking:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000026",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "running",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": null
+						}
+					],
+					"content": "Checking:",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000028",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "A file" },
+						{ "type": "file", "id": "f-1", "name": "a.png", "contentType": "image/png", "size": 10 }
+					],
+					"content": "A file",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000029",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Settled " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "waiting",
+							"answer": null,
+							"atOffset": 0
+						}
+					],
+					"content": "Settled ",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000030",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		}
+	],
+	"isTyping": [
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000031",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [{ "type": "text", "text": "Writing" }],
+					"content": "Writing",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000032",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Done" }],
+					"content": "Done",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000033",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Asking " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "waiting",
+							"answer": null,
+							"atOffset": 0
+						}
+					],
+					"content": "Asking ",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000034",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{ "type": "text", "text": "Asking " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "answered",
+							"answer": null,
+							"atOffset": 0
+						},
+						{ "type": "text", "text": "and on" }
+					],
+					"content": "Asking and on",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000036",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000035",
+							"tool": "linear__create_issue",
+							"input": {},
+							"output": null,
+							"status": "awaiting_approval",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "pending", "decidedByName": null, "decidedAt": null }
+						}
+					],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000038",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "streaming",
+					"parts": [
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000037",
+							"tool": "linear__create_issue",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z",
+							"approval": { "status": "allowed", "decidedByName": null, "decidedAt": null }
+						}
+					],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		}
+	],
+	"startsGroup": [
+		{
+			"given": [
+				null,
+				{
+					"id": "00000000-0000-4000-8000-000000000039",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "First" }],
+					"content": "First",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000040",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "One" }],
+					"content": "One",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000041",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Two" }],
+					"content": "Two",
+					"createdAt": "2026-09-25T06:59:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000042",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "One" }],
+					"content": "One",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000043",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Two" }],
+					"content": "Two",
+					"createdAt": "2026-09-25T07:00:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000044",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "One" }],
+					"content": "One",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000045",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-grace",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Two" }],
+					"content": "Two",
+					"createdAt": "2026-09-25T06:01:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000046",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "One" }],
+					"content": "One",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000047",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Two" }],
+					"content": "Two",
+					"createdAt": "2026-09-25T06:01:00.000Z"
+				}
+			],
+			"expect": false
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000048",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "One" }],
+					"content": "One",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000049",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Two" }],
+					"content": "Two",
+					"createdAt": "2026-09-25T06:01:00.000Z",
+					"replyTo": {
+						"id": "00000000-0000-4000-8000-000000000999",
+						"author": {
+							"kind": "person",
+							"id": "u-ada",
+							"name": "Ada Lovelace",
+							"email": "ada@example.com",
+							"handle": "ada",
+							"image": null
+						},
+						"preview": "Earlier"
+					}
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000050",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Asking " },
+						{
+							"type": "collaboration",
+							"id": "c-1",
+							"agentId": "b-ops",
+							"agentName": "Ops Bot",
+							"threadId": "00000000-0000-4000-9000-000000000002",
+							"brief": "Check the deploy",
+							"status": "answered",
+							"answer": null,
+							"atOffset": 0
+						}
+					],
+					"content": "Asking ",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000051",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Back" }],
+					"content": "Back",
+					"createdAt": "2026-09-25T06:01:00.000Z"
+				}
+			],
+			"expect": true
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000052",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "routine_trigger",
+						"executionId": "e-1",
+						"routineName": "Morning digest",
+						"triggerKind": "cron"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Run" }],
+					"content": "Run",
+					"createdAt": "2026-09-25T06:00:00.000Z"
+				},
+				{
+					"id": "00000000-0000-4000-8000-000000000053",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "routine_trigger",
+						"executionId": "e-1",
+						"routineName": "Morning digest",
+						"triggerKind": "cron"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Run" }],
+					"content": "Run",
+					"createdAt": "2026-09-25T06:01:00.000Z"
+				}
+			],
+			"expect": true
+		}
+	],
+	"startsNewDay": [
+		{ "given": [null, "2026-09-25T06:12"], "expect": true },
+		{ "given": ["2026-09-25T06:12", "2026-09-25T23:59"], "expect": false },
+		{ "given": ["2026-09-25T23:59", "2026-09-26T00:00"], "expect": true },
+		{ "given": ["2026-09-25T06:12", "2026-09-24T06:12"], "expect": true }
+	],
+	"formatDay": [
+		{ "given": ["2026-09-25T00:01", "2026-09-25T23:59", "en-US"], "expect": "Today" },
+		{ "given": ["2026-09-24T23:59", "2026-09-25T00:01", "en-US"], "expect": "Yesterday" },
+		{ "given": ["2026-09-23T12:00", "2026-09-25T12:00", "en-US"], "expect": "Sep 23" },
+		{ "given": ["2026-01-02T12:00", "2026-09-25T12:00", "en-US"], "expect": "Jan 2" },
+		{ "given": ["2025-12-31T12:00", "2026-01-01T12:00", "en-US"], "expect": "Yesterday" },
+		{ "given": ["2025-12-30T12:00", "2026-01-01T12:00", "en-US"], "expect": "Dec 30, 2025" },
+		{ "given": ["2026-09-26T12:00", "2026-09-25T12:00", "en-US"], "expect": "Sep 26" },
+		{ "given": ["2026-03-03T12:00", "2026-09-25T12:00", "de-DE"], "expect": "3. März" },
+		{ "given": ["2026-03-03T12:00", "2026-09-25T12:00", "ja-JP"], "expect": "3月3日" },
+		{ "given": ["2025-03-03T12:00", "2026-09-25T12:00", "fr-FR"], "expect": "3 mars 2025" }
+	],
+	"findAnsweringFace": [
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000054",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "person",
+							"id": "u-ada",
+							"name": "Ada Lovelace",
+							"email": "ada@example.com",
+							"handle": "ada",
+							"image": null
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Hi" }],
+						"content": "Hi",
+						"createdAt": "2026-09-25T06:12:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000055",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Hello" }],
+						"content": "Hello",
+						"createdAt": "2026-09-25T06:12:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000055", "botTyping": false }
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000056",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Hello" }],
+						"content": "Hello",
+						"createdAt": "2026-09-25T06:12:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000057",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "person",
+							"id": "u-ada",
+							"name": "Ada Lovelace",
+							"email": "ada@example.com",
+							"handle": "ada",
+							"image": null
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Hi" }],
+						"content": "Hi",
+						"createdAt": "2026-09-25T06:12:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": null
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000058",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "One" }],
+						"content": "One",
+						"createdAt": "2026-09-25T06:00:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000059",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Two" }],
+						"content": "Two",
+						"createdAt": "2026-09-25T06:01:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000058", "botTyping": false }
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000060",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Done" }],
+						"content": "Done",
+						"createdAt": "2026-09-25T06:00:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000061",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "streaming",
+						"parts": [],
+						"content": "",
+						"createdAt": "2026-09-25T06:01:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000060", "botTyping": true }
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000062",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Done" }],
+						"content": "Done",
+						"createdAt": "2026-09-25T06:00:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000063",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "streaming",
+						"parts": [{ "type": "text", "text": "More" }],
+						"content": "More",
+						"createdAt": "2026-09-25T06:01:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000062", "botTyping": true }
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000064",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Yesterday" }],
+						"content": "Yesterday",
+						"createdAt": "2026-09-24T12:00:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000065",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Today" }],
+						"content": "Today",
+						"createdAt": "2026-09-25T12:00:00.000Z"
+					}
+				],
+				true
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000065", "botTyping": false }
+		},
+		{
+			"given": [
+				[
+					{
+						"id": "00000000-0000-4000-8000-000000000066",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Yesterday" }],
+						"content": "Yesterday",
+						"createdAt": "2026-09-24T12:00:00.000Z"
+					},
+					{
+						"id": "00000000-0000-4000-8000-000000000067",
+						"threadId": "00000000-0000-4000-9000-000000000001",
+						"author": {
+							"kind": "agent",
+							"id": "b-scout",
+							"name": "Scout",
+							"handle": "scout",
+							"color": "red",
+							"face": "pill",
+							"shape": "circle"
+						},
+						"kind": "text",
+						"status": "complete",
+						"parts": [{ "type": "text", "text": "Today" }],
+						"content": "Today",
+						"createdAt": "2026-09-25T12:00:00.000Z"
+					}
+				],
+				false
+			],
+			"expect": { "messageId": "00000000-0000-4000-8000-000000000067", "botTyping": false }
+		}
+	]
+}

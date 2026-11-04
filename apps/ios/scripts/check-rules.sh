@@ -22,6 +22,8 @@ xcrun swiftc -o "$build/rule-checks" \
 	Conversation/ToolSteps.swift \
 	Conversation/Previews.swift \
 	Conversation/Mentions.swift \
+	Conversation/Segments.swift \
+	Conversation/ChatGroups.swift \
 	Routines/ScheduleWords.swift \
 	"$app/RuleChecks/main.swift"
 "$build/rule-checks" "$app/../../packages/contracts/cases"

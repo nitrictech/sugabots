@@ -134,6 +134,24 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 		"messagePreview": { try Previews.message(argument($0, 0)) },
 		"quotedPreview": { try Previews.quoted(argument($0, 0)) },
 	], [:]),
+	("thread-layout.cases.json", [
+		"segmentsOf": { arguments in
+			try Segments.of(argument(arguments, 0)).map { segment -> JSONValue in
+				switch segment.kind {
+				case let .text(text): object(["type": .string("text"), "key": .string(segment.id), "text": .string(text)])
+				case .collaboration: object(["type": .string("collaboration"), "key": .string(segment.id)])
+				case .toolCall: object(["type": .string("tool_call"), "key": .string(segment.id)])
+				}
+			}
+		},
+		"showsNothingYet": { try Segments.showsNothingYet(argument($0, 0)) },
+		"isTyping": { try ChatGroups.isTyping(argument($0, 0)) },
+		"startsGroup": { try ChatGroups.startsGroup(argument($0, 0, as: Message?.self), argument($0, 1)) },
+		"startsNewDay": { try ChatGroups.startsNewDay($0[0] == .null ? nil : localTime($0, 0), localTime($0, 1)) },
+		"formatDay": { try Times.day(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
+	], [
+		"findAnsweringFace": "The app draws no face coming alive for the bot answering yet.",
+	]),
 	("list-time.cases.json", [
 		"formatClockTime": { try Times.clock(localTime($0, 0), locale: locale($0, 1)) },
 		"formatListTime": { try Times.list(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
