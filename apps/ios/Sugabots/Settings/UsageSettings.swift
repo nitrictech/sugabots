@@ -230,9 +230,6 @@ private struct Breakdown: View {
 	let stale: Bool
 	@State private var view = View.bot
 
-	/// The colours each provider's models take in turn, as `PROVIDER_HUES`.
-	private static let providerHues = ["blue", "purple", "teal", "amber", "rose", "green", "orange", "plum"]
-
 	var body: some SwiftUI.View {
 		let lines = lines(for: view)
 		let largest = lines.map(\.usd).max() ?? 0
@@ -312,7 +309,7 @@ private struct Breakdown: View {
 			let order = usage.models.map(providerOf).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
 			return usage.models.map { model in
 				let providerName = model.providerName ?? ProviderPreset.named(model.preset?.rawValue)?.name ?? "Removed provider"
-				let hue = Self.providerHues[(order.firstIndex(of: providerOf(model)) ?? 0) % Self.providerHues.count]
+				let hue = WorkspaceUsage.providerHues[(order.firstIndex(of: providerOf(model)) ?? 0) % WorkspaceUsage.providerHues.count]
 				return Line(
 					id: "\(model.model):\(model.providerName ?? "")", icon: AnyView(ProviderTile(name: providerName, preset: model.preset?.rawValue)),
 					label: model.displayName ?? model.model, sub: providerName,

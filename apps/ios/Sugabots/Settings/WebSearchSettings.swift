@@ -1,24 +1,6 @@
 import SwiftUI
 
-/// A search provider in the catalog, as `searchProviderCatalog`.
-private struct SearchPreset {
-	let id: String
-	let name: String
-	let baseUrl: String
-	let local: Bool
-	let requiresApiKey: Bool
-	let description: String
-
-	static let catalog = [
-		SearchPreset(id: "exa", name: "Exa", baseUrl: "https://api.exa.ai", local: false, requiresApiKey: false, description: "Works out of the box"),
-		SearchPreset(id: "brave", name: "Brave Search", baseUrl: "https://api.search.brave.com/res/v1", local: false, requiresApiKey: true, description: "Independent index, simple pricing"),
-		SearchPreset(id: "tavily", name: "Tavily", baseUrl: "https://api.tavily.com", local: false, requiresApiKey: true, description: "Made for AI agents"),
-		SearchPreset(id: "searxng", name: "SearXNG", baseUrl: "http://127.0.0.1:8080", local: true, requiresApiKey: false, description: "Runs on your own server"),
-	]
-
-	/// As `DEFAULT_SEARCH_PRESET`.
-	static let defaultId = "exa"
-
+extension SearchPreset {
 	static func named(_ id: String) -> SearchPreset { catalog.first { $0.id == id } ?? catalog[0] }
 
 	/// As `keyHint`.

@@ -57,12 +57,6 @@ const networkModes: readonly { value: SandboxNetworkMode; label: string }[] = [
 	{ value: "allowlist", label: "Allowlist" },
 ];
 
-/** What each provider is good for, in the line under its name. */
-const providerDescriptions: Record<SandboxProviderPresetId, string> = {
-	opensandbox: "Runs on your own Docker or Kubernetes",
-	e2b: "Hosted microVMs, or E2B Embed on your own server",
-};
-
 export function SandboxSettings() {
 	const providers = useSandboxProviders();
 	if (providers.isPending) return null;
@@ -276,7 +270,7 @@ function ProviderChoice({
 								)}
 							</span>
 							<span className="text-pretty text-subtle-foreground text-xs">
-								{providerDescriptions[candidate.id]}
+								{candidate.description}
 							</span>
 						</span>
 						<SettingsRadioMark checked={candidate.id === chosen} />

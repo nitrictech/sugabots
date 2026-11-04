@@ -9,26 +9,10 @@ extension WorkspaceRole: Identifiable {
 	static let assignable: [WorkspaceRole] = AssignableWorkspaceRole.known.map { WorkspaceRole(rawValue: $0.rawValue) }
 
 	/// As `workspaceRoleLabel`.
-	var label: String {
-		switch self {
-		case .owner: "Owner"
-		case .admin: "Admin"
-		case .member: "Member"
-		case .viewer: "Viewer"
-		case let .unknown(role): role.capitalized
-		}
-	}
+	var label: String { Self.labels[rawValue] ?? rawValue.capitalized }
 
 	/// As `workspaceRoleDescription`.
-	var description: String {
-		switch self {
-		case .owner: "Administers the workspace, decides who else does, and can hand it on."
-		case .admin: "Administers the workspace, its providers and every shared pod."
-		case .member: "Builds agents in the pods they are added to."
-		case .viewer: "Reads and takes part in the pods they are added to."
-		case .unknown: ""
-		}
-	}
+	var description: String { Self.descriptions[rawValue] ?? "" }
 
 	/// The role as an invitation or a change of role gives it.
 	var asAssignable: AssignableWorkspaceRole { AssignableWorkspaceRole(rawValue: rawValue) }
@@ -57,14 +41,7 @@ extension ConnectionAccess: Identifiable {
 	static let offered: [ConnectionAccess] = [.allow, .ask, .off]
 
 	/// As `ACCESS_WORDS`.
-	var words: String {
-		switch self {
-		case .allow: "Allowed"
-		case .ask: "Ask first"
-		case .off: "Off"
-		case let .unknown(access): access
-		}
-	}
+	var words: String { Self.words[rawValue] ?? rawValue }
 }
 
 extension ToolAccessCounts {

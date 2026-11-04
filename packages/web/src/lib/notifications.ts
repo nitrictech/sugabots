@@ -14,6 +14,7 @@ import { Effect, Schema } from "effect";
 import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
+import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
 
 /**
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
@@ -340,13 +341,6 @@ function closeNotificationsAbout(conversationId: string) {
 	shownByThisTab.get(conversationNotificationTag(conversationId))?.close();
 }
 
-/** What each level is called where a person chooses one. */
-export const NOTIFICATION_LEVEL_LABELS: Record<NotificationLevel, string> = {
-	all: "Everything",
-	mentions: "Mentions and replies",
-	nothing: "Nothing",
-};
-
 /** When the place's mute ends, or null when it is not muted for a while. */
 export function mutedUntilFor(
 	settings: NotificationSettings,
@@ -357,21 +351,17 @@ export function mutedUntilFor(
 	return until && new Date(until) > new Date() ? new Date(until) : null;
 }
 
-/** How long a pause or a mute lasts, as Slack offers them. */
-export const MUTE_DURATIONS = [
-	{ label: "For 30 minutes", until: (now: Date) => new Date(now.getTime() + 30 * 60_000) },
-	{ label: "For 1 hour", until: (now: Date) => new Date(now.getTime() + 60 * 60_000) },
-	{ label: "For 2 hours", until: (now: Date) => new Date(now.getTime() + 2 * 60 * 60_000) },
-	{ label: "Until tomorrow", until: tomorrowMorning },
-];
+/** How long a pause or a mute lasts, as Slack offers them, with when it ends if started `now`. */
+export const MUTE_DURATIONS = MUTE_LENGTHS.map(({ label, length }) => ({
+	label,
+	until: (now: Date) => muteEnd(length, now),
+}));
 
-/** The hour a pause or mute until tomorrow ends, on this device's clock. */
-const MORNING_HOUR = 9;
-
-function tomorrowMorning(now: Date): Date {
+function muteEnd(length: MuteLength, now: Date): Date {
+	if ("minutes" in length) return new Date(now.getTime() + length.minutes * 60_000);
 	const morning = new Date(now);
 	morning.setDate(morning.getDate() + 1);
-	morning.setHours(MORNING_HOUR, 0, 0, 0);
+	morning.setHours(length.tomorrowAtHour, 0, 0, 0);
 	return morning;
 }
 

@@ -11,6 +11,7 @@ import { dirname } from "node:path";
 import * as api from "./generate-api.ts";
 import * as botLooks from "./generate-bot-looks.ts";
 import * as builtInTools from "./generate-built-in-tools.ts";
+import * as catalogs from "./generate-catalogs.ts";
 import * as connectionMarks from "./generate-connection-marks.ts";
 import * as emoji from "./generate-emoji.ts";
 import * as limits from "./generate-limits.ts";
@@ -24,6 +25,7 @@ export const generators: Record<string, RegisteredGenerator> = {
 	"generate-api.ts": register(api.generator),
 	"generate-bot-looks.ts": iosOnly(botLooks.generate),
 	"generate-built-in-tools.ts": iosOnly(builtInTools.generate),
+	"generate-catalogs.ts": iosOnly(catalogs.generate),
 	"generate-connection-marks.ts": iosOnly(connectionMarks.generate),
 	"generate-emoji.ts": iosOnly(emoji.generate),
 	"generate-limits.ts": iosOnly(limits.generate),

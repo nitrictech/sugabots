@@ -56,10 +56,10 @@ export type WorkspaceRole = typeof workspaceRoleSchema.Type;
 /**
  * A `Record` rather than a chain of comparisons, so adding a role to
  * `WORKSPACE_ROLES` fails to compile here instead of quietly displaying the
- * new role under an old role's name. `ROLE_DESCRIPTIONS` below is the same
+ * new role under an old role's name. `WORKSPACE_ROLE_DESCRIPTIONS` below is the same
  * bargain.
  */
-const ROLE_LABELS: Record<WorkspaceRole, string> = {
+export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
 	owner: "Owner",
 	admin: "Admin",
 	member: "Member",
@@ -78,7 +78,7 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
  * Member does not create pods, and a Viewer may still take part in a
  * conversation.
  */
-const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
+export const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin: "Administers the workspace, its providers and every shared pod.",
 	member: "Builds agents in the pods they are added to.",
@@ -90,12 +90,12 @@ const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
  * grants — nothing — rather than borrowed from the role it is not.
  */
 export function workspaceRoleLabel(role: WorkspaceRole | undefined): string {
-	return role ? ROLE_LABELS[role] : "No access";
+	return role ? WORKSPACE_ROLE_LABELS[role] : "No access";
 }
 
 /** One line saying what a role may do, shown wherever one is chosen. */
 export function workspaceRoleDescription(role: WorkspaceRole): string {
-	return ROLE_DESCRIPTIONS[role];
+	return WORKSPACE_ROLE_DESCRIPTIONS[role];
 }
 
 /**

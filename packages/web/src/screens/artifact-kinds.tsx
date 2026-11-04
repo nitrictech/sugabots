@@ -2,6 +2,7 @@ import type { ArtifactKind } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
+import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-files.ts";
 import type { PageAt } from "@/lib/artifacts.ts";
 import { FIT_HEIGHT_PX, HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
@@ -31,9 +32,9 @@ export interface ArtifactKindView {
 
 export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 	document: {
-		label: "Document",
+		label: ARTIFACT_KIND_LABELS.document,
 		Icon: FileText,
-		file: { extension: "md", type: "text/markdown", contentOf: (content) => content },
+		file: { ...ARTIFACT_KIND_FILES.document, contentOf: (content) => content },
 		// A preview, not the document: wide enough for its tables.
 		cardWidth: "max-w-160",
 		Inline: DocumentPreview,
@@ -46,10 +47,10 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		),
 	},
 	html: {
-		label: "Page",
+		label: ARTIFACT_KIND_LABELS.html,
 		Icon: PanelsTopLeft,
 		// Opened from disk, the page still can't reach the network, as in the app's frame.
-		file: { extension: "html", type: "text/html", contentOf: withContentPolicy },
+		file: { ...ARTIFACT_KIND_FILES.html, contentOf: withContentPolicy },
 		// The page itself, running: as much room as the reply's text has.
 		cardWidth: "max-w-none",
 		Inline: LivePage,

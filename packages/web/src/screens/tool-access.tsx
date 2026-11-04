@@ -1,4 +1,5 @@
 import type { ConnectionAccess, ToolAccessCounts } from "@sugabots/contracts";
+import { ACCESS_WORDS } from "@/lib/tool-access-words.ts";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
@@ -8,13 +9,6 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
  */
 
 const ACCESSES = ["allow", "ask", "off"] as const;
-
-/** A setting in words, as a connection's own page puts it: Allowed, Ask first, Off. */
-export const ACCESS_WORDS: Record<ConnectionAccess, string> = {
-	allow: "Allowed",
-	ask: "Ask first",
-	off: "Off",
-};
 
 const toolOptions = ACCESSES.map((value) => ({ value, label: ACCESS_WORDS[value] }));
 

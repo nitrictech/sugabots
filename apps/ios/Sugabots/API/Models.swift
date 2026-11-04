@@ -263,14 +263,7 @@ struct ApprovalEntry: Identifiable {
 extension NotificationLevel: Identifiable {
 	var id: String { rawValue }
 
-	var label: String {
-		switch self {
-		case .all: "Everything"
-		case .mentions: "Mentions and replies"
-		case .nothing: "Nothing"
-		case .unknown: "Something else"
-		}
-	}
+	var label: String { Self.labels[rawValue] ?? "Something else" }
 
 	var symbol: String {
 		switch self {

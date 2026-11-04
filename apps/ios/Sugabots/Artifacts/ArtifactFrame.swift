@@ -1,14 +1,10 @@
 import SwiftUI
 import WebKit
 
-/// How each kind of artifact is named and saved, as the web's `ARTIFACT_KINDS`.
+/// How each kind of artifact is named and saved, as the web's `ARTIFACT_KINDS`;
+/// a kind this app doesn't know is shown as a document.
 extension ArtifactKind {
-	var label: String {
-		switch self {
-		case .html: "Page"
-		case .document, .unknown: "Document"
-		}
-	}
+	var label: String { Self.labels[shownAs.rawValue] ?? "" }
 
 	var icon: Lucide {
 		switch self {
@@ -18,11 +14,10 @@ extension ArtifactKind {
 	}
 
 	/// What Download saves it as.
-	var fileExtension: String {
-		switch self {
-		case .html: "html"
-		case .document, .unknown: "md"
-		}
+	var fileExtension: String { Self.fileExtensions[shownAs.rawValue] ?? "" }
+
+	private var shownAs: ArtifactKind {
+		if case .unknown = self { .document } else { self }
 	}
 }
 

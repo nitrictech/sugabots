@@ -27,14 +27,8 @@ struct NotificationsSettingsScreen: View {
 
 	// MARK: Groups
 
-	private static let levelNotes: [NotificationLevel: String] = [
-		.all: "Every new message in the conversations you can see, and approvals that wait on you.",
-		.mentions: "Messages that mention you, a bot's answers to you, replies in conversations you're part of, and approvals that wait on you.",
-		.nothing: "No notifications, wherever you are.",
-	]
-
 	private func notifyAbout(_ settings: NotificationSettings) -> some View {
-		SettingsGroup(label: "Notify me about", note: Self.levelNotes[settings.level]) {
+		SettingsGroup(label: "Notify me about", note: NotificationLevel.notes[settings.level.rawValue]) {
 			SettingsControlRow(label: "Notify me about", stacked: true) {
 				SegmentedChoice(label: "Notify me about", options: NotificationLevel.known.map { ($0, $0.label) }, value: settings.level, fill: true) { level in
 					update(settings, level: level)

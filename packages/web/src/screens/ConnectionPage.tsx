@@ -20,6 +20,7 @@ import {
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
 import { podSettingsPageLink } from "@/lib/links.ts";
+import { ACCESS_WORDS } from "@/lib/tool-access-words.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -39,7 +40,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
-import { ACCESS_WORDS, AccessToggle } from "./tool-access.tsx";
+import { AccessToggle } from "./tool-access.tsx";
 
 /*
  * One connection, on a page of its own under its pod: who connected it and

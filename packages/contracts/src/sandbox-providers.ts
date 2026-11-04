@@ -55,6 +55,8 @@ export interface SandboxProviderPreset {
 	/** What sandboxes are made from: an image for OpenSandbox, a template for E2B. */
 	imageLabel: string;
 	defaultImage: string;
+	/** What it is good for, in the line under its name where one is chosen. */
+	description: string;
 }
 
 export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
@@ -65,6 +67,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		baseUrl: "http://localhost:8090",
 		imageLabel: "Image",
 		defaultImage: SANDBOX_IMAGE,
+		description: "Runs on your own Docker or Kubernetes",
 	},
 	{
 		id: "e2b",
@@ -72,6 +75,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		hosting: "remote",
 		imageLabel: "Template",
 		defaultImage: SANDBOX_E2B_TEMPLATE,
+		description: "Hosted microVMs, or E2B Embed on your own server",
 	},
 ];
 

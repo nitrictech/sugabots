@@ -565,11 +565,6 @@ struct WebhookDraft: Hashable {
 }
 
 extension WebhookAuthChoice {
-	static let sourceLabels = ["generic": "Generic", "github": "GitHub", "stripe": "Stripe", "slack": "Slack", "linear": "Linear"]
-	static let authOptions: [(value: String, label: String)] = [("basic", "Basic"), ("bearer", "Bearer"), ("api_key", "API key"), ("hmac", "HMAC")]
-	static let algorithmOptions: [(value: String, label: String)] = [("sha1", "SHA-1"), ("sha256", "SHA-256"), ("sha512", "SHA-512")]
-	static let encodingOptions: [(value: String, label: String)] = [("hex", "Hex"), ("base64", "Base64")]
-
 	/// What each generic kind asks for when it is chosen.
 	static func genericDefault(_ kind: String) -> WebhookAuthChoice {
 		switch kind {
@@ -583,25 +578,16 @@ extension WebhookAuthChoice {
 	/// "generic" for any sender, else the source.
 	var source: String { isSource ? kind : "generic" }
 
+	/// What the secret is called: every source's is a signing secret.
 	var secretLabel: String {
-		switch self {
-		case .source, .hmac: "Signing secret"
-		case .apiKey: "Key"
-		case .bearer: "Token"
-		case .basic: "Password"
-		}
+		isSource ? "Signing secret" : Self.secretLabels[kind] ?? "Secret"
 	}
 
 	/// How the secret looks: a source's format, or the prefix of a kind's own secrets.
 	var secretPlaceholder: String? {
-		switch self {
-		case let .source(source):
-			["github": "The secret set on the webhook in GitHub", "stripe": "whsec_…", "slack": "The app's Signing Secret", "linear": "lin_wh_…"][source]
-		case .hmac: "whsec_…"
-		case .apiKey: "sk_rt_…"
-		case .bearer: "rtb_…"
-		case .basic: nil
-		}
+		if isSource { return Self.sourceSecretPlaceholders[kind] }
+		guard let prefix = Self.secretPrefixes[kind], !prefix.isEmpty else { return nil }
+		return "\(prefix)…"
 	}
 
 	/// What a caller must do to be let in.
@@ -656,7 +642,7 @@ struct WebhookSourceRow: View {
 	var body: some View {
 		MenuRow(
 			label: "Source",
-			options: ["generic", "github", "stripe", "slack", "linear"].map { ($0, WebhookAuthChoice.sourceLabels[$0] ?? $0) },
+			options: WebhookAuthChoice.sourceOptions,
 			value: auth.source,
 			mark: { source in
 				if source == "generic" {
@@ -793,17 +779,6 @@ struct RepositoryDraft: Hashable {
 	var events = ["pull_request_opened"]
 
 	static let pickAnEventNote = "Pick at least one thing for it to run on."
-
-	/// Each event in the order the switches list them, as `REPOSITORY_EVENTS`, with what its switch says.
-	static let events: [(value: String, label: String)] = [
-		("pull_request_opened", "A pull request is opened"),
-		("pull_request_review", "A pull request is reviewed"),
-		("pull_request_comment", "Someone comments on a pull request"),
-		("issue_opened", "An issue is opened"),
-		("issue_comment", "Someone comments on an issue"),
-		("checks_failed", "Checks fail"),
-		("push", "A branch is pushed to"),
-	]
 }
 
 /// The repository and events groups, for a routine on a bot in `pod`, from its GitHub connection's repositories.

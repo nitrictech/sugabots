@@ -12,13 +12,13 @@ import {
 	Settings,
 } from "lucide-react";
 import type { ReactElement } from "react";
+import { NOTIFICATION_LEVEL_LABELS } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
 	levelAbove,
 	levelChosenFor,
 	MUTE_DURATIONS,
 	mutedUntilFor,
-	NOTIFICATION_LEVEL_LABELS,
 	type NotificationPlace,
 	useMuteNotifications,
 	useSetNotificationLevel,

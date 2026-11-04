@@ -1,6 +1,5 @@
 import {
 	DEFAULT_QUIET_HOURS,
-	type NotificationLevel,
 	type NotificationPreferences,
 	type NotificationSettings,
 	type QuietHours,
@@ -8,10 +7,10 @@ import {
 } from "@sugabots/contracts";
 import { useId } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { NOTIFICATION_LEVEL_LABELS, NOTIFICATION_LEVEL_NOTES } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
 	MUTE_DURATIONS,
-	NOTIFICATION_LEVEL_LABELS,
 	useBrowserNotifications,
 	useNotificationSettings,
 	useUpdateNotificationPreferences,
@@ -115,13 +114,6 @@ const LEVEL_OPTIONS = (["all", "mentions", "nothing"] as const).map((value) => (
 	label: NOTIFICATION_LEVEL_LABELS[value],
 }));
 
-const LEVEL_NOTES: Record<NotificationLevel, string> = {
-	all: "Every new message in the conversations you can see, and approvals that wait on you.",
-	mentions:
-		"Messages that mention you, a bot's answers to you, replies in conversations you're part of, and approvals that wait on you.",
-	nothing: "No notifications, wherever you are.",
-};
-
 function preferencesOf(settings: NotificationSettings): NotificationPreferences {
 	return {
 		level: settings.level,
@@ -135,7 +127,7 @@ function preferencesOf(settings: NotificationSettings): NotificationPreferences 
 function NotifyAbout({ settings }: { settings: NotificationSettings }) {
 	const update = useUpdateNotificationPreferences();
 	return (
-		<SettingsGroup label="Notify me about" note={LEVEL_NOTES[settings.level]}>
+		<SettingsGroup label="Notify me about" note={NOTIFICATION_LEVEL_NOTES[settings.level]}>
 			<SettingsChoiceRow
 				label="Notify me about"
 				options={LEVEL_OPTIONS}

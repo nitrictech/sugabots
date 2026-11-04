@@ -271,21 +271,25 @@ struct NotificationMenu: View {
 	}
 }
 
-/// How long a pause or a mute lasts, as Slack offers them.
+/// How long a pause or a mute lasts, as Slack offers them; `all` lists them.
 struct MuteDuration {
+	enum Length {
+		case minutes(Int)
+		/// Until this hour tomorrow, on this device's clock.
+		case tomorrow(atHour: Int)
+	}
+
 	let label: String
-	let until: (Date) -> Date
+	let length: Length
 
-	/// The hour a mute until tomorrow ends, on this device's clock.
-	private static let morningHour = 9
-
-	static let all = [
-		MuteDuration(label: "For 30 minutes") { $0.addingTimeInterval(30 * 60) },
-		MuteDuration(label: "For 1 hour") { $0.addingTimeInterval(60 * 60) },
-		MuteDuration(label: "For 2 hours") { $0.addingTimeInterval(2 * 60 * 60) },
-		MuteDuration(label: "Until tomorrow") { now in
+	/// When it ends, if started `now`.
+	func until(_ now: Date) -> Date {
+		switch length {
+		case let .minutes(minutes):
+			return now.addingTimeInterval(TimeInterval(minutes * 60))
+		case let .tomorrow(hour):
 			let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now
-			return Calendar.current.date(bySettingHour: morningHour, minute: 0, second: 0, of: tomorrow) ?? tomorrow
-		},
-	]
+			return Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+		}
+	}
 }

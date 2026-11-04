@@ -31,6 +31,7 @@ import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } fro
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
@@ -710,18 +711,8 @@ function makerOf(model: ProviderModel): string | undefined {
 }
 
 function makerLabel(maker: string): string {
-	return MAKER_NAMES[maker] ?? maker.charAt(0).toUpperCase() + maker.slice(1);
+	return MODEL_MAKER_NAMES[maker] ?? maker.charAt(0).toUpperCase() + maker.slice(1);
 }
-
-const MAKER_NAMES: Record<string, string> = {
-	openai: "OpenAI",
-	"meta-llama": "Meta",
-	mistralai: "Mistral",
-	deepseek: "DeepSeek",
-	"x-ai": "xAI",
-	moonshotai: "Moonshot",
-	qwen: "Qwen",
-};
 
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();

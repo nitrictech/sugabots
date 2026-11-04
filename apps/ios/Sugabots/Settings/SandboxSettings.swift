@@ -54,23 +54,7 @@ private struct SandboxProviderChange {
 	var settings: SandboxProviderFields?
 }
 
-/// A computer provider in the catalog, as `sandboxProviderCatalog`.
-private struct SandboxPreset {
-	let id: String
-	let name: String
-	let baseUrl: String?
-	let imageLabel: String
-	let defaultImage: String
-	let description: String
-
-	static let catalog = [
-		SandboxPreset(id: "opensandbox", name: "OpenSandbox", baseUrl: "http://localhost:8090", imageLabel: "Image", defaultImage: "ghcr.io/nitrictech/sugabots-sandbox:latest", description: "Runs on your own Docker or Kubernetes"),
-		SandboxPreset(id: "e2b", name: "E2B", baseUrl: nil, imageLabel: "Template", defaultImage: "sugabots-sandbox", description: "Hosted microVMs, or E2B Embed on your own server"),
-	]
-
-	/// As `SANDBOX_E2B_DEFAULT_SIZE`.
-	static let defaultSize = (cpuCount: 2, memoryGiB: 4)
-
+extension SandboxPreset {
 	static func named(_ id: String) -> SandboxPreset { catalog.first { $0.id == id } ?? catalog[0] }
 }
 

@@ -12,3 +12,23 @@ extension ToolNames {
 		"artifact_edit": "Edit artifacts",
 	]
 }
+
+/// One of the bot's own tools, as `builtInToolCatalog` lists them.
+struct BuiltInTool {
+	let key: String
+	let name: String
+	/// What the tool does, in one plain sentence.
+	let description: String
+	/// Whether it reaches the web, so works only while the workspace allows that.
+	let usesWeb: Bool
+
+	static let catalog = [
+		BuiltInTool(key: "web_fetch", name: "Read web pages", description: "Fetches a public page by its address and reads it as text.", usesWeb: true),
+		BuiltInTool(key: "web_search", name: "Search the web", description: "Searches through the workspace's search provider, when one is switched on.", usesWeb: true),
+		BuiltInTool(key: "routines", name: "Manage its routines", description: "Lists, sets up and changes its own schedules when a pod admin asks it to.", usesWeb: false),
+		BuiltInTool(key: "artifact_list", name: "List artifacts", description: "Lists the documents and HTML pages kept in the bot's pod.", usesWeb: false),
+		BuiltInTool(key: "artifact_read", name: "Read artifacts", description: "Reads a document or HTML page kept in the bot's pod.", usesWeb: false),
+		BuiltInTool(key: "artifact_write", name: "Write artifacts", description: "Makes a document or HTML page the pod keeps, or saves a new version of one.", usesWeb: false),
+		BuiltInTool(key: "artifact_edit", name: "Edit artifacts", description: "Changes part of a document or HTML page, as a new version.", usesWeb: false),
+	]
+}

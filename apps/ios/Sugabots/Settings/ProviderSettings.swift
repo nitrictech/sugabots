@@ -565,8 +565,6 @@ private struct ProviderModelsGroup: View {
 	/// Switched-on models lead, as they were when the page opened, so a row never moves under the switch just used.
 	@State private var onWhenOpened: Set<String>?
 
-	private static let makerNames = ["openai": "OpenAI", "meta-llama": "Meta", "mistralai": "Mistral", "deepseek": "DeepSeek", "x-ai": "xAI", "moonshotai": "Moonshot", "qwen": "Qwen"]
-
 	var body: some View {
 		let large = provider.models.count > Limits.largeModelCatalog
 		let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -623,7 +621,7 @@ private struct ProviderModelsGroup: View {
 	private func row(_ model: ProviderModel, large: Bool) -> some View {
 		let bots = store.agents.filter { $0.systemAgentKey == nil && $0.model == model.modelId }
 		let used = bots.isEmpty ? "Not used yet" : "\(bots.count) \(bots.count == 1 ? "bot" : "bots")"
-		let maker = model.maker.map { Self.makerNames[$0] ?? $0.prefix(1).uppercased() + $0.dropFirst() } ?? provider.name
+		let maker = model.maker.map { ProviderModel.makerNames[$0] ?? $0.prefix(1).uppercased() + $0.dropFirst() } ?? provider.name
 		let who = large ? maker : used
 		let held = model.enabled ? holdersOf(model) : nil
 		return HStack(spacing: 14) {
