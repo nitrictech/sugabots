@@ -252,16 +252,6 @@ struct ApprovalEntry: Identifiable {
 
 extension NotificationLevel: Identifiable {
 	var id: String { rawValue }
-
-	var label: String { Self.labels[rawValue] ?? "Something else" }
-
-	var symbol: String {
-		switch self {
-		case .all: "bell.badge"
-		case .mentions: "at"
-		case .nothing, .unknown: "bell.slash"
-		}
-	}
 }
 
 /// A pod or one of its bots, where a person may choose a level of their own.

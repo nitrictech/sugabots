@@ -73,16 +73,6 @@ extension NotificationLevel {
 	]
 }
 
-extension MuteDuration {
-	/// The pauses and mutes offered, as `MUTE_LENGTHS`.
-	static let all = [
-		MuteDuration(label: "For 30 minutes", length: .minutes(30)),
-		MuteDuration(label: "For 1 hour", length: .minutes(60)),
-		MuteDuration(label: "For 2 hours", length: .minutes(120)),
-		MuteDuration(label: "Until tomorrow", length: .tomorrow(atHour: 9)),
-	]
-}
-
 extension WorkspaceRole {
 	/// What each role is called, by its raw value, as `WORKSPACE_ROLE_LABELS`.
 	static let labels: [String: String] = [

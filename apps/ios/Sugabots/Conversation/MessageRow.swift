@@ -62,9 +62,7 @@ struct MessageRow: View {
 		let agent: AgentParticipant? = if case let .agent(agent) = message.author { agent } else { nil }
 		let segments = Segments.of(message)
 		let files = message.files
-		let held = heldActions(words: segments.compactMap(\.text).joined(separator: "
-
-"))
+		let held = heldActions(words: segments.compactMap(\.text).joined(separator: "\n\n"))
 		if !Segments.showsNothingYet(message) {
 			HStack(alignment: .top, spacing: compact ? 12 : 14) {
 				face

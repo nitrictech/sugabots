@@ -263,3 +263,16 @@ struct NotificationMenu: View {
 		}
 	}
 }
+
+/// How a notification level is named and drawn in the menus that choose it.
+extension NotificationLevel {
+	var label: String { Self.labels[rawValue] ?? "Something else" }
+
+	var symbol: String {
+		switch self {
+		case .all: "bell.badge"
+		case .mentions: "at"
+		case .nothing, .unknown: "bell.slash"
+		}
+	}
+}
