@@ -62,9 +62,10 @@ struct WebToggle: View {
 	}
 
 	var body: some View {
-		// The system's switch, as it is: the web's colour, near white in dark, would hide its white knob.
+		// The system's switch in the system's green: the app's accent, near white in dark, would hide its white knob.
 		Toggle(label, isOn: Binding(get: { isOn }, set: change))
 			.labelsHidden()
+			.tint(Color(uiColor: .systemGreen))
 	}
 }
 
