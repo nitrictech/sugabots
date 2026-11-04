@@ -117,7 +117,12 @@ describe("switching off a model bots run on", () => {
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
-		expect(within(dialog).getByText(/Issue Triager, Linear Handler/)).toBeDefined();
+		const moving = within(dialog).getByRole("list", { name: `Bots on ${opus}` });
+		expect(
+			within(moving)
+				.getAllByRole("img")
+				.map((face) => face.getAttribute("aria-label")),
+		).toEqual(["Issue Triager", "Linear Handler"]);
 		expect(within(dialog).getByRole("button", { name: sonnet, pressed: true })).toBeDefined();
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
 

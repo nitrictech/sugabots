@@ -63,6 +63,7 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
@@ -130,6 +131,42 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 				</span>
 			)}
 		</span>
+	);
+}
+
+/** Every bot in `bots` as its face, each named on hover or keyboard focus. */
+function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
+	return (
+		<ul aria-label={label} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+			{bots.map((bot) => (
+				<li key={bot.id} className="flex">
+					<Tooltip
+						label={bot.name}
+						side="top"
+						// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
+						onOpenChange={(open, details) => {
+							if (
+								open &&
+								details.reason === "trigger-focus" &&
+								!(details.event.target as Element).matches(":focus-visible")
+							) {
+								details.cancel();
+							}
+						}}
+					>
+						<span
+							role="img"
+							aria-label={bot.name}
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+							tabIndex={0}
+							className="focus-ring rounded-full"
+						>
+							<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={28} />
+						</span>
+					</Tooltip>
+				</li>
+			))}
+		</ul>
 	);
 }
 
@@ -904,9 +941,9 @@ function MoveBotsDialog({
 			<DialogFormHeader title={`Switch off ${name}`} />
 			<DialogFormBody>
 				<DialogDescription>
-					{count} {name}: {bots.map((bot) => bot.name).join(", ")}. Choose the model to move{" "}
-					{bots.length === 1 ? "it" : "them"} to.
+					{count} {name}. Choose the model to move {bots.length === 1 ? "it" : "them"} to.
 				</DialogDescription>
+				<NamedBotFaces bots={bots} label={`Bots on ${name}`} />
 				{candidates.length === 0 ? (
 					<Alert>Switch on another model first, so the bots have one to move to.</Alert>
 				) : (
