@@ -89,7 +89,11 @@ export type TemplateStatus = "missing" | "building" | "ready" | "failed";
 
 export interface Info {
 	readonly state: "running" | "paused";
-	/** The image or template it was made from, as the provider names it. */
+	/**
+	 * The image or template it was made from, as the provider names it, which
+	 * may be another name for it than it was made with: a tag for an image
+	 * made from its digest.
+	 */
 	readonly image: string;
 	/**
 	 * Whether its {@link WORKSPACE_DIRECTORY} is kept apart from it, so a new

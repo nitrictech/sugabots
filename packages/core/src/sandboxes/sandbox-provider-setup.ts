@@ -226,9 +226,10 @@ export const make = Effect.gen(function* () {
 					const configured = yield* providers.connection(workspaceId, providerId);
 					const templates = configured && sandboxes.forConnection(configured.connection).templates;
 					if (!templates) return yield* new NoTemplates();
-					const image = yield* Effect.promise(() =>
-						pinnedToDigest(SANDBOX_IMAGE, egress.providers).catch(() => SANDBOX_IMAGE),
+					const pinned = yield* Effect.promise(() =>
+						pinnedToDigest(SANDBOX_IMAGE, egress.providers).catch(() => undefined),
 					);
+					const image = pinned ?? SANDBOX_IMAGE;
 					const build = yield* templates.build(image);
 					yield* providers.recordTemplateBuild(workspaceId, providerId, build);
 					return yield* templates.status(build);

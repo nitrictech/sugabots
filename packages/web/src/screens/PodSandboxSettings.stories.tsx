@@ -30,11 +30,14 @@ const diskWith = (usedGB: number): SandboxDisk => ({
 	],
 });
 
+const image =
+	"ghcr.io/nitrictech/sugabots-sandbox@sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+
 const running: PodSandbox = {
 	sandbox: {
 		kind: "present",
 		state: "running",
-		image: "ghcr.io/nitrictech/sugabots-sandbox:latest",
+		image,
 		providerName: "OpenSandbox",
 		createdAt: "2026-09-29T09:00:00.000Z",
 		lastUsedAt: "2026-10-02T05:40:00.000Z",
@@ -116,7 +119,7 @@ const meta = preview.meta({
 export const Running = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("OpenSandbox")).toBeVisible();
-		await expect(canvas.getByText("ghcr.io/nitrictech/sugabots-sandbox:latest")).toBeVisible();
+		await expect(canvas.getByText(image)).toBeVisible();
 		await expect(canvas.getByText("Running")).toBeVisible();
 		await expect(canvas.getByText("Reset")).toBeVisible();
 		await expect(await canvas.findByText("api.stripe.com")).toBeVisible();
