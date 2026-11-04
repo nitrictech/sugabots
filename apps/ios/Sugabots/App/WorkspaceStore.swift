@@ -28,6 +28,9 @@ final class WorkspaceStore {
 	/// What you may do in the workspace, and your role there.
 	private(set) var permissions: WorkspacePermissions?
 	private(set) var role: WorkspaceRole?
+	/// Conversations as they were when last left, so one opened again shows at once while it refreshes.
+	/// Not observed: nothing redraws when one is kept.
+	@ObservationIgnored var leftConversations: [String: ConversationModel.Snapshot] = [:]
 	/// The models the workspace's bots may run on, for naming a bot's.
 	private(set) var enabledModels: WorkspaceModelsResponse?
 	private(set) var loadError: String?

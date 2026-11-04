@@ -48,6 +48,32 @@ final class ConversationModel {
 		self.threadId = threadId
 		self.store = store
 		self.paged = paged
+		// Shown at once as it was left, while `load` brings it up to date.
+		if paged, let left = store.leftConversations[threadId] { restore(left) }
+	}
+
+	/// What a conversation showed when it was left.
+	struct Snapshot {
+		let details: ThreadDetails
+		let pageItems: [ChatMessageItem]
+		let olderCursor: String?
+		let pagesLoaded: Int
+		let entries: [ChatHistoryEntry]
+	}
+
+	private func restore(_ left: Snapshot) {
+		details = left.details
+		liveMessages = left.details.messages.sorted { $0.createdAt < $1.createdAt }
+		pageItems = left.pageItems
+		olderCursor = left.olderCursor
+		pagesLoaded = left.pagesLoaded
+		entries = left.entries
+	}
+
+	/// Keeps what's shown for the next time the conversation opens.
+	private func keep() {
+		guard paged, let details, loadError == nil, !messagesFailed else { return }
+		store.leftConversations[threadId] = Snapshot(details: details, pageItems: pageItems, olderCursor: olderCursor, pagesLoaded: pagesLoaded, entries: entries)
 	}
 
 	var thread: Thread? { details?.thread }
@@ -108,9 +134,29 @@ final class ConversationModel {
 	func stop() {
 		listening?.cancel()
 		refetching?.cancel()
+		keep()
 	}
 
 	func load() async {
+		// A conversation the pods' lists show is its own thread, so its pages can load
+		// alongside its details instead of a round trip after them.
+		if paged, store.listedKind(of: threadId) != nil {
+			async let details: Void = loadDetails()
+			async let page: Void = loadNewestPage()
+			async let history: Void = loadHistory()
+			_ = await (details, page, history)
+			keep()
+			return
+		}
+		await loadDetails()
+		guard loadError == nil, paged, thread?.conversationId != nil else { return }
+		async let page: Void = loadNewestPage()
+		async let history: Void = loadHistory()
+		_ = await (page, history)
+		keep()
+	}
+
+	private func loadDetails() async {
 		do {
 			let details = try await store.client.threads.get(threadId: threadId, limit: String(Self.pageSize))
 			self.details = details
@@ -118,13 +164,9 @@ final class ConversationModel {
 			if details.thread.status != .running { runningTurnId = nil }
 			loadError = nil
 		} catch {
-			loadError = error.localizedDescription
-			return
+			// A conversation already showing from when it was left stays shown; the next refresh tries again.
+			if details == nil { loadError = error.localizedDescription }
 		}
-		guard paged, thread?.conversationId != nil else { return }
-		async let page: Void = loadNewestPage()
-		async let history: Void = loadHistory()
-		_ = await (page, history)
 	}
 
 	private func loadNewestPage() async {
