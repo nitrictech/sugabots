@@ -13,10 +13,7 @@ private struct DebugOpen: ViewModifier {
 	func body(content: Content) -> some View {
 		content
 			.fullScreenCover(item: Binding(get: { opened.map(Opened.init) }, set: { opened = $0?.place })) { item in
-				NavigationStack {
-					SettingsDestination(place: item.place)
-						.navigationDestination(for: Route.self) { RouteDestination(route: $0) }
-				}
+				PageStack { SettingsDestination(place: item.place) }
 			}
 			.task(id: store.pods.count) { open() }
 	}

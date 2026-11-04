@@ -76,10 +76,7 @@ struct ComputerSheet: View {
 			if let pod, let conversationId { DesktopView(pod: pod, conversationId: conversationId) }
 		}
 		.fullScreenCover(isPresented: $settingUp) {
-			NavigationStack {
-				SettingsDestination(place: .workspace(.sandboxes))
-					.navigationDestination(for: Route.self) { RouteDestination(route: $0) }
-			}
+			PageStack { SettingsDestination(place: .workspace(.sandboxes)) }
 		}
 	}
 

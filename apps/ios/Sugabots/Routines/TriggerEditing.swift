@@ -312,7 +312,7 @@ private struct TriggerKindStep: View {
 			connected = Set(((try? await store.connections(in: pod.id)) ?? []).map(\.kind.rawValue))
 		}
 		.sheet(item: $openedSettings) { pod in
-			NavigationStack { RouteDestination(route: .podSettings(pod)) }
+			PageStack { RouteDestination(route: .podSettings(pod)) }
 		}
 	}
 

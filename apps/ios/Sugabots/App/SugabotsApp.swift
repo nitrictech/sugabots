@@ -135,6 +135,22 @@ private struct TabStack<Root: View>: View {
 	}
 }
 
+/// A stack of its own for a sheet or cover, rooted at `root`: pages opened
+/// inside it push here, not onto the tab's stack hidden behind the sheet.
+struct PageStack<Root: View>: View {
+	@ViewBuilder let root: Root
+	@State private var path: [Route] = []
+
+	var body: some View {
+		NavigationStack(path: $path) {
+			root.navigationDestination(for: Route.self) { route in
+				RouteDestination(route: route)
+			}
+		}
+		.environment(\.openPage, OpenPage { route in path.append(route) })
+	}
+}
+
 /// The page a `Route` opens, without a navigation bar: each page draws its own header.
 struct RouteDestination: View {
 	let route: Route
@@ -277,7 +293,8 @@ extension View {
 	}
 }
 
-/// Pushes a page onto the open tab's stack. Pages open this way, not with a
+/// Pushes a page onto the stack it is called in: the open tab's, or a
+/// sheet's `PageStack`. Pages open this way, not with a
 /// `navigationDestination` of their own: a page pushed beside the stack's path
 /// can't push onto that path itself, so its links would do nothing.
 struct OpenPage {
