@@ -13,6 +13,8 @@ declare module "@novnc/novnc" {
 		viewOnly: boolean;
 		scaleViewport: boolean;
 		background: string;
+		/** Whether a click or tap on the screen moves focus to it. */
+		focusOnClick: boolean;
 		disconnect(): void;
 		/** Puts text on the remote desktop's clipboard. */
 		clipboardPasteFrom(text: string): void;

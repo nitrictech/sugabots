@@ -2,8 +2,8 @@ import type RFB from "@novnc/novnc";
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Monitor, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Keyboard, Monitor, X } from "lucide-react";
+import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
@@ -163,6 +163,7 @@ function ComputerScreen({
 }) {
 	const [inControl, setInControl] = useState(false);
 	const agentUsing = useDesktopInUse(threadId, agent.id);
+	const keyboard = useRef<HTMLTextAreaElement>(null);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
@@ -173,6 +174,7 @@ function ComputerScreen({
 						agentId={agent.id}
 						viewOnly={!inControl}
 						offersReconnect
+						keyboardInput={keyboard}
 					/>
 				</div>
 			</div>
@@ -189,8 +191,7 @@ function ComputerScreen({
 						<>You can watch what {agent.name} does here.</>
 					) : inControl ? (
 						<>
-							<b className="font-semibold text-foreground">You</b> have control. What you do here is
-							real.
+							<b className="font-semibold text-foreground">You</b> have control
 						</>
 					) : agentUsing ? (
 						<>
@@ -200,6 +201,23 @@ function ComputerScreen({
 						<>Watching</>
 					)}
 				</span>
+				{inControl && (
+					<Button
+						size="sm"
+						variant="secondary"
+						aria-label="Keyboard"
+						className="hidden pointer-coarse:inline-flex"
+						// Keeps an open keyboard's field focused, so this click can close it.
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={() => {
+							const field = keyboard.current;
+							if (document.activeElement === field) field?.blur();
+							else field?.focus();
+						}}
+					>
+						<Keyboard aria-hidden />
+					</Button>
+				)}
 				{mayUse && (
 					<Button
 						size="sm"
@@ -277,6 +295,7 @@ export function DesktopScreen({
 	agentId,
 	viewOnly,
 	offersReconnect,
+	keyboardInput,
 }: {
 	threadId: string;
 	agentId: string;
@@ -284,6 +303,12 @@ export function DesktopScreen({
 	viewOnly: boolean;
 	/** Shows a Reconnect button once disconnected, for a screen nothing else covers. */
 	offersReconnect: boolean;
+	/**
+	 * Given while not `viewOnly`, a hidden field whose typing goes to the
+	 * desktop; focusing it opens a touch screen's keyboard, which a phone only
+	 * shows for a text field.
+	 */
+	keyboardInput?: Ref<HTMLTextAreaElement>;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
@@ -400,6 +425,15 @@ export function DesktopScreen({
 	return (
 		<div className="relative aspect-4/3 w-full overflow-hidden rounded-panel bg-list">
 			<div ref={screen} className="absolute inset-0" />
+			{keyboardInput && !viewOnly && (
+				<KeyboardField
+					ref={keyboardInput}
+					viewer={connected}
+					onTyped={() => {
+						lastUsedAt.current = Date.now();
+					}}
+				/>
+			)}
 			{standing !== "connected" && (
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-xs">
 					<p>{STANDING_TEXT[standing]}</p>
@@ -414,9 +448,93 @@ export function DesktopScreen({
 	);
 }
 
-/** X11's keysyms for the left Control key and `v`, which noVNC sends as they are. */
+/** X11's keysyms for the keys sent by hand, which noVNC passes on as they are. */
 const XK_CONTROL_L = 0xffe3;
 const XK_V = 0x0076;
+const XK_BACKSPACE = 0xff08;
+const XK_RETURN = 0xff0d;
+
+/**
+ * What the keyboard field holds before any typing: text for Backspace to
+ * delete, since a field with nothing to delete reports no input, and for an
+ * on-screen keyboard to revise as it corrects a word. noVNC's own app does the same.
+ */
+const KEYBOARD_FIELD_FILLER = "_".repeat(100);
+
+/**
+ * A hidden field that sends what is typed into it to the desktop, by the
+ * difference each change makes, as on-screen keyboards report little else
+ * dependably: Android's give most keys no key code, and any may replace a
+ * word it has corrected.
+ */
+function KeyboardField({
+	ref,
+	viewer,
+	onTyped,
+}: {
+	ref: Ref<HTMLTextAreaElement>;
+	viewer: RefObject<RFB | undefined>;
+	onTyped: () => void;
+}) {
+	const sent = useRef(KEYBOARD_FIELD_FILLER);
+	const refill = (field: HTMLTextAreaElement) => {
+		field.value = KEYBOARD_FIELD_FILLER;
+		field.setSelectionRange(field.value.length, field.value.length);
+		sent.current = KEYBOARD_FIELD_FILLER;
+	};
+	const typed = (event: FormEvent<HTMLTextAreaElement>) => {
+		const field = event.currentTarget;
+		if (viewer.current) typeDifference(viewer.current, sent.current, field.value);
+		sent.current = field.value;
+		onTyped();
+		// Refilled between words only: a keyboard mid-word revises the field's text.
+		const composing = (event.nativeEvent as InputEvent).isComposing;
+		const length = field.value.length;
+		const filler = KEYBOARD_FIELD_FILLER.length;
+		if (!composing && (length < filler / 2 || length > filler * 2)) refill(field);
+	};
+	// While typing, a tap on the desktop would otherwise focus noVNC's screen and close the keyboard.
+	const setDesktopTakesFocus = (takesFocus: boolean) => {
+		if (viewer.current) viewer.current.focusOnClick = takesFocus;
+	};
+	return (
+		<textarea
+			ref={ref}
+			aria-label="Type on the desktop"
+			defaultValue={KEYBOARD_FIELD_FILLER}
+			autoCapitalize="off"
+			autoComplete="off"
+			autoCorrect="off"
+			spellCheck={false}
+			// Transparent, not hidden: a phone won't focus a field it can't display.
+			className="pointer-events-none absolute bottom-0 left-0 size-px resize-none opacity-0"
+			onFocus={(event) => {
+				refill(event.currentTarget);
+				setDesktopTakesFocus(false);
+			}}
+			onBlur={() => setDesktopTakesFocus(true)}
+			onInput={typed}
+		/>
+	);
+}
+
+/** Sends the desktop the Backspaces and characters that turn `before` into `after`. */
+function typeDifference(desktop: RFB, before: string, after: string) {
+	const was = Array.from(before);
+	const now = Array.from(after);
+	let kept = 0;
+	while (kept < was.length && kept < now.length && was[kept] === now[kept]) kept++;
+	for (let index = kept; index < was.length; index++) desktop.sendKey(XK_BACKSPACE, "Backspace");
+	// No key code, so the desktop types the character itself rather than a key its layout maps.
+	for (const character of now.slice(kept)) desktop.sendKey(keysymFor(character), "");
+}
+
+/** X11's keysym for a character: Latin-1's as they are, the rest of Unicode's offset by 0x1000000. */
+function keysymFor(character: string): number {
+	if (character === "\n") return XK_RETURN;
+	const codePoint = character.codePointAt(0) ?? 0;
+	return codePoint < 0x100 ? codePoint : 0x1000000 | codePoint;
+}
 
 /** ⌘V on a Mac, Ctrl+V elsewhere, without the Shift or Alt of a different shortcut. */
 function isPasteShortcut(event: KeyboardEvent): boolean {
