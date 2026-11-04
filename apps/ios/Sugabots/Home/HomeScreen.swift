@@ -46,6 +46,7 @@ private struct PodRail: View {
 	let current: Pod?
 	let choose: (Pod) -> Void
 	@Environment(WorkspaceStore.self) private var store
+	@Environment(\.openPage) private var openPage
 	@State private var creating = false
 
 	var body: some View {
@@ -58,6 +59,12 @@ private struct PodRail: View {
 						PodTile(pod: pod)
 					}
 					.buttonStyle(.plain)
+					// Held, its notifications, as the web's sidebar gives a pod on a right click.
+					.contextMenu {
+						if let settings = store.notificationSettings {
+							NotificationMenu(place: .pod(id: pod.id), settings: settings) { openPage(.settings(.notifications)) }
+						}
+					}
 					.frame(maxWidth: .infinity)
 					.overlay(alignment: .leading) {
 						if isCurrent || news {
