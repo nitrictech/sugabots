@@ -27,11 +27,13 @@ enum Previews {
 		return Self.message(spoken.isEmpty ? message.content : spoken)
 	}
 
-	/// Markdown in one line written as plain text: no emphasis marks, links as their words.
+	/// One line of markdown as the text it reads as once rendered, without its
+	/// syntax, as `markdownText`. A rule reads as nothing, where Foundation draws one.
 	private static func plain(_ line: String) -> String {
-		line
-			.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
-			.replacingOccurrences(of: #"^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)"#, with: "", options: .regularExpression)
-			.replacingOccurrences(of: #"(\*\*|__|\*|_|~~|`)"#, with: "", options: .regularExpression)
+		guard let parsed = try? AttributedString(markdown: line) else { return line }
+		return parsed.runs
+			.filter { run in !(run.presentationIntent?.components.contains { $0.kind == .thematicBreak } ?? false) }
+			.map { String(parsed[$0.range].characters) }
+			.joined()
 	}
 }
