@@ -218,10 +218,11 @@ private struct TitleRow<Face: View>: View {
 			.padding(.leading, Face.self == EmptyView.self ? 16 : 6)
 			.padding(.trailing, 16)
 			.frame(height: 44)
-			.glass(in: Capsule())
 			.contentShape(Capsule())
 		}
-		.buttonStyle(.plain)
+		// Glass that fills a step darker while pressed, as Back does; the plain style would fade
+		// the whole pill, glass and all, and fade it back only after Details has opened.
+		.buttonStyle(CapsuleGlassPressStyle())
 		.accessibilityLabel([name, line].compactMap { $0 }.joined(separator: ", ") + ", details")
 	}
 }
