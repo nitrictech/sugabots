@@ -259,14 +259,25 @@ struct SavedFile: Identifiable {
 
 // MARK: Navigation
 
-extension UINavigationController: UIGestureRecognizerDelegate {
+extension UINavigationController {
 	/// Keeps swiping back from the left edge working on pages that draw their own Back instead of a navigation bar.
 	override open func viewDidLoad() {
 		super.viewDidLoad()
-		interactivePopGestureRecognizer?.delegate = self
+		interactivePopGestureRecognizer?.delegate = SwipeBack.delegate
 	}
+}
 
-	public func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
-		viewControllers.count > 1
+/// The swipe back gesture's delegate. Its own object, rather than the navigation
+/// controller, because UIKit could one day make `UINavigationController` a
+/// gesture delegate itself, and two conformances would clash.
+private final class SwipeBack: NSObject, UIGestureRecognizerDelegate {
+	/// Kept here because a gesture holds its delegate weakly.
+	static let delegate = SwipeBack()
+
+	/// Only while there's a page to go back to. The gesture is on the navigation
+	/// controller's view, whose next responder is the controller.
+	func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+		guard let navigation = gesture.view?.next as? UINavigationController else { return false }
+		return navigation.viewControllers.count > 1
 	}
 }
