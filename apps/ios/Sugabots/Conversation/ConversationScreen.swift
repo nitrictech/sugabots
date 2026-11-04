@@ -140,8 +140,8 @@ private struct ConversationContent: View {
 		.onAppear {
 			if attachments == nil { attachments = ComposerAttachments(conversationId: model.conversationId, client: store.client) }
 			#if DEBUG
-			// `SUGABOTS_DETAILS=1` opens Details over the conversation at launch, for screenshots.
-			if DebugLaunch.opensDetails {
+			// `SUGABOTS_DETAILS=1` opens Details over the first conversation at launch, for screenshots.
+			if DebugLaunch.takeDetailsOpening() {
 				Task {
 					try? await Task.sleep(for: .seconds(1.5))
 					showingDetails = true

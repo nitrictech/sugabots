@@ -114,7 +114,16 @@ enum DebugLaunch {
 	static let sheet = environment["SUGABOTS_SHEET"]
 
 	/// Whether `SUGABOTS_DETAILS=1` asks for Details over a conversation.
-	static let opensDetails = environment["SUGABOTS_DETAILS"] == "1"
+	private static let opensDetails = environment["SUGABOTS_DETAILS"] == "1"
+	@MainActor private static var detailsOpened = false
+
+	/// Whether to open Details over the conversation now showing: the first one
+	/// only, so conversations opened later in the same run aren't covered too.
+	@MainActor static func takeDetailsOpening() -> Bool {
+		guard opensDetails, !detailsOpened else { return false }
+		detailsOpened = true
+		return true
+	}
 
 	/// The pod the target is in, once the workspace has loaded it.
 	@MainActor
