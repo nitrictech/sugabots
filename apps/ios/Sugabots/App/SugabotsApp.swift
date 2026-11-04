@@ -94,7 +94,8 @@ struct MainTabs: View {
 		// The tabs float over every page, which scrolls on under them; while something is typed, the keyboard has the room.
 		.overlay(alignment: .bottom) {
 			if !keyboardUp {
-				TabBar(tab: $tab).offset(y: WindowInsets.tabBarSink)
+				// Tapping the open tab again goes back to its first page, as iOS's own tab bars do.
+				TabBar(tab: $tab) { reopened in paths[reopened] = [] }.offset(y: WindowInsets.tabBarSink)
 			}
 		}
 		.environment(\.tabBarRoom, keyboardUp ? 0 : TabBar.room)
@@ -174,6 +175,8 @@ struct RouteDestination: View {
 /// waits on you.
 private struct TabBar: View {
 	@Binding var tab: MainTabs.Tab
+	/// The open tab, tapped again.
+	let reopen: (MainTabs.Tab) -> Void
 	@Environment(WorkspaceStore.self) private var store
 
 	private static let tabs: [MainTabs.Tab] = [.home, .inbox, .approvals, .you]
@@ -225,7 +228,7 @@ private struct TabBar: View {
 		@ViewBuilder icon: () -> some View
 	) -> some View {
 		let open = tab == target
-		return Button { tab = target } label: {
+		return Button { if open { reopen(target) } else { tab = target } } label: {
 			VStack(spacing: 3) {
 				icon().frame(height: 24)
 				Text(name).font(Typeface.rubik(10, .medium))
