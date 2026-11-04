@@ -92,7 +92,7 @@ struct BotToolsSection: View {
 								.frame(height: 44)
 								.contentShape(Rectangle())
 							}
-							.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 6))
+							.buttonStyle(PressableRowStyle(cornerRadius: 6))
 						}
 					}
 				}

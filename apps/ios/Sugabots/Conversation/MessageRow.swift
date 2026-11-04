@@ -551,7 +551,7 @@ struct SideThreadLine: View {
 			.frame(minHeight: 44)
 			.contentShape(Rectangle())
 		}
-		.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
+		.buttonStyle(PressableRowStyle(cornerRadius: 10))
 		.padding(.top, 4)
 		.padding(.leading, 8)
 		.accessibilityLabel([description, statusText, lastActivityAt.map { "Last reply \(Times.clock($0))" }].compactMap { $0 }.joined(separator: ", "))

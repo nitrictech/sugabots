@@ -218,7 +218,7 @@ private struct InboxRow: View {
 		.contentShape(Rectangle())
 		if let route {
 			NavigationLink(value: route) { content }
-				.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 8))
+				.buttonStyle(PressableRowStyle(cornerRadius: 8))
 		} else {
 			content
 		}

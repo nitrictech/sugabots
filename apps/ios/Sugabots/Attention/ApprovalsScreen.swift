@@ -161,7 +161,7 @@ private struct ResolvedRow: View {
 			.frame(minHeight: 56)
 			.contentShape(Rectangle())
 		}
-		.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 8))
+		.buttonStyle(PressableRowStyle(cornerRadius: 8))
 	}
 }
 

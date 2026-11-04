@@ -13,6 +13,11 @@ struct PressableRowStyle: ButtonStyle {
 	}
 }
 
+extension ButtonStyle where Self == PressableRowStyle {
+	/// A row of Home's sidebar: Artifacts, a channel, a bot.
+	static var sidebarRow: PressableRowStyle { PressableRowStyle(cornerRadius: 10) }
+}
+
 /// Nothing here, or nothing could be loaded, and what to do about it, as the
 /// web's `ui/empty-state.tsx`: perhaps a mark on a tile, a title, and a line
 /// under it. It fills the space it's given, centred; in a scrolling page, which

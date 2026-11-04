@@ -309,7 +309,7 @@ private struct SharedFiles: View {
 							.frame(height: 44)
 							.contentShape(Rectangle())
 						}
-						.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 6))
+						.buttonStyle(PressableRowStyle(cornerRadius: 6))
 					}
 					if files.count > Self.shown {
 						ShowMoreButton(open: $open).padding(.vertical, 4)

@@ -139,7 +139,7 @@ private struct PodPanel: View {
 						.frame(height: 44)
 						.contentShape(Rectangle())
 					}
-					.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
+					.buttonStyle(.sidebarRow)
 					Rectangle().fill(Palette.border).frame(height: 1).padding(.horizontal, 12)
 					ConversationList(pod: pod)
 				}

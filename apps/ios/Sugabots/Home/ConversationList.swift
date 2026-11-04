@@ -134,7 +134,7 @@ struct ConversationList: View {
 			.frame(height: 44)
 			.contentShape(Rectangle())
 		}
-		.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
+		.buttonStyle(.sidebarRow)
 	}
 
 	private func isOpen(_ section: String) -> Bool {
@@ -268,7 +268,7 @@ private struct NoBots: View {
 		.frame(height: 44)
 		.contentShape(Rectangle())
 		if let onNewBot {
-			Button(action: onNewBot) { row }.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
+			Button(action: onNewBot) { row }.buttonStyle(.sidebarRow)
 		} else {
 			row
 		}
@@ -318,7 +318,7 @@ private struct BotItem: View {
 					.contentShape(Rectangle())
 				}
 				// Darkens while pressed, as a channel's row does, so a tap shows it landed.
-				.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
+				.buttonStyle(.sidebarRow)
 				if routineFailed {
 					FailedRoutineDot().frame(width: 22).accessibilityLabel("A routine's latest run failed")
 				}
@@ -386,7 +386,7 @@ private struct ThreadTree: View {
 						UnreadMarker(unreadMessages: row.unreadMessages, needsYou: row.needsYou).frame(width: 22)
 					}
 				}
-				.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 6))
+				.buttonStyle(PressableRowStyle(cornerRadius: 6))
 			}
 			if hidden > 0 {
 				Button { unclipped = true } label: {

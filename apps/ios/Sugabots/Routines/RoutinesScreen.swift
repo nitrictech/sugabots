@@ -93,7 +93,7 @@ private struct RoutineRow: View {
 			.padding(10)
 			.contentShape(Rectangle())
 		}
-		.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 8))
+		.buttonStyle(PressableRowStyle(cornerRadius: 8))
 		.accessibilityLabel(row.mentionsYou ? "\(row.routine.name), mentions you" : row.routine.name)
 		.task(id: row.routine.id) {
 			lastRun = try? await store.latestRun(of: row.routine.id, agentId: row.agent.id)
