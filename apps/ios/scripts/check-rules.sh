@@ -7,7 +7,7 @@ app="$(cd "$(dirname "$0")/.." && pwd)"
 build="$(mktemp -d)"
 trap 'rm -rf "$build"' EXIT
 cd "$app/Sugabots"
-xcrun swiftc -o "$build/rule-checks" \
+xcrun swiftc -enable-bare-slash-regex -o "$build/rule-checks" \
 	API/API.generated.swift \
 	API/APIClient.swift \
 	API/APISupport.swift \
@@ -25,6 +25,7 @@ xcrun swiftc -o "$build/rule-checks" \
 	Conversation/Segments.swift \
 	Conversation/ChatGroups.swift \
 	Conversation/FileLook.swift \
+	Conversation/MarkdownBlocks.swift \
 	Design/Avatars.swift \
 	Home/Mutes.swift \
 	Settings/TimeZoneChoices.swift \

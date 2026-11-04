@@ -101,6 +101,29 @@ func localTimeText(_ date: Date) -> String {
 /// How many image pixels the app draws a point with, as `Gravatar` sizes its pictures.
 let pixelsPerPoint: CGFloat = 3
 
+/// Markdown's blocks as an outline, each with its words as they read, as the web's `markdownOutline` draws them.
+func outline(_ markdown: String) -> JSONValue {
+	func words(_ text: String) -> JSONValue { .string(String(MarkdownBlocks.inline(text).characters)) }
+	return .array(MarkdownBlocks.parse(markdown).map { block in
+		switch block {
+		case let .paragraph(text): object(["type": .string("paragraph"), "text": words(text)])
+		case let .heading(level, text): object(["type": .string("heading"), "level": .number(Double(level)), "text": words(text)])
+		case let .list(items, ordered, start):
+			object([
+				"type": .string("list"),
+				"ordered": .bool(ordered),
+				"start": ordered ? .number(Double(start)) : nil,
+				"items": .array(items.map { object(["text": words($0.text), "checked": $0.checked.map(JSONValue.bool), "blocks": outline($0.children)]) }),
+			])
+		case let .quote(text): object(["type": .string("quote"), "blocks": outline(text)])
+		case let .code(language, code): object(["type": .string("code"), "language": language.map(JSONValue.string) ?? .null, "code": .string(code)])
+		case let .table(header, rows):
+			object(["type": .string("table"), "header": .array(header.map(words)), "rows": .array(rows.map { .array($0.map(words)) })])
+		case .rule: object(["type": .string("rule")])
+		}
+	})
+}
+
 /// Each case file, with the Swift rule for each web rule it covers, and the
 /// rules it has cases for that this app doesn't copy, with why.
 let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])] = [
@@ -195,6 +218,9 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 			let label: String = try argument(arguments, 0)
 			return try MuteDuration.all.first { $0.label == label }.map { localTimeText($0.until(try localTime(arguments, 1))) }
 		},
+	], [:]),
+	("markdown.cases.json", [
+		"markdownOutline": { try outline(argument($0, 0)) },
 	], [:]),
 	("list-time.cases.json", [
 		"formatClockTime": { try Times.clock(localTime($0, 0), locale: locale($0, 1)) },

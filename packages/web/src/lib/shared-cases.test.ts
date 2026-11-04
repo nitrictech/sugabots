@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import avatarCases from "../../../contracts/cases/avatar.cases.json" with { type: "json" };
 import fileLookCases from "../../../contracts/cases/file-looks.cases.json" with { type: "json" };
 import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
+import markdownCases from "../../../contracts/cases/markdown.cases.json" with { type: "json" };
 import mentionCases from "../../../contracts/cases/mentions.cases.json" with { type: "json" };
 import messagePreviewCases from "../../../contracts/cases/message-preview.cases.json" with {
 	type: "json",
@@ -56,6 +57,7 @@ import {
 	toolLineText,
 	toolStepRuns,
 } from "../screens/tool-steps.ts";
+import { markdownOutline } from "../test-markdown-outline.ts";
 import { gravatarUrl, initials } from "../ui/avatar.tsx";
 import type { ConnectionLook } from "./connections.ts";
 import { extensionOf, fileLookOf, fileSizeLabel } from "./file-looks.ts";
@@ -216,6 +218,12 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 				return duration && localTimeText(duration.until(new Date(now)));
 			},
 		},
+	},
+	{
+		// What MessageMarkdown draws, as test-markdown-outline.ts reads it from the page.
+		file: "markdown.cases.json",
+		cases: markdownCases,
+		rules: { markdownOutline },
 	},
 	{
 		file: "message-preview.cases.json",
