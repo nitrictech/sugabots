@@ -140,7 +140,7 @@ final class ConversationModel {
 	func load() async {
 		// A conversation the pods' lists show is its own thread, so its pages can load
 		// alongside its details instead of a round trip after them.
-		if paged, store.listedKind(of: threadId) != nil {
+		if paged, store.isListed(threadId) {
 			async let details: Void = loadDetails()
 			async let page: Void = loadNewestPage()
 			async let history: Void = loadHistory()
@@ -424,3 +424,9 @@ final class ConversationModel {
 	}
 }
 
+
+/// A conversation's model is one open conversation, the same however often a route names it.
+extension ConversationModel: Hashable {
+	nonisolated static func == (lhs: ConversationModel, rhs: ConversationModel) -> Bool { lhs === rhs }
+	nonisolated func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+}

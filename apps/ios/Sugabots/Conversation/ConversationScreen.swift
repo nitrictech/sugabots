@@ -77,7 +77,7 @@ private struct ConversationContent: View {
 	private static let foot = "foot"
 
 	private func openDetails() {
-		openPage(.details(DetailsOf(model: model, kind: kind)))
+		openPage(.details(model))
 	}
 	/// The space between the composer and the keyboard, over the hint row's own.
 	private static let keyboardGap: CGFloat = 8
@@ -175,19 +175,7 @@ private struct ConversationContent: View {
 		}
 	}
 
-	private var kind: ConversationKind {
-		// Until the thread loads, its kind as the pods' chat lists know it, so the header
-		// shows the bot's face and model from the start rather than changing as it loads.
-		guard let thread = model.thread else { return store.listedKind(of: model.threadId) ?? .peopleThread }
-		if thread.type == .podChat {
-			// The pod's list has a rename as soon as it's made; the thread's own title waits for its details to reload.
-			return .podChat(name: store.podChat(model.conversationId, in: thread.podId)?.title ?? thread.title)
-		}
-		if let agent = thread.hostAgentId.flatMap(store.agent(id:)) {
-			return thread.type == .botChannel ? .botChannel(agent) : .botThread(agent)
-		}
-		return .peopleThread
-	}
+	private var kind: ConversationKind { store.kind(of: model) }
 
 	private var host: AgentParticipant? {
 		guard let agent = kind.agent else { return nil }

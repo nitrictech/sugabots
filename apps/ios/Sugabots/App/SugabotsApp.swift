@@ -178,7 +178,7 @@ struct RouteDestination: View {
 		case let .artifacts(pod): ArtifactsScreen(pod: pod)
 		case let .artifact(podId, artifactId, version): ArtifactScreen(podId: podId, artifactId: artifactId, version: version)
 		case let .settings(place): SettingsDestination(place: place)
-		case let .details(of): ConversationDetails(model: of.model, kind: of.kind)
+		case let .details(model): ConversationDetails(model: model)
 		}
 	}
 }

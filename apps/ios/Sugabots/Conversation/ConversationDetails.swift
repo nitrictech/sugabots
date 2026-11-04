@@ -6,10 +6,10 @@ import SwiftUI
 @MainActor
 struct ConversationDetails: View {
 	let model: ConversationModel
-	let kind: ConversationKind
 	@Environment(WorkspaceStore.self) private var store
 
 	var body: some View {
+		let kind = store.kind(of: model)
 		if let details = model.details, let pod = store.pod(id: details.thread.podId) {
 			if let routine = details.routine, let agent = kind.agent {
 				RoutinePanel(agent: agent, pod: pod, conversationId: model.conversationId, standing: routine)
