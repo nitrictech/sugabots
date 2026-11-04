@@ -5,8 +5,7 @@ import Foundation
 /// it can be screenshotted at any page without tapping.
 ///
 /// `SUGABOTS_OPEN` names a page as `page[/Pod name[/detail]]`; see `Target`.
-/// `SUGABOTS_SHEET` names a sheet a settings page opens over itself, and
-/// `SUGABOTS_DETAILS=1` opens Details over a conversation, and `SUGABOTS_TYPING=1` gives its composer the keyboard.
+/// The other variables are read through `once`.
 enum DebugLaunch {
 	/// A page `SUGABOTS_OPEN` names. A pod is named by its name and a bot by its name within the pod.
 	enum Target {
@@ -40,7 +39,7 @@ enum DebugLaunch {
 		/// `emoji/Pod[/full]`: the emoji picker, perhaps at its full list.
 		case emoji(pod: String, full: Bool)
 
-		// Settings, over the tabs.
+		// Settings, pushed on You.
 		/// `profile`, `notifications`, `member` (the workspace's first).
 		case profile, notifications, member
 		/// A workspace section by its name: `members`, `providers`, …
@@ -110,40 +109,19 @@ enum DebugLaunch {
 	/// The page `SUGABOTS_OPEN` names, if any.
 	static let target = environment["SUGABOTS_OPEN"].flatMap(Target.parse)
 
-	/// The sheet `SUGABOTS_SHEET` names: `invite`, `timezone`, `addconnection` or `look`.
-	static let sheet = environment["SUGABOTS_SHEET"]
+	/// The variables of the launch environment `once` has answered true for.
+	@MainActor private static var taken: Set<String> = []
 
-	/// Whether `SUGABOTS_TYPING=1` asks for the first conversation's composer to have the keyboard.
-	private static let focusesComposer = environment["SUGABOTS_TYPING"] == "1"
-	@MainActor private static var composerFocused = false
-
-	/// Whether to give the conversation now showing the keyboard: the first one only.
-	@MainActor static func takeComposerFocusing() -> Bool {
-		guard focusesComposer, !composerFocused else { return false }
-		composerFocused = true
-		return true
-	}
-
-	/// Whether `SUGABOTS_HOLD=1` asks for a message's actions to be held open, as for a screenshot.
-	private static let holdsMessage = environment["SUGABOTS_HOLD"] == "1"
-	@MainActor private static var messageHeld = false
-
-	/// Whether to hold the message now showing: the first only.
-	@MainActor static func takeMessageHolding() -> Bool {
-		guard holdsMessage, !messageHeld else { return false }
-		messageHeld = true
-		return true
-	}
-
-	/// Whether `SUGABOTS_DETAILS=1` asks for Details over a conversation.
-	private static let opensDetails = environment["SUGABOTS_DETAILS"] == "1"
-	@MainActor private static var detailsOpened = false
-
-	/// Whether to open Details over the conversation now showing: the first one
-	/// only, so conversations opened later in the same run aren't covered too.
-	@MainActor static func takeDetailsOpening() -> Bool {
-		guard opensDetails, !detailsOpened else { return false }
-		detailsOpened = true
+	/// Whether the launch environment sets `variable` to `value`, answering
+	/// true only the first time it is asked, so what it asks for happens once a
+	/// launch, not each time its page appears: `SUGABOTS_TYPING=1` gives the
+	/// first conversation's composer the keyboard, `SUGABOTS_DETAILS=1` opens
+	/// Details over it, `SUGABOTS_HOLD=1` holds a message open, and
+	/// `SUGABOTS_SHEET` names a sheet a settings page opens over itself:
+	/// `invite`, `timezone`, `addconnection` or `look`.
+	@MainActor static func once(_ variable: String, is value: String = "1") -> Bool {
+		guard environment[variable] == value, !taken.contains(variable) else { return false }
+		taken.insert(variable)
 		return true
 	}
 
@@ -160,10 +138,11 @@ enum DebugLaunch {
 		store.agents.first { $0.podId == pod.id && $0.name == name }
 	}
 
-	/// The tab to show, and the page to push on it, for a target that is one; nil for any other.
-	/// Home is put on the target's pod.
+	/// The tab to show, and the page to push on it, for a target that is one;
+	/// nil for any other. Home is put on the target's pod; a settings page is
+	/// pushed on You.
 	@MainActor
-	static func destination(in store: WorkspaceStore) -> (MainTabs.Tab, Route?)? {
+	static func destination(in store: WorkspaceStore) async -> (MainTabs.Tab, Route?)? {
 		guard let target, !store.pods.isEmpty else { return nil }
 		let pod = targetPod(in: store)
 		if let pod { UserDefaults.standard.set(pod.id, forKey: "homePodId") }
@@ -181,7 +160,23 @@ enum DebugLaunch {
 			guard let pod else { return nil }
 			return (.home, .newThread(pod, agent: name.flatMap { bot(named: $0, in: pod, store: store) }))
 		case .podSettings: return pod.map { (.home, .podSettings($0)) }
-		default: return nil
+		case .routines: return pod.map { (.home, .routines($0, agent: nil)) }
+		case .newRoutine: return pod.map { (.home, .newRoutine($0, agent: nil)) }
+		case .artifacts: return pod.map { (.home, .artifacts($0)) }
+		case .profile: return (.you, .settings(.profile))
+		case .notifications: return (.you, .settings(.notifications))
+		case let .workspace(section): return (.you, .settings(.workspace(section)))
+		case .member:
+			guard let first = try? await store.workspaceMembers().first else { return nil }
+			return (.you, .settings(.member(id: first.id)))
+		case .youPod: return pod.map { (.you, .settings(.pod($0))) }
+		case let .podPage(_, page): return pod.map { (.you, .settings(.podPage($0, page))) }
+		case let .agentSettings(_, name):
+			guard let pod, let agent = bot(named: name, in: pod, store: store) else { return nil }
+			return (.you, .settings(.agent(pod, agent)))
+		case .findWorkspace, .signIn, .signUp, .forgotPassword, .newBot, .routinePanel, .trigger, .emoji:
+			// Signing in opens its own pages, and these open over Home (see `debugOpen()`).
+			return nil
 		}
 	}
 }

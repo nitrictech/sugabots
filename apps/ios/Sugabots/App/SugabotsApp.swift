@@ -86,7 +86,7 @@ struct MainTabs: View {
 		}
 		#if DEBUG
 		.task(id: store.pods.isEmpty) {
-			guard let (openTab, route) = DebugLaunch.destination(in: store) else { return }
+			guard let (openTab, route) = await DebugLaunch.destination(in: store) else { return }
 			tab = openTab
 			if let route { paths[openTab] = [route] }
 		}
@@ -101,9 +101,6 @@ struct MainTabs: View {
 		.environment(\.tabBarRoom, keyboardUp ? 0 : TabBar.room)
 		// Every page opens on the open tab's own stack, so Back returns to where it was opened from.
 		.environment(\.openPage, OpenPage { route in paths[tab, default: []].append(route) })
-		#if DEBUG
-		.debugOpen(tab: $tab)
-		#endif
 		.onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
 		.onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
 		.onChange(of: scenePhase) { _, phase in

@@ -142,18 +142,14 @@ private struct ConversationContent: View {
 		.onAppear {
 			if attachments == nil { attachments = ComposerAttachments(conversationId: model.conversationId, client: store.client) }
 			#if DEBUG
-			// `SUGABOTS_TYPING=1` gives the first conversation's composer the keyboard at launch, and
-			// `SUGABOTS_DETAILS=1` opens Details over it, for screenshots.
-			if DebugLaunch.takeComposerFocusing() {
+			// For screenshots: the keyboard, or Details, over the first conversation at launch, once it has settled.
+			let typing = DebugLaunch.once("SUGABOTS_TYPING")
+			let openingDetails = DebugLaunch.once("SUGABOTS_DETAILS")
+			if typing || openingDetails {
 				Task {
 					try? await Task.sleep(for: .seconds(1.5))
-					composing = true
-				}
-			}
-			if DebugLaunch.takeDetailsOpening() {
-				Task {
-					try? await Task.sleep(for: .seconds(1.5))
-					openDetails()
+					if typing { composing = true }
+					if openingDetails { openDetails() }
 				}
 			}
 			#endif

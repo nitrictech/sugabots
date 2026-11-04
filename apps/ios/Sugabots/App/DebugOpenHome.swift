@@ -14,12 +14,11 @@ extension EnvironmentValues {
 }
 
 #if DEBUG
-/// Opens a page over Home that `SUGABOTS_OPEN` names, once the workspace loads:
-/// routines, a new routine, artifacts, a new bot, a routine's panel, a new
-/// trigger or the emoji picker (see `DebugLaunch.Target`).
+/// Opens what `SUGABOTS_OPEN` names over Home that is not a page of its own,
+/// once the workspace loads: a new bot, a routine's panel, a new trigger or
+/// the emoji picker (see `DebugLaunch.Target`). Pages are pushed by `DebugLaunch.destination`.
 private struct DebugOpen: ViewModifier {
 	@Environment(WorkspaceStore.self) private var store
-	@State private var opened: Route?
 	@State private var makingBot: Pod?
 	@State private var panel: (agent: Agent, pod: Pod, routine: ListedRoutine)?
 	@State private var triggerPod: Pod?
@@ -27,7 +26,6 @@ private struct DebugOpen: ViewModifier {
 
 	func body(content: Content) -> some View {
 		content
-			.navigationDestination(item: $opened) { RouteDestination(route: $0) }
 			.navigationDestination(isPresented: Binding(get: { panel != nil }, set: { if !$0 { panel = nil } })) {
 				if let panel {
 					RoutinePanel(
@@ -53,14 +51,11 @@ private struct DebugOpen: ViewModifier {
 				EmojiPicker(full: fullEmojiList, used: ["👍"]) { _ in }
 			}
 			.task(id: store.pods.count) {
-				guard opened == nil, makingBot == nil, panel == nil, triggerPod == nil,
+				guard makingBot == nil, panel == nil, triggerPod == nil,
 					let target = DebugLaunch.target, let pod = DebugLaunch.targetPod(in: store)
 				else { return }
 				await store.refreshChatList(pod)
 				switch target {
-				case .routines: opened = .routines(pod, agent: nil)
-				case .newRoutine: opened = .newRoutine(pod, agent: nil)
-				case .artifacts: opened = .artifacts(pod)
 				case .newBot: makingBot = pod
 				case .trigger: triggerPod = pod
 				case .emoji:

@@ -116,7 +116,7 @@ struct MessageRow: View {
 			}
 			#if DEBUG
 			.task {
-				guard finished, DebugLaunch.takeMessageHolding() else { return }
+				guard finished, DebugLaunch.once("SUGABOTS_HOLD") else { return }
 				try? await Task.sleep(for: .seconds(2))
 				holding = true
 			}
