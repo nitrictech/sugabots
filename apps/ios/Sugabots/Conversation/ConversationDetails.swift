@@ -17,7 +17,7 @@ struct ConversationDetails: View {
 				DetailsPage {
 					switch kind {
 					case let .botChannel(agent), let .botThread(agent):
-						BotDetails(agent: agent, pod: pod, threadId: details.thread.id)
+						BotDetails(agent: agent, pod: pod, threadId: details.thread.id, replying: model.isRunning)
 					case let .podChat(name):
 						ChannelHeading(model: model, pod: pod, details: details, name: name)
 					case .peopleThread:
@@ -134,6 +134,8 @@ private struct BotDetails: View {
 	let agent: Agent
 	let pod: Pod
 	let threadId: String
+	/// Whether the bot is answering in the chat, which its face shows by thinking.
+	let replying: Bool
 	@Environment(WorkspaceStore.self) private var store
 	@Environment(\.openPage) private var openPage
 	@State private var activity: ThreadActivity?
@@ -146,7 +148,8 @@ private struct BotDetails: View {
 
 	var body: some View {
 		DetailsHeading(name: agent.name, line: store.modelName(agent.model) ?? "No model chosen") {
-			BotFace(look: agent.look, size: 88)
+			// Alive, unlike the web's, which keeps it still: the one large face here, with nothing else moving.
+			WatchingFace(look: agent.look, size: 88, busy: replying, watching: true)
 		} actions: {
 			RoundAction(icon: .settings, label: "Settings") { label in
 				Button { openPage(.settings(.agent(pod, agent))) } label: { label }.buttonStyle(.plain)
