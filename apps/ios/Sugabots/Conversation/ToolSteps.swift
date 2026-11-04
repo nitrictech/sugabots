@@ -85,10 +85,10 @@ enum ToolSteps {
 		return names.dropLast().joined(separator: ", ") + " and " + last
 	}
 
-	/// How long a call took, in milliseconds; nothing until it finished.
+	/// How long a call took, in whole milliseconds as its times are written; nothing until it finished.
 	static func duration(of call: ToolCallPart) -> Double {
 		guard let finishedAt = call.finishedAt else { return 0 }
-		return max(finishedAt.timeIntervalSince(call.startedAt) * 1000, 0)
+		return max((finishedAt.timeIntervalSince(call.startedAt) * 1000).rounded(), 0)
 	}
 
 	/// `850ms`, `1.4s`.
@@ -139,7 +139,7 @@ enum ToolSteps {
 		if call.tool.hasPrefix(ToolNames.browserPrefix) {
 			return Step(action: action, subject: code(withoutScheme(input["url"]?.string)))
 		}
-		let subject = ["query", "title", "name", "url", "path"].compactMap { input[$0]?.string }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+		let subject = ["query", "title", "name", "url", "path"].compactMap { input[$0]?.string }.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 		return Step(action: action, subject: name(subject))
 	}
 
@@ -217,7 +217,7 @@ enum ToolSteps {
 		case "run_command":
 			details = inputWithText("command")
 			if stored != nil && stored != .null {
-				let printed = [output["stdout"], output["stderr"]].compactMap { $0?.string }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+				let printed = [output["stdout"], output["stderr"]].compactMap { $0?.string }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 				details.output = .string(printed.isEmpty ? "No output" : printed.map { $0.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }.joined(separator: "\n"))
 			}
 		case "read_file":
@@ -258,12 +258,12 @@ enum ToolSteps {
 	}
 
 	private static func code(_ value: String?) -> (text: String, asCode: Bool)? {
-		guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+		guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 		return (value, true)
 	}
 
 	private static func name(_ value: String?) -> (text: String, asCode: Bool)? {
-		guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+		guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 		return (value, false)
 	}
 
