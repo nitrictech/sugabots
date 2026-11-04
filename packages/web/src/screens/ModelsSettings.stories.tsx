@@ -277,6 +277,25 @@ export const Provider = meta.story({
 	},
 });
 
+/**
+ * Switching off a model a bot still runs on asks which model the bot moves
+ * to, starting on the one new bots use.
+ */
+export const SwitchOffModelInUse = meta.story({
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
+		await expect(within(dialog).getByText(/1 bot uses GPT-5: On-call\./)).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Claude Sonnet", pressed: true }),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move bot and switch off" }),
+		).toBeEnabled();
+	},
+});
+
 /** A provider that resells hundreds of models: a search, which also finds them by who makes them. */
 export const LargeCatalog = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
