@@ -63,6 +63,7 @@ These files are generated, each by its script in `scripts/`, from the web's pack
 | `generate-api.ts` | `API/API.generated.swift`, and Android's `apps/android/api` client | `packages/contracts/openapi.json`, read by `api/model.ts` and written by `api/swift.ts` and `api/kotlin.ts` |
 | `generate-palette.ts` | `Design/Palette.generated.swift` | the colour tokens on `:root` in `packages/web/src/app.css` |
 | `generate-built-in-tools.ts` | `Conversation/BuiltInTools.generated.swift` | `builtInToolCatalog` in `@sugabots/contracts` |
+| `generate-limits.ts` | `API/Limits.generated.swift` | the limits in `@sugabots/contracts`, including the screens' own in `client-limits.ts` |
 | `generate-bot-looks.ts` | `Design/BotLooks.generated.swift` | `@sugabots/avatars`, the pod palette |
 | `generate-lucide-icons.ts` | `Design/Lucide.generated.swift` | every icon `packages/web` imports from `lucide-react` |
 | `generate-connection-marks.ts` | `Design/ConnectionMarks.generated.swift` | `ui/connection-mark.tsx` |

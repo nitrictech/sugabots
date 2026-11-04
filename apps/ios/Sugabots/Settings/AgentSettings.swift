@@ -80,9 +80,9 @@ struct AgentSettingsScreen: View {
 		) {
 			if let failure { FormAlert(text: failure) }
 			SettingsGroup(label: "Profile") {
-				ProfileField(label: "Name", value: agent.name, maxLength: 64, required: true, editable: may.updateAgents) { try await save(AgentUpdate(name: $0)) }
+				ProfileField(label: "Name", value: agent.name, maxLength: Limits.agentNameMaxLength, required: true, editable: may.updateAgents) { try await save(AgentUpdate(name: $0)) }
 				SettingsDivider()
-				ProfileField(label: "Description", value: agent.description ?? "", placeholder: "One line on what it's for", maxLength: 200, wide: true, editable: may.updateAgents) {
+				ProfileField(label: "Description", value: agent.description ?? "", placeholder: "One line on what it's for", maxLength: Limits.descriptionMaxLength, wide: true, editable: may.updateAgents) {
 					try await save(AgentUpdate(description: $0))
 				}
 				SettingsDivider()
@@ -382,9 +382,6 @@ private struct InstructionsPage: View {
 	@State private var saving = false
 	@State private var failure: String?
 
-	/// As `PROMPT_MAX_LENGTH`.
-	private static let maxLength = 20_000
-
 	init(agent: Agent, editable: Bool, save: @escaping (String) async throws -> Void) {
 		self.agent = agent
 		self.editable = editable
@@ -397,10 +394,10 @@ private struct InstructionsPage: View {
 			if let failure { FormAlert(text: failure) }
 			SettingsGroup(
 				note: editable
-					? "Write it like a note to a new teammate: what it's for, how to sound, and what to never do. \(draft.count.formatted()) of \(Self.maxLength.formatted()) characters."
+					? "Write it like a note to a new teammate: what it's for, how to sound, and what to never do. \(draft.count.formatted()) of \(Limits.promptMaxLength.formatted()) characters."
 					: nil
 			) {
-				TextEditor(text: $draft.limited(to: Self.maxLength))
+				TextEditor(text: $draft.limited(to: Limits.promptMaxLength))
 					.font(Typeface.rubik(16))
 					.lineSpacing(16 * 0.65 - 6)
 					.foregroundStyle(Palette.foreground)

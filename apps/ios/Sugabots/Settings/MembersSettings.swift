@@ -70,11 +70,8 @@ private struct InvitationsGroup: View {
 	@State private var pending = false
 	@State private var failure: String?
 
-	/// As `INVITE_LIFETIME_DAYS`.
-	private static let lifetimeDays = 2
-
 	var body: some View {
-		SettingsGroup(label: "Invited", note: "Invites expire after \(Self.lifetimeDays) days.") {
+		SettingsGroup(label: "Invited", note: "Invites expire after \(Limits.inviteLifetimeDays) days.") {
 			DividedRows(data: invitations) { invitation in
 				SettingsRow(
 					label: invitation.email,

@@ -100,6 +100,7 @@
 		34DFE18A966ADD697ABA604C /* WorkspaceSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1342CDDC7441F57A99CB6871 /* WorkspaceSetup.swift */; };
 		ECFCEE9261AABA53F76D02F5 /* OnboardingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE98F9B193A58ED9BA76367 /* OnboardingScreen.swift */; };
 		16CEB72DB2AA48EB7D7F71D0 /* APISupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED438D930AB133C4512934A4 /* APISupport.swift */; };
+		98051DF9B579ACC50C8280C6 /* Limits.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AAFB107CEA25DC79FD9BD44 /* Limits.generated.swift */; };
 		35BA3351830AC73EE7E4C384 /* API.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = F565504977686DC2C6646F64 /* API.generated.swift */; };
 		D87FE125A7ADB72DF2396E1C /* Palette.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = E306B63D1457877EF13B86BF /* Palette.generated.swift */; };
 		838707CAAE8CAE5F736C8037 /* Names.swift in Sources */ = {isa = PBXBuildFile; fileRef = F662813640A6971D34A1AB38 /* Names.swift */; };
@@ -203,6 +204,7 @@
 		1342CDDC7441F57A99CB6871 /* WorkspaceSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceSetup.swift"; sourceTree = "<group>"; };
 		2CE98F9B193A58ED9BA76367 /* OnboardingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingScreen.swift"; sourceTree = "<group>"; };
 		ED438D930AB133C4512934A4 /* APISupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APISupport.swift; sourceTree = "<group>"; };
+		1AAFB107CEA25DC79FD9BD44 /* Limits.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Limits.generated.swift; sourceTree = "<group>"; };
 		F565504977686DC2C6646F64 /* API.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.generated.swift; sourceTree = "<group>"; };
 		E306B63D1457877EF13B86BF /* Palette.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.generated.swift; sourceTree = "<group>"; };
 		F662813640A6971D34A1AB38 /* Names.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Names.swift; sourceTree = "<group>"; };
@@ -266,6 +268,7 @@
 			children = (
 				F565504977686DC2C6646F64 /* API.generated.swift */,
 				ED438D930AB133C4512934A4 /* APISupport.swift */,
+				1AAFB107CEA25DC79FD9BD44 /* Limits.generated.swift */,
 				0CB77A42DADE6C912766F2C8 /* SettingsModels.swift */,
 				7DF8FADC896F2CFA236BC02B /* ArtifactModels.swift */,
 				F7D3976E868E592145F3B9E3 /* RoutineModels.swift */,
@@ -541,6 +544,7 @@
 				D87FE125A7ADB72DF2396E1C /* Palette.generated.swift in Sources */,
 				35BA3351830AC73EE7E4C384 /* API.generated.swift in Sources */,
 				16CEB72DB2AA48EB7D7F71D0 /* APISupport.swift in Sources */,
+				98051DF9B579ACC50C8280C6 /* Limits.generated.swift in Sources */,
 				D21A0A2B17C70D3228EF01C3 /* MentionEditor.swift in Sources */,
 				ECFCEE9261AABA53F76D02F5 /* OnboardingScreen.swift in Sources */,
 				34DFE18A966ADD697ABA604C /* WorkspaceSetup.swift in Sources */,

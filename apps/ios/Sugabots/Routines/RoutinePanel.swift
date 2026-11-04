@@ -245,7 +245,7 @@ struct RoutinePanel: View {
 				name: routine.name,
 				action: "Save",
 				placeholder: "e.g. Friday pipeline review",
-				maxLength: Routine.maxNameCharacters
+				maxLength: Limits.maxRoutineNameCharacters
 			) { name in
 				_ = try await store.updateRoutine(routine.id, agentId: agent.id, name: name)
 				await load()

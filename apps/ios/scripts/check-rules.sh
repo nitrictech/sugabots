@@ -11,6 +11,7 @@ xcrun swiftc -o "$build/rule-checks" \
 	API/API.generated.swift \
 	API/APIClient.swift \
 	API/APISupport.swift \
+	API/Limits.generated.swift \
 	API/TokenStore.swift \
 	API/RoutineModels.swift \
 	Conversation/BuiltInTools.generated.swift \

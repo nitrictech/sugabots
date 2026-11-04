@@ -80,9 +80,6 @@ struct NotificationsSettingsScreen: View {
 		}
 	}
 
-	/// As `DEFAULT_QUIET_HOURS`.
-	private static let defaultQuietHours = (from: "22:00", to: "08:00")
-
 	private func quietHours(_ settings: NotificationSettings) -> some View {
 		let quiet = settings.quietHours
 		let device = TimeZone.current.identifier
@@ -93,7 +90,7 @@ struct NotificationsSettingsScreen: View {
 		) {
 			SettingsRow.trailing(label: "Quiet hours") {
 				WebToggle(label: "Quiet hours", isOn: quiet != nil) { on in
-					update(settings, quietHours: .some(on ? .init(from: Self.defaultQuietHours.from, to: Self.defaultQuietHours.to, timeZone: device) : nil))
+					update(settings, quietHours: .some(on ? .init(from: Limits.defaultQuietHours.from, to: Limits.defaultQuietHours.to, timeZone: device) : nil))
 				}
 			}
 			if let quiet {

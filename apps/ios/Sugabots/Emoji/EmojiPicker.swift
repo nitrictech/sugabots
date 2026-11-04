@@ -21,8 +21,7 @@ struct EmojiPicker: View {
 	@State private var recent = RecentEmoji.all
 	@State private var tone: Emoji.SkinTone?
 
-	/// As `MAX_REACTION_EMOJI_PER_MESSAGE` in `@sugabots/contracts`.
-	static let maxReactionEmojiPerMessage = 20
+	static let maxReactionEmojiPerMessage = Limits.maxReactionEmojiPerMessage
 	/// How many emoji each row holds, as the web's picker.
 	private static let columns = 9
 	/// The picker's width on the web; a phone's sheet centres it.

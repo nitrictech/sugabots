@@ -1,10 +1,12 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
+	AGENT_NAME_MAX_LENGTH,
 	type Agent,
 	type AgentColor,
 	type AgentFace,
 	type AgentShape,
 	effectiveCapabilities,
+	LARGE_MODEL_CATALOG,
 	type ModelProvider,
 	type Pod,
 	type ProviderModel,
@@ -43,7 +45,7 @@ import {
 	useUpdateWorkspace,
 	useWorkspace,
 } from "@/lib/workspace.ts";
-import { isConnected, LARGE_CATALOG, modelName } from "@/screens/ProviderSettings.tsx";
+import { isConnected, modelName } from "@/screens/ProviderSettings.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -473,7 +475,7 @@ function ChooseModelStep({
 		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,
 	);
 	const chosen = choices.find((model) => model.id === chosenId);
-	const large = choices.length > LARGE_CATALOG;
+	const large = choices.length > LARGE_MODEL_CATALOG;
 	const needle = search.trim().toLowerCase();
 	const shown = choices.filter(
 		(model) =>
@@ -605,7 +607,7 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 				aria-label="Name"
 				value={name}
 				onChange={(event) => setName(event.target.value)}
-				maxLength={64}
+				maxLength={AGENT_NAME_MAX_LENGTH}
 				placeholder="Give it a name"
 				className={fieldClass}
 			/>

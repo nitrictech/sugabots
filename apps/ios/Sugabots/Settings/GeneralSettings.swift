@@ -9,9 +9,6 @@ struct ProfileSettingsScreen: View {
 	@AppStorage(Theme.storageKey) private var theme = Theme.dark
 	@State private var name: String?
 
-	/// As `USER_NAME_MAX_LENGTH`.
-	private static let maxNameLength = 100
-
 	var body: some View {
 		let user = store.user
 		SettingsPage(
@@ -20,7 +17,7 @@ struct ProfileSettingsScreen: View {
 			hero: AnyView(PersonAvatar(name: name ?? user.name, email: user.email, image: user.image, size: 44))
 		) {
 			SettingsGroup(label: "Account") {
-				SettingsNameRow(name: name ?? user.name, maxLength: Self.maxNameLength) { next in
+				SettingsNameRow(name: name ?? user.name, maxLength: Limits.userNameMaxLength) { next in
 					try await store.client.updateName(next)
 					name = next
 				}

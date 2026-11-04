@@ -7,6 +7,7 @@ import {
 	type ListedRoutine,
 	type NotificationSettings,
 	type Pod,
+	THREADS_SHOWN,
 } from "@sugabots/contracts";
 import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -378,9 +379,6 @@ const PHONE_ROW =
 /** A bot's own part of its row: its face and name, filling the row up to its end. */
 const botClassName =
 	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left text-sm max-md:gap-3 max-md:rounded-lg max-md:text-base";
-
-/** How many of a bot's open threads show under it, before All threads leads to the rest. */
-const THREADS_SHOWN = 6;
 
 /**
  * A bot on one line, which opens its channel, with its threads under it

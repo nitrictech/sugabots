@@ -1,6 +1,7 @@
 import {
 	type Agent,
 	effectiveCapabilities,
+	LARGE_MODEL_CATALOG,
 	type ModelProvider,
 	type ProviderModel,
 	type ProviderModelCapability,
@@ -68,9 +69,6 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
  * disconnecting it. A switched-off model is still listed, in its place, so
  * turning one on or off never moves the list under your pointer.
  */
-
-/** More models than this and the list gets a search and a filter by who makes them. */
-export const LARGE_CATALOG = 20;
 
 /**
  * Whether bots can reach a provider: switched on, and holding the key or
@@ -732,7 +730,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
-	const large = provider.models.length > LARGE_CATALOG;
+	const large = provider.models.length > LARGE_MODEL_CATALOG;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
 	const [onWhenOpened] = useState(
 		() => new Set(provider.models.filter((model) => model.enabled).map((model) => model.id)),

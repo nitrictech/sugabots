@@ -493,7 +493,7 @@ private struct TimesRow: View {
 					}
 					.background(Palette.chip, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 				}
-				if times.count < ScheduleWords.maxTimes {
+				if times.count < Limits.maxRoutineScheduleTimes {
 					Button("+ Add") { change(times + [ScheduleWords.nextTime(times)]) }
 						.font(Typeface.rubik(14, .medium))
 						.foregroundStyle(Palette.primaryForeground)
@@ -554,15 +554,13 @@ struct WebhookDraft: Hashable {
 	/// Blank for none, so the address alone runs it.
 	var secret = ""
 
-	/// As `MIN_WEBHOOK_SECRET_CHARACTERS`.
-	static let minSecretCharacters = 16
-	static let secretTooShortNote = "A secret needs at least \(minSecretCharacters) characters."
+	static let secretTooShortNote = "A secret needs at least \(Limits.minWebhookSecretCharacters) characters."
 	static let noSecretNote = "With no secret, anyone who has the address can run it. Add one so only the sender can."
 
 	/// Whether the secret can be saved: a source's, however long; one made up, long enough; or none.
 	var secretReady: Bool {
 		let trimmed = secret.trimmingCharacters(in: .whitespaces)
-		return trimmed.isEmpty || auth.isSource || trimmed.count >= Self.minSecretCharacters
+		return trimmed.isEmpty || auth.isSource || trimmed.count >= Limits.minWebhookSecretCharacters
 	}
 }
 

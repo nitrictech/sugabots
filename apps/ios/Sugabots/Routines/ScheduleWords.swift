@@ -43,13 +43,12 @@ enum ScheduleWords {
 	private static let nextTimeGapMinutes = 4 * 60
 	/// How far a new time steps aside from one already taken, and the times a day can be picked from.
 	static let timeStepMinutes = 30
-	/// As `MAX_ROUTINE_SCHEDULE_TIMES`.
-	static let maxTimes = 8
-	/// The most of each unit a schedule can skip between runs, as `MAX_EVERY_*`.
+	/// The most of each unit a schedule can skip between runs.
 	static func maxEvery(_ repeatKind: CalendarSchedule.Repeat) -> Int {
 		switch repeatKind {
-		case .daily: 30
-		case .weekly, .monthly: 12
+		case .daily: Limits.maxEveryDays
+		case .weekly: Limits.maxEveryWeeks
+		case .monthly: Limits.maxEveryMonths
 		}
 	}
 

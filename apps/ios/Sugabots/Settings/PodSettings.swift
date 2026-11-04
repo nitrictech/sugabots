@@ -55,9 +55,6 @@ private struct PodGeneralPage: View {
 	@State private var recolourFailure: String?
 	@State private var confirmingDelete = false
 
-	/// As `POD_NAME_MAX_LENGTH`.
-	private static let maxNameLength = 64
-
 	var body: some View {
 		let may = record.permissions
 		let shared = record.kind == .shared
@@ -69,7 +66,7 @@ private struct PodGeneralPage: View {
 			if let recolourFailure { FormAlert(text: recolourFailure) }
 			if may.rename {
 				SettingsGroup(label: "Pod") {
-					SettingsNameRow(name: record.name, maxLength: Self.maxNameLength) { name in
+					SettingsNameRow(name: record.name, maxLength: Limits.podNameMaxLength) { name in
 						try await store.updatePod(pod.id, name: name)
 						await changed()
 					}

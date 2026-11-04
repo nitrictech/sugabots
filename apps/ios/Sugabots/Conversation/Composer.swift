@@ -33,8 +33,9 @@ final class ComposerAttachment: Identifiable {
 @MainActor
 @Observable
 final class ComposerAttachments {
-	/// As `MAX_ATTACHMENTS_PER_MESSAGE` in `@sugabots/contracts`.
-	static let maximum = 20
+	static let maximum = Limits.maxAttachmentsPerMessage
+	/// Why a file over `MAX_ATTACHMENT_BYTES` is never uploaded, as the web says it.
+	static let tooLargeReason = "Too large. \(Limits.maxAttachmentMegabytes) MB at most."
 
 	private(set) var items: [ComposerAttachment] = []
 	/// How many files were left out for going past the most a message holds.
@@ -58,7 +59,11 @@ final class ComposerAttachments {
 		for file in files.prefix(max(room, 0)) {
 			let attachment = ComposerAttachment(name: file.name, contentType: file.contentType, data: file.data)
 			items.append(attachment)
-			upload(attachment)
+			if file.data.count > Limits.maxAttachmentBytes {
+				attachment.upload = .failed(Self.tooLargeReason, retryable: false)
+			} else {
+				upload(attachment)
+			}
 		}
 	}
 

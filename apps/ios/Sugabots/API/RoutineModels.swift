@@ -215,17 +215,12 @@ extension Routine {
 		)
 	}
 
-	/// As `MAX_ROUTINE_NAME_CHARACTERS`.
-	static let maxNameCharacters = 80
-	/// As `MAX_ROUTINE_INSTRUCTIONS_CHARACTERS`.
-	static let maxInstructionsCharacters = 20_000
-
 	/// "{name} copy", or "{name} copy 2" and on when that is taken, shortened to fit.
 	static func copyName(_ name: String, taken: [String]) -> String {
 		var number = 1
 		while true {
 			let suffix = number == 1 ? " copy" : " copy \(number)"
-			let candidate = String(name.prefix(maxNameCharacters - suffix.count)) + suffix
+			let candidate = String(name.prefix(Limits.maxRoutineNameCharacters - suffix.count)) + suffix
 			if !taken.contains(candidate) { return candidate }
 			number += 1
 		}

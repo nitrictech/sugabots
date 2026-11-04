@@ -22,8 +22,6 @@ struct NewBotScreen: View {
 	@State private var failure: String?
 	@FocusState private var naming: Bool
 
-	/// As `name`'s `maxLength` on the web.
-	private static let maxNameLength = 64
 
 	var body: some View {
 		let offered = models?.models ?? []
@@ -69,7 +67,7 @@ struct NewBotScreen: View {
 					.disabled(customising)
 					.accessibilityLabel("Change the look")
 					if !customising {
-						TextField("", text: $name.limited(to: Self.maxNameLength), prompt: Text("Name your bot").foregroundStyle(Palette.subtleForeground))
+						TextField("", text: $name.limited(to: Limits.agentNameMaxLength), prompt: Text("Name your bot").foregroundStyle(Palette.subtleForeground))
 							.font(Typeface.rubik(16))
 							.foregroundStyle(Palette.foreground)
 							.autocorrectionDisabled()

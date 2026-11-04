@@ -460,7 +460,7 @@ struct ToolCallValue: View {
 /// Messages shortened for one line, as `messagePreview` in `@sugabots/contracts`.
 enum Previews {
 	/// The longest a preview runs.
-	static let maxCharacters = 140
+	static let maxCharacters = Limits.messagePreviewCharacters
 
 	static func message(_ content: String) -> String {
 		let line = content.components(separatedBy: "\n")

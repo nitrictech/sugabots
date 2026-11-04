@@ -1,9 +1,10 @@
-import type {
-	NotificationLevel,
-	NotificationPreferences,
-	NotificationSettings,
-	QuietHours,
-	RoutineRunNotifications,
+import {
+	DEFAULT_QUIET_HOURS,
+	type NotificationLevel,
+	type NotificationPreferences,
+	type NotificationSettings,
+	type QuietHours,
+	type RoutineRunNotifications,
 } from "@sugabots/contracts";
 import { useId } from "react";
 import { failureMessage } from "@/lib/failure.ts";
@@ -218,8 +219,6 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 		</SettingsGroup>
 	);
 }
-
-const DEFAULT_QUIET_HOURS = { from: "22:00", to: "08:00" };
 
 function QuietHoursSettings({ settings }: { settings: NotificationSettings }) {
 	const update = useUpdateNotificationPreferences();

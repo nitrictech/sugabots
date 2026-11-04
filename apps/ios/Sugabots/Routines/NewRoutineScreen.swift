@@ -60,7 +60,7 @@ struct NewRoutineScreen: View {
 				: "Set it up, then create it."
 		) {
 			SettingsGroup {
-				SettingsFieldRow(label: "Name", value: $name, placeholder: "e.g. Friday pipeline review", maxLength: Routine.maxNameCharacters)
+				SettingsFieldRow(label: "Name", value: $name, placeholder: "e.g. Friday pipeline review", maxLength: Limits.maxRoutineNameCharacters)
 				SettingsDivider()
 				if botFixed, let bot {
 					SettingsRow(label: "Bot", trailing: { SettingsValue(text: bot.name) })
@@ -285,7 +285,7 @@ struct RoutineInstructionsField: View {
 		SettingsGroup(note: editable ? Self.note(text) : nil) {
 			TextField(
 				"",
-				text: $text.limited(to: Routine.maxInstructionsCharacters),
+				text: $text.limited(to: Limits.maxRoutineInstructionsCharacters),
 				prompt: Text("e.g. Summarise this week's replies and flag anything that has stalled.").foregroundStyle(Palette.subtleForeground),
 				axis: .vertical
 			)
@@ -303,7 +303,7 @@ struct RoutineInstructionsField: View {
 	/// What to say, and how much room is left.
 	private static func note(_ instructions: String) -> String {
 		let count = { (number: Int) in number.formatted(.number.locale(Locale(identifier: "en"))) }
-		return "Say what to look at, what to do, and what a good result looks like. \(count(instructions.count)) of \(count(Routine.maxInstructionsCharacters)) characters."
+		return "Say what to look at, what to do, and what a good result looks like. \(count(instructions.count)) of \(count(Limits.maxRoutineInstructionsCharacters)) characters."
 	}
 }
 

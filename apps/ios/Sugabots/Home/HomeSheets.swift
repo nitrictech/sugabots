@@ -53,9 +53,6 @@ struct NameSheet: View {
 }
 
 extension NameSheet {
-	/// As `CHAT_NAME_MAX_LENGTH` in `@sugabots/contracts`.
-	nonisolated private static let maxChannelNameLength = 64
-
 	/// Naming a pod's channel, as the web's `ChatNameDialog`.
 	nonisolated static func channel(title: String, name: String = "", action: String, save: @escaping (String) async throws -> Void) -> NameSheet {
 		NameSheet(
@@ -63,7 +60,7 @@ extension NameSheet {
 			name: name,
 			action: action,
 			placeholder: "e.g. Pricing",
-			maxLength: maxChannelNameLength,
+			maxLength: Limits.chatNameMaxLength,
 			note: "Everyone in the pod can read and write in it.",
 			save: save
 		)
@@ -143,9 +140,6 @@ struct NewPodSheet: View {
 	@State private var creating = false
 	@State private var failure: String?
 
-	/// As `POD_NAME_MAX_LENGTH` in `@sugabots/contracts`.
-	private static let maxLength = 64
-
 	var body: some View {
 		let color = chosenColor ?? leastUsedColor
 		let usable = !Self.slug(name).isEmpty
@@ -158,7 +152,7 @@ struct NewPodSheet: View {
 			.padding(.top, 4)
 			.padding(.bottom, 8)
 			SettingsGroup(note: "You'll add bots, people and connections next.") {
-				SettingsFieldRow(label: "Name", value: $name, placeholder: "e.g. Support", maxLength: Self.maxLength)
+				SettingsFieldRow(label: "Name", value: $name, placeholder: "e.g. Support", maxLength: Limits.podNameMaxLength)
 				SettingsDivider()
 				SettingsControlRow(label: "Colour", stacked: true) {
 					ColourSwatches(colors: PodColor.known.map(\.rawValue), swatch: { BotLooks.pods[$0]?.swatch ?? .gray }, value: color) { chosenColor = $0 }
