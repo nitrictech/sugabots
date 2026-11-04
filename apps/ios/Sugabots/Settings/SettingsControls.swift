@@ -44,13 +44,11 @@ struct SegmentedChoice<Value: Hashable>: View {
 	}
 }
 
-/// The web's `Toggle`: a 36 by 20 switch, filled with the primary colour when on.
+/// The web's `Toggle`, as a phone draws a switch: the system's own, its size, in the web's colour when on.
 struct WebToggle: View {
 	let label: String
 	let isOn: Bool
 	let change: (Bool) -> Void
-	@Environment(\.isEnabled) private var isEnabled
-	@Environment(\.colorScheme) private var colorScheme
 
 	init(label: String, isOn: Bool, change: @escaping (Bool) -> Void) {
 		self.label = label
@@ -64,24 +62,10 @@ struct WebToggle: View {
 	}
 
 	var body: some View {
-		Button { change(!isOn) } label: {
-			Capsule()
-				.fill(isOn ? Palette.switchOn : Palette.borderStrong)
-				.frame(width: 36, height: 20)
-				.overlay(alignment: isOn ? .trailing : .leading) {
-					Circle()
-						.fill(isOn ? Palette.primaryForeground : colorScheme == .dark ? Palette.subtleForeground : .white)
-						.frame(width: 16, height: 16)
-						.padding(2)
-				}
-				.animation(.easeOut(duration: 0.15), value: isOn)
-				.opacity(isEnabled ? 1 : 0.45)
-				.contentShape(Rectangle())
-		}
-		.buttonStyle(.plain)
-		.accessibilityLabel(label)
-		.accessibilityValue(isOn ? "On" : "Off")
-		.accessibilityAddTraits(.isToggle)
+		// The system's switch, a phone's own size, coloured as the web's is when on.
+		Toggle(label, isOn: Binding(get: { isOn }, set: change))
+			.labelsHidden()
+			.tint(Palette.switchOn)
 	}
 }
 
