@@ -62,8 +62,7 @@ final class ConversationModel {
 	}
 
 	private func restore(_ left: Snapshot) {
-		details = left.details
-		liveMessages = left.details.messages.sorted { $0.createdAt < $1.createdAt }
+		show(left.details)
 		pageItems = left.pageItems
 		olderCursor = left.olderCursor
 		pagesLoaded = left.pagesLoaded
@@ -138,35 +137,41 @@ final class ConversationModel {
 	}
 
 	func load() async {
-		// A conversation the pods' lists show is its own thread, so its pages can load
-		// alongside its details instead of a round trip after them.
 		if paged, store.isListed(threadId) {
+			// A conversation the pods' lists show is its own thread, so its pages can load
+			// alongside its details instead of a round trip after them.
 			async let details: Void = loadDetails()
-			async let page: Void = loadNewestPage()
-			async let history: Void = loadHistory()
-			_ = await (details, page, history)
-			keep()
-			return
+			async let pages: Void = loadPages()
+			_ = await (details, pages)
+		} else {
+			await loadDetails()
+			guard loadError == nil, paged, thread?.conversationId != nil else { return }
+			await loadPages()
 		}
-		await loadDetails()
-		guard loadError == nil, paged, thread?.conversationId != nil else { return }
-		async let page: Void = loadNewestPage()
-		async let history: Void = loadHistory()
-		_ = await (page, history)
 		keep()
 	}
 
 	private func loadDetails() async {
 		do {
-			let details = try await store.client.threads.get(threadId: threadId, limit: String(Self.pageSize))
-			self.details = details
-			liveMessages = details.messages.sorted { $0.createdAt < $1.createdAt }
-			if details.thread.status != .running { runningTurnId = nil }
-			loadError = nil
+			show(try await store.client.threads.get(threadId: threadId, limit: String(Self.pageSize)))
 		} catch {
 			// A conversation already showing from when it was left stays shown; the next refresh tries again.
 			if details == nil { loadError = error.localizedDescription }
 		}
+	}
+
+	private func show(_ details: ThreadDetails) {
+		self.details = details
+		liveMessages = details.messages.sorted { $0.createdAt < $1.createdAt }
+		if details.thread.status != .running { runningTurnId = nil }
+		loadError = nil
+	}
+
+	/// Loads the conversation's newest page of items and its side threads, together.
+	private func loadPages() async {
+		async let page: Void = loadNewestPage()
+		async let history: Void = loadHistory()
+		_ = await (page, history)
 	}
 
 	private func loadNewestPage() async {
