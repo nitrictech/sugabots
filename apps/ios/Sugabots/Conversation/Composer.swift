@@ -117,7 +117,11 @@ struct Composer: View {
 	var error: String?
 	var needsText = false
 	let submit: () -> Void
-	@FocusState.Binding var focused: Bool
+	/// Whether the field has the keyboard. Plain state, not `FocusState`: the
+	/// field is UIKit's, so no SwiftUI view is focused on it, and SwiftUI puts a
+	/// `FocusState` nothing is focused on back to false, taking the keyboard away
+	/// as soon as it comes up.
+	@Binding var focused: Bool
 	@State private var picking = false
 	@State private var importing = false
 	@State private var photos: [PhotosPickerItem] = []

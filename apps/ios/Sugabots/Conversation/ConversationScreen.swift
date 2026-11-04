@@ -70,7 +70,8 @@ private struct ConversationContent: View {
 	@State private var latestInView = true
 	/// The pod's connections, by handle, for naming and marking a bot's steps.
 	@State private var looks: [String: ConnectionLook] = [:]
-	@FocusState private var composing: Bool
+	/// Whether the composer has the keyboard, as `Composer.focused` says.
+	@State private var composing = false
 
 	/// How often a person still typing says so again, as the web's composer does.
 	private static let typingSignalInterval: TimeInterval = 3

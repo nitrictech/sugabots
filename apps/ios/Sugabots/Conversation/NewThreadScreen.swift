@@ -17,7 +17,8 @@ struct NewThreadScreen: View {
 	@State private var starting = false
 	@State private var failed = false
 	@State private var opened: Route?
-	@FocusState private var composing: Bool
+	/// Whether the composer has the keyboard, as `Composer.focused` says.
+	@State private var composing = false
 
 	var body: some View {
 		let title = agent == nil ? "New thread in \(pod.name)" : "New thread"
