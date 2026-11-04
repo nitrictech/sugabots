@@ -104,16 +104,11 @@ import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
 import { RoutinesStage, type RoutinesView } from "./RoutinesStage.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
-import {
-	DaySeparator,
-	findAnsweringFace,
-	startsNewDay,
-	ThreadConversation,
-	typersAfter,
-} from "./ThreadConversation.tsx";
+import { DaySeparator, ThreadConversation, typersAfter } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { ThreadsStage } from "./ThreadsStage.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
+import { findAnsweringFace, startsNewDay } from "./thread-layout.ts";
 
 /**
  * How close to the foot of the log still counts as at the latest message, both

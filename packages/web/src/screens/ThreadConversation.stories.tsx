@@ -15,7 +15,8 @@ import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
+import { ThreadConversation } from "./ThreadConversation.tsx";
+import { findAnsweringFace } from "./thread-layout.ts";
 
 const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	kind: "agent",
