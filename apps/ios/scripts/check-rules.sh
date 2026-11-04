@@ -14,12 +14,14 @@ xcrun swiftc -o "$build/rule-checks" \
 	API/Limits.generated.swift \
 	API/TokenStore.swift \
 	API/RoutineModels.swift \
+	API/Models.swift \
 	Conversation/BuiltInTools.generated.swift \
 	Conversation/Names.swift \
 	Conversation/Times.swift \
 	Conversation/ToolNames.swift \
 	Conversation/ToolSteps.swift \
 	Conversation/Previews.swift \
+	Conversation/Mentions.swift \
 	Routines/ScheduleWords.swift \
 	"$app/RuleChecks/main.swift"
 "$build/rule-checks" "$app/../../packages/contracts/cases"

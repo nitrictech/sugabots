@@ -70,6 +70,19 @@ func stepJSON(_ step: ToolSteps.Step) -> JSONValue {
 	])
 }
 
+/// Whom a mention can name, as the cases give them: participants, and groups as `{ kind: "group", handle }`.
+func mentionTargets(_ arguments: [JSONValue], _ index: Int) throws -> [MentionTarget] {
+	try argument(arguments, index, as: [JSONValue].self).map { target in
+		if target.fields["kind"] == .string("group"), let handle = target.fields["handle"]?.string { return .group(handle: handle) }
+		return try .participant(argument([target], 0))
+	}
+}
+
+/// The index `offset` UTF-16 units into `text`, as JavaScript counts, or its end past that.
+func utf16Index(_ offset: Int, in text: String) -> String.Index {
+	text.utf16.index(text.startIndex, offsetBy: offset, limitedBy: text.endIndex) ?? text.endIndex
+}
+
 /// Connections' looks by handle, as the cases give them.
 func looks(_ arguments: [JSONValue], _ index: Int) throws -> [String: ConnectionLook] {
 	try argument(arguments, index, as: [String: [String: String]].self).compactMapValues { look in
@@ -105,6 +118,21 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 		"durationOf": { try ToolSteps.duration(of: argument($0, 0)) },
 		"formatDuration": { try ToolSteps.formatDuration(argument($0, 0)) },
 		"formatTotal": { try ToolSteps.formatTotal(argument($0, 0)) },
+	], [:]),
+	("mentions.cases.json", [
+		"splitAroundMentions": { try Mentions.split(argument($0, 0)) },
+		"mentionedHandles": { try Mentions.handles(in: argument($0, 0)) },
+		"canStartMention": { arguments in
+			let text: String = try argument(arguments, 0)
+			return try Mentions.canStart(at: utf16Index(argument(arguments, 1), in: text), in: text)
+		},
+		"firstBotNamed": { try Mentions.firstBot(in: argument($0, 0), among: argument($0, 1))?.id },
+		"withGroupMentions": { try Mentions.withGroups(argument($0, 0), threadType: argument($0, 1)).map(\.key) },
+		"targetWithHandle": { try Mentions.target(withHandle: argument($0, 1), among: mentionTargets($0, 0))?.key },
+	], [:]),
+	("message-preview.cases.json", [
+		"messagePreview": { try Previews.message(argument($0, 0)) },
+		"quotedPreview": { try Previews.quoted(argument($0, 0)) },
 	], [:]),
 	("list-time.cases.json", [
 		"formatClockTime": { try Times.clock(localTime($0, 0), locale: locale($0, 1)) },

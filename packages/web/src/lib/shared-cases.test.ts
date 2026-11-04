@@ -1,17 +1,35 @@
-import type {
-	CalendarSchedule,
-	MessagePart,
-	RoutineTriggerInput,
-	ToolCallPart,
+import {
+	type CalendarSchedule,
+	canStartMention,
+	type MessagePart,
+	mentionedHandles,
+	messagePreview,
+	quotedPreview,
+	type RoutineTriggerInput,
+	splitAroundMentions,
+	type ThreadParticipant,
+	type ThreadType,
+	type ToolCallPart,
 } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
+import mentionCases from "../../../contracts/cases/mentions.cases.json" with { type: "json" };
+import messagePreviewCases from "../../../contracts/cases/message-preview.cases.json" with {
+	type: "json",
+};
 import nameListCases from "../../../contracts/cases/name-list.cases.json" with { type: "json" };
 import routineScheduleCases from "../../../contracts/cases/routine-schedule.cases.json" with {
 	type: "json",
 };
 import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
 import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
+import {
+	firstBotNamed,
+	type MentionTarget,
+	mentionTargetKey,
+	targetWithHandle,
+	withGroupMentions,
+} from "../screens/mentions.tsx";
 import { durationOf, formatDuration, formatTotal } from "../screens/tool-activity.ts";
 import {
 	describeStep,
@@ -89,6 +107,28 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 		},
 	},
 	{ file: "name-list.cases.json", cases: nameListCases, rules: { listNames, countOf } },
+	{
+		// A bot is named by its id, and whom a mention can name by `mentionTargetKey`.
+		file: "mentions.cases.json",
+		cases: mentionCases,
+		rules: {
+			splitAroundMentions,
+			mentionedHandles,
+			canStartMention,
+			firstBotNamed: (draft: string, crew: ThreadParticipant[]) => firstBotNamed(draft, crew)?.id,
+			withGroupMentions: (mentionable: ThreadParticipant[], threadType: ThreadType) =>
+				withGroupMentions(mentionable, threadType).map(mentionTargetKey),
+			targetWithHandle: (mentionable: MentionTarget[], handle: string) => {
+				const target = targetWithHandle(mentionable, handle);
+				return target && mentionTargetKey(target);
+			},
+		},
+	},
+	{
+		file: "message-preview.cases.json",
+		cases: messagePreviewCases,
+		rules: { messagePreview, quotedPreview },
+	},
 	{
 		// Calls are as the API sends them. Runs list their calls by id; file names and connections' looks are by id and handle.
 		file: "tool-steps.cases.json",
