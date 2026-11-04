@@ -191,8 +191,7 @@ function ComputerScreen({
 						<>You can watch what {agent.name} does here.</>
 					) : inControl ? (
 						<>
-							<b className="font-semibold text-foreground">You</b> have control. What you do here is
-							real.
+							<b className="font-semibold text-foreground">You</b> have control
 						</>
 					) : agentUsing ? (
 						<>
