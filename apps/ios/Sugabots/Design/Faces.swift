@@ -1,4 +1,3 @@
-import CryptoKit
 import SwiftUI
 
 /// How a bot's colour is drawn: its face and eyes, and the tint behind what it says with the text on it.
@@ -126,7 +125,7 @@ struct PersonAvatar: View {
 	var body: some View {
 		ZStack {
 			Circle().fill(Palette.personAvatar)
-			Text(Self.initials(of: name))
+			Text(Initials.of(name))
 				.font(Typeface.rubik(max(9, (size * 0.34).rounded()), .bold))
 				.foregroundStyle(Palette.personAvatarForeground)
 			if let picture {
@@ -151,14 +150,6 @@ struct PersonAvatar: View {
 	static func initial(of name: String) -> String {
 		name.trimmingCharacters(in: .whitespaces).first.map { String($0).uppercased() } ?? "?"
 	}
-
-	/// As the web's `initials`: the first and last names' first letters, or a single name's first two.
-	static func initials(of name: String) -> String {
-		let parts = name.split(whereSeparator: \.isWhitespace)
-		guard let first = parts.first else { return "?" }
-		let last = parts.count > 1 ? parts.last : nil
-		return (last.map { String(first.prefix(1)) + String($0.prefix(1)) } ?? String(first.prefix(2))).uppercased()
-	}
 }
 
 /// Somebody's face: a bot's, or a person's avatar. Nobody, or a kind this app
@@ -173,19 +164,6 @@ struct ParticipantFace: View {
 		case let .person(person): PersonAvatar(name: person.name, email: person.email, image: person.image, size: size)
 		case .unknown, nil: Color.clear.frame(width: size, height: size)
 		}
-	}
-}
-
-/// Gravatar's address for an email, as `gravatarUrl` in the web app's `ui/avatar.tsx` builds it.
-enum Gravatar {
-	/// Drawn at three times its size, so it stays sharp on every iPhone screen.
-	private static let pixelsPerPoint: CGFloat = 3
-
-	/// Answers 404 when the address has no Gravatar, rather than a generated placeholder.
-	static func url(for email: String, points: CGFloat) -> URL {
-		let normalized = email.trimmingCharacters(in: .whitespaces).lowercased()
-		let hash = SHA256.hash(data: Data(normalized.utf8)).map { String(format: "%02x", $0) }.joined()
-		return URL(string: "https://gravatar.com/avatar/\(hash)?s=\(Int(points * pixelsPerPoint))&d=404")!
 	}
 }
 

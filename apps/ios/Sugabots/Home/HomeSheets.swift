@@ -235,7 +235,7 @@ struct NotificationMenu: View {
 		Menu {
 			if let until = settings.mutedUntil(place) {
 				Button { mute(until: nil) } label: {
-					Label("Unmute · Muted until \(Self.formatUntil(until))", systemImage: "bell")
+					Label("Unmute · Muted until \(MuteDuration.formatUntil(until))", systemImage: "bell")
 				}
 			} else if (chosen ?? followed) != .nothing {
 				ForEach(MuteDuration.all, id: \.label) { duration in
@@ -260,36 +260,6 @@ struct NotificationMenu: View {
 	private func mute(until: Date?) {
 		Task {
 			do { try await store.mute(place, until: until) } catch { toaster.show(error.localizedDescription) }
-		}
-	}
-
-	/// As `formatUntil`: a time today, or a weekday and time after.
-	static func formatUntil(_ until: Date) -> String {
-		Calendar.current.isDateInToday(until)
-			? until.formatted(date: .omitted, time: .shortened)
-			: until.formatted(.dateTime.weekday(.abbreviated).hour().minute())
-	}
-}
-
-/// How long a pause or a mute lasts, as Slack offers them; `all` lists them.
-struct MuteDuration {
-	enum Length {
-		case minutes(Int)
-		/// Until this hour tomorrow, on this device's clock.
-		case tomorrow(atHour: Int)
-	}
-
-	let label: String
-	let length: Length
-
-	/// When it ends, if started `now`.
-	func until(_ now: Date) -> Date {
-		switch length {
-		case let .minutes(minutes):
-			return now.addingTimeInterval(TimeInterval(minutes * 60))
-		case let .tomorrow(hour):
-			let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now
-			return Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: tomorrow) ?? tomorrow
 		}
 	}
 }

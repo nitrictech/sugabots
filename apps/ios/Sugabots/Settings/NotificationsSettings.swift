@@ -56,7 +56,7 @@ struct NotificationsSettingsScreen: View {
 	private func pause(_ settings: NotificationSettings) -> some View {
 		let until = settings.pausedUntil.flatMap { $0 > .now ? $0 : nil }
 		return SettingsGroup {
-			SettingsRow.trailing(label: "Pause notifications", sub: until.map { "Paused until \(NotificationMenu.formatUntil($0))" }) {
+			SettingsRow.trailing(label: "Pause notifications", sub: until.map { "Paused until \(MuteDuration.formatUntil($0))" }) {
 				if until != nil {
 					Button("Resume") { update(settings, pausedUntil: .some(nil)) }
 						.buttonStyle(WebButtonStyle(variant: .secondary, size: .small))
