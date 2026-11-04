@@ -369,8 +369,8 @@ private struct ThreadTree: View {
 	let threads: [ChatListItem]
 	@State private var unclipped = false
 
-	/// How many threads show before Show more.
-	private static let threadsBeforeShowMore = 4
+	/// How many threads show before Show more, as the web's `THREADS_SHOWN`.
+	private static let threadsBeforeShowMore = 6
 
 	var body: some View {
 		let shown = unclipped ? threads : Array(threads.prefix(Self.threadsBeforeShowMore))
