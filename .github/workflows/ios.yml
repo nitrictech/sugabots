@@ -12,13 +12,11 @@ on:
     paths:
       - "apps/ios/**"
       - "packages/contracts/**"
-      - "packages/web/src/lib/*.cases.json"
       - ".github/workflows/ios.yml"
   pull_request:
     paths:
       - "apps/ios/**"
       - "packages/contracts/**"
-      - "packages/web/src/lib/*.cases.json"
       - ".github/workflows/ios.yml"
 
 concurrency:

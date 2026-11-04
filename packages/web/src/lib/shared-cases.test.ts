@@ -1,15 +1,18 @@
 import type { CalendarSchedule, RoutineTriggerInput } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
-import listTimeCases from "./list-time.cases.json" with { type: "json" };
+import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
+import nameListCases from "../../../contracts/cases/name-list.cases.json" with { type: "json" };
+import routineScheduleCases from "../../../contracts/cases/routine-schedule.cases.json" with {
+	type: "json",
+};
+import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
 import {
 	formatAge,
 	formatClockTime,
 	formatListTime,
 	formatListTimeInSentence,
 } from "./list-time.ts";
-import nameListCases from "./name-list.cases.json" with { type: "json" };
 import { countOf, listNames } from "./name-list.ts";
-import routineScheduleCases from "./routine-schedule.cases.json" with { type: "json" };
 import {
 	formatDayOfMonth,
 	formatEvery,
@@ -19,14 +22,13 @@ import {
 	stepTime,
 	triggerLabel,
 } from "./routine-schedule.ts";
-import toolNameCases from "./tool-names.cases.json" with { type: "json" };
 import { connectionLabel, stepLabel, toolTitle, wordsFromKey } from "./tool-names.ts";
 
 /*
- * The rules in these `*.cases.json` files are copied into the iOS app, which
- * runs the same cases against its Swift (`apps/ios/scripts/check-rules.sh`).
- * Change a case here when the web's behaviour changes, and the app's check
- * fails until its copy does the same.
+ * The rules in `packages/contracts/cases/*.cases.json` are copied into the
+ * phone apps, which run the same cases against their own copies (the iOS app's
+ * `apps/ios/scripts/check-rules.sh`). Change a case here when the web's
+ * behaviour changes, and an app's check fails until its copy does the same.
  */
 
 type Rule = (...given: never[]) => unknown;
@@ -69,6 +71,12 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 		},
 	},
 ];
+
+it("runs every case file", () => {
+	const files = Object.keys(import.meta.glob("../../../contracts/cases/*.cases.json"));
+	const names = files.map((path) => path.slice(path.lastIndexOf("/") + 1));
+	expect(names.sort()).toEqual(suites.map(({ file }) => file).sort());
+});
 
 for (const { file, cases, rules } of suites) {
 	describe(file, () => {

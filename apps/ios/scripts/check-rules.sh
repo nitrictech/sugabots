@@ -20,4 +20,4 @@ xcrun swiftc -o "$build/rule-checks" \
 	Conversation/ToolNames.swift \
 	Routines/ScheduleWords.swift \
 	"$app/RuleChecks/main.swift"
-"$build/rule-checks" "$app/../../packages/web/src/lib"
+"$build/rule-checks" "$app/../../packages/contracts/cases"

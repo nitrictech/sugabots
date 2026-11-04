@@ -1,6 +1,6 @@
 import Foundation
 
-// Runs the web's shared rule cases (`packages/web/src/lib/*.cases.json`)
+// Runs the web's shared rule cases (`packages/contracts/cases/*.cases.json`)
 // against the app's Swift copies of those rules, which the web runs against
 // its own in `shared-cases.test.ts`. Built and run by
 // `apps/ios/scripts/check-rules.sh`; exits non-zero on any case that differs.
@@ -96,6 +96,11 @@ var passed = 0
 func fail(_ message: String) {
 	failures += 1
 	print("✗ \(message)")
+}
+
+let caseFiles = try FileManager.default.contentsOfDirectory(atPath: casesFolder.path).filter { $0.hasSuffix(".cases.json") }
+for file in Set(caseFiles).subtracting(suites.map(\.file)).sorted() {
+	fail("\(file) has no Swift rules here")
 }
 
 for (file, rules) in suites {

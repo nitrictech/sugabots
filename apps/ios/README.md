@@ -26,7 +26,7 @@ Add what the app needs on top of these types (labels, `Identifiable`, derived va
 
 ## Rules copied from the web
 
-Some of the web's rules are written again in Swift: how a tool step is named (`Conversation/ToolNames.swift`), how names are listed (`Conversation/Names.swift`), how times are written (`Conversation/Times.swift`), and how a routine's schedule is worded (`Routines/ScheduleWords.swift`). Their cases are in `packages/web/src/lib/*.cases.json`, which the web's `shared-cases.test.ts` runs against the web's rules and `scripts/check-rules.sh` runs against the Swift ones, so a rule changed on one side and not the other fails one of them. The script builds those files into a Mac program with `RuleChecks/main.swift`, so each must import only Foundation. To copy another rule, add its cases to a case file and the rule to both runners.
+Some of the web's rules are written again in Swift: how a tool step is named (`Conversation/ToolNames.swift`), how names are listed (`Conversation/Names.swift`), how times are written (`Conversation/Times.swift`), and how a routine's schedule is worded (`Routines/ScheduleWords.swift`). Their cases are in `packages/contracts/cases/*.cases.json`, which the web's `shared-cases.test.ts` runs against the web's rules and `scripts/check-rules.sh` runs against the Swift ones, so a rule changed on one side and not the other fails one of them. The script builds those files into a Mac program with `RuleChecks/main.swift`, so each must import only Foundation. To copy another rule, add its cases to a case file and the rule to both runners.
 
 ## Run it
 
