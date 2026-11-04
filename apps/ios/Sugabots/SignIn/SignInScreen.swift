@@ -2,12 +2,13 @@ import SwiftUI
 
 /// Signing in or making an account, as the web's `Login`: the welcome first,
 /// then the email form, with Forgot password and Create an account under it.
-/// The app also needs the server, which the web doesn't: it is named quietly
-/// at the foot, where it can be changed.
+/// Between them the app asks which workspace, as Slack does, since it isn't
+/// opened at the workspace's own address the way the web is.
 @MainActor
 struct SignInScreen: View {
 	private enum Page {
 		case welcome
+		case workspace
 		case form
 		case forgotPassword
 		/// The address of an account that exists but hasn't been proven.
@@ -17,42 +18,33 @@ struct SignInScreen: View {
 	@Environment(Session.self) private var session
 	@State private var page = Page.welcome
 	@State private var isNew = false
-	@State private var server = ""
-	@State private var choosingServer = false
+	@State private var address = WorkspaceAddress(name: "", ending: WorkspaceAddress.hostedEnding)
 
 	var body: some View {
 		Group {
 			switch page {
 			case .welcome:
-				Welcome { page = .form }
+				Welcome { page = .workspace }
+			case .workspace:
+				WorkspaceStep(address: $address, onBack: { page = .welcome }) { page = .form }
 			case .form:
-				LogInForm(server: server, isNew: $isNew, onBack: { page = .welcome }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
+				LogInForm(server: address.server, workspace: address.host, isNew: $isNew, onBack: { page = .workspace }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
 			case .forgotPassword:
-				ForgotPassword(server: server) { page = .form }
+				ForgotPassword(server: address.server) { page = .form }
 			case let .unverified(email):
 				AuthLayout(title: "Check your email", subtitle: "Open the link sent to \(email) to finish signing in.") {
 					Button("Back") { page = .form }.buttonStyle(WebButtonStyle(variant: .secondary, size: .large, fullWidth: true))
 				}
 			}
 		}
-		.safeAreaInset(edge: .bottom, spacing: 0) {
-			Button { choosingServer = true } label: {
-				Text("Server: \(Self.host(of: server))")
-					.font(Typeface.rubik(13))
-					.foregroundStyle(Palette.subtleForeground)
-					.padding(.vertical, 12)
-					.frame(maxWidth: .infinity)
-			}
-			.buttonStyle(.plain)
-			.accessibilityLabel("Server, \(Self.host(of: server))")
-			.accessibilityHint("Changes the Sugabots server to sign in to")
-		}
 		.background(Palette.background.ignoresSafeArea())
 		.onAppear {
-			if server.isEmpty { server = session.server }
+			// The workspace signed in to last, so signing in again is only Continue.
+			if address.name.isEmpty, !session.server.isEmpty { address = WorkspaceAddress(server: session.server) }
 			#if DEBUG
 			// A development build opens the page `SUGABOTS_OPEN` names, to screenshot it.
 			switch DebugLaunch.target {
+			case .findWorkspace: page = .workspace
 			case .signIn: page = .form
 			case .signUp:
 				isNew = true
@@ -62,19 +54,123 @@ struct SignInScreen: View {
 			}
 			#endif
 		}
-		.fullScreenCover(isPresented: $choosingServer) {
-			ServerSheet(server: server) { chosen in
-				server = chosen
-				choosingServer = false
-			}
-		}
+	}
+}
+
+/// A workspace's address as sign-in asks for it: its name, then the ending of
+/// the address its server is under. A hosted workspace is `[name].sugabots.ai`;
+/// a self-hosted server has its own ending, such as `.yourcompany.com`.
+struct WorkspaceAddress: Equatable {
+	static let hostedEnding = ".sugabots.ai"
+
+	var name: String
+	var ending: String
+
+	init(name: String, ending: String) {
+		self.name = name
+		self.ending = ending
 	}
 
-	private static func host(of server: String) -> String {
-		let trimmed = server.trimmingCharacters(in: .whitespaces)
-		let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-		guard let url = URL(string: withScheme), let host = url.host() else { return trimmed.isEmpty ? "Not set" : trimmed }
-		return url.port.map { "\(host):\($0)" } ?? host
+	/// Split from a whole address, such as a saved server or one pasted into the
+	/// name: its first label is the name and the rest, with any port, the ending.
+	init(server: String) {
+		let withoutScheme = server.trimmingCharacters(in: .whitespaces).components(separatedBy: "://").last ?? ""
+		let host = withoutScheme.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
+		guard let dot = host.firstIndex(of: ".") else {
+			self.init(name: host, ending: Self.hostedEnding)
+			return
+		}
+		self.init(name: String(host[..<dot]), ending: String(host[dot...]))
+	}
+
+	/// The name as typed, or its address's parts if a whole address was typed into it.
+	var resolved: WorkspaceAddress {
+		let typed = name.trimmingCharacters(in: .whitespaces)
+		if typed.contains(".") || typed.contains("://") { return WorkspaceAddress(server: typed) }
+		let trimmedEnding = ending.trimmingCharacters(in: .whitespaces)
+		return WorkspaceAddress(name: typed, ending: trimmedEnding.hasPrefix(".") ? trimmedEnding : ".\(trimmedEnding)")
+	}
+
+	/// The workspace's host, with any port, such as `acme.sugabots.ai`.
+	var host: String {
+		let parts = resolved
+		return (parts.name + parts.ending).lowercased()
+	}
+
+	var server: String { "https://\(host)" }
+}
+
+/// Which workspace to sign in to, as Slack asks: its name, before
+/// `.sugabots.ai` or another ending for a self-hosted server.
+@MainActor
+private struct WorkspaceStep: View {
+	@Binding var address: WorkspaceAddress
+	let onBack: () -> Void
+	let onFound: () -> Void
+	@Environment(Session.self) private var session
+	@State private var changingEnding = false
+	@State private var checking = false
+	@State private var failure: String?
+
+	var body: some View {
+		AuthLayout(title: "Your workspace", subtitle: "Enter the name of the workspace you sign in to.", onBack: onBack) {
+			FormCard {
+				FormRow(label: "Name", last: !changingEnding) {
+					HStack(spacing: 0) {
+						TextField("", text: $address.name, prompt: Text(verbatim: "your-team").foregroundStyle(Palette.mutedForeground))
+							.textContentType(.URL)
+							.keyboardType(.URL)
+							.textInputAutocapitalization(.never)
+							.autocorrectionDisabled()
+							.onSubmit(check)
+							.authField()
+						if !changingEnding {
+							Text(address.ending).authField().foregroundStyle(Palette.mutedForeground).lineLimit(1)
+						}
+					}
+				}
+				if changingEnding {
+					FormRow(label: "Ending", last: true) {
+						TextField("", text: $address.ending, prompt: Text(verbatim: ".yourcompany.com").foregroundStyle(Palette.mutedForeground))
+							.keyboardType(.URL)
+							.textInputAutocapitalization(.never)
+							.autocorrectionDisabled()
+							.onSubmit(check)
+							.authField()
+					}
+				}
+			}
+			if let failure { FormAlert(text: failure) }
+			Button(checking ? "Finding…" : "Continue", action: check)
+				.buttonStyle(WebButtonStyle(size: .large, fullWidth: true))
+				.disabled(checking)
+			Button(changingEnding ? "Use \(WorkspaceAddress.hostedEnding)" : "My workspace isn't on \(WorkspaceAddress.hostedEnding)") {
+				changingEnding.toggle()
+				if !changingEnding { address.ending = WorkspaceAddress.hostedEnding }
+			}
+			.buttonStyle(QuietLinkStyle())
+			.frame(maxWidth: .infinity)
+		}
+		.onAppear { changingEnding = address.ending != WorkspaceAddress.hostedEnding }
+	}
+
+	private func check() {
+		guard !checking else { return }
+		guard !address.resolved.name.isEmpty else {
+			failure = "Enter your workspace's name."
+			return
+		}
+		checking = true
+		failure = nil
+		Task {
+			do {
+				try await session.checkServer(address.server)
+				onFound()
+			} catch {
+				failure = error.localizedDescription
+			}
+			checking = false
+		}
 	}
 }
 
@@ -131,6 +227,8 @@ private struct Welcome: View {
 @MainActor
 private struct LogInForm: View {
 	let server: String
+	/// The workspace's host, said under the title so it's clear where this signs in.
+	let workspace: String
 	@Binding var isNew: Bool
 	let onBack: () -> Void
 	let onForgot: () -> Void
@@ -143,7 +241,7 @@ private struct LogInForm: View {
 	@State private var busy = false
 
 	var body: some View {
-		AuthLayout(title: isNew ? "Create an account" : "Log in", onBack: onBack) {
+		AuthLayout(title: isNew ? "Create an account" : "Log in", subtitle: "to \(workspace)", onBack: onBack) {
 			FormCard {
 				if isNew {
 					FormRow(label: "Name") {
@@ -269,42 +367,6 @@ private struct ForgotPassword: View {
 				self.error = error.localizedDescription
 			}
 			busy = false
-		}
-	}
-}
-
-/// Choosing the server to sign in to: the address Sugabots is opened at.
-@MainActor
-private struct ServerSheet: View {
-	let server: String
-	let chosen: (String) -> Void
-	@Environment(Session.self) private var session
-	@State private var draft = ""
-	@State private var checking = false
-	@State private var failure: String?
-
-	var body: some View {
-		DialogForm(title: "Server", action: checking ? "Checking…" : "Save", actionDisabled: checking || draft.trimmingCharacters(in: .whitespaces).isEmpty, gap: 12, submit: save) {
-			SettingsGroup(note: "The address you open Sugabots at, such as sugabots.yourcompany.com.") {
-				SettingsFieldRow(label: "Address", value: $draft, placeholder: "sugabots.example.com")
-			}
-			if let failure { FormAlert(text: failure) }
-		}
-		.onAppear { draft = server.replacingOccurrences(of: "https://", with: "") }
-	}
-
-	private func save() {
-		let typed = draft.trimmingCharacters(in: .whitespaces)
-		checking = true
-		failure = nil
-		Task {
-			do {
-				try await session.checkServer(typed)
-				chosen(typed.contains("://") ? typed : "https://\(typed)")
-			} catch {
-				failure = error.localizedDescription
-			}
-			checking = false
 		}
 	}
 }

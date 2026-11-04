@@ -15,8 +15,8 @@ enum DebugLaunch {
 		case inbox, approvals, you
 
 		// Signing in, before there's an account.
-		/// `login`, `signup`, `forgot`.
-		case signIn, signUp, forgotPassword
+		/// `findworkspace`, `login`, `signup`, `forgot`.
+		case findWorkspace, signIn, signUp, forgotPassword
 
 		// Home, over the pod.
 		/// `pod/Pod`: Home on the pod.
@@ -60,7 +60,7 @@ enum DebugLaunch {
 				let .routinePanel(pod, _), let .trigger(pod, _), let .emoji(pod, _),
 				let .youPod(pod), let .podPage(pod, _), let .agentSettings(pod, _):
 				pod
-			case .inbox, .approvals, .you, .signIn, .signUp, .forgotPassword, .conversation,
+			case .inbox, .approvals, .you, .findWorkspace, .signIn, .signUp, .forgotPassword, .conversation,
 				.profile, .notifications, .member, .workspace:
 				nil
 			}
@@ -76,6 +76,7 @@ enum DebugLaunch {
 			case ("inbox", _, _): return .inbox
 			case ("approvals", _, _): return .approvals
 			case ("you", _, _): return .you
+			case ("findworkspace", _, _): return .findWorkspace
 			case ("login", _, _): return .signIn
 			case ("signup", _, _): return .signUp
 			case ("forgot", _, _): return .forgotPassword

@@ -32,9 +32,9 @@ Some of the web's rules are written again in Swift: how a tool step is named (`C
 
 Open `Sugabots.xcodeproj` in Xcode and run the `Sugabots` scheme on an iPhone simulator. The app has no package dependencies.
 
-Sign in with the Server URL you open Sugabots at, such as `https://sugabots.example.com`. The app talks to `/api` under that URL. It signs in with better-auth's bearer plugin and keeps the token in the Keychain. Debug builds suggest `https://sugabots.local`, which Portless serves on your network in LAN mode.
+Sign-in asks for the workspace first, as Slack does: its name, which opens `https://[name].sugabots.ai`, or a name and another ending for a self-hosted server, such as `sugabots` + `.yourcompany.com`. The app talks to `/api` under that address. It signs in with better-auth's bearer plugin and keeps the token in the Keychain. Debug builds suggest `sugabots` + `.local`, that is `https://sugabots.local`, which Portless serves on your network in LAN mode.
 
-better-auth only accepts a sign-in whose `Origin` is in the server's trusted origins (`PUBLIC_URL`, `WEB_APP_URL`). The app sends the Server URL's origin, so sign in with the same URL the web app uses. For a local server, the simulator also has to trust Portless's certificate:
+better-auth only accepts a sign-in whose `Origin` is in the server's trusted origins (`PUBLIC_URL`, `WEB_APP_URL`). The app sends the workspace address's origin, so sign in at the same address the web app uses. For a local server, the simulator also has to trust Portless's certificate:
 
 ```sh
 xcrun simctl keychain booted add-root-cert ~/.portless/ca.pem

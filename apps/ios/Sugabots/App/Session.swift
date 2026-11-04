@@ -42,15 +42,15 @@ final class Session {
 		await open(with: client)
 	}
 
-	/// Whether a Sugabots server answers at `server`, so a mistyped address is caught before the password is.
+	/// Whether a Sugabots server answers at `server`, so a mistyped workspace is caught before the password is.
 	func checkServer(_ server: String) async throws {
 		guard let client = client(for: server) else {
-			throw APIFailure(status: 0, message: "Enter an address like sugabots.yourcompany.com")
+			throw APIFailure(status: 0, message: "Enter your workspace's name, such as your-team.")
 		}
 		do {
 			_ = try await client.health()
 		} catch let failure as APIFailure {
-			throw APIFailure(status: failure.status, message: "There's no Sugabots server at \(client.baseURL.host() ?? server).")
+			throw APIFailure(status: failure.status, message: "There's no Sugabots workspace at \(client.baseURL.host() ?? server).")
 		} catch {
 			throw APIFailure(status: 0, message: "Couldn't reach \(client.baseURL.host() ?? server). \(error.localizedDescription)")
 		}
