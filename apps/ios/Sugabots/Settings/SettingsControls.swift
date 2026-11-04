@@ -44,7 +44,7 @@ struct SegmentedChoice<Value: Hashable>: View {
 	}
 }
 
-/// The web's `Toggle`, as a phone draws a switch: the system's own, its size, in the web's colour when on.
+/// The web's `Toggle`, as a phone draws a switch: the system's own.
 struct WebToggle: View {
 	let label: String
 	let isOn: Bool
@@ -62,10 +62,9 @@ struct WebToggle: View {
 	}
 
 	var body: some View {
-		// The system's switch, a phone's own size, coloured as the web's is when on.
+		// The system's switch, as it is: the web's colour, near white in dark, would hide its white knob.
 		Toggle(label, isOn: Binding(get: { isOn }, set: change))
 			.labelsHidden()
-			.tint(Palette.switchOn)
 	}
 }
 
