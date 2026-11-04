@@ -43,7 +43,9 @@ enum Segments {
 			case let .text(part):
 				let text = part.text
 				let later = message.parts.dropFirst(index + 1)
-				let followed = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && later.contains { if case .file = $0 { false } else { true } }
+				// Files and a routine result's artifacts go after all of a reply's text as
+				// they are attached, so one shared mid-reply doesn't mean the text before it is finished.
+				let followed = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && later.contains { !isAttached($0) }
 				let narration: Bool = if case .toolCall? = later.first { true } else { false }
 				if (finished || followed) && !narration {
 					segments.append(Segment(id: "text@\(written)", kind: .text(text)))
@@ -76,5 +78,13 @@ enum Segments {
 	private static func wasPutToSomeone(_ call: ToolCallPart) -> Bool {
 		guard let status = call.approval?.status else { return false }
 		return [.pending, .allowed, .denied].contains(status)
+	}
+
+	/// A part attached to a message after its text rather than placed in it, as `isAttached`.
+	private static func isAttached(_ part: MessagePart) -> Bool {
+		switch part {
+		case .file, .artifact: true
+		default: false
+		}
 	}
 }
