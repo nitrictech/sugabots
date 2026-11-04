@@ -19,7 +19,7 @@ enum Gravatar {
 
 	/// Answers 404 when the address has no Gravatar, rather than a generated placeholder.
 	static func url(for email: String, points: CGFloat) -> URL {
-		let normalized = email.trimmingCharacters(in: .whitespaces).lowercased()
+		let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 		let hash = SHA256.hash(data: Data(normalized.utf8)).map { String(format: "%02x", $0) }.joined()
 		return URL(string: "https://gravatar.com/avatar/\(hash)?s=\(Int(points * pixelsPerPoint))&d=404")!
 	}

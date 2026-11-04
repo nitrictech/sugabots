@@ -26,8 +26,10 @@ struct MuteDuration {
 	/// When a pause or mute ends, as `formatUntil`: a time today, or a weekday and time after.
 	static func formatUntil(_ until: Date, now: Date = .now, locale: Locale = .current, calendar: Calendar = .current) -> String {
 		let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-		return calendar.isDate(until, inSameDayAs: now)
+		let written = calendar.isDate(until, inSameDayAs: now)
 			? until.formatted(style.hour().minute())
 			: until.formatted(style.weekday(.abbreviated).hour().minute())
+		// Apple's dates put a narrow space before AM or PM, where the web's have a plain one.
+		return written.replacingOccurrences(of: "\u{202F}", with: " ")
 	}
 }

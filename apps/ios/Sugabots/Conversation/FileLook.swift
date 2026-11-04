@@ -17,7 +17,7 @@ enum FileLook: Equatable {
 
 	/// A media type without its parameters, as `mediaTypeEssence`: ` Text/CSV; charset=utf-8` is `text/csv`.
 	static func mediaTypeEssence(_ mediaType: String) -> String {
-		mediaType.split(separator: ";").first.map(String.init)?.lowercased() ?? ""
+		(mediaType.split(separator: ";", omittingEmptySubsequences: false).first.map(String.init) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 	}
 
 	/// The part of `name` after its last dot, lowercased, or nothing when it has none.
