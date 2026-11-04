@@ -21,6 +21,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
+import { Egress } from "../../providers/network/egress.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
 import { BotThreads } from "../chats/bot-threads.ts";
@@ -97,6 +98,7 @@ type SegmentServices =
 	| BotRoutines.Service
 	| Installation.Service
 	| BotThreads.Service
+	| Egress.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -401,6 +403,7 @@ const streamReply = (
 			const routines = yield* BotRoutines.Service;
 			const installation = yield* Installation.Service;
 			const botThreads = yield* BotThreads.Service;
+			const egress = yield* Egress.Service;
 			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
@@ -492,6 +495,7 @@ const streamReply = (
 				builtIn,
 				sandbox,
 				connections: connections.tools,
+				uploads: egress.providers,
 				files,
 				agents,
 				webAppUrl: installation.webAppUrl,

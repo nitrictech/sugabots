@@ -11,6 +11,7 @@ import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
+import { Egress } from "../../providers/network/egress.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
 import { BotThreads } from "../chats/bot-threads.ts";
@@ -379,7 +380,7 @@ describe("runSegment", () => {
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain("wiki__lookup");
 		expect(turnNote).not.toContain("drive__lookup");
-		expect(turnNote).toContain("- sugabots (2 tools): read_docs, workspace_access");
+		expect(turnNote).toContain("- sugabots (3 tools): read_docs, upload_file, workspace_access");
 	});
 
 	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
@@ -768,6 +769,7 @@ function segmentWith(given: Given) {
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
 				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),
+				unimplemented(Egress.Service, {}),
 				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),

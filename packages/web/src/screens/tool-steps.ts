@@ -82,6 +82,8 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "read_thread_file":
 			// A long tool result is kept as a file too, and has no name in the thread.
 			return step("Read", name(fileName(input.file)), "Read a long result");
+		case "upload_file":
+			return step("Uploaded", name(fileName(input.file)) ?? code(input.path), "Uploaded a file");
 		case "web_search":
 			return step("Searched the web for", name(input.query), "Searched the web");
 		case "web_fetch":

@@ -18,6 +18,8 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
+import { Egress } from "../../providers/network/egress.ts";
+import { unimplemented } from "../../testing.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -95,6 +97,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 						),
 						Layer.succeed(BuiltInTools.Service, outside.builtInTools ?? BuiltInTools.none),
 						Layer.succeed(SandboxTools.Service, SandboxTools.none),
+						unimplemented(Egress.Service, {}),
 						Layer.succeed(ConnectionTools.Service, outside.connectionTools ?? ConnectionTools.none),
 					),
 				),

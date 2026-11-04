@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import type { EgressHttpClients } from "../../providers/network/egress.ts";
 import type { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
 import type { BotThreads } from "../chats/bot-threads.ts";
 import type { BotRoutines } from "../routines/bot-routines.ts";
@@ -33,6 +34,7 @@ import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
+import { UPLOAD_FILE_TOOL, uploadFileTool } from "../tools/upload-file/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn, TurnContext } from "./execution.ts";
@@ -73,6 +75,8 @@ export interface ToolDependencies {
 	sandbox: SandboxTools.Offered;
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
+	/** Where `upload_file` sends files, each client bound to one service's upload address. */
+	uploads: EgressHttpClients;
 	/** The thread's files: where long tool results are kept, and what `read_thread_file` reads. */
 	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile" | "write">;
 	/** Where the agent's own instructions are saved, as the person it is answering. */
@@ -118,6 +122,9 @@ const readDocs = readDocsTool(docPages);
  * nothing in the sandbox, and the files a reply shared go when it starts again.
  */
 const RERUNNABLE_SANDBOX_TOOLS: ReadonlySet<string> = new Set([READ_FILE_TOOL, SHARE_FILE_TOOL]);
+
+/** Sugabots' own catalog tools that send something out, so a turn that fails after one is not run again. */
+const MUTATING_CATALOG_TOOLS: ReadonlySet<string> = new Set([UPLOAD_FILE_TOOL]);
 
 /** The tools sent with the turn's requests, and the catalog `tool_search` finds the rest in. */
 export interface TurnTools {
@@ -174,6 +181,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			},
 		};
 	}
+	const threadFiles = withStartingFiles(deps.files, prepared.context);
 	// Sugabots' own tools in the catalog, which are always there to be found.
 	const builtInFound: Record<string, Tool> = {
 		[READ_DOCS_TOOL]: readDocs,
@@ -182,10 +190,20 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			workspaceId: prepared.context.thread.workspaceId,
 			run: deps.run,
 		}),
+		[UPLOAD_FILE_TOOL]: uploadFileTool({
+			threadId: prepared.context.thread.id,
+			files: threadFiles,
+			sandbox: deps.sandbox.usable ? deps.sandbox.workspace : undefined,
+			upload: deps.uploads,
+			run: deps.run,
+		}),
 	};
 	const catalogTools: Record<string, Tool> = {};
 	for (const [key, found] of Object.entries(builtInFound)) {
-		catalogTools[key] = recorded(key, found, recording);
+		catalogTools[key] = recorded(key, found, {
+			...recording,
+			mutating: MUTATING_CATALOG_TOOLS.has(key),
+		});
 	}
 	for (const [key, offered] of Object.entries(deps.connections)) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
@@ -248,7 +266,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		READ_THREAD_FILE_TOOL,
 		readThreadFileTool({
 			threadId: prepared.context.thread.id,
-			files: withStartingFiles(deps.files, prepared.context),
+			files: threadFiles,
 			acceptsImages: prepared.context.agent.acceptsImages,
 			run: deps.run,
 		}),
