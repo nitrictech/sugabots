@@ -210,17 +210,22 @@ struct NewPodSheet: View {
 
 /// A pod's or bot's notifications, as the web's context menu offers them:
 /// the level to follow or choose, then muting it for a while and the way to
-/// every notification setting.
+/// every notification setting. Empty until the person's notification
+/// settings have loaded.
 @MainActor
 struct NotificationMenu: View {
 	let place: NotificationPlace
-	let settings: NotificationSettings
-	/// Opens every notification setting, the menu's last item.
-	let openSettings: () -> Void
 	@Environment(WorkspaceStore.self) private var store
 	@Environment(Toaster.self) private var toaster
+	@Environment(\.openPage) private var openPage
 
 	var body: some View {
+		if let settings = store.notificationSettings {
+			menu(settings)
+		}
+	}
+
+	@ViewBuilder private func menu(_ settings: NotificationSettings) -> some View {
 		let chosen = settings.levelChosen(for: place)
 		let followed = settings.levelAbove(place)
 		Section("Notify you about…") {
@@ -246,7 +251,7 @@ struct NotificationMenu: View {
 				}
 			}
 			Divider()
-			Button(action: openSettings) { Label("Notification settings", systemImage: "gearshape") }
+			Button { openPage(.settings(.notifications)) } label: { Label("Notification settings", systemImage: "gearshape") }
 		} label: {
 			Label("More options", systemImage: "ellipsis")
 		}
