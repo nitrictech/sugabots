@@ -86,7 +86,7 @@ struct SideThreadSheet: View {
 			let context = MessageContext(
 				podId: details.thread.podId,
 				mentionable: model.mentionable,
-				canApprove: details.capabilities?.approveToolCalls ?? false,
+				capabilities: details.capabilities,
 				looks: looks,
 				userId: store.user.id,
 				conversationId: conversationId

@@ -295,7 +295,7 @@ private struct ConversationContent: View {
 		return MessageContext(
 			podId: pod.id,
 			mentionable: model.mentionable,
-			canApprove: details.capabilities?.approveToolCalls ?? false,
+			capabilities: details.capabilities,
 			looks: looks,
 			fileNames: fileNames,
 			threadActivityAt: Dictionary(model.entries.map { ($0.threadId, $0.latestActivityAt) }, uniquingKeysWith: { first, _ in first }),

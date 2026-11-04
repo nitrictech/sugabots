@@ -9,7 +9,8 @@ struct ApprovalCard: View {
 	let call: ToolCallPart
 	let agent: AgentParticipant
 	let podId: String
-	let canApprove: Bool
+	/// What the person may decide in the call's thread.
+	let capabilities: ThreadDetails.Capabilities?
 	/// The pod's connections, by handle.
 	let looks: [String: ConnectionLook]
 	@State private var reviewing = false
@@ -18,7 +19,7 @@ struct ApprovalCard: View {
 
 	var body: some View {
 		let step = ApprovalStep(call: call, agentName: agent.name, looks: looks)
-		let answerable = call.awaitsApproval && canApprove && !answered
+		let answerable = call.awaitsApproval && mayAnswer && !answered
 		VStack(alignment: .leading, spacing: 10) {
 			StepHeading(step: step)
 			FoldedRequest(input: call.input)
@@ -50,9 +51,20 @@ struct ApprovalCard: View {
 		}
 	}
 
+	/// Whether the person may answer the call, as the web's `mayAnswer`
+	/// decides: a request to change the pod's sandbox is for those who manage
+	/// it, any other for those who may approve the pod's tool calls.
+	private var mayAnswer: Bool {
+		answersSandbox
+			? capabilities?.approveSandboxRequests ?? false
+			: capabilities?.approveToolCalls ?? false
+	}
+
+	private var answersSandbox: Bool { call.approval?.deciders == .sandboxManagers }
+
 	@ViewBuilder private var status: some View {
-		if call.awaitsApproval && !canApprove {
-			Text(call.approval?.deciders == .sandboxManagers
+		if call.awaitsApproval && !mayAnswer {
+			Text(answersSandbox
 				? "Waiting for an admin of this pod to answer this."
 				: "Waiting for someone with permission to answer this.")
 				.font(Typeface.rubik(12))

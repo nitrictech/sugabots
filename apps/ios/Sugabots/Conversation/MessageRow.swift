@@ -5,7 +5,8 @@ import UIKit
 struct MessageContext {
 	let podId: String
 	let mentionable: [ThreadParticipant]
-	let canApprove: Bool
+	/// What the person may decide in the conversation.
+	let capabilities: ThreadDetails.Capabilities?
 	var looks: [String: ConnectionLook] = [:]
 	/// Every file named in the conversation, by id, for steps that name one.
 	var fileNames: [String: String] = [:]
@@ -183,7 +184,7 @@ struct MessageRow: View {
 			}
 		case let .toolCall(call):
 			if let agent {
-				ApprovalCard(call: call, agent: agent, podId: context.podId, canApprove: context.canApprove, looks: context.looks)
+				ApprovalCard(call: call, agent: agent, podId: context.podId, capabilities: context.capabilities, looks: context.looks)
 					.padding(.top, 6)
 					.padding(.bottom, 4)
 			}
