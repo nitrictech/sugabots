@@ -623,7 +623,12 @@ export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnecti
 	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
 );
 
-export { latestRunFailed, routineExecutionIdOf, toRoutineExecution } from "./execution.ts";
+export {
+	latestRunFailed,
+	latestRunFailedUnseen,
+	routineExecutionIdOf,
+	toRoutineExecution,
+} from "./execution.ts";
 export { InvalidRoutineExecutionCursor } from "./routine-view.ts";
 /** Accepts the runs of cron routines as they fall due. */
 export { layer as schedulerLayer } from "./scheduler.ts";

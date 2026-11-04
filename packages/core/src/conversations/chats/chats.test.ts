@@ -4,7 +4,8 @@ import {
 	handleFromName,
 	threadChannel,
 } from "@sugabots/contracts";
-import { and, desc, eq, like } from "drizzle-orm";
+import { userText } from "@sugabots/errors";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Visibility } from "../../authorization/visibility.ts";
@@ -408,6 +409,44 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(
 			(await chats.openRoutineFeed({ workspace: workspaceId, routineId: quiet.routine.id })).title,
 		).toBe("Weekly digest");
+	});
+
+	it("marks a routine whose run failed until the person opens it after the run ends", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+		);
+		const accepted = await routines.run({
+			agentId,
+			routineId: created.routine.id,
+			requestId: crypto.randomUUID(),
+		});
+		const feed = await chats.openRoutineFeed({
+			workspace: workspaceId,
+			routineId: created.routine.id,
+		});
+		// Opened while the run was still going, so before it failed.
+		await chats.markRead(feed.id);
+		await onDatabase((db) =>
+			db
+				.update(routineExecution)
+				.set({
+					state: "failed",
+					startedAt: sql`${routineExecution.acceptedAt}`,
+					finishedAt: sql`${routineExecution.acceptedAt} + interval '1 minute'`,
+					error: userText`The reply took too long and was stopped.`,
+				})
+				.where(eq(routineExecution.id, accepted.executionId)),
+		);
+		const failed = async () => ({
+			listed: (await view.list({ workspace: workspaceId, pod: podId }))?.routines[0]?.routine
+				.failed,
+			counted: (await view.podMarkers(workspaceId)).pods[podId]?.failedRoutines ?? 0,
+		});
+
+		expect(await failed()).toEqual({ listed: true, counted: 1 });
+		await chats.markRead(feed.id);
+		expect(await failed()).toEqual({ listed: false, counted: 0 });
 	});
 
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
