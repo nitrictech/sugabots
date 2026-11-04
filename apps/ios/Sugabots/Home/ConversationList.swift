@@ -307,7 +307,8 @@ private struct BotItem: View {
 					.frame(maxHeight: .infinity)
 					.contentShape(Rectangle())
 				}
-				.buttonStyle(.plain)
+				// Darkens while pressed, as a channel's row does, so a tap shows it landed.
+				.buttonStyle(PressableRowStyle(pressed: Palette.rowSelected, cornerRadius: 10))
 				if routineFailed {
 					FailedRoutineDot().frame(width: 22).accessibilityLabel("A routine's latest run failed")
 				}
@@ -320,7 +321,7 @@ private struct BotItem: View {
 						.frame(width: 22, height: 22)
 						.contentShape(Rectangle())
 				}
-				.buttonStyle(.plain)
+				.buttonStyle(IconPressStyle())
 				.accessibilityLabel(group.agent.map { "New thread with \($0.name)" } ?? "New thread with people")
 			}
 			.padding(.trailing, 6)
