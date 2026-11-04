@@ -1004,7 +1004,7 @@ export function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
 }
 
 /** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */
-function formatFullTimestamp(createdAt: string): string {
+export function formatFullTimestamp(createdAt: string): string {
 	const date = new Date(createdAt);
 	const dateFormat: Intl.DateTimeFormatOptions =
 		date.getFullYear() === new Date().getFullYear()

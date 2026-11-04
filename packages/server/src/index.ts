@@ -124,7 +124,8 @@ const ConversationServices = Conversations.layer.pipe(
 /**
  * What runs without a request: the workflows, the routine scheduler, the
  * nightly event prune, deleting queued blobs, seeding the preset providers
- * into every workspace, and pausing idle sandboxes.
+ * into every workspace, pausing idle sandboxes, and measuring running ones'
+ * disks.
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
@@ -133,7 +134,7 @@ const Background = Layer.mergeAll(
 	BlobDeletions.layer,
 	UnsentUploads.layer,
 	PresetSeeding.layer,
-	PodSandboxes.pauseSweepLayer,
+	PodSandboxes.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */

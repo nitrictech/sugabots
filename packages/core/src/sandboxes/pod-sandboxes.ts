@@ -1,7 +1,7 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
 import { type UserText, userText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
 import { Database, query, serviceOperations } from "../database/database.ts";
 import { sandboxLease, sandbox as sandboxTable } from "../database/schema.ts";
@@ -9,6 +9,7 @@ import { Ids } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { reachOf } from "./allowed-hosts.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
+import { type DiskUsage, measureDisk } from "./sandbox-disk.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 import type { SandboxLeaseHolderKind } from "./sql.ts";
@@ -21,8 +22,12 @@ export const LEASE_RENEWAL = Duration.seconds(30);
 export const IDLE_BEFORE_PAUSE = Duration.minutes(5);
 /** How long before its credentials expire a sandbox in use is given new ones. */
 const CREDENTIAL_REFRESH_MARGIN = Duration.minutes(10);
-/** How often the sweep looks for idle sandboxes to pause. */
-const PAUSE_SWEEP_INTERVAL = Duration.minutes(1);
+/** How often the sweeps look for idle sandboxes to pause, and running ones to measure. */
+const SWEEP_INTERVAL = Duration.minutes(1);
+/** How long a running sandbox's disk goes before it is measured again. */
+const DISK_MEASUREMENT_INTERVAL = Duration.minutes(2);
+/** How many sandboxes' disks are measured at once. */
+const DISK_MEASUREMENT_CONCURRENCY = 4;
 
 /**
  * The only writer of `sandbox` and `sandbox_lease`: each pod's one sandbox,
@@ -52,6 +57,16 @@ export interface Interface {
 	readonly release: (holder: Holder) => Effect.Effect<void>;
 	/** Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. */
 	readonly pauseIdle: Effect.Effect<void>;
+	/**
+	 * Measures the disk of every running sandbox not measured for
+	 * {@link DISK_MEASUREMENT_INTERVAL}, without resuming any: a paused
+	 * sandbox's disk doesn't change, so its last measurement still holds.
+	 */
+	readonly measureDisks: Effect.Effect<void>;
+	/** The last measurement of the pod's sandbox's disk, if it has one. */
+	readonly diskOf: (pod: Pod) => Effect.Effect<MeasuredDisk | undefined>;
+	/** The last measurement of the disk of each of the workspace's pods' sandboxes that has one. */
+	readonly disksIn: (workspaceId: string) => Effect.Effect<readonly PodDisk[]>;
 	/**
 	 * Destroys every sandbox `provider` made and forgets them, so the provider
 	 * can be removed without leaving machines running at it.
@@ -312,6 +327,8 @@ export const make = Effect.gen(function* () {
 						providerSandboxId: sandboxId,
 						pausedAt: null,
 						lastUsedAt: now,
+						diskUsage: null,
+						diskMeasuredAt: null,
 					})
 					.where(eq(sandboxTable.id, recordId)),
 			);
@@ -374,6 +391,55 @@ export const make = Effect.gen(function* () {
 								Effect.logWarning("Could not pause an idle sandbox; trying again later", failure),
 						}),
 					);
+			}),
+		);
+
+	/**
+	 * Measures one sandbox's disk if it is running. It is opened under the
+	 * pod's lock, which the pause sweep pauses under, so a sandbox paused
+	 * meanwhile is never resumed to be measured. The measuring itself runs
+	 * outside the lock, so as not to hold up turns; a sandbox paused while
+	 * it runs fails it, and keeps its last measurement.
+	 */
+	const measureDiskIfRunning = (row: SandboxRow) =>
+		Effect.gen(function* () {
+			const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
+			if (!configured) return;
+			const at = sandboxes.forConnection(configured.connection);
+			const running = yield* oneAtATime(row.podId)(
+				Effect.gen(function* () {
+					const [still] = yield* query((db) =>
+						db
+							.select({ id: sandboxTable.id })
+							.from(sandboxTable)
+							.where(and(sameSandbox(row), isNull(sandboxTable.pausedAt))),
+					);
+					if (!still) return undefined;
+					const { state } = yield* at.info(row.providerSandboxId);
+					if (state !== "running") return undefined;
+					return (yield* at.open(row.providerSandboxId)).sandbox;
+				}),
+			);
+			if (!running) return;
+			const usage = yield* measureDisk(running);
+			const now = yield* DateTime.nowAsDate;
+			yield* query((db) =>
+				db
+					.update(sandboxTable)
+					.set({ diskUsage: usage, diskMeasuredAt: now })
+					.where(sameSandbox(row)),
+			);
+		}).pipe(
+			Effect.catchTags({
+				SandboxMissing: () => Effect.void,
+				SandboxStopped: () => Effect.void,
+				SandboxUnavailable: (failure) =>
+					Effect.logWarning("Could not measure a sandbox's disk; trying again later", failure),
+				DiskUnmeasurable: (failure) =>
+					Effect.logWarning("A sandbox's disk could not be measured", {
+						exitCode: failure.exitCode,
+						stderr: failure.stderr,
+					}),
 			}),
 		);
 
@@ -505,6 +571,87 @@ export const make = Effect.gen(function* () {
 			}),
 		),
 
+		measureDisks: operation(
+			"measureDisks",
+			Effect.gen(function* () {
+				const now = yield* DateTime.now;
+				const measuredBefore = DateTime.toDateUtc(
+					DateTime.subtractDuration(now, DISK_MEASUREMENT_INTERVAL),
+				);
+				// A sandbox nobody has used since its last measurement isn't measured
+				// again. Its disk barely changes, and opening one can postpone the
+				// provider's own pause, the backstop for when ours fails.
+				const usedSinceMeasured = or(
+					liveLease(DateTime.toDateUtc(now)),
+					gt(sandboxTable.lastUsedAt, sandboxTable.diskMeasuredAt),
+				);
+				const due = yield* query((db) =>
+					db
+						.select()
+						.from(sandboxTable)
+						.where(
+							and(
+								isNull(sandboxTable.pausedAt),
+								or(
+									isNull(sandboxTable.diskMeasuredAt),
+									and(lt(sandboxTable.diskMeasuredAt, measuredBefore), usedSinceMeasured),
+								),
+							),
+						),
+				);
+				// One sandbox that can't be measured, such as one whose provider's
+				// key no longer decrypts, mustn't stop the others being measured.
+				const measureOnItsOwn = (row: SandboxRow) =>
+					measureDiskIfRunning(row).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logError("Measuring a sandbox's disk failed", cause),
+						),
+						Effect.annotateLogs({ sandboxId: row.id }),
+					);
+				yield* Effect.forEach(due, measureOnItsOwn, {
+					concurrency: DISK_MEASUREMENT_CONCURRENCY,
+					discard: true,
+				});
+			}),
+		),
+
+		diskOf: (pod) =>
+			operation(
+				"diskOf",
+				Effect.map(
+					query((db) =>
+						db
+							.select(MEASUREMENT_COLUMNS)
+							.from(sandboxTable)
+							.where(
+								and(
+									eq(sandboxTable.workspaceId, pod.workspaceId),
+									eq(sandboxTable.podId, pod.podId),
+								),
+							),
+					),
+					([row]) => (row ? measuredDiskOf(row) : undefined),
+				),
+			),
+
+		disksIn: (workspaceId) =>
+			operation(
+				"disksIn",
+				Effect.map(
+					query((db) =>
+						db
+							.select({ podId: sandboxTable.podId, ...MEASUREMENT_COLUMNS })
+							.from(sandboxTable)
+							.where(eq(sandboxTable.workspaceId, workspaceId)),
+					),
+					(rows) =>
+						rows.flatMap((row) => {
+							const disk = measuredDiskOf(row);
+							return disk ? [{ podId: row.podId, disk }] : [];
+						}),
+				),
+			),
+
 		destroyAllMadeBy: (workspaceId, provider) =>
 			operation(
 				"destroyAllMadeBy",
@@ -558,6 +705,7 @@ export const make = Effect.gen(function* () {
 						lastUsedAt: row.lastUsedAt,
 						turnsUsing: using.turns,
 						peopleWatching: using.watching,
+						disk: measuredDiskOf(row),
 					};
 					const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
 					if (!configured) return { ...present, state: "unreachable", upgradeAvailable: false };
@@ -721,28 +869,59 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Sandboxes.layer, SandboxProviderRepository.layer]),
 );
 
-/** Runs `pauseIdle` every minute for as long as the layer's scope is open. */
-export const pauseSweepLayer = Layer.effectDiscard(
+/**
+ * Runs `pauseIdle` and `measureDisks` every minute, each on its own so a slow
+ * measurement never holds up a pause, for as long as the layer's scope is open.
+ */
+export const sweepLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const podSandboxes = yield* Service;
 		const database = yield* Database;
-		const pass = podSandboxes.pauseIdle.pipe(
-			Effect.provideService(Database, database),
-			Effect.catchCause((cause) => Effect.logError("Pausing idle sandboxes failed", cause)),
-		);
-		yield* Effect.forkScoped(
-			pass.pipe(
-				Effect.delay(PAUSE_SWEEP_INTERVAL),
-				Effect.forever,
-				Effect.withTracerEnabled(false),
-			),
-		);
+		const repeatedly = (sweep: Effect.Effect<void, never, Database>, failureMessage: string) =>
+			Effect.forkScoped(
+				sweep.pipe(
+					Effect.provideService(Database, database),
+					Effect.catchCause((cause) => Effect.logError(failureMessage, cause)),
+					Effect.delay(SWEEP_INTERVAL),
+					Effect.forever,
+					Effect.withTracerEnabled(false),
+				),
+			);
+		yield* repeatedly(podSandboxes.pauseIdle, "Pausing idle sandboxes failed");
+		yield* repeatedly(podSandboxes.measureDisks, "Measuring sandboxes' disks failed");
 	}),
 ).pipe(Layer.provide(layer));
 
+/** The columns that record a sandbox's last disk measurement. */
+const MEASUREMENT_COLUMNS = {
+	diskUsage: sandboxTable.diskUsage,
+	diskMeasuredAt: sandboxTable.diskMeasuredAt,
+};
+
+/** The row's last disk measurement; the columns are null together until there is one. */
+function measuredDiskOf(
+	row: Pick<SandboxRow, "diskUsage" | "diskMeasuredAt">,
+): MeasuredDisk | undefined {
+	if (!row.diskUsage || !row.diskMeasuredAt) return undefined;
+	return { ...row.diskUsage, measuredAt: row.diskMeasuredAt };
+}
+
+/** The row, while it still records the same sandbox at the provider. */
+function sameSandbox(row: SandboxRow) {
+	return and(
+		eq(sandboxTable.id, row.id),
+		eq(sandboxTable.providerSandboxId, row.providerSandboxId),
+	);
+}
+
+/** A lease on the sandbox that is still in force at `now`. */
+function liveLease(now: Date) {
+	return sql`exists (select 1 from ${sandboxLease} where ${sandboxLease.sandboxId} = ${sandboxTable.id} and ${sandboxLease.expiresAt} > ${now})`;
+}
+
 /** No lease on the sandbox that is still in force at `now`. */
 function noLiveLease(now: Date) {
-	return sql`not exists (select 1 from ${sandboxLease} where ${sandboxLease.sandboxId} = ${sandboxTable.id} and ${sandboxLease.expiresAt} > ${now})`;
+	return sql`not ${liveLease(now)}`;
 }
 
 type SandboxRow = typeof sandboxTable.$inferSelect;
@@ -796,7 +975,20 @@ export type Status =
 			readonly peopleWatching: number;
 			/** Whether the enabled provider would make it from another image, or is another provider. */
 			readonly upgradeAvailable: boolean;
+			/** Its last measurement, if it has been measured. */
+			readonly disk?: MeasuredDisk;
 	  };
+
+/** How full a sandbox's disk was when it was measured. */
+export interface MeasuredDisk extends DiskUsage {
+	readonly measuredAt: Date;
+}
+
+/** The last measurement of a pod's sandbox's disk. */
+export interface PodDisk {
+	readonly podId: string;
+	readonly disk: MeasuredDisk;
+}
 
 const COPY_STEP = { timeout: "5 minutes", maxOutputCharacters: 4_000 } as const;
 

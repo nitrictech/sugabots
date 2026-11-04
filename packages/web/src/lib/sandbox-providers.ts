@@ -24,6 +24,23 @@ export function useSandboxProviders() {
 	});
 }
 
+/** How full the disks of the workspace's pods' sandboxes are, of those measured. */
+export function useSandboxDisks() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["sandbox-disks", workspaceId],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.sandboxProviders.disks({ params: { workspace: workspaceId } }),
+						{ signal },
+					)
+			: skipToken,
+		// They're measured every few minutes while the sandboxes run.
+		refetchInterval: 60_000,
+	});
+}
+
 /**
  * Whether the workspace's agents can be given a sandbox. Any member may read
  * it. Its key starts with the providers' key, so changing a provider refetches it.

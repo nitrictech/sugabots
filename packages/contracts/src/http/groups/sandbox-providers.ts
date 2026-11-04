@@ -3,6 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	newSandboxHostSchema,
 	newSandboxProviderSchema,
+	podSandboxDiskSchema,
 	sandboxAccessSchema,
 	sandboxHostSchema,
 	sandboxNetworkSettingsSchema,
@@ -18,6 +19,7 @@ import { Session } from "../middleware.ts";
 
 const root = "/workspaces/:workspace/sandbox-providers";
 const network = "/workspaces/:workspace/sandbox-network";
+const disks = "/workspaces/:workspace/sandbox-disks";
 const workspace = { workspace: workspaceIdOrSlugSchema };
 const provider = { workspace: workspaceIdOrSlugSchema, providerId: uuidSchema };
 
@@ -62,6 +64,12 @@ export class SandboxProvidersApi extends HttpApiGroup.make("sandboxProviders")
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
 			params: provider,
 			success: sandboxProviderTestResultSchema,
+			error: refused,
+		}),
+		/** How full the disks of the pods' sandboxes the person can see are, of those measured. */
+		HttpApiEndpoint.get("disks", disks, {
+			params: workspace,
+			success: Schema.Array(podSandboxDiskSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.get("network", network, {

@@ -2,7 +2,10 @@ import { posix } from "node:path";
 import {
 	attachmentNameSchema,
 	type FilePart,
+	formatDiskSize,
 	MAX_ATTACHMENTS_PER_MESSAGE,
+	sandboxDiskLevel,
+	sandboxDiskPercent,
 } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { tool } from "ai";
@@ -412,6 +415,16 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
 					.pipe(Effect.as({ written: absolute(place, path) })),
 			),
 	});
+}
+
+/**
+ * A warning for the turn's note when the sandbox's disk was close to full
+ * when last measured, so the agent frees space before it runs out, and stops
+ * when a command fails for lack of it, rather than trying again.
+ */
+export function diskNote(disk: PodSandboxes.MeasuredDisk | undefined): string | undefined {
+	if (!disk || sandboxDiskLevel(disk) === "normal") return undefined;
+	return `The pod's sandbox's disk was ${sandboxDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Every agent in the pod shares it, and once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the people in the thread that the sandbox's disk is full.`;
 }
 
 /**

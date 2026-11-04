@@ -1,4 +1,5 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
+import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { Effect } from "effect";
@@ -14,6 +15,7 @@ export const sandboxProviderRoutes = HttpApiBuilder.group(
 		Effect.gen(function* () {
 			const setup = yield* SandboxProviderSetup.Service;
 			const network = yield* SandboxNetwork.Service;
+			const podSandboxes = yield* PodSandboxSetup.Service;
 			return handlers
 				.handle("list", ({ params }) =>
 					setup.list(params.workspace).pipe(asSessionUser, asHttpError(sandboxProviderErrors)),
@@ -64,6 +66,9 @@ export const sandboxProviderRoutes = HttpApiBuilder.group(
 					setup
 						.test({ workspace: params.workspace, providerId: params.providerId })
 						.pipe(asSessionUser, asHttpError(sandboxProviderErrors)),
+				)
+				.handle("disks", ({ params }) =>
+					podSandboxes.disks(params.workspace).pipe(asSessionUser, asHttpError(refusals)),
 				)
 				.handle("network", ({ params }) =>
 					network.settings(params.workspace).pipe(asSessionUser, asHttpError(refusals)),

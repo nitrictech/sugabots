@@ -1,12 +1,13 @@
 export * as PodSandboxSetup from "./pod-sandbox-setup.ts";
 
-import type { PodSandbox } from "@sugabots/contracts";
+import type { PodSandbox, PodSandboxDisk, SandboxDisk } from "@sugabots/contracts";
 import { sandboxProviderPreset } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
+import { Visibility } from "../authorization/visibility.ts";
 import { serviceOperations } from "../database/database.ts";
 import type { UserFacing } from "../user-message.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
@@ -22,6 +23,10 @@ export interface Interface {
 	readonly get: (
 		podId: string,
 	) => Effect.Effect<PodSandbox, AuthorizationDenied, CurrentActor.Service>;
+	/** How full the disks of the sandboxes of the workspace's pods the actor sees are, of those measured. */
+	readonly disks: (
+		workspace: string,
+	) => Effect.Effect<PodSandboxDisk[], AuthorizationDenied, CurrentActor.Service>;
 	readonly reset: (
 		podId: string,
 	) => Effect.Effect<
@@ -50,6 +55,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("PodSandboxSetup");
 	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
 	const providers = yield* SandboxProviderRepository.Service;
 
@@ -74,6 +80,7 @@ export const make = Effect.gen(function* () {
 					turnsUsing: status.turnsUsing,
 					peopleWatching: status.peopleWatching,
 					upgradeAvailable: status.upgradeAvailable,
+					disk: status.disk ? shownDisk(status.disk) : null,
 				},
 				providerEnabled,
 				canManage,
@@ -93,6 +100,19 @@ export const make = Effect.gen(function* () {
 				Effect.flatMap(standingIn(podId, "pod.read"), ({ pod, canManage }) =>
 					shown(pod, canManage),
 				),
+			),
+
+		disks: (workspace) =>
+			operation(
+				"disks",
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+					const seen = new Set((yield* visibility.pods(workspaceId)).map(({ pod }) => pod.id));
+					const measured = yield* podSandboxes.disksIn(workspaceId);
+					return measured
+						.filter(({ podId }) => seen.has(podId))
+						.map(({ podId, disk }) => ({ podId, disk: shownDisk(disk) }));
+				}),
 			),
 
 		reset: (podId) =>
@@ -122,8 +142,17 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, PodSandboxes.layer, SandboxProviderRepository.layer]),
+	Layer.provide([
+		Authorization.layer,
+		Visibility.layer,
+		PodSandboxes.layer,
+		SandboxProviderRepository.layer,
+	]),
 );
+
+function shownDisk(disk: PodSandboxes.MeasuredDisk): SandboxDisk {
+	return { ...disk, measuredAt: disk.measuredAt.toISOString() };
+}
 
 /** No sandbox provider is enabled, so there's nothing to make a new sandbox with. */
 export class NoSandboxProvider extends Data.TaggedError("NoSandboxProvider") implements UserFacing {

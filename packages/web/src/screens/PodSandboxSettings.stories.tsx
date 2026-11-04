@@ -1,14 +1,34 @@
-import type { PodSandbox, PodSandboxNetwork } from "@sugabots/contracts";
+import type { PodSandbox, PodSandboxNetwork, SandboxDisk } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect } from "storybook/test";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { SettingsPage } from "@/ui/settings-page.tsx";
+import { storyBots } from "../story-app.tsx";
 import { PodSandboxSettings } from "./PodSandboxSettings.tsx";
 
 const podId = "0199a3a0-0000-7000-8000-000000000601";
 const sandboxUrl = `${import.meta.env.VITE_API_URL}/pods/${podId}/sandbox`;
+
+const [builder, reviewer] = storyBots;
+const bots = [builder, reviewer].filter((bot) => bot !== undefined);
+
+const GB = 1024 ** 3;
+const bytes = (gigabytes: number) => Math.round(gigabytes * GB);
+
+/** A 20 GB disk with `usedGB` of it used: two bots' homes, the threads, /tmp, and the system. */
+const diskWith = (usedGB: number): SandboxDisk => ({
+	usedBytes: bytes(usedGB),
+	totalBytes: bytes(20),
+	measuredAt: "2026-10-02T05:38:00.000Z",
+	folders: [
+		{ kind: "threads", bytes: bytes(usedGB * 0.45) },
+		{ kind: "home", agentId: builder?.id ?? "", bytes: bytes(usedGB * 0.25) },
+		{ kind: "temporary", bytes: bytes(usedGB * 0.1) },
+		{ kind: "home", agentId: reviewer?.id ?? "", bytes: bytes(usedGB * 0.05) },
+	],
+});
 
 const running: PodSandbox = {
 	sandbox: {
@@ -21,6 +41,7 @@ const running: PodSandbox = {
 		turnsUsing: 0,
 		peopleWatching: 0,
 		upgradeAvailable: false,
+		disk: diskWith(6.2),
 	},
 	providerEnabled: true,
 	canManage: true,
@@ -68,7 +89,7 @@ const meta = preview.meta({
 	title: "Views/PodSandboxSettings",
 	component: PodSandboxSettings,
 	tags: ["ai-generated"],
-	args: { podId, canManageNetwork: true },
+	args: { podId, bots, canManageNetwork: true },
 	parameters: { layout: "fullscreen", docs: { story: { inline: false, height: "520px" } } },
 	decorators: [
 		(Story, context) => (
@@ -100,6 +121,54 @@ export const Running = meta.story({
 		await expect(canvas.getByText("Reset")).toBeVisible();
 		await expect(await canvas.findByText("api.stripe.com")).toBeVisible();
 		await expect(canvas.getByLabelText("Add host")).toBeVisible();
+	},
+});
+
+/**
+ * Its disk, with what each bot's home, the threads' folders and /tmp take of
+ * it, largest first, and the rest the system's.
+ */
+export const Disk = meta.story({
+	play: async ({ canvas }) => {
+		const disk = await canvas.findByRole("region", { name: "Disk" });
+		await expect(within(disk).getByText("6.2 GB of 20 GB used")).toBeVisible();
+		await expect(within(disk).getByRole("meter", { name: "Disk used" })).toHaveValue(31);
+		await expect(within(disk).getByText("Thread folders")).toBeVisible();
+		await expect(within(disk).getByText(builder?.name ?? "")).toBeVisible();
+		await expect(within(disk).getByText("Everything else")).toBeVisible();
+		await expect(within(disk).queryByText(/Nearly full|Almost full/)).toBeNull();
+	},
+});
+
+/** Past 80%: the bar and the share turn amber, and the note says what to do. */
+export const DiskNearlyFull = meta.story({
+	beforeEach({ msw }) {
+		msw.use(answers(present({ disk: diskWith(16.6) })));
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("83%")).toBeVisible();
+		await expect(canvas.getByText(/^Nearly full/)).toBeVisible();
+	},
+});
+
+/** Past 90%: red, since commands that write are about to fail. */
+export const DiskAlmostFull = meta.story({
+	beforeEach({ msw }) {
+		msw.use(answers(present({ disk: diskWith(19.4) })));
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("97%")).toBeVisible();
+		await expect(canvas.getByText(/^Almost full/)).toBeVisible();
+	},
+});
+
+/** Made before disks were measured, or not on since: nothing to show yet. */
+export const DiskNotMeasured = meta.story({
+	beforeEach({ msw }) {
+		msw.use(answers(present({ disk: null })));
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("Not measured yet")).toBeVisible();
 	},
 });
 

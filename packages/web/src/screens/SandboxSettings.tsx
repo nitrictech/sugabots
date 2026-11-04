@@ -7,6 +7,7 @@ import {
 	type SandboxProviderSettings,
 	type SandboxProviderTestResult,
 	type SandboxProviderUpdate,
+	sandboxDiskShare,
 	sandboxE2bCpuCountSchema,
 	sandboxE2bMemoryGiBSchema,
 	sandboxProviderCatalog,
@@ -17,10 +18,11 @@ import { Schema } from "effect";
 import { useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import {
 	usePrepareSandboxTemplate,
+	useSandboxDisks,
 	useSandboxProviderActions,
 	useSandboxProviders,
 	useSandboxTemplate,
@@ -40,16 +42,18 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { DiskMeter, DiskPercent, diskSummary } from "./SandboxDisk.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
  * The workspace's computers, experimental: a switch for whether bots get a
  * Linux computer per pod to run commands on, which provider makes those
- * computers, that provider's account, what the computers may reach, and the
- * bots using one. A workspace may keep a provider configured for each preset;
- * the switch enables the chosen one, which disables any other. Code calls a
- * computer a sandbox; people read "computer".
+ * computers, that provider's account, what the computers may reach, the bots
+ * using one, and how full each pod's computer's disk is. A workspace may keep
+ * a provider configured for each preset; the switch enables the chosen one,
+ * which disables any other. Code calls a computer a sandbox; people read
+ * "computer".
  */
 
 const networkModes: readonly { value: SandboxNetworkMode; label: string }[] = [
@@ -200,6 +204,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 				}
 			/>
 			<BotsUsingAComputer />
+			<PodDisks />
 		</>
 	);
 }
@@ -234,6 +239,46 @@ function BotsUsingAComputer() {
 					sub={pod.name}
 					chevron
 					render={<Link {...agentSettingsLink({ pod, agent })} />}
+				/>
+			))}
+		</SettingsGroup>
+	);
+}
+
+/**
+ * How full each pod's computer's disk was when last measured, fullest first,
+ * each opening the pod's Computer page, which shows what fills it. Hidden
+ * until one has been measured.
+ */
+function PodDisks() {
+	const { data: disks } = useSandboxDisks();
+	const { data: pods } = usePods();
+	const podById = new Map(pods?.map((pod) => [pod.id, pod]));
+	const measured = (disks ?? [])
+		.flatMap(({ podId, disk }) => {
+			const pod = podById.get(podId);
+			return pod ? [{ pod, disk }] : [];
+		})
+		.toSorted((a, b) => sandboxDiskShare(b.disk) - sandboxDiskShare(a.disk));
+	if (measured.length === 0) return null;
+	return (
+		<SettingsGroup
+			label="Disk use by pod"
+			note="Measured every few minutes while each computer is on. Once a pod's disk fills, its bots' commands fail."
+		>
+			{measured.map(({ pod, disk }) => (
+				<SettingsRow
+					key={pod.id}
+					label={pod.name}
+					sub={
+						<>
+							<DiskMeter disk={disk} label={`${pod.name} disk used`} />
+							{diskSummary(disk)}
+						</>
+					}
+					trailing={<DiskPercent disk={disk} />}
+					chevron
+					render={<Link {...podSettingsPageLink(pod, "computer")} />}
 				/>
 			))}
 		</SettingsGroup>
