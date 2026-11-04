@@ -141,7 +141,11 @@ export function RoutinePanel({
 							aria-hidden
 							className={cn(
 								"size-1.5 shrink-0 rounded-full",
-								active ? "bg-success" : "bg-disabled-foreground",
+								active
+									? "bg-success"
+									: standing.pausedAfterFailures
+										? "bg-destructive-text"
+										: "bg-disabled-foreground",
 							)}
 						/>
 						<span className="flex-1 text-xs text-foreground">

@@ -11,7 +11,7 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
-import { outcomeOf, RunStatus } from "@/screens/RoutineRun.tsx";
+import { outcomeOf, type RunOutcome, RunStatus } from "@/screens/RoutineRun.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
@@ -209,6 +209,12 @@ export function RoutineRow({
 	const lastRun = useRecentRuns({ agentId: row.agent.id, routineId: row.routine.id }).data
 		?.items[0];
 	const paused = row.routine.state === "paused";
+	const status: RunOutcome | undefined = paused
+		? row.routine.pausedAfterFailures
+			? "pausedAfterFailures"
+			: "paused"
+		: lastRun && outcomeOf(lastRun.state);
+	const schedule = routine && scheduleLabel(routine);
 	return useRender({
 		render: render ?? <Link {...routineThreadLink(pod, row.routine.id)} />,
 		props: {
@@ -244,15 +250,14 @@ export function RoutineRow({
 							</span>
 							{lastRun && <ListTime at={lastRun.acceptedAt} />}
 						</span>
-						{paused ? (
-							<RunStatus outcome="paused" />
-						) : lastRun ? (
-							<RunStatus outcome={outcomeOf(lastRun.state)} />
-						) : (
-							<span className="truncate text-subtle-foreground text-xs">
-								{(routine && scheduleLabel(routine)) ?? "Not run yet"}
-							</span>
-						)}
+						<span className="flex min-w-0 items-center gap-3 text-xs">
+							{status && <RunStatus outcome={status} />}
+							{(schedule || !status) && (
+								<span className="min-w-0 truncate text-subtle-foreground">
+									{schedule ?? "Not run yet"}
+								</span>
+							)}
+						</span>
 					</span>
 				</>
 			),

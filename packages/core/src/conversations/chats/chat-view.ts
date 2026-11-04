@@ -225,6 +225,7 @@ export const make = Effect.gen(function* () {
 									name: row.routine.name,
 									state: row.routine.state,
 									failed: row.failed,
+									pausedAfterFailures: row.routine.pausedAfterFailuresAt !== null,
 								},
 								agent: toAgent(crew),
 								conversation: row.feed && toRoutineFeed(row.feed),

@@ -27,6 +27,7 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton, ROOMY_ON_PHONE } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** A kind of item in the feed, which the filter can narrow Inbox to. */
 type Kind = ActivityItem["kind"];
@@ -426,9 +427,11 @@ function InboxRow({
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
 				{item.unread && (
-					<span className="block size-1.5 rounded-full bg-foreground">
-						<span className="sr-only">Unread</span>
-					</span>
+					<Tooltip label="Unread" side="right">
+						<span className="block size-1.5 rounded-full bg-foreground">
+							<span className="sr-only">Unread</span>
+						</span>
+					</Tooltip>
 				)}
 			</span>
 			<span aria-hidden className="flex shrink-0">

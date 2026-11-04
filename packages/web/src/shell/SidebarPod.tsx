@@ -12,6 +12,7 @@ import { Locked, OnlyYou, PERSONAL_POD_PRIVACY_IN_FULL } from "@/shell/PersonalP
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** A pod the viewer reaches, with how its chats stand for them. */
 export interface PodStanding {
@@ -145,9 +146,11 @@ function PodNews({ standing }: { standing: PodStanding }) {
 	const { unreadMessages, needsApproval, failedRoutines } = standing;
 	if (needsApproval) {
 		return (
-			<span className="mr-2 size-1.5 shrink-0 rounded-full bg-foreground">
-				<span className="sr-only">Waiting for your approval</span>
-			</span>
+			<Tooltip label="Waiting for your approval" side="right">
+				<span className="mr-2 size-1.5 shrink-0 rounded-full bg-foreground">
+					<span className="sr-only">Waiting for your approval</span>
+				</span>
+			</Tooltip>
 		);
 	}
 	const news = [

@@ -288,6 +288,8 @@ export const listedRoutineSchema = Schema.Struct({
 		state: routineStateSchema,
 		/** Its latest run failed, and nothing has run it since. */
 		failed: Schema.Boolean,
+		/** It paused itself after runs in a row failed, rather than somebody pausing it. */
+		pausedAfterFailures: Schema.Boolean,
 	}),
 	/** The bot that runs it. */
 	agent: agentSchema,
