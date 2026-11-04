@@ -606,20 +606,23 @@ struct MessageReactionsView: View {
 	let toggle: (String) -> Void
 	let add: () -> Void
 
+	/// A chip's height: a fingertip's, as Slack's on a phone, larger than the web's.
+	private static let chipHeight: CGFloat = 32
+
 	var body: some View {
 		let reactions = message.reactions ?? []
 		if !reactions.isEmpty {
-			FlowLayout(spacing: 4) {
+			FlowLayout(spacing: 6) {
 				ForEach(reactions, id: \.emoji) { reaction in
 					let mine = reaction.people.contains { $0.id == userId }
 					Button { toggle(reaction.emoji) } label: {
-						HStack(spacing: 4) {
-							Text(reaction.emoji).font(.system(size: 14))
-							Text("\(reaction.people.count)").font(Typeface.rubik(12, .semibold)).monospacedDigit()
+						HStack(spacing: 5) {
+							Text(reaction.emoji).font(.system(size: 18))
+							Text("\(reaction.people.count)").font(Typeface.rubik(14, .semibold)).monospacedDigit()
 						}
 						.foregroundStyle(mine ? Palette.foreground : Palette.softForeground)
-						.padding(.horizontal, 8)
-						.frame(height: 24)
+						.padding(.horizontal, 11)
+						.frame(height: Self.chipHeight)
 						.background(mine ? Palette.reactionMine : Palette.card, in: Capsule())
 						.overlay(Capsule().strokeBorder(mine ? Palette.primary : Palette.chipStrong))
 					}
@@ -629,9 +632,9 @@ struct MessageReactionsView: View {
 				}
 				if addable {
 					Button(action: add) {
-						Icon(.smilePlus, size: 14, strokeWidth: 2)
+						Icon(.smilePlus, size: 18, strokeWidth: 2)
 							.foregroundStyle(Palette.mutedForeground)
-							.frame(width: 48, height: 24)
+							.frame(width: 52, height: Self.chipHeight)
 							.overlay(Capsule().strokeBorder(Palette.chipStrong))
 					}
 					.buttonStyle(.plain)
