@@ -13,6 +13,7 @@ import {
 	providerSignInCompletionSchema,
 	providerSignInOutcomeSchema,
 	providerSignInStartedSchema,
+	providerSwitchOffSchema,
 	providerTestResultSchema,
 	workspaceModelsResponseSchema,
 } from "../../model-providers.ts";
@@ -73,6 +74,12 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 		}),
 		HttpApiEndpoint.delete("remove", `${root}/:providerId`, {
 			params: provider,
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		HttpApiEndpoint.post("switchOff", `${root}/:providerId/switch-off`, {
+			params: provider,
+			payload: providerSwitchOffSchema,
+			success: movedCountSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
