@@ -324,86 +324,33 @@ enum MarkdownInline {
 				attributed[run.range].underlineStyle = .single
 			}
 		}
-		Mentions.chip(in: &attributed, size: size, mentionable: mentionable)
+		Mentions.chip(in: &attributed, size: size, mentionable: mentionable.map(MentionTarget.participant))
 		return attributed
 	}
 }
 
-/// Mentions in text, as `splitAroundMentions` finds them: `@handle` for a
-/// person or bot somebody may mention here.
-enum Mentions {
-	/// What may not come just before a mention's `@`, as the inside of a
-	/// character class, as `NOT_BEFORE_MENTION` in `@sugabots/contracts`: a word
-	/// character, so an email address is not a mention, and a `.` or `@`, so
-	/// neither is a domain or `@@`. Spelled out rather than as `\w`, which in
-	/// Swift takes in letters beyond ASCII where JavaScript's does not. Regex
-	/// literals don't compose, so the patterns below are built from strings.
-	private static let notBeforeMention = "A-Za-z0-9_.@"
-	private static let notBeforeMentionCharacter = try! Regex("[\(notBeforeMention)]")
-	/// A handle as a mention writes it: letters and digits, in runs joined by single hyphens.
-	private static let handle = "[a-z0-9]+(?:-[a-z0-9]+)*"
-
-	/// `@handle`, as `MENTION` in `@sugabots/contracts`. Swift's regexes can't
-	/// look behind, so what comes before the `@` is matched as the first group,
-	/// and the handle, without its `@`, is the second.
-	private static let pattern = try! Regex(
-		"(^|[^\(notBeforeMention)])@(\(handle))",
-		as: (Substring, Substring, Substring).self
-	).ignoresCase()
-
-	/// A mention a space or line break has finished, as the composer turns into
-	/// a chip: what comes before the `@` as the first group, then `@handle`.
-	static let finished = try! Regex(
-		"(^|[^\(notBeforeMention)])(@\(handle))(?=\\s)",
-		as: (Substring, Substring, Substring).self
-	).ignoresCase()
-
-	/// Whether the `@` at `index` in `text` can start a mention, as the contract's `canStartMention`.
-	static func canStart(at index: String.Index, in text: String) -> Bool {
-		guard text[index] == "@" else { return false }
-		guard index > text.startIndex else { return true }
-		return String(text[text.index(before: index)]).wholeMatch(of: notBeforeMentionCharacter) == nil
-	}
-
-	/// The handles `text` mentions, lowercased, in order, as the contract's `mentionedHandles`.
-	static func handles(in text: String) -> [String] {
-		var found: [String] = []
-		for match in text.matches(of: pattern) where !found.contains(String(match.2).lowercased()) {
-			found.append(String(match.2).lowercased())
-		}
-		return found
-	}
-
-	/// Those among `mentionable` whom `text` mentions.
-	static func mentioned(in text: String, among mentionable: [ThreadParticipant]) -> [ThreadParticipant] {
-		let named = handles(in: text)
-		return mentionable.filter { named.contains($0.handle) }
-	}
-
-	/// The bot `text` mentions first among `crew`, whom sending from a pod's
-	/// channel starts a thread with, as the web's `firstBotNamed`; any named
-	/// after it are only mentioned.
-	static func firstBot(in text: String, among crew: [ThreadParticipant]) -> AgentParticipant? {
-		let bots = crew.compactMap(\.agent)
-		return handles(in: text).lazy.compactMap { handle in bots.first { $0.handle == handle } }.first
-	}
-
+extension Mentions {
 	/// Marks each mention of somebody in `mentionable` as a chip: a bot by
-	/// its name, a person by `@handle`, in bold on the chip colour.
-	static func chip(in attributed: inout AttributedString, size: CGFloat, mentionable: [ThreadParticipant]) {
-		let plain = String(attributed.characters)
-		for match in plain.matches(of: pattern).reversed() {
-			let handle = String(match.2).lowercased()
-			guard let member = mentionable.first(where: { $0.handle == handle }) else { continue }
-			let start = plain.distance(from: plain.startIndex, to: match.2.startIndex) - 1
-			let length = handle.count + 1
-			let lower = attributed.index(attributed.startIndex, offsetByCharacters: start)
-			let upper = attributed.index(lower, offsetByCharacters: length)
-			var chip = AttributedString(member.agent != nil ? "\u{2009}\(member.name)\u{2009}" : "\u{2009}@\(member.handle)\u{2009}")
+	/// its name, a person or everyone by `@handle`, in bold on the chip colour.
+	static func chip(in attributed: inout AttributedString, size: CGFloat, mentionable: [MentionTarget]) {
+		var chipped = AttributedString()
+		var offset = 0
+		for (index, part) in split(String(attributed.characters)).enumerated() {
+			let written = index % 2 == 0 ? part : "@\(part)"
+			let start = attributed.index(attributed.startIndex, offsetByUnicodeScalars: offset)
+			let end = attributed.index(start, offsetByUnicodeScalars: written.unicodeScalars.count)
+			offset += written.unicodeScalars.count
+			guard index % 2 == 1, let target = target(withHandle: part, among: mentionable) else {
+				chipped.append(attributed[start..<end])
+				continue
+			}
+			let name = if case let .participant(.agent(agent)) = target { agent.name } else { "@\(target.handle)" }
+			var chip = AttributedString("\u{2009}\(name)\u{2009}")
 			chip.font = Typeface.rubik(size, .semibold)
 			chip.foregroundColor = Palette.foreground
 			chip.backgroundColor = Palette.chip
-			attributed.replaceSubrange(lower..<upper, with: chip)
+			chipped.append(chip)
 		}
+		attributed = chipped
 	}
 }

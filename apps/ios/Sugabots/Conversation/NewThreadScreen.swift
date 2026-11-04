@@ -110,7 +110,8 @@ struct NewThreadScreen: View {
 			label: threadWith.map { "Message \($0.name)" } ?? "Message \(pod.name)",
 			placeholder: placeholder,
 			text: $draft,
-			mentionable: (startsFrom?.mentionable ?? []).filter { $0.id != store.user.id },
+			// What is sent here starts a conversation, so `@here` and `@channel` are offered as in one.
+			mentionable: Mentions.withGroups((startsFrom?.mentionable ?? []).filter { $0.id != store.user.id }, threadType: .conversation),
 			attachments: attachments,
 			sending: starting,
 			error: failed ? "The thread was not started. Try again." : nil,

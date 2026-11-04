@@ -9,7 +9,7 @@ import UIKit
 struct MentionEditor: UIViewRepresentable {
 	@Binding var text: String
 	@Binding var isFocused: Bool
-	let mentionable: [ThreadParticipant]
+	let mentionable: [MentionTarget]
 	/// The longest a draft may run, as the web's `maxLength`.
 	var maxLength = 20_000
 	/// How many lines it grows to before it scrolls.
@@ -110,8 +110,8 @@ struct MentionEditor: UIViewRepresentable {
 					caretLocation = rendered.length + (segment.isMention ? (caret == location ? 0 : 1) : caret - location)
 					placed = true
 				}
-				if let member = segment.member {
-					rendered.append(Self.chip(for: member, handle: segment.text, traits: view.traitCollection))
+				if let target = segment.target {
+					rendered.append(Self.chip(for: target, handle: segment.text, traits: view.traitCollection))
 				} else {
 					rendered.append(NSAttributedString(string: segment.text, attributes: Self.plainAttributes))
 				}
@@ -128,24 +128,23 @@ struct MentionEditor: UIViewRepresentable {
 
 		struct Segment {
 			let text: String
-			var member: ThreadParticipant?
-			var isMention: Bool { member != nil }
+			var target: MentionTarget?
+			var isMention: Bool { target != nil }
 		}
 
 		/// `plain` split around its finished mentions of somebody in `mentionable`.
-		static func segments(of plain: String, mentionable: [ThreadParticipant]) -> [Segment] {
+		static func segments(of plain: String, mentionable: [MentionTarget]) -> [Segment] {
 			var segments: [Segment] = []
 			var rest = plain[...]
 			while let match = rest.firstMatch(of: Mentions.finished) {
-				let handle = String(match.2.dropFirst()).lowercased()
 				let before = rest[..<match.2.startIndex]
-				guard let member = mentionable.first(where: { $0.handle == handle }) else {
+				guard let target = Mentions.target(withHandle: String(match.2.dropFirst()), among: mentionable) else {
 					segments.append(Segment(text: String(rest[..<match.2.endIndex])))
 					rest = rest[match.2.endIndex...]
 					continue
 				}
 				if !before.isEmpty { segments.append(Segment(text: String(before))) }
-				segments.append(Segment(text: String(match.2), member: member))
+				segments.append(Segment(text: String(match.2), target: target))
 				rest = rest[match.2.endIndex...]
 			}
 			if !rest.isEmpty { segments.append(Segment(text: String(rest))) }
@@ -178,13 +177,13 @@ struct MentionEditor: UIViewRepresentable {
 			return length
 		}
 
-		/// A mention as a chip: a bot's face and name, or a person's `@handle`, on
+		/// A mention as a chip: a bot's face and name, or a person's or everyone's `@handle`, on
 		/// the chip colour, drawn in the appearance of the text it sits in. That is
 		/// the theme chosen on You, which needn't be the device's, so `traits` are
 		/// the text view's rather than whatever traits are current.
-		static func chip(for member: ThreadParticipant, handle: String, traits: UITraitCollection) -> NSAttributedString {
+		static func chip(for target: MentionTarget, handle: String, traits: UITraitCollection) -> NSAttributedString {
 			let scheme: ColorScheme = traits.userInterfaceStyle == .dark ? .dark : .light
-			let renderer = ImageRenderer(content: MentionChipImage(member: member).environment(\.colorScheme, scheme))
+			let renderer = ImageRenderer(content: MentionChipImage(target: target).environment(\.colorScheme, scheme))
 			renderer.scale = traits.displayScale
 			let attachment = NSTextAttachment()
 			var drawn: UIImage?
@@ -208,15 +207,15 @@ extension NSAttributedString.Key {
 
 /// A mention chip as the web's `MentionChip` draws it in the composer.
 private struct MentionChipImage: View {
-	let member: ThreadParticipant
+	let target: MentionTarget
 
 	var body: some View {
 		HStack(spacing: 4) {
-			if let agent = member.agent {
+			if case let .participant(.agent(agent)) = target {
 				BotFace(look: agent.look, size: 14)
 				Text(agent.name)
 			} else {
-				Text("@\(member.handle)")
+				Text("@\(target.handle)")
 			}
 		}
 		.font(Typeface.rubik(16, .semibold))

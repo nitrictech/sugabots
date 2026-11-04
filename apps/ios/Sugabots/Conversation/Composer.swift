@@ -114,7 +114,8 @@ struct Composer: View {
 	/// What the empty draft says, when it isn't the label.
 	var placeholder: String?
 	@Binding var text: String
-	let mentionable: [ThreadParticipant]
+	/// Whom an `@` can name: people and bots, and where it would notify somebody, everyone.
+	let mentionable: [MentionTarget]
 	var replyingTo: MessageReplyTo?
 	var cancelReply: () -> Void = {}
 	let attachments: ComposerAttachments?
@@ -257,7 +258,7 @@ struct Composer: View {
 	}
 
 	/// The `@` being typed at the draft's end, and who it could mention.
-	private var mentionBeingTyped: (start: String.Index, query: String, matches: [ThreadParticipant])? {
+	private var mentionBeingTyped: (start: String.Index, query: String, matches: [MentionTarget])? {
 		guard let at = text.lastIndex(of: "@") else { return nil }
 		let offset = text.distance(from: text.startIndex, to: at)
 		guard dismissedMentionAt != offset else { return nil }
@@ -265,7 +266,7 @@ struct Composer: View {
 		let query = String(text[text.index(after: at)...])
 		guard !query.contains("\n"), !query.hasPrefix(" "), !query.contains("@") else { return nil }
 		let lowered = query.lowercased()
-		let matches = mentionable.filter { $0.name.lowercased().contains(lowered) || $0.handle.contains(lowered) }
+		let matches = mentionable.filter { $0.handle.contains(lowered) || $0.participant?.name.lowercased().contains(lowered) == true }
 		return (at, query, matches)
 	}
 
@@ -286,8 +287,8 @@ struct Composer: View {
 		EmojiShortcodes.remember(emoji)
 	}
 
-	private func choose(_ member: ThreadParticipant, replacing mention: (start: String.Index, query: String, matches: [ThreadParticipant])) {
-		text = String(text[..<mention.start]) + "@\(member.handle) "
+	private func choose(_ target: MentionTarget, replacing mention: (start: String.Index, query: String, matches: [MentionTarget])) {
+		text = String(text[..<mention.start]) + "@\(target.handle) "
 	}
 
 	/// A file the person chose, read while its security scope is open.
@@ -379,8 +380,8 @@ private struct AttachmentTray: View {
 
 /// People and bots matching the `@` being typed, over the composer.
 private struct SuggestionList: View {
-	let matches: [ThreadParticipant]
-	let choose: (ThreadParticipant) -> Void
+	let matches: [MentionTarget]
+	let choose: (MentionTarget) -> Void
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 0) {
@@ -392,13 +393,20 @@ private struct SuggestionList: View {
 				.padding(.bottom, 4)
 			ScrollView {
 				VStack(spacing: 0) {
-					ForEach(matches, id: \.id) { member in
-						Button { choose(member) } label: {
+					ForEach(matches, id: \.key) { target in
+						Button { choose(target) } label: {
 							HStack(spacing: 10) {
-								ParticipantFace(participant: member, size: 26)
+								if let member = target.participant {
+									ParticipantFace(participant: member, size: 26)
+								} else {
+									Icon(.atSign, size: 14, strokeWidth: 2)
+										.foregroundStyle(Palette.mutedForeground)
+										.frame(width: 26, height: 26)
+										.background(Palette.chip, in: Circle())
+								}
 								VStack(alignment: .leading, spacing: 1) {
-									Text(member.name).font(Typeface.rubik(14, .medium)).foregroundStyle(Palette.foreground).lineLimit(1)
-									Text(member.agent != nil ? "Bot" : "@\(member.handle)").font(Typeface.rubik(12)).foregroundStyle(Palette.mutedForeground).lineLimit(1)
+									Text(target.participant?.name ?? "@\(target.handle)").font(Typeface.rubik(14, .medium)).foregroundStyle(Palette.foreground).lineLimit(1)
+									Text(subtitle(target)).font(Typeface.rubik(12)).foregroundStyle(Palette.mutedForeground).lineLimit(1)
 								}
 								Spacer(minLength: 0)
 							}
@@ -421,6 +429,15 @@ private struct SuggestionList: View {
 		.shadow(color: .black.opacity(0.3), radius: 16, y: 6)
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel("People and bots to mention")
+	}
+
+	/// Under a suggestion's name: Bot, a person's handle, or what mentioning everyone does.
+	private func subtitle(_ target: MentionTarget) -> String {
+		switch target {
+		case .group: "Notify everyone who can see this"
+		case .participant(.agent): "Bot"
+		case let .participant(participant): "@\(participant.handle)"
+		}
 	}
 }
 

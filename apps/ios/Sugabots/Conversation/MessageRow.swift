@@ -193,7 +193,7 @@ struct MessageRow: View {
 				if let agent {
 					MessageMarkdown(text: text, mentionable: context.mentionable, palette: BotLooks.palettes[agent.color.rawValue], size: compact ? 14.5 : 15)
 				} else {
-					Text(MarkdownInline.plainWithMentions(text, mentionable: context.mentionable, size: compact ? 14.5 : 15))
+					Text(MarkdownInline.plainWithMentions(text, by: message.author, mentionable: context.mentionable, size: compact ? 14.5 : 15))
 						.lineSpacing(3.5)
 						.foregroundStyle(Palette.bodyForeground)
 						// Not selectable: holding a message brings up its actions, Copy among them.
@@ -659,11 +659,14 @@ struct MessageReactionsView: View {
 }
 
 extension MarkdownInline {
-	/// A person's words as written, with mentions as chips.
-	static func plainWithMentions(_ text: String, mentionable: [ThreadParticipant], size: CGFloat = 15) -> AttributedString {
+	/// Words as written, with mentions as chips. Only a person's can mention
+	/// everyone, with `@here` or `@channel`: a bot's or a routine's notify nobody.
+	static func plainWithMentions(_ text: String, by author: MessageAuthor, mentionable: [ThreadParticipant], size: CGFloat = 15) -> AttributedString {
 		var attributed = AttributedString(text)
 		attributed.font = Typeface.rubik(size)
-		Mentions.chip(in: &attributed, size: size, mentionable: mentionable)
+		var targets = mentionable.map(MentionTarget.participant)
+		if case .person = author { targets += Mentions.groupHandles.map { .group(handle: $0) } }
+		Mentions.chip(in: &attributed, size: size, mentionable: targets)
 		return attributed
 	}
 }

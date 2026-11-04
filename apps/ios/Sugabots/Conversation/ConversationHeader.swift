@@ -324,7 +324,7 @@ private struct StartedFrom: View {
 		VStack(alignment: .leading, spacing: 4) {
 			Text(message.author.name).font(Typeface.rubik(14, .semibold)).foregroundStyle(Palette.foreground)
 			if !message.content.isEmpty {
-				Text(MarkdownInline.plainWithMentions(message.content, mentionable: mentionable))
+				Text(MarkdownInline.plainWithMentions(message.content, by: message.author, mentionable: mentionable))
 					.font(Typeface.rubik(15))
 					.lineSpacing(4)
 					.foregroundStyle(Palette.softForeground)
