@@ -64,6 +64,7 @@ struct MessageRow: View {
 		let calls = message.parts.compactMap { if case let .toolCall(call) = $0 { call } else { nil } }
 		let files = message.files
 		let shows = !calls.isEmpty || !files.isEmpty || segments.contains { !$0.isEmptyText }
+		let held = heldActions(words: segments.compactMap(\.text).joined(separator: "\n\n"))
 		if message.status != .streaming || shows {
 			HStack(alignment: .top, spacing: compact ? 12 : 14) {
 				face
@@ -109,7 +110,7 @@ struct MessageRow: View {
 				timeTapped.toggle()
 			}
 			.onLongPressGesture(minimumDuration: 0.35) {
-				guard hasActions(words: segments.compactMap(\.text).joined()) else { return }
+				guard held != nil else { return }
 				UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 				holding = true
 			}
@@ -127,7 +128,7 @@ struct MessageRow: View {
 					pickingReaction = true
 				}
 			}) {
-				actionsSheet(words: segments.compactMap(\.text).joined(separator: "\n\n"))
+				if let held { held }
 			}
 			.sheet(isPresented: $pickingReaction) {
 				EmojiPicker(full: reactionEmoji.count >= EmojiPicker.maxReactionEmojiPerMessage, used: reactionEmoji) { emoji in
@@ -241,13 +242,9 @@ struct MessageRow: View {
 		actions.react?(message, emoji)
 	}
 
-	/// Whether holding the message has anything to offer, given its `words`.
-	private func hasActions(words: String) -> Bool {
-		finished && (actions.react != nil || actions.reply != nil || actions.startThread != nil) || !words.isEmpty
-	}
-
-	private func actionsSheet(words: String) -> some View {
-		MessageActionsSheet(
+	/// What holding the message offers, given its `words`; nil when it offers nothing.
+	private func heldActions(words: String) -> MessageActionsSheet? {
+		let sheet = MessageActionsSheet(
 			react: finished && actions.react != nil ? { emoji in
 				holding = false
 				addReaction(emoji)
@@ -264,6 +261,7 @@ struct MessageRow: View {
 				toaster.show("Copied")
 			}
 		)
+		return sheet.isEmpty ? nil : sheet
 	}
 }
 
@@ -277,6 +275,8 @@ private struct MessageActionsSheet: View {
 	let startThread: (() -> Void)?
 	let copy: (() -> Void)?
 	@State private var height: CGFloat = 240
+
+	var isEmpty: Bool { react == nil && reply == nil && startThread == nil && copy == nil }
 
 	/// How many emoji the quick row offers before the picker's button.
 	private static let quickCount = 5
