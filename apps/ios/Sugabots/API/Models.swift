@@ -31,14 +31,8 @@ extension PodPermissions {
 }
 
 extension Agent {
-	var look: BotLook { BotLook(color: color.rawValue, face: face.rawValue, shape: shape.rawValue) }
-
 	/// Its description, or nil when it has none or it was left empty.
 	var givenDescription: String? { description.flatMap { $0.isEmpty ? nil : $0 } }
-}
-
-extension AgentParticipant {
-	var look: BotLook { BotLook(color: color.rawValue, face: face.rawValue, shape: shape.rawValue) }
 }
 
 extension WorkspaceModel: Identifiable {

@@ -106,6 +106,14 @@ struct BotLook: Hashable {
 	var shape: String
 }
 
+extension Agent {
+	var look: BotLook { BotLook(color: color.rawValue, face: face.rawValue, shape: shape.rawValue) }
+}
+
+extension AgentParticipant {
+	var look: BotLook { BotLook(color: color.rawValue, face: face.rawValue, shape: shape.rawValue) }
+}
+
 /// A person's initial on a grey disc, covered by their picture when they have
 /// one, or else their Gravatar when their email has one, as the web draws them.
 struct PersonAvatar: View {
