@@ -279,9 +279,9 @@ private struct MessageActionsSheet: View {
 	var isEmpty: Bool { react == nil && reply == nil && startThread == nil && copy == nil }
 
 	/// How many emoji the quick row offers before the picker's button.
-	private static let quickCount = 5
+	private static let quickCount = NativeConstants.quickReactionCount
 	/// What fills the quick row after the emoji chosen lately on this device.
-	private static let usualReactions = ["👍", "❤️", "😂", "🎉", "👀"]
+	private static let usualReactions = NativeConstants.usualReactions
 
 	private var quick: [String] {
 		var seen = Set<String>()
@@ -619,7 +619,7 @@ struct MessageReactionsView: View {
 	let add: () -> Void
 
 	/// A chip's height: a fingertip's, as Slack's on a phone, larger than the web's.
-	private static let chipHeight: CGFloat = 32
+	private static let chipHeight = NativeConstants.reactionChipHeight
 
 	var body: some View {
 		let reactions = message.reactions ?? []

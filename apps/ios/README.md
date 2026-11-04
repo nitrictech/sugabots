@@ -7,7 +7,7 @@ A native SwiftUI app for iPhone (iOS 17+) that copies the web app's phone layout
 - **Settings**, **Routines**, **Artifacts**, **New bot**, **New thread** and the signed-out screens follow their web pages.
 - A bot's **live desktop** is the web's own phone desktop page in a web view, signed in with the app's session cookie.
 
-When the web changes, compare the page in `packages/web/src` and change its Swift copy to match. The generated files below come straight from the web's packages and the API.
+When the web changes, compare the page in `packages/web/src` and change its Swift copy to match. The generated files below come straight from the web's packages and the API. Where the app deliberately differs from the web, [`apps/NATIVE.md`](../NATIVE.md) says how and why, and the values are in `apps/native-constants.json`.
 
 ## The API
 
@@ -66,6 +66,7 @@ These files are generated, each by its script in `scripts/`, from the web's pack
 | `generate-limits.ts` | `API/Limits.generated.swift` | the limits in `@sugabots/contracts`, including the screens' own in `client-limits.ts` |
 | `generate-catalogs.ts` | `API/Catalogs.generated.swift` | the search and computer provider catalogs, role labels and webhook prefixes in `@sugabots/contracts`; the web's words and lists in `packages/web/src/lib` (`notification-choices.ts`, `model-makers.ts`, `tool-access-words.ts`, `routine-trigger-words.ts`, `artifact-kind-files.ts`, `provider-hues.ts`) |
 | `generate-artifact-pages.ts` | `Artifacts/ArtifactPages.generated.swift` | `artifact-pages.ts` in `@sugabots/contracts`, `lib/page-frame.ts`, and `app.css`'s colours |
+| `generate-native-constants.ts` | `Design/NativeConstants.generated.swift` | `apps/native-constants.json` |
 
 The web modules these read are plain data, imported by the web's components and by the scripts, which Node runs as they are: they import nothing but types, so no React and no `@/` paths. Each script builds its data apart from the Swift it writes, so another app's copy can be written from the same data.
 | `generate-bot-looks.ts` | `Design/BotLooks.generated.swift` | `@sugabots/avatars`, the pod palette |

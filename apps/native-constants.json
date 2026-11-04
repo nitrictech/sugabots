@@ -1,0 +1,50 @@
+{
+	"hostedWorkspaceEnding": {
+		"value": ".sugabots.ai",
+		"about": "What sign-in writes after a workspace's name: a hosted workspace is at [name].sugabots.ai."
+	},
+	"quickReactionCount": {
+		"value": 5,
+		"unit": "count",
+		"about": "How many emoji a held message's actions offer before the button for the picker."
+	},
+	"usualReactions": {
+		"value": ["👍", "❤️", "😂", "🎉", "👀"],
+		"about": "What fills the quick reactions after the emoji chosen lately on this device."
+	},
+	"reactionChipHeight": {
+		"value": 32,
+		"unit": "points",
+		"about": "A reaction chip's height under a message: a fingertip's, as Slack's on a phone."
+	},
+	"headerFaceSize": {
+		"value": 32,
+		"unit": "points",
+		"about": "A face in a conversation's title pill: 6 points inside its rounded end, and 6 over and under."
+	},
+	"headerPillHeight": {
+		"value": 44,
+		"unit": "points",
+		"about": "How tall a conversation's title pill is, after Slack's."
+	},
+	"headerGapBelowIsland": {
+		"value": 8,
+		"unit": "points",
+		"about": "The gap a conversation's header keeps below the Dynamic Island."
+	},
+	"tabBarSink": {
+		"value": 12,
+		"unit": "points",
+		"about": "How far the tab bar reaches down into the home indicator's band, as Slack's does."
+	},
+	"barSideInset": {
+		"value": 21,
+		"unit": "points",
+		"about": "How far the tab bar and the composer sit in from the screen's sides."
+	},
+	"keyboardGap": {
+		"value": 8,
+		"unit": "points",
+		"about": "The space between the composer and the keyboard, backed by frost."
+	}
+}

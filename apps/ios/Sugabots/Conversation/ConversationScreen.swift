@@ -77,7 +77,7 @@ private struct ConversationContent: View {
 	private static let foot = "foot"
 
 	/// The space between the composer and the keyboard, over the hint row's own.
-	private static let keyboardGap: CGFloat = 8
+	private static let keyboardGap = NativeConstants.keyboardGap
 	/// How long a message jumped to stays highlighted.
 	private static let pointedOutFor: Duration = .seconds(2)
 	/// The space over the first message, under the floating header.

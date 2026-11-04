@@ -61,7 +61,7 @@ struct SignInScreen: View {
 /// the address its server is under. A hosted workspace is `[name].sugabots.ai`;
 /// a self-hosted server has its own ending, such as `.yourcompany.com`.
 struct WorkspaceAddress: Equatable {
-	static let hostedEnding = ".sugabots.ai"
+	static let hostedEnding = NativeConstants.hostedWorkspaceEnding
 
 	var name: String
 	var ending: String

@@ -23,7 +23,7 @@ struct ConversationHeader: View {
 	@Environment(\.dismiss) private var dismiss
 
 	/// A face in the title pill: 6 points inside its rounded end, and 6 over and under in its 44.
-	private static let faceSize: CGFloat = 32
+	private static let faceSize = NativeConstants.headerFaceSize
 
 	var body: some View {
 		HStack(spacing: 8) {
@@ -190,7 +190,7 @@ private struct TitleRow<Face: View>: View {
 			// A face sits close to the pill's round end; text alone gets the same inset as the other end.
 			.padding(.leading, Face.self == EmptyView.self ? 16 : 6)
 			.padding(.trailing, 16)
-			.frame(height: 44)
+			.frame(height: NativeConstants.headerPillHeight)
 			.contentShape(Capsule())
 		}
 		// Glass that fills a step darker while pressed, as Back does; the plain style would fade

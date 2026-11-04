@@ -110,12 +110,17 @@ enum WindowInsets {
 
 	/// How far the tab bar reaches down into the home indicator's band, as
 	/// Slack's does, leaving the content more room.
-	static let barReach: CGFloat = 12
+	static let barReach = NativeConstants.tabBarSink
 
-	/// How far the header rises into the safe area at the top. The Dynamic
-	/// Island ends 11 points above the safe area's edge, and the header keeps 8
-	/// points below it, so it rises 3; a notch or status bar gives nothing.
-	static var headerRise: CGFloat { current.top > 47 ? 3 : 0 }
+	/// How far the header rises into the safe area at the top: as far as keeps
+	/// it `headerGapBelowIsland` below the Dynamic Island, which ends
+	/// `dynamicIslandClearance` above the safe area's edge. A notch or status bar gives nothing.
+	static var headerRise: CGFloat {
+		current.top > 47 ? dynamicIslandClearance - NativeConstants.headerGapBelowIsland : 0
+	}
+
+	/// How far above the safe area's top edge the Dynamic Island ends.
+	private static let dynamicIslandClearance: CGFloat = 11
 
 	/// How far the tab bar sinks into the safe area at the foot: up to `barReach`,
 	/// keeping 8 points off the screen's edge.
@@ -123,7 +128,7 @@ enum WindowInsets {
 }
 
 /// How far a page's side bars (the tab bar, the composer) sit in from the screen's edges.
-let barSideInset: CGFloat = 21
+let barSideInset = NativeConstants.barSideInset
 
 extension View {
 	/// The gap above a page's header: see `PageTopPadding`. Pages take 12

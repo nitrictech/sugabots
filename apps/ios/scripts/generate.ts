@@ -17,6 +17,7 @@ import * as connectionMarks from "./generate-connection-marks.ts";
 import * as emoji from "./generate-emoji.ts";
 import * as limits from "./generate-limits.ts";
 import * as lucideIcons from "./generate-lucide-icons.ts";
+import * as nativeConstants from "./generate-native-constants.ts";
 import * as palette from "./generate-palette.ts";
 import * as providerLogos from "./generate-provider-logos.ts";
 import { iosOnly, type RegisteredGenerator, register, targetRoots } from "./generated-files.ts";
@@ -32,6 +33,7 @@ export const generators: Record<string, RegisteredGenerator> = {
 	"generate-emoji.ts": iosOnly(emoji.generate),
 	"generate-limits.ts": iosOnly(limits.generate),
 	"generate-lucide-icons.ts": iosOnly(lucideIcons.generate),
+	"generate-native-constants.ts": iosOnly(nativeConstants.generate),
 	"generate-palette.ts": iosOnly(palette.generate),
 	"generate-provider-logos.ts": iosOnly(providerLogos.generate),
 };
