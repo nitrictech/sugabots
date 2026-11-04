@@ -28,7 +28,7 @@ struct SignInScreen: View {
 			case .workspace:
 				WorkspaceStep(address: $address, onBack: { page = .welcome }) { page = .form }
 			case .form:
-				LogInForm(server: address.server, workspace: address.resolved, isNew: $isNew, onBack: { page = .workspace }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
+				LogInForm(workspace: address.resolved, isNew: $isNew, onBack: { page = .workspace }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
 			case .forgotPassword:
 				ForgotPassword(server: address.server) { page = .form }
 			case let .unverified(email):
@@ -348,8 +348,7 @@ private struct Welcome: View {
 /// Logging in, or making an account.
 @MainActor
 private struct LogInForm: View {
-	let server: String
-	/// Where this signs in, shown under the title.
+	/// Where this signs in, shown under the title, and whose server it asks.
 	let workspace: WorkspaceAddress
 	@Binding var isNew: Bool
 	let onBack: () -> Void
@@ -421,11 +420,11 @@ private struct LogInForm: View {
 		Task {
 			do {
 				if isNew {
-					if try await !session.signUp(server: server, name: name, email: email, password: password) {
+					if try await !session.signUp(server: workspace.server, name: name, email: email, password: password) {
 						onUnverified(email)
 					}
 				} else {
-					try await session.signIn(server: server, email: email, password: password)
+					try await session.signIn(server: workspace.server, email: email, password: password)
 				}
 			} catch let failure as APIFailure where failure.isEmailUnverified {
 				// Refusing this attempt has already resent the link.
