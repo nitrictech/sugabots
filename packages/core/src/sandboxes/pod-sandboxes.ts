@@ -578,6 +578,13 @@ export const make = Effect.gen(function* () {
 				const measuredBefore = DateTime.toDateUtc(
 					DateTime.subtractDuration(now, DISK_MEASUREMENT_INTERVAL),
 				);
+				// A sandbox nobody has used since its last measurement isn't measured
+				// again. Its disk barely changes, and opening one can postpone the
+				// provider's own pause, the backstop for when ours fails.
+				const usedSinceMeasured = or(
+					liveLease(DateTime.toDateUtc(now)),
+					gt(sandboxTable.lastUsedAt, sandboxTable.diskMeasuredAt),
+				);
 				const due = yield* query((db) =>
 					db
 						.select()
@@ -587,7 +594,7 @@ export const make = Effect.gen(function* () {
 								isNull(sandboxTable.pausedAt),
 								or(
 									isNull(sandboxTable.diskMeasuredAt),
-									lt(sandboxTable.diskMeasuredAt, measuredBefore),
+									and(lt(sandboxTable.diskMeasuredAt, measuredBefore), usedSinceMeasured),
 								),
 							),
 						),
@@ -907,9 +914,14 @@ function sameSandbox(row: SandboxRow) {
 	);
 }
 
+/** A lease on the sandbox that is still in force at `now`. */
+function liveLease(now: Date) {
+	return sql`exists (select 1 from ${sandboxLease} where ${sandboxLease.sandboxId} = ${sandboxTable.id} and ${sandboxLease.expiresAt} > ${now})`;
+}
+
 /** No lease on the sandbox that is still in force at `now`. */
 function noLiveLease(now: Date) {
-	return sql`not exists (select 1 from ${sandboxLease} where ${sandboxLease.sandboxId} = ${sandboxTable.id} and ${sandboxLease.expiresAt} > ${now})`;
+	return sql`not ${liveLease(now)}`;
 }
 
 type SandboxRow = typeof sandboxTable.$inferSelect;

@@ -382,6 +382,36 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 	);
 
 	it(
+		"measures a sandbox again while it's in use, and stops once nobody has used it since",
+		async () => {
+			const measuredAgo = (minutes: number) =>
+				onDatabase((db) =>
+					db
+						.update(sandbox)
+						.set({ diskMeasuredAt: new Date(Date.now() - minutes * 60 * 1000) })
+						.where(eq(sandbox.podId, thePod.podId)),
+				);
+			// open() holds a lease until release(HOLDER): the sandbox is in use.
+			await open();
+			await runOnPostgres(podSandboxes.measureDisks);
+			await measuredAgo(60);
+
+			await runOnPostgres(podSandboxes.measureDisks);
+			const whileInUse = (await measuredDisk())?.measuredAt;
+
+			await runOnPostgres(podSandboxes.release(HOLDER));
+			await idleForAnHour();
+			await measuredAgo(30);
+			const beforeIdleSweep = (await measuredDisk())?.measuredAt;
+			await runOnPostgres(podSandboxes.measureDisks);
+
+			expect(whileInUse?.getTime()).toBeGreaterThan(Date.now() - 60 * 1000);
+			expect((await measuredDisk())?.measuredAt).toEqual(beforeIdleSweep);
+		},
+		SLOW,
+	);
+
+	it(
 		"leaves a paused sandbox paused, with its last measurement",
 		async () => {
 			await open();
