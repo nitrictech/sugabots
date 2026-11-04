@@ -20,6 +20,7 @@ import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
 import { HTTP_CONNECTION_TOOLS } from "./http-tools.ts";
+import { addedToolsFor } from "./linear/linear-tools.ts";
 import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
@@ -339,7 +340,7 @@ export const make = Effect.gen(function* () {
 						if (changes.access !== undefined || changes.toolAccess !== undefined) {
 							const [current] = yield* query((db) =>
 								db
-									.select({ kind: connection.kind, names: listedToolNames })
+									.select({ kind: connection.kind, url: connection.url, names: listedToolNames })
 									.from(connection)
 									.where(inPod)
 									.limit(1)
@@ -348,6 +349,7 @@ export const make = Effect.gen(function* () {
 							if (!current) return undefined;
 							const names = toolsOf({
 								kind: current.kind,
+								url: current.url,
 								tools: current.names.map((name) => ({ name })),
 							}).map((tool) => tool.name);
 							chosen = yield* choicesFor(names, changes);
@@ -570,16 +572,17 @@ function choicesFor(
 
 /**
  * A connection's tools: an MCP server's as it listed them when last asked,
- * or GitHub's or an HTTP endpoint's, which are Sugabots' own, as this
- * version has them.
+ * with any Sugabots adds to it, such as Linear's upload; or GitHub's or an
+ * HTTP endpoint's, which are Sugabots' own, as this version has them.
  */
-export function toolsOf<Tool>(row: {
+export function toolsOf<Tool extends { name: string }>(row: {
 	kind: ConnectionRow["kind"];
+	url: string;
 	tools: readonly Tool[];
 }): readonly (Tool | ConnectionTool)[] {
 	if (row.kind === "github") return GITHUB_CONNECTION_TOOLS;
 	if (row.kind === "http") return HTTP_CONNECTION_TOOLS;
-	return row.tools;
+	return [...row.tools, ...addedToolsFor(row.url, row.tools)];
 }
 
 /** Whether the connection has tools and every one of them is off. */

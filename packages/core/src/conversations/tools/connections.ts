@@ -30,9 +30,12 @@ import {
 	type EgressHttpClient,
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
+import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import type { Workspace } from "./github/push-tool.ts";
 import { gitHubNote, gitHubTools } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
+import { linearTools } from "./linear/tools.ts";
+import type { UploadSide } from "./signed-upload/tool.ts";
 
 /**
  * The tools an agent inherits from its pod for one turn.
@@ -52,7 +55,8 @@ import { httpTools } from "./http/tools.ts";
  *
  * A GitHub connection's tools are Sugabots' own (see `github/tools.ts`), with
  * no server to reach; they are offered the same way, keyed by its handle. So
- * are an HTTP connection's, a request per method (see `http/tools.ts`).
+ * are an HTTP connection's, a request per method (see `http/tools.ts`), and
+ * those Sugabots adds to a Linear server's own (see `linear/tools.ts`).
  */
 
 export interface OfferedTool {
@@ -94,6 +98,9 @@ export interface Interface {
 export interface TurnSide {
 	readonly turnId: string;
 	readonly agentId: string;
+	readonly threadId: string;
+	/** The thread's files, which a connection's upload tool sends from. */
+	readonly files: Pick<ThreadFiles.Interface, "read">;
 	/** The pod's sandbox, while the turn may use it. */
 	readonly workspace: Workspace | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */
@@ -197,6 +204,15 @@ export function from({
 				};
 				const targets = reached.filter((target) => target.kind === "mcp");
 				if (targets.length === 0) return { ...nothingOffered, ...ownTools, addable };
+				const uploadSide: UploadSide = {
+					threadId: turn.threadId,
+					files: turn.files,
+					sandbox: turn.workspace,
+					upload: httpClients,
+					run: effectRunner({
+						runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<Database>()),
+					}),
+				};
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const now = yield* Clock.currentTimeMillis;
 				const sessions = new Map<string, Promise<ServerSession>>();
@@ -273,7 +289,14 @@ export function from({
 				return {
 					tools: Object.assign(
 						{},
-						...listed.map(({ target, listing }) => buildOfferedTools(target, listing, openSession)),
+						...listed.map(({ target, listing }) => ({
+							...linearTools(
+								target,
+								listing.tools.map(({ described }) => described),
+								uploadSide,
+							),
+							...buildOfferedTools(target, listing, openSession),
+						})),
 						ownTools.tools,
 					),
 					unavailable: targets

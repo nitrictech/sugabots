@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
+import { connectServer } from "../../providers/connections/mcp.ts";
 import { ConnectionTools } from "./connections.ts";
 
 /**
@@ -177,6 +178,43 @@ describe("a turn's connection tools", () => {
 		}
 	});
 
+	it("adds Linear's upload to a Linear connection, running without asking, and to no other", async () => {
+		const linear = target({
+			connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
+			handle: "linear",
+			url: "https://mcp.linear.app/mcp",
+			toolAccess: {},
+		});
+		const offered = ConnectionTools.from({
+			connections: { targetsForPod: () => Effect.succeed([linear, target()]) },
+			httpClients: { for: () => fetch },
+			// Linear's address, answered by the fixture server.
+			connect: (server, client) => connectServer({ ...server, url }, client),
+		});
+
+		const set = await run(offered.forPod("w", "p", NO_TURN));
+		try {
+			expect(Object.keys(set.tools).sort()).toEqual([
+				"linear__lookup",
+				"linear__upload_file",
+				"linear__wipe",
+				"wiki__lookup",
+				"wiki__wipe",
+			]);
+			expect(set.tools.linear__upload_file).toMatchObject({
+				handle: "linear",
+				access: "allow",
+				mutating: false,
+				remoteToolName: "upload_file",
+			});
+			expect(set.tools.linear__upload_file?.description).toContain(
+				"linear__prepare_attachment_upload",
+			);
+		} finally {
+			await set.close();
+		}
+	});
+
 	describe("from one turn to the next", () => {
 		const callOptions = { toolCallId: "1", messages: [] } as never;
 
@@ -280,4 +318,11 @@ describe("a turn's connection tools", () => {
 });
 
 /** A turn with no sandbox, for cases that only look at MCP servers' tools. */
-const NO_TURN = { turnId: "t", agentId: "a", workspace: undefined, sandboxSignsIn: false };
+const NO_TURN = {
+	turnId: "t",
+	agentId: "a",
+	threadId: "0199a3a0-0000-7000-8000-000000000001",
+	files: { read: () => Effect.die(new Error("No thread files in this test")) },
+	workspace: undefined,
+	sandboxSignsIn: false,
+};

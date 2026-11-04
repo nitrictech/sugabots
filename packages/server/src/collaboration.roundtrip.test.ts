@@ -25,7 +25,6 @@ import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/da
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
-import { Egress } from "@sugabots/core/providers/network/egress";
 import { unimplemented } from "@sugabots/core/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -78,7 +77,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						Layer.succeed(Models.Service, model),
 						Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
 						Layer.succeed(SandboxTools.Service, SandboxTools.none),
-						unimplemented(Egress.Service, {}),
 						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
 						unimplemented(Notifications.Service, { handler: () => Effect.void }),
 					),

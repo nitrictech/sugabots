@@ -234,6 +234,36 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		expect(tools).toContainEqual(expect.objectContaining({ name: "push_branch", access: "ask" }));
 	});
 
+	it("lists Linear's upload beside a Linear server's own tools, to choose for like them", async () => {
+		const made = await create({ name: "Linear", url: "https://mcp.linear.app/mcp" });
+		await listTools(made.id, [lookup]);
+
+		expect((await shown(made.id))?.tools.map(({ name, access }) => ({ name, access }))).toEqual([
+			{ name: "lookup", access: "allow" },
+			{ name: "upload_file", access: "allow" },
+		]);
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { upload_file: "off" } });
+		expect((await shown(made.id))?.tools).toContainEqual(
+			expect.objectContaining({ name: "upload_file", access: "off" }),
+		);
+	});
+
+	it("leaves Linear's upload to the server when the server lists one of its own", async () => {
+		const made = await create({ name: "Linear", url: "https://mcp.linear.app/mcp" });
+		await listTools(made.id, [{ ...edit, name: "upload_file" }]);
+
+		expect((await shown(made.id))?.tools).toEqual([
+			expect.objectContaining({ name: "upload_file", readOnly: false, access: "ask" }),
+		]);
+	});
+
+	it("adds nothing to a server outside the catalog", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		await listTools(made.id, [lookup]);
+
+		expect((await shown(made.id))?.tools.map((tool) => tool.name)).toEqual(["lookup"]);
+	});
+
 	it("hands a turn an HTTP connection, with this version's method tools", async () => {
 		const [made] = await onDatabase((db) =>
 			db

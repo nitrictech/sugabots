@@ -82,8 +82,6 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "read_thread_file":
 			// A long tool result is kept as a file too, and has no name in the thread.
 			return step("Read", name(fileName(input.file)), "Read a long result");
-		case "upload_file":
-			return step("Uploaded", name(fileName(input.file)) ?? code(input.path), "Uploaded a file");
 		case "web_search":
 			return step("Searched the web for", name(input.query), "Searched the web");
 		case "web_fetch":
@@ -131,7 +129,9 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) {
 		return { action, subject: code(withoutScheme(input.url)) };
 	}
-	return { action, subject: name(SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords)) };
+	// A file in the thread, such as one a connection uploads, is named as the thread names it.
+	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
+	return { action, subject: name(subject) };
 }
 
 /**
