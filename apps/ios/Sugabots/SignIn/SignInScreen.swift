@@ -28,7 +28,7 @@ struct SignInScreen: View {
 			case .workspace:
 				WorkspaceStep(address: $address, onBack: { page = .welcome }) { page = .form }
 			case .form:
-				LogInForm(server: address.server, workspace: address.host, isNew: $isNew, onBack: { page = .workspace }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
+				LogInForm(server: address.server, workspace: address.resolved, isNew: $isNew, onBack: { page = .workspace }, onForgot: { page = .forgotPassword }) { page = .unverified($0) }
 			case .forgotPassword:
 				ForgotPassword(server: address.server) { page = .form }
 			case let .unverified(email):
@@ -88,6 +88,7 @@ struct WorkspaceAddress: Equatable {
 		let typed = name.trimmingCharacters(in: .whitespaces)
 		if typed.contains(".") || typed.contains("://") { return WorkspaceAddress(server: typed) }
 		let trimmedEnding = ending.trimmingCharacters(in: .whitespaces)
+		if trimmedEnding.isEmpty { return WorkspaceAddress(name: typed, ending: Self.hostedEnding) }
 		return WorkspaceAddress(name: typed, ending: trimmedEnding.hasPrefix(".") ? trimmedEnding : ".\(trimmedEnding)")
 	}
 
@@ -100,66 +101,110 @@ struct WorkspaceAddress: Equatable {
 	var server: String { "https://\(host)" }
 }
 
-/// Which workspace to sign in to, as Slack asks: its name, before
-/// `.sugabots.ai` or another ending for a self-hosted server.
+/// Which workspace to sign in to, as Slack asks: one large address field, the
+/// name typed into it and the ending written straight after, `.sugabots.ai`
+/// unless a self-hosted server's ending is typed over it.
 @MainActor
 private struct WorkspaceStep: View {
+	private enum Field { case name, ending }
+
 	@Binding var address: WorkspaceAddress
 	let onBack: () -> Void
 	let onFound: () -> Void
 	@Environment(Session.self) private var session
-	@State private var changingEnding = false
+	@FocusState private var focus: Field?
 	@State private var checking = false
 	@State private var failure: String?
 
 	var body: some View {
-		AuthLayout(title: "Your workspace", subtitle: "Enter the name of the workspace you sign in to.", onBack: onBack) {
-			FormCard {
-				FormRow(label: "Name", last: !changingEnding) {
-					HStack(spacing: 0) {
-						TextField("", text: $address.name, prompt: Text(verbatim: "your-team").foregroundStyle(Palette.mutedForeground))
-							.textContentType(.URL)
-							.keyboardType(.URL)
-							.textInputAutocapitalization(.never)
-							.autocorrectionDisabled()
-							.onSubmit(check)
-							.authField()
-						if !changingEnding {
-							Text(address.ending).authField().foregroundStyle(Palette.mutedForeground).lineLimit(1)
-						}
-					}
-				}
-				if changingEnding {
-					FormRow(label: "Ending", last: true) {
-						TextField("", text: $address.ending, prompt: Text(verbatim: ".yourcompany.com").foregroundStyle(Palette.mutedForeground))
-							.keyboardType(.URL)
-							.textInputAutocapitalization(.never)
-							.autocorrectionDisabled()
-							.onSubmit(check)
-							.authField()
-					}
-				}
+		// Near the top rather than centred, so the field and Continue stay clear of the keyboard it opens.
+		AuthLayout(title: "Find your workspace", subtitle: "Type its name: the start of the address your team opens Sugabots at.", centred: false, onBack: onBack) {
+			VStack(alignment: .leading, spacing: 12) {
+				addressField
+				endingHint
 			}
 			if let failure { FormAlert(text: failure) }
-			Button(checking ? "Finding…" : "Continue", action: check)
-				.buttonStyle(WebButtonStyle(size: .large, fullWidth: true))
-				.disabled(checking)
-			Button(changingEnding ? "Use \(WorkspaceAddress.hostedEnding)" : "My workspace isn't on \(WorkspaceAddress.hostedEnding)") {
-				changingEnding.toggle()
-				if !changingEnding { address.ending = WorkspaceAddress.hostedEnding }
+			Button(action: check) {
+				if checking {
+					ProgressView().tint(Palette.primaryForeground)
+				} else {
+					Text("Continue")
+				}
 			}
-			.buttonStyle(QuietLinkStyle())
-			.frame(maxWidth: .infinity)
+			.buttonStyle(WebButtonStyle(size: .large, fullWidth: true))
+			.disabled(checking || address.resolved.name.isEmpty)
+			.padding(.top, 6)
 		}
-		.onAppear { changingEnding = address.ending != WorkspaceAddress.hostedEnding }
+		.onAppear { focus = .name }
+	}
+
+	private var addressField: some View {
+		HStack(spacing: 12) {
+			WorkspaceInitial(name: address.resolved.name, size: 36)
+			HStack(spacing: 0) {
+				TextField("", text: $address.name, prompt: Text(verbatim: "your-team").foregroundStyle(Palette.subtleForeground))
+					.focused($focus, equals: .name)
+					.foregroundStyle(Palette.foreground)
+					.submitLabel(.continue)
+					.onSubmit(check)
+					.fixedSize()
+				// Typed over for a self-hosted server; grey while it's only the default.
+				TextField("", text: $address.ending, prompt: Text(verbatim: WorkspaceAddress.hostedEnding).foregroundStyle(Palette.subtleForeground))
+					.focused($focus, equals: .ending)
+					.foregroundStyle(focus == .ending ? Palette.foreground : Palette.mutedForeground)
+					.submitLabel(.continue)
+					.onSubmit(check)
+					.fixedSize()
+					.accessibilityLabel("Address ending")
+				Spacer(minLength: 0)
+			}
+			.font(Typeface.rubik(19, .medium))
+			.keyboardType(.URL)
+			.textContentType(.URL)
+			.textInputAutocapitalization(.never)
+			.autocorrectionDisabled()
+			.lineLimit(1)
+			// The field's own width, however long the address: what doesn't fit is cut off, not pushed out.
+			.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+			.clipped()
+		}
+		.padding(.leading, 12)
+		.padding(.trailing, 16)
+		.frame(height: 64)
+		.background(Palette.list, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+		.overlay(
+			RoundedRectangle(cornerRadius: 18, style: .continuous)
+				.strokeBorder(focus == nil ? Palette.border : Palette.ring, lineWidth: focus == nil ? 1 : 1.5)
+		)
+		.animation(.easeOut(duration: 0.15), value: focus)
+	}
+
+	/// How to reach a self-hosted server, or the way back to the hosted ending once it's changed.
+	@ViewBuilder private var endingHint: some View {
+		if address.ending == WorkspaceAddress.hostedEnding {
+			Text("Self-hosted? Tap \(WorkspaceAddress.hostedEnding) to type your own domain.")
+				.font(Typeface.rubik(13))
+				.foregroundStyle(Palette.subtleForeground)
+				.padding(.horizontal, 4)
+		} else {
+			Button("Use \(WorkspaceAddress.hostedEnding)") {
+				address.ending = WorkspaceAddress.hostedEnding
+				focus = .name
+			}
+			.font(Typeface.rubik(13, .medium))
+			.foregroundStyle(Palette.mutedForeground)
+			.padding(.horizontal, 4)
+		}
 	}
 
 	private func check() {
 		guard !checking else { return }
 		guard !address.resolved.name.isEmpty else {
-			failure = "Enter your workspace's name."
+			failure = "Type your workspace's name."
+			focus = .name
 			return
 		}
+		focus = nil
 		checking = true
 		failure = nil
 		Task {
@@ -171,6 +216,61 @@ private struct WorkspaceStep: View {
 			}
 			checking = false
 		}
+	}
+}
+
+/// A workspace's mark while signing in, before its own look is known: the
+/// first letter of its name on a tile, or a bot while nothing is typed.
+private struct WorkspaceInitial: View {
+	let name: String
+	let size: CGFloat
+
+	var body: some View {
+		Group {
+			if let letter = name.first {
+				Text(String(letter).uppercased())
+					.font(Typeface.rubik(size * 0.47, .semibold))
+					.foregroundStyle(Palette.foreground)
+					.frame(width: size, height: size)
+					.background(Palette.tile, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+			} else {
+				BotFace(look: BotLook(color: "yellow", face: "pill", shape: "squircle"), size: size)
+			}
+		}
+		.accessibilityHidden(true)
+		.animation(.easeOut(duration: 0.15), value: name.first)
+	}
+}
+
+/// The workspace a form signs in to, at its top: tapping it goes back to choose another.
+private struct WorkspacePill: View {
+	let host: String
+	let name: String
+	let change: () -> Void
+
+	var body: some View {
+		Button(action: change) {
+			HStack(spacing: 10) {
+				WorkspaceInitial(name: name, size: 26)
+				Text(host)
+					.font(Typeface.rubik(14, .medium))
+					.foregroundStyle(Palette.foreground)
+					.lineLimit(1)
+					.truncationMode(.middle)
+				Text("Change")
+					.font(Typeface.rubik(13))
+					.foregroundStyle(Palette.mutedForeground)
+			}
+			.padding(.leading, 6)
+			.padding(.trailing, 14)
+			.frame(height: 38)
+			.background(Palette.list, in: Capsule())
+			.overlay(Capsule().strokeBorder(Palette.border))
+		}
+		.buttonStyle(.plain)
+		.frame(maxWidth: .infinity)
+		.accessibilityLabel("Signing in to \(host)")
+		.accessibilityHint("Changes the workspace")
 	}
 }
 
@@ -227,8 +327,8 @@ private struct Welcome: View {
 @MainActor
 private struct LogInForm: View {
 	let server: String
-	/// The workspace's host, said under the title so it's clear where this signs in.
-	let workspace: String
+	/// Where this signs in, shown under the title.
+	let workspace: WorkspaceAddress
 	@Binding var isNew: Bool
 	let onBack: () -> Void
 	let onForgot: () -> Void
@@ -241,7 +341,9 @@ private struct LogInForm: View {
 	@State private var busy = false
 
 	var body: some View {
-		AuthLayout(title: isNew ? "Create an account" : "Log in", subtitle: "to \(workspace)", onBack: onBack) {
+		AuthLayout(title: isNew ? "Create an account" : "Log in", onBack: onBack) {
+			WorkspacePill(host: workspace.host, name: workspace.name, change: onBack)
+				.padding(.bottom, 10)
 			FormCard {
 				if isNew {
 					FormRow(label: "Name") {
@@ -378,6 +480,8 @@ private struct ForgotPassword: View {
 struct AuthLayout<Content: View>: View {
 	let title: String
 	var subtitle: String?
+	/// Centred on the screen, or from the top for a page that opens the keyboard.
+	var centred = true
 	var onBack: (() -> Void)?
 	@ViewBuilder var content: Content
 
@@ -409,9 +513,9 @@ struct AuthLayout<Content: View>: View {
 				}
 				.frame(maxWidth: 440)
 				.padding(.horizontal, 16)
-				.padding(.vertical, 40)
+				.padding(.vertical, centred ? 40 : 24)
 				.frame(maxWidth: .infinity)
-				.containerRelativeFrame(.vertical, alignment: .center) { height, _ in height }
+				.containerRelativeFrame(.vertical, alignment: centred ? .center : .top) { height, _ in height }
 			}
 			.scrollBounceBehavior(.basedOnSize)
 		}
