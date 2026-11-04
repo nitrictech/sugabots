@@ -195,7 +195,7 @@ struct MessageRow: View {
 					Text(MarkdownInline.plainWithMentions(text, mentionable: context.mentionable, size: compact ? 14.5 : 15))
 						.lineSpacing(3.5)
 						.foregroundStyle(Palette.bodyForeground)
-						.textSelection(.enabled)
+						// Not selectable: holding a message brings up its actions, Copy among them.
 						.fixedSize(horizontal: false, vertical: true)
 				}
 			}

@@ -82,7 +82,7 @@ struct MessageMarkdown: View {
 			.lineSpacing(size * 0.5 - 4)
 			.foregroundStyle(Palette.bodyForeground)
 			.tint(palette?.mono.resolved ?? Palette.foreground)
-			.textSelection(.enabled)
+			// Not selectable: holding a message brings up its actions, Copy among them, as Slack's do.
 			.fixedSize(horizontal: false, vertical: true)
 	}
 }
@@ -116,7 +116,6 @@ private struct CodeBlock: View {
 				Text(code)
 					.font(Typeface.mono(13))
 					.foregroundStyle(Palette.foreground)
-					.textSelection(.enabled)
 					.padding(.horizontal, 12)
 					.padding(.bottom, 12)
 					.padding(.top, 2)
