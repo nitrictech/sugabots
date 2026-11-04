@@ -15,6 +15,7 @@ import * as builtInTools from "./generate-built-in-tools.ts";
 import * as catalogs from "./generate-catalogs.ts";
 import * as connectionMarks from "./generate-connection-marks.ts";
 import * as emoji from "./generate-emoji.ts";
+import * as faceMotion from "./generate-face-motion.ts";
 import * as limits from "./generate-limits.ts";
 import * as lucideIcons from "./generate-lucide-icons.ts";
 import * as nativeConstants from "./generate-native-constants.ts";

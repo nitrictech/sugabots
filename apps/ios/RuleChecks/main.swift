@@ -183,9 +183,23 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 		"startsGroup": { try ChatGroups.startsGroup(argument($0, 0, as: Message?.self), argument($0, 1)) },
 		"startsNewDay": { try ChatGroups.startsNewDay($0[0] == .null ? nil : localTime($0, 0), localTime($0, 1)) },
 		"formatDay": { try Times.day(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
-	], [
-		"findAnsweringFace": "The app draws no face coming alive for the bot answering yet.",
-	]),
+		// The web takes the messages in one list and whether days divide them; the app takes them already in runs.
+		"findAnsweringFace": { arguments in
+			let messages: [Message] = try argument(arguments, 0)
+			let dividers: Bool = try argument(arguments, 1)
+			var runs: [[Message]] = []
+			for (index, message) in messages.enumerated() {
+				let previous = index > 0 ? messages[index - 1] : nil
+				if runs.isEmpty || (dividers && ChatGroups.startsNewDay(previous?.createdAt, message.createdAt)) {
+					runs.append([message])
+				} else {
+					runs[runs.count - 1].append(message)
+				}
+			}
+			guard let face = ChatGroups.answeringFace(in: runs) else { return JSONValue.null }
+			return object(["messageId": .string(face.messageId), "botTyping": .bool(face.botTyping)])
+		},
+	], [:]),
 	("file-looks.cases.json", [
 		"fileLookOf": { arguments in
 			let file = try argument(arguments, 0, as: [String: String].self)
