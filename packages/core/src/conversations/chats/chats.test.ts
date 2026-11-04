@@ -1418,7 +1418,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 							eq(event.channel, threadChannel(current.id)),
 							eq(event.type, "message.reactions_changed"),
 						),
-					),
+					)
+					.orderBy(event.seq),
 			);
 
 		const added = await reactions.add(asked.id, "👍🏽");
