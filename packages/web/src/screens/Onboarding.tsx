@@ -13,6 +13,7 @@ import {
 	providerLacksCredential,
 	providerPreset,
 	slugify,
+	WORKSPACE_NAME_MAX_LENGTH,
 	type Workspace,
 } from "@sugabots/contracts";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
@@ -343,7 +344,7 @@ function WorkspaceStep({
 				autoFocus
 				value={name}
 				onChange={(event) => setName(event.target.value)}
-				maxLength={64}
+				maxLength={WORKSPACE_NAME_MAX_LENGTH}
 				placeholder={firstName ? `e.g. ${firstName}'s bots` : "e.g. Acme"}
 				className={fieldClass}
 			/>
