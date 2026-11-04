@@ -166,7 +166,7 @@ export const podChatMarkersSchema = Schema.Struct({
 		Schema.Struct({
 			unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 			needsApproval: Schema.Boolean,
-			/** How many of its routines' latest runs failed. */
+			/** How many of its routines' latest runs failed since the person last opened them. */
 			failedRoutines: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		}),
 	),
@@ -286,7 +286,7 @@ export const listedRoutineSchema = Schema.Struct({
 		id: uuidSchema,
 		name: Schema.String,
 		state: routineStateSchema,
-		/** Its latest run failed, and nothing has run it since. */
+		/** Its latest run failed, and the person has not opened its thread since. */
 		failed: Schema.Boolean,
 		/** It paused itself after runs in a row failed, rather than somebody pausing it. */
 		pausedAfterFailures: Schema.Boolean,

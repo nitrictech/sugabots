@@ -213,7 +213,9 @@ export function useMarkReadWhileSeen(
  * finishes, not at every word.
  */
 function readRevision(item: ChatMessageItem): string {
-	return item.kind === "message" ? `${item.message.id}:${item.message.status}` : item.id;
+	if (item.kind === "message") return `${item.message.id}:${item.message.status}`;
+	// A run seen while it runs is read again once it ends.
+	return item.kind === "routine" ? `${item.id}:${item.state}` : item.id;
 }
 
 /** Fetches again what shows which chats are unread: the lists, the sidebar and activity. */

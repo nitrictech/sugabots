@@ -966,10 +966,13 @@ export const make = Effect.gen(function* () {
 								.select({ at: sql`min(${streaming.createdAt})` })
 								.from(streaming)
 								.where(and(eq(streaming.threadId, threadId), eq(streaming.status, "streaming")));
-							// A routine's thread lists its runs among its messages, so reading it reads them too.
+							// A routine's thread lists its runs among its messages, so reading it reads
+							// them too: through when the newest ended, or began while it still runs.
 							const run = alias(thread, "run_thread");
 							const newestRun = db
-								.select({ at: sql`max(${routineExecution.acceptedAt})` })
+								.select({
+									at: sql`max(coalesce(${routineExecution.finishedAt}, ${routineExecution.acceptedAt}))`,
+								})
 								.from(routineExecution)
 								.innerJoin(run, eq(run.id, routineExecution.threadId))
 								.where(eq(run.conversationId, threadId));
