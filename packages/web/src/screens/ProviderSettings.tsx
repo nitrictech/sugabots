@@ -16,6 +16,7 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
+	Check,
 	Eye,
 	Grid2X2,
 	Image,
@@ -718,8 +719,10 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
 	const holdersOf = useModelHolders();
+	const offered = useModels().data?.models ?? [];
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
+	const [movingBotsOff, setMovingBotsOff] = useState<ProviderModel>();
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
@@ -779,6 +782,13 @@ function Models({ provider }: { provider: ModelProvider }) {
 							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
+					// Another provider offering the same model keeps its bots running.
+					const strandsBots =
+						bots.length > 0 &&
+						!offered.some(
+							(candidate) =>
+								candidate.modelId === model.modelId && candidate.providerId !== provider.id,
+						);
 					return (
 						<SettingsRow
 							key={model.id}
@@ -798,13 +808,17 @@ function Models({ provider }: { provider: ModelProvider }) {
 										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
-										onChange={(enabled) =>
+										onChange={(enabled) => {
+											if (!enabled && strandsBots) {
+												setMovingBotsOff(model);
+												return;
+											}
 											actions.setModel.mutate({
 												providerId: provider.id,
 												modelId: model.id,
 												enabled,
-											})
-										}
+											});
+										}}
 									/>
 								</>
 							}
@@ -812,6 +826,19 @@ function Models({ provider }: { provider: ModelProvider }) {
 					);
 				})}
 			</ScrollingWhen>
+			<Dialog
+				open={movingBotsOff !== undefined}
+				onOpenChange={(open) => !open && setMovingBotsOff(undefined)}
+			>
+				{movingBotsOff && (
+					<MoveBotsDialog
+						provider={provider}
+						model={movingBotsOff}
+						bots={botsOn(movingBotsOff.modelId)}
+						done={() => setMovingBotsOff(undefined)}
+					/>
+				)}
+			</Dialog>
 			{custom &&
 				(adding ? (
 					<AddModelRow provider={provider} done={() => setAdding(false)} />
@@ -824,6 +851,105 @@ function Models({ provider }: { provider: ModelProvider }) {
 				</div>
 			)}
 		</SettingsGroup>
+	);
+}
+
+/**
+ * Switching off a model bots still run on: which of the other switched-on
+ * models they move to, starting on the one new bots use. They move and the
+ * model goes off together, so no bot is left on a model that is off.
+ */
+function MoveBotsDialog({
+	provider,
+	model,
+	bots,
+	done,
+}: {
+	provider: ModelProvider;
+	model: ProviderModel;
+	bots: readonly Agent[];
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.modelId !== model.modelId,
+	);
+	const [chosen, setChosen] = useState(() =>
+		candidates.some((candidate) => candidate.modelId === models?.defaultModel)
+			? models?.defaultModel
+			: candidates[0]?.modelId,
+	);
+	const providerNames = [...new Set(candidates.map((candidate) => candidate.providerName))];
+	const name = modelName(model);
+	const count = `${bots.length} ${bots.length === 1 ? "bot uses" : "bots use"}`;
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!chosen) return;
+		try {
+			await actions.switchOffModel.mutateAsync({
+				providerId: provider.id,
+				modelId: model.id,
+				moveBotsTo: chosen,
+			});
+		} catch {
+			return;
+		}
+		done();
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader title={`Switch off ${name}`} />
+			<DialogFormBody>
+				<DialogDescription>
+					{count} {name}: {bots.map((bot) => bot.name).join(", ")}. Choose the model to move{" "}
+					{bots.length === 1 ? "it" : "them"} to.
+				</DialogDescription>
+				{candidates.length === 0 ? (
+					<Alert>Switch on another model first, so the bots have one to move to.</Alert>
+				) : (
+					<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+						{providerNames.map((providerName) => (
+							<SettingsGroup key={providerName} label={providerName}>
+								{candidates
+									.filter((candidate) => candidate.providerName === providerName)
+									.map((candidate) => {
+										const selected = candidate.modelId === chosen;
+										return (
+											<SettingsRow
+												key={candidate.modelId}
+												label={candidate.displayName ?? candidate.modelId}
+												render={<button type="button" aria-pressed={selected} />}
+												trailing={
+													selected && (
+														<Check
+															aria-hidden
+															size={16}
+															strokeWidth={2.6}
+															className="shrink-0 text-link"
+														/>
+													)
+												}
+												onClick={() => setChosen(candidate.modelId)}
+											/>
+										);
+									})}
+							</SettingsGroup>
+						))}
+					</div>
+				)}
+				{actions.switchOffModel.error && (
+					<Alert>{failureMessage(actions.switchOffModel.error)}</Alert>
+				)}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={bots.length === 1 ? "Move bot and switch off" : "Move bots and switch off"}
+				actionDisabled={!chosen || actions.switchOffModel.isPending}
+				onCancel={done}
+			/>
+		</DialogForm>
 	);
 }
 

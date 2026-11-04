@@ -92,6 +92,12 @@ export interface Interface {
 		workspaceId: string,
 		model: string,
 	) => Effect.Effect<void>;
+	/** Points every crew agent on model `from` at model `to`, and returns how many moved. */
+	readonly moveCrewAgentsToModel: (
+		workspaceId: string,
+		from: string,
+		to: string,
+	) => Effect.Effect<number>;
 	/** The system agent and its model, or nothing when it is not set up. */
 	readonly runnableSystemAgent: (
 		workspaceId: string,
@@ -318,6 +324,24 @@ export const make = Effect.gen(function* () {
 			operation(
 				"fillMissingSystemAgentModels",
 				setSystemAgentModels(workspaceId, model, isNull(agent.model)),
+			),
+
+		moveCrewAgentsToModel: (workspaceId, from, to) =>
+			operation(
+				"moveCrewAgentsToModel",
+				query((db) =>
+					db
+						.update(agent)
+						.set({ model: to })
+						.where(
+							and(
+								eq(agent.workspaceId, workspaceId),
+								isNull(agent.systemAgentKey),
+								eq(agent.model, from),
+							),
+						)
+						.returning({ id: agent.id }),
+				).pipe(Effect.map((rows) => rows.length)),
 			),
 
 		runnableSystemAgent: (workspaceId, key) =>

@@ -90,6 +90,7 @@ export const client = {
 			addModel: vi.fn(),
 			setModelsEnabled: vi.fn(),
 			updateModel: vi.fn(),
+			switchOffModel: vi.fn(),
 			removeModel: vi.fn(),
 		},
 		searchProviders: {

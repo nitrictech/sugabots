@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, modelProviders, mount } from "@/test-api.tsx";
+import { apiAnswers, MODELS, modelProviders, mount } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -88,5 +88,52 @@ describe("a model's capabilities", () => {
 			expect(screen.queryByRole("dialog", { name: "What it can do" })).toBeNull(),
 		);
 		await waitFor(() => expect(screen.queryByRole("img", { name: "Vision" })).toBeNull());
+	});
+});
+
+describe("switching off a model bots run on", () => {
+	const [, anthropic] = modelProviders;
+	const [opus, sonnet] = MODELS;
+	if (!anthropic || !opus || !sonnet) throw new Error("fixture");
+
+	it("moves the bots to the chosen model as it switches the model off", async () => {
+		const providers = client.api.modelProviders;
+		providers.listEnabledModels.mockReturnValue(
+			Effect.succeed({
+				models: [opus, sonnet].map((modelId) => ({
+					providerId: anthropic.id,
+					providerName: anthropic.name,
+					providerPreset: "anthropic" as const,
+					providerActive: true,
+					modelId,
+					displayName: null,
+					capabilities: ["tools" as const],
+				})),
+				defaultModel: sonnet,
+			}),
+		);
+		providers.switchOffModel.mockReturnValue(Effect.succeed({ moved: 2 }));
+		mount(`/suga/settings/providers/${anthropic.id}`);
+
+		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
+		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
+		expect(within(dialog).getByText(/Issue Triager, Linear Handler/)).toBeDefined();
+		expect(within(dialog).getByRole("button", { name: sonnet, pressed: true })).toBeDefined();
+		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
+
+		await waitFor(() =>
+			expect(providers.switchOffModel).toHaveBeenCalledWith({
+				params: {
+					workspace: expect.any(String),
+					providerId: anthropic.id,
+					modelId: anthropic.models[0]?.id,
+				},
+				payload: { moveBotsTo: sonnet },
+			}),
+		);
+		expect(providers.updateModel).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog", { name: `Switch off ${opus}` })).toBeNull(),
+		);
 	});
 });
