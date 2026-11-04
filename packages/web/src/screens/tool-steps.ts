@@ -12,10 +12,11 @@ import {
 import { awaitsApproval, durationOf, formatTotal } from "./tool-activity.ts";
 
 /*
- * A reply's tool calls as the tool line lists them once opened: in runs under
- * what the bot said it was about to do, each call written as what it did to
- * what ("Read image.png", "Ran ls -la"), rather than as the tool's name and
- * its raw output.
+ * A reply's tool calls as the tool line says them: in one line over the reply
+ * (`toolLineText`), and once it is opened, in runs under what the bot said it
+ * was about to do, each call written as what it did to what ("Read
+ * image.png", "Ran ls -la") with a note on how it went (`noteOf`), rather
+ * than as the tool's name and its raw output.
  *
  * The built-in tools are matched by key, as `@/lib/tool-names.ts` does; a
  * connection's tool, or a built-in one not listed here, is named by its key and
