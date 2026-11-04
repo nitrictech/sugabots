@@ -98,9 +98,3 @@ extension ConnectionToolSetting: Identifiable {
 	/// As `connectionToolMutating`: anything not known to only read.
 	var mutating: Bool { readOnly != true }
 }
-
-/// What a connection is shown with elsewhere, by its handle, as `useConnectionLooks`.
-struct ConnectionLook: Hashable {
-	let name: String
-	let presetId: String?
-}

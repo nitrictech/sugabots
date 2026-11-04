@@ -55,3 +55,9 @@ enum ToolNames {
 		return first.uppercased() + trimmed.dropFirst()
 	}
 }
+
+/// What a connection is shown with elsewhere, by its handle, as `useConnectionLooks`.
+struct ConnectionLook: Hashable {
+	let name: String
+	let presetId: String?
+}

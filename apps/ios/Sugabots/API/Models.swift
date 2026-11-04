@@ -76,10 +76,6 @@ extension MessageAuthor {
 		if case let .person(person) = self { person.id } else { nil }
 	}}
 
-extension ToolCallPart {
-	var awaitsApproval: Bool { status == .awaitingApproval && approval?.status == .pending }
-}
-
 extension ThreadParticipant: Identifiable {
 	var id: String {
 		switch self {
