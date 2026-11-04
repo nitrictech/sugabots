@@ -144,6 +144,12 @@ private struct ConversationContent: View {
 			if attachments == nil { attachments = ComposerAttachments(conversationId: model.conversationId, client: store.client) }
 			#if DEBUG
 			// `SUGABOTS_DETAILS=1` opens Details over the first conversation at launch, for screenshots.
+			if DebugLaunch.takeComposerFocusing() {
+				Task {
+					try? await Task.sleep(for: .seconds(1.5))
+					composing = true
+				}
+			}
 			if DebugLaunch.takeDetailsOpening() {
 				Task {
 					try? await Task.sleep(for: .seconds(1.5))
@@ -369,9 +375,16 @@ private struct ConversationContent: View {
 			}
 			.padding(.horizontal, barSideInset)
 			.padding(.top, 4)
-			// Clear of the keyboard while typing, as the tab bar keeps it clear of the foot otherwise.
+			// Clear of the keyboard while typing, as the tab bar keeps it clear of the foot otherwise,
+			// on frost that runs into the keyboard's glass rather than a band of the page's colour over it.
 			.padding(.bottom, composing ? Self.keyboardGap : 0)
-			.background(Palette.background)
+			.background {
+				if composing {
+					Rectangle().fill(.regularMaterial).ignoresSafeArea(edges: .bottom)
+				} else {
+					Palette.background
+				}
+			}
 		}
 	}
 

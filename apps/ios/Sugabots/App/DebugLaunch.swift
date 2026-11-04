@@ -6,7 +6,7 @@ import Foundation
 ///
 /// `SUGABOTS_OPEN` names a page as `page[/Pod name[/detail]]`; see `Target`.
 /// `SUGABOTS_SHEET` names a sheet a settings page opens over itself, and
-/// `SUGABOTS_DETAILS=1` opens Details over a conversation.
+/// `SUGABOTS_DETAILS=1` opens Details over a conversation, and `SUGABOTS_TYPING=1` gives its composer the keyboard.
 enum DebugLaunch {
 	/// A page `SUGABOTS_OPEN` names. A pod is named by its name and a bot by its name within the pod.
 	enum Target {
@@ -112,6 +112,17 @@ enum DebugLaunch {
 
 	/// The sheet `SUGABOTS_SHEET` names: `invite`, `timezone`, `addconnection` or `look`.
 	static let sheet = environment["SUGABOTS_SHEET"]
+
+	/// Whether `SUGABOTS_TYPING=1` asks for the first conversation's composer to have the keyboard.
+	private static let focusesComposer = environment["SUGABOTS_TYPING"] == "1"
+	@MainActor private static var composerFocused = false
+
+	/// Whether to give the conversation now showing the keyboard: the first one only.
+	@MainActor static func takeComposerFocusing() -> Bool {
+		guard focusesComposer, !composerFocused else { return false }
+		composerFocused = true
+		return true
+	}
 
 	/// Whether `SUGABOTS_DETAILS=1` asks for Details over a conversation.
 	private static let opensDetails = environment["SUGABOTS_DETAILS"] == "1"
