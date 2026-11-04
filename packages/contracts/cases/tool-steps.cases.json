@@ -1,0 +1,2099 @@
+{
+	"//": [
+		"An app may not keep the order of an object's keys as a tool wrote them, and noteOf counts the first list in a tool's output, so no case gives an output with more than one list besides its images."
+	],
+	"toolStepRuns": [
+		{
+			"given": [
+				[
+					{ "type": "text", "text": "Let me check the logs:" },
+					{
+						"type": "tool_call",
+						"id": "call-1",
+						"tool": "run_command",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-2",
+						"tool": "read_file",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{ "type": "text", "text": "Found it." }
+				]
+			],
+			"expect": [{ "narration": "Let me check the logs", "calls": ["call-1", "call-2"] }]
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-3",
+						"tool": "web_search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{ "type": "text", "text": "Now the page.\n\nMore after." },
+					{
+						"type": "tool_call",
+						"id": "call-4",
+						"tool": "web_fetch",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				]
+			],
+			"expect": [{ "calls": ["call-3"] }, { "narration": "Now the page.", "calls": ["call-4"] }]
+		},
+		{
+			"given": [
+				[
+					{ "type": "text", "text": "**Checking** the [docs](https://example.com):  " },
+					{
+						"type": "tool_call",
+						"id": "call-5",
+						"tool": "read_docs",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{ "type": "text", "text": "Then" },
+					{
+						"type": "file",
+						"id": "file-1",
+						"name": "a.png",
+						"contentType": "image/png",
+						"size": 2048
+					},
+					{
+						"type": "tool_call",
+						"id": "call-6",
+						"tool": "run_command",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				]
+			],
+			"expect": [{ "narration": "Checking the docs", "calls": ["call-5"] }, { "calls": ["call-6"] }]
+		},
+		{
+			"given": [
+				[
+					{ "type": "text", "text": "   " },
+					{
+						"type": "tool_call",
+						"id": "call-7",
+						"tool": "run_command",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				]
+			],
+			"expect": [{ "calls": ["call-7"] }]
+		},
+		{ "given": [[{ "type": "text", "text": "Just words." }]], "expect": [] }
+	],
+	"describeStep": [
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-8",
+					"tool": "run_command",
+					"input": { "command": "  ls -la\ncat notes.txt" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Ran", "subject": { "text": "ls -la", "asCode": true } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-9",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Ran a command" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-10",
+					"tool": "read_file",
+					"input": { "path": "/workspace/notes.md" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read", "subject": { "text": "/workspace/notes.md", "asCode": true } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-11",
+					"tool": "write_file",
+					"input": { "path": " ", "content": "hi" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Wrote a file" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-12",
+					"tool": "copy_file_to_sandbox",
+					"input": { "file": "file-1" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{ "file-1": "screenshot.png", "file-2": "results-long.txt" }
+			],
+			"expect": { "action": "Copied", "subject": { "text": "screenshot.png", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-13",
+					"tool": "copy_file_to_sandbox",
+					"input": { "file": "file-9" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{ "file-1": "screenshot.png", "file-2": "results-long.txt" }
+			],
+			"expect": { "action": "Copied a file to the sandbox" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-14",
+					"tool": "share_file",
+					"input": { "path": "/out/report.pdf" },
+					"output": { "shared": "Q3 report.pdf" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Shared", "subject": { "text": "Q3 report.pdf", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-15",
+					"tool": "share_file",
+					"input": { "path": "/out/report.pdf", "name": "Report" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Shared", "subject": { "text": "Report", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-16",
+					"tool": "share_file",
+					"input": { "path": "/out/charts/report.pdf" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Shared", "subject": { "text": "report.pdf", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-17",
+					"tool": "read_thread_file",
+					"input": { "file": "file-2" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{ "file-1": "screenshot.png", "file-2": "results-long.txt" }
+			],
+			"expect": { "action": "Read", "subject": { "text": "results-long.txt", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-18",
+					"tool": "read_thread_file",
+					"input": { "file": "file-7" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{ "file-1": "screenshot.png", "file-2": "results-long.txt" }
+			],
+			"expect": { "action": "Read a long result" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-19",
+					"tool": "web_search",
+					"input": { "query": "sugabots pricing" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Searched the web for",
+				"subject": { "text": "sugabots pricing", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-20",
+					"tool": "web_search",
+					"input": { "query": "\n" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Searched the web" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-21",
+					"tool": "web_fetch",
+					"input": { "url": "https://example.com/a" },
+					"output": { "page": { "title": "Example" } },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read", "subject": { "text": "Example", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-22",
+					"tool": "web_fetch",
+					"input": { "url": "http://example.com/a?b=1" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read", "subject": { "text": "example.com/a?b=1", "asCode": true } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-23",
+					"tool": "web_fetch",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read a page" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-24",
+					"tool": "tool_search",
+					"input": { "query": "create issues" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Looked for tools to",
+				"subject": { "text": "create issues", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-25",
+					"tool": "search_history",
+					"input": { "query": "deploy" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Searched the thread for",
+				"subject": { "text": "deploy", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-26",
+					"tool": "search_history",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read back through the thread" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-27",
+					"tool": "read_docs",
+					"input": { "page": "Routines" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read the docs on", "subject": { "text": "Routines", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-28",
+					"tool": "artifact_list",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Listed artifacts" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-29",
+					"tool": "artifact_read",
+					"input": {},
+					"output": { "title": "Launch plan" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read", "subject": { "text": "Launch plan", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-30",
+					"tool": "artifact_read",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Read an artifact" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-31",
+					"tool": "artifact_write",
+					"input": { "title": "Draft" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Created", "subject": { "text": "Draft", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-32",
+					"tool": "artifact_write",
+					"input": { "title": "Draft" },
+					"output": { "title": "Final" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Created", "subject": { "text": "Final", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-33",
+					"tool": "artifact_write",
+					"input": { "artifactId": "art-1", "title": "Draft" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Rewrote", "subject": { "text": "Draft", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-34",
+					"tool": "artifact_write",
+					"input": { "artifactId": "art-1" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Rewrote an artifact" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-35",
+					"tool": "artifact_edit",
+					"input": {},
+					"output": { "title": "Launch plan" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Edited", "subject": { "text": "Launch plan", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-36",
+					"tool": "list_routines",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Listed its routines" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-37",
+					"tool": "create_routine",
+					"input": { "name": "Morning digest" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Set up the routine",
+				"subject": { "text": "Morning digest", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-38",
+					"tool": "update_routine",
+					"input": { "name": "Morning digest" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Changed the routine",
+				"subject": { "text": "Morning digest", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-39",
+					"tool": "update_routine",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Changed a routine" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-40",
+					"tool": "save_instructions",
+					"input": { "instructions": "Be brief." },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Saved its instructions" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-41",
+					"tool": "request_network_access",
+					"input": { "host": "api.github.com" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Asked to reach",
+				"subject": { "text": "api.github.com", "asCode": true }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-42",
+					"tool": "workspace_access",
+					"input": { "person": "Ada" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Checked the access of", "subject": { "text": "Ada", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-43",
+					"tool": "browser_navigate",
+					"input": { "url": "https://news.ycombinator.com" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Navigate",
+				"subject": { "text": "news.ycombinator.com", "asCode": true }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-44",
+					"tool": "browser_click",
+					"input": { "selector": "#go" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Click" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-45",
+					"tool": "linear__search_issues",
+					"input": { "query": "login bug", "limit": 5 },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Search issues", "subject": { "text": "login bug", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-46",
+					"tool": "linear__create_issue",
+					"input": { "query": "  ", "title": "Fix login", "name": "x" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Create issue", "subject": { "text": "Fix login", "asCode": false } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-47",
+					"tool": "notion__fetch",
+					"input": { "url": "https://notion.so/page", "id": 4 },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": {
+				"action": "Fetch",
+				"subject": { "text": "https://notion.so/page", "asCode": false }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-48",
+					"tool": "sentry__list_projects",
+					"input": { "limit": 10, "name": 7 },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "List projects" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-49",
+					"tool": "some_new_tool",
+					"input": { "path": "a/b" },
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				},
+				{}
+			],
+			"expect": { "action": "Some new tool", "subject": { "text": "a/b", "asCode": false } }
+		}
+	],
+	"stepDetails": [
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-50",
+					"tool": "run_command",
+					"input": { "command": "ls", "timeoutSeconds": 30 },
+					"output": { "stdout": "a\nb\n", "stderr": "warn  \n", "exitCode": 0 },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": {
+				"input": "ls",
+				"otherArguments": { "timeoutSeconds": 30 },
+				"output": "a\nb\nwarn"
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-51",
+					"tool": "run_command",
+					"input": { "command": "true" },
+					"output": { "stdout": "", "stderr": "\n", "exitCode": 0 },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": "true", "output": "No output" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-52",
+					"tool": "run_command",
+					"input": { "command": "sleep 9" },
+					"output": null,
+					"status": "running",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null
+				}
+			],
+			"expect": { "input": "sleep 9" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-53",
+					"tool": "read_file",
+					"input": { "path": "notes.md" },
+					"output": { "content": "# Notes" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": "notes.md", "output": "# Notes" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-54",
+					"tool": "read_file",
+					"input": { "path": "pic.png" },
+					"output": { "kind": "image", "bytes": 10 },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": "pic.png", "output": { "kind": "image", "bytes": 10 } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-55",
+					"tool": "write_file",
+					"input": { "path": "a.txt", "content": "hello" },
+					"output": { "written": 5 },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": {
+				"input": "hello",
+				"otherArguments": { "path": "a.txt" },
+				"output": { "written": 5 }
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-56",
+					"tool": "write_file",
+					"input": { "path": "a.txt" },
+					"output": {},
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "otherArguments": { "path": "a.txt" } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-57",
+					"tool": "read_thread_file",
+					"input": { "file": "file-2", "offset": 0 },
+					"output": { "lines": "1: one\n2: two" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": { "file": "file-2", "offset": 0 }, "output": "1: one\n2: two" }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-58",
+					"tool": "web_search",
+					"input": { "query": "x" },
+					"output": { "results": [{ "title": "A" }] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": { "query": "x" }, "output": { "results": [{ "title": "A" }] } }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-59",
+					"tool": "linear__search",
+					"input": { "query": "x" },
+					"output": { "content": [{ "type": "text", "text": "[1,2]" }] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": { "query": "x" }, "output": [1, 2] }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-60",
+					"tool": "linear__search",
+					"input": {},
+					"output": { "truncated": true, "characters": 120000, "preview": "{\"items\":[1,2" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": {
+				"output": "{\"items\":[1,2",
+				"outputCut": "Only the first 13 of 120,000 characters were kept."
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-61",
+					"tool": "run_command",
+					"input": { "command": "cat big" },
+					"output": { "truncated": true, "preview": "{\"stdout\":\"aaa" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": {
+				"input": "cat big",
+				"output": "No output",
+				"outputCut": "Only the first 14 characters were kept."
+			}
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-62",
+					"tool": "linear__search",
+					"input": { "query": "x" },
+					"output": [],
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "input": { "query": "x" } }
+		}
+	],
+	"outputValue": [
+		{
+			"given": [
+				{
+					"structuredContent": { "items": [1] },
+					"content": [{ "type": "text", "text": "ignored" }]
+				}
+			],
+			"expect": { "items": [1] }
+		},
+		{ "given": [{ "content": [{ "type": "text", "text": "{\"a\":1}" }] }], "expect": { "a": 1 } },
+		{
+			"given": [
+				{
+					"content": [
+						{ "type": "text", "text": "line one" },
+						{ "type": "text", "text": "line two" }
+					]
+				}
+			],
+			"expect": "line one\nline two"
+		},
+		{
+			"given": [{ "content": [{ "type": "text", "text": "  [not json" }] }],
+			"expect": "  [not json"
+		},
+		{
+			"given": [
+				{ "content": [{ "type": "text", "text": "hi" }, { "type": "image", "data": "…" }] }
+			],
+			"expect": { "content": [{ "type": "text", "text": "hi" }, { "type": "image", "data": "…" }] }
+		},
+		{ "given": [{ "answer": 42 }], "expect": { "answer": 42 } },
+		{ "given": ["plain"], "expect": "plain" },
+		{ "given": [null], "expect": null }
+	],
+	"noteOf": [
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-63",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": null,
+					"status": "awaiting_approval",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null,
+					"approval": { "status": "denied", "decidedByName": "Ada", "decidedAt": null }
+				}
+			],
+			"expect": { "text": "Denied by Ada", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-64",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": null,
+					"status": "awaiting_approval",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null,
+					"approval": { "status": "denied", "decidedByName": null, "decidedAt": null }
+				}
+			],
+			"expect": { "text": "Denied", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-65",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "failed",
+					"error": "Sandbox stopped",
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Sandbox stopped", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-66",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "failed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Failed", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-67",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": null,
+					"status": "awaiting_approval",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null,
+					"approval": { "status": "pending", "decidedByName": null, "decidedAt": null }
+				}
+			],
+			"expect": { "text": "Waiting for approval", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-68",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": null,
+					"status": "awaiting_approval",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null,
+					"approval": { "status": "allowed", "decidedByName": "Ada", "decidedAt": null }
+				}
+			],
+			"expect": { "text": "Allowed by Ada", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-69",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": null,
+					"status": "awaiting_approval",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null,
+					"approval": { "status": "allowed", "decidedByName": null, "decidedAt": null }
+				}
+			],
+			"expect": { "text": "Allowed", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-70",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "running",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null
+				}
+			],
+			"expect": { "text": "Running", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-71",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "refused": "Not in this workspace" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Not in this workspace", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-72",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "ok": false, "reason": "Too many" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Too many", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-73",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "ok": false },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Failed", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-74",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "status": "refused", "error": "No access" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "No access", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-75",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "status": "failed", "message": "Bad input" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Bad input", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-76",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "isError": true, "content": [{ "type": "text", "text": "Rate limited" }] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Rate limited", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-77",
+					"tool": "linear__create_issue",
+					"input": {},
+					"output": { "isError": true, "content": [{ "type": "text", "text": "{\"code\":1}" }] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Failed", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-78",
+					"tool": "run_command",
+					"input": {},
+					"output": { "stdout": "", "exitCode": 2 },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Exit 2", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-79",
+					"tool": "run_command",
+					"input": {},
+					"output": { "stdout": "", "exitCode": 0, "timedOut": true },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "Timed out", "failed": true }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-80",
+					"tool": "web_search",
+					"input": {},
+					"output": { "results": [{}, {}, {}] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "3 results", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-81",
+					"tool": "web_search",
+					"input": {},
+					"output": { "results": [{}] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "1 result", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-82",
+					"tool": "web_search",
+					"input": {},
+					"output": { "images": [{}, {}], "results": [] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "0 results", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-83",
+					"tool": "linear__search",
+					"input": {},
+					"output": { "content": [{ "type": "text", "text": "[1,2,3,4]" }] },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "4 results", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-84",
+					"tool": "linear__search",
+					"input": {},
+					"output": { "structuredContent": { "issues": [1, 2] } },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": { "text": "2 results", "failed": false }
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-85",
+					"tool": "read_file",
+					"input": {},
+					"output": { "content": "text" },
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": null
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-86",
+					"tool": "read_file",
+					"input": {},
+					"output": "done",
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": null
+		}
+	],
+	"toolLineText": [
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-87",
+						"tool": "linear__search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-88",
+						"tool": "web_search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:03.000Z"
+					}
+				],
+				{ "linear": { "name": "Linear", "presetId": "linear" } }
+			],
+			"expect": "Used Linear and Web search for 4s"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-89",
+						"tool": "linear__search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:00.250Z"
+					}
+				],
+				{}
+			],
+			"expect": "Used Linear for 250ms"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-90",
+						"tool": "sentry__search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-91",
+						"tool": "linear__create_issue",
+						"input": {},
+						"output": null,
+						"status": "awaiting_approval",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": null,
+						"approval": { "status": "pending", "decidedByName": null, "decidedAt": null }
+					}
+				],
+				{ "sentry": { "name": "Sentry" }, "linear": { "name": "Linear" } }
+			],
+			"expect": "Used Sentry, waiting on Linear approval"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-92",
+						"tool": "linear__create_issue",
+						"input": {},
+						"output": null,
+						"status": "awaiting_approval",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": null,
+						"approval": { "status": "pending", "decidedByName": null, "decidedAt": null }
+					}
+				],
+				{ "linear": { "name": "Linear" } }
+			],
+			"expect": "Waiting on Linear approval"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-93",
+						"tool": "sentry__search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-94",
+						"tool": "linear__create_issue",
+						"input": {},
+						"output": null,
+						"status": "awaiting_approval",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": null,
+						"approval": { "status": "denied", "decidedByName": "Ada", "decidedAt": null }
+					}
+				],
+				{ "sentry": { "name": "Sentry" }, "linear": { "name": "Linear" } }
+			],
+			"expect": "Used Sentry, Linear denied"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-95",
+						"tool": "linear__create_issue",
+						"input": {},
+						"output": null,
+						"status": "awaiting_approval",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": null,
+						"approval": { "status": "allowed", "decidedByName": null, "decidedAt": null }
+					}
+				],
+				{ "linear": { "name": "Linear" } }
+			],
+			"expect": "Using Linear"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-96",
+						"tool": "sentry__search",
+						"input": {},
+						"output": null,
+						"status": "running",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": null
+					}
+				],
+				{ "sentry": { "name": "Sentry" } }
+			],
+			"expect": "Using Sentry"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-97",
+						"tool": "web_search",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-98",
+						"tool": "acme_crm__list",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				],
+				{}
+			],
+			"expect": "Used Web search and Acme crm for 3s"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-99",
+						"tool": "artifact_edit",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-100",
+						"tool": "artifact_read",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-101",
+						"tool": "browser_navigate",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-102",
+						"tool": "browser_click",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				],
+				{}
+			],
+			"expect": "Used Artifacts and Browser for 6s"
+		},
+		{
+			"given": [
+				[
+					{
+						"type": "tool_call",
+						"id": "call-103",
+						"tool": "run_command",
+						"input": {},
+						"output": null,
+						"status": "failed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-104",
+						"tool": "read_file",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					},
+					{
+						"type": "tool_call",
+						"id": "call-105",
+						"tool": "github__list_issues",
+						"input": {},
+						"output": null,
+						"status": "completed",
+						"error": null,
+						"mutating": false,
+						"atOffset": 0,
+						"startedAt": "2026-09-25T06:12:00.000Z",
+						"finishedAt": "2026-09-25T06:12:01.400Z"
+					}
+				],
+				{}
+			],
+			"expect": "Used Run command, Read file and Github for 4s"
+		}
+	],
+	"durationOf": [
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-106",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": "2026-09-25T06:12:01.400Z"
+				}
+			],
+			"expect": 1400
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-107",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "running",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:00.000Z",
+					"finishedAt": null
+				}
+			],
+			"expect": 0
+		},
+		{
+			"given": [
+				{
+					"type": "tool_call",
+					"id": "call-108",
+					"tool": "run_command",
+					"input": {},
+					"output": null,
+					"status": "completed",
+					"error": null,
+					"mutating": false,
+					"atOffset": 0,
+					"startedAt": "2026-09-25T06:12:05.000Z",
+					"finishedAt": "2026-09-25T06:12:04.000Z"
+				}
+			],
+			"expect": 0
+		}
+	],
+	"formatDuration": [
+		{ "given": [0], "expect": "0ms" },
+		{ "given": [473], "expect": "473ms" },
+		{ "given": [999.4], "expect": "999ms" },
+		{ "given": [999.6], "expect": "1000ms" },
+		{ "given": [1000], "expect": "1.0s" },
+		{ "given": [1449], "expect": "1.4s" },
+		{ "given": [30640], "expect": "30.6s" },
+		{ "given": [125000], "expect": "125.0s" }
+	],
+	"formatTotal": [
+		{ "given": [0], "expect": "0ms" },
+		{ "given": [473], "expect": "473ms" },
+		{ "given": [999.6], "expect": "1000ms" },
+		{ "given": [1000], "expect": "1s" },
+		{ "given": [1499], "expect": "1s" },
+		{ "given": [1500], "expect": "2s" },
+		{ "given": [32400], "expect": "32s" },
+		{ "given": [125000], "expect": "125s" }
+	]
+}

@@ -15,7 +15,12 @@ typealias Rule = ([JSONValue]) throws -> any Encodable
 
 /// A JSON argument as the type a rule takes.
 func argument<T: Decodable>(_ arguments: [JSONValue], _ index: Int, as _: T.Type = T.self) throws -> T {
-	try JSONDecoder().decode(T.self, from: JSONEncoder().encode(arguments[index]))
+	try APIClient.decoder.decode(T.self, from: JSONEncoder().encode(arguments[index]))
+}
+
+/// An object of the fields that have a value; a rule's result leaves out what it doesn't say, as the web's does.
+func object(_ fields: [String: JSONValue?]) -> JSONValue {
+	.object(fields.compactMapValues { $0 })
 }
 
 /// A value as JSON on one line, as a failure quotes it.
@@ -57,24 +62,60 @@ func locale(_ arguments: [JSONValue], _ index: Int) throws -> Locale {
 	try Locale(identifier: argument(arguments, index))
 }
 
-/// Each case file, with the Swift rule for each web rule it covers.
-let suites: [(file: String, rules: [String: Rule])] = [
+/// A tool step's words, as `describeStep` gives them.
+func stepJSON(_ step: ToolSteps.Step) -> JSONValue {
+	object([
+		"action": .string(step.action),
+		"subject": step.subject.map { object(["text": .string($0.text), "asCode": .bool($0.asCode)]) },
+	])
+}
+
+/// Connections' looks by handle, as the cases give them.
+func looks(_ arguments: [JSONValue], _ index: Int) throws -> [String: ConnectionLook] {
+	try argument(arguments, index, as: [String: [String: String]].self).compactMapValues { look in
+		look["name"].map { ConnectionLook(name: $0, presetId: look["presetId"]) }
+	}
+}
+
+/// Each case file, with the Swift rule for each web rule it covers, and the
+/// rules it has cases for that this app doesn't copy, with why.
+let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])] = [
 	("tool-names.cases.json", [
 		"stepLabel": { try ToolNames.step(argument($0, 0)) },
 		"toolTitle": { try ToolNames.title(argument($0, 0)) },
 		"connectionLabel": { try ToolNames.connectionLabel(argument($0, 0), name: $0.count > 1 ? argument($0, 1) : nil) },
 		"wordsFromKey": { try ToolNames.words(fromKey: argument($0, 0)) },
-	]),
+	], [:]),
+	("tool-steps.cases.json", [
+		"toolStepRuns": { arguments in
+			try ToolSteps.runs(of: argument(arguments, 0)).map { run in
+				object(["narration": run.narration.map(JSONValue.string), "calls": .array(run.calls.map { .string($0.id) })])
+			}
+		},
+		"describeStep": { try stepJSON(ToolSteps.describe(argument($0, 0), fileNames: argument($0, 1))) },
+		"stepDetails": { arguments in
+			let details = try ToolSteps.details(of: argument(arguments, 0))
+			return object(["input": details.input, "otherArguments": details.otherArguments, "output": details.output, "outputCut": details.outputCut.map(JSONValue.string)])
+		},
+		"outputValue": { try ToolSteps.outputValue(argument($0, 0)) ?? .null },
+		"noteOf": { arguments in
+			try ToolSteps.note(of: argument(arguments, 0)).map { object(["text": .string($0.text), "failed": .bool($0.failed)]) } ?? .null
+		},
+		"toolLineText": { try ToolSteps.lineText(argument($0, 0), looks: looks($0, 1)) },
+		"durationOf": { try ToolSteps.duration(of: argument($0, 0)) },
+		"formatDuration": { try ToolSteps.formatDuration(argument($0, 0)) },
+		"formatTotal": { try ToolSteps.formatTotal(argument($0, 0)) },
+	], [:]),
 	("list-time.cases.json", [
 		"formatClockTime": { try Times.clock(localTime($0, 0), locale: locale($0, 1)) },
 		"formatListTime": { try Times.list(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
 		"formatListTimeInSentence": { try Times.listInSentence(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
 		"formatAge": { try Times.age(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
-	]),
+	], [:]),
 	("name-list.cases.json", [
 		"listNames": { try Names.list(argument($0, 0)) },
 		"countOf": { try Names.count(argument($0, 0), argument($0, 1), argument($0, 2)) },
-	]),
+	], [:]),
 	("routine-schedule.cases.json", [
 		"formatTime": { try ScheduleWords.formatTime(argument($0, 0)) },
 		"formatDayOfMonth": { arguments in
@@ -86,7 +127,7 @@ let suites: [(file: String, rules: [String: Rule])] = [
 		"formatEvery": { try ScheduleWords.formatEvery(calendar(argument($0, 0))) },
 		"scheduleSummary": { try ScheduleWords.summary(calendar(argument($0, 0))) },
 		"triggerLabel": { try ScheduleWords.triggerLabel(triggerInput(argument($0, 0))) },
-	]),
+	], [:]),
 ]
 
 let casesFolder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -103,11 +144,20 @@ for file in Set(caseFiles).subtracting(suites.map(\.file)).sorted() {
 	fail("\(file) has no Swift rules here")
 }
 
-for (file, rules) in suites {
-	let cases = try JSONDecoder().decode([String: [RuleCase]].self, from: Data(contentsOf: casesFolder.appendingPathComponent(file)))
-	for name in Set(cases.keys).symmetricDifference(rules.keys).sorted() {
+/// A case file's key that starts with this is a note to its readers, not a rule.
+let notePrefix = "//"
+var notCopied = 0
+
+for (file, rules, uncopied) in suites {
+	let entries = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: casesFolder.appendingPathComponent(file)))
+	let cases = try entries.filter { !$0.key.hasPrefix(notePrefix) }.mapValues { try JSONDecoder().decode([RuleCase].self, from: JSONEncoder().encode($0)) }
+	for name in Set(cases.keys).symmetricDifference(Set(rules.keys).union(uncopied.keys)).sorted() {
 		fail("\(file): \(cases[name] == nil ? "no cases for \(name)" : "no Swift rule for \(name)")")
 	}
+	for name in Set(rules.keys).intersection(uncopied.keys).sorted() {
+		fail("\(file): \(name) is both copied and not")
+	}
+	notCopied += uncopied.count
 	for (name, entries) in cases.sorted(by: { $0.key < $1.key }) {
 		guard let rule = rules[name] else { continue }
 		for entry in entries {
@@ -126,5 +176,5 @@ for (file, rules) in suites {
 	}
 }
 
-print("\(passed) passed, \(failures) failed")
+print("\(passed) passed, \(failures) failed, \(notCopied) rules not copied to this app")
 exit(failures == 0 ? 0 : 1)

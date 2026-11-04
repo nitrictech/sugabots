@@ -18,6 +18,8 @@ xcrun swiftc -o "$build/rule-checks" \
 	Conversation/Names.swift \
 	Conversation/Times.swift \
 	Conversation/ToolNames.swift \
+	Conversation/ToolSteps.swift \
+	Conversation/Previews.swift \
 	Routines/ScheduleWords.swift \
 	"$app/RuleChecks/main.swift"
 "$build/rule-checks" "$app/../../packages/contracts/cases"

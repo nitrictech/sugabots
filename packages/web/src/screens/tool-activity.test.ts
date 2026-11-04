@@ -1,8 +1,8 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import type { ConnectionLook } from "@/lib/connections.ts";
-import { toolLineText } from "./ToolLine.tsx";
 import { formatDuration, formatTotal } from "./tool-activity.ts";
+import { toolLineText } from "./tool-steps.ts";
 
 let nextId = 0;
 

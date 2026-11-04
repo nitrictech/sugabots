@@ -1,4 +1,9 @@
-import type { CalendarSchedule, RoutineTriggerInput } from "@sugabots/contracts";
+import type {
+	CalendarSchedule,
+	MessagePart,
+	RoutineTriggerInput,
+	ToolCallPart,
+} from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
 import nameListCases from "../../../contracts/cases/name-list.cases.json" with { type: "json" };
@@ -6,6 +11,17 @@ import routineScheduleCases from "../../../contracts/cases/routine-schedule.case
 	type: "json",
 };
 import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
+import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
+import { durationOf, formatDuration, formatTotal } from "../screens/tool-activity.ts";
+import {
+	describeStep,
+	noteOf,
+	outputValue,
+	stepDetails,
+	toolLineText,
+	toolStepRuns,
+} from "../screens/tool-steps.ts";
+import type { ConnectionLook } from "./connections.ts";
 import {
 	formatAge,
 	formatClockTime,
@@ -29,10 +45,26 @@ import { connectionLabel, stepLabel, toolTitle, wordsFromKey } from "./tool-name
  * phone apps, which run the same cases against their own copies (the iOS app's
  * `apps/ios/scripts/check-rules.sh`). Change a case here when the web's
  * behaviour changes, and an app's check fails until its copy does the same.
+ *
+ * Each file maps a rule's name to its cases: the arguments it is `given`, as
+ * JSON, and what it returns for them, with null for nothing. A key starting
+ * with `//` is a note to the file's readers, such as where an app knowingly
+ * differs, and no rule.
  */
 
 type Rule = (...given: never[]) => unknown;
-type Cases = Record<string, readonly { given: readonly unknown[]; expect: unknown }[]>;
+type Case = { given: readonly unknown[]; expect: unknown };
+type Cases = Record<string, unknown>;
+
+const NOTE_PREFIX = "//";
+
+/** The file's rules and their cases, without its notes. */
+function rulesIn(cases: Cases): [string, Case[]][] {
+	return Object.entries(cases).filter(([name]) => !name.startsWith(NOTE_PREFIX)) as [
+		string,
+		Case[],
+	][];
+}
 
 const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 	{
@@ -58,6 +90,28 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 	},
 	{ file: "name-list.cases.json", cases: nameListCases, rules: { listNames, countOf } },
 	{
+		// Calls are as the API sends them. Runs list their calls by id; file names and connections' looks are by id and handle.
+		file: "tool-steps.cases.json",
+		cases: toolStepCases,
+		rules: {
+			toolStepRuns: (parts: MessagePart[]) =>
+				toolStepRuns(parts).map(({ narration, calls }) => ({
+					narration,
+					calls: calls.map(({ id }) => id),
+				})),
+			describeStep: (call: ToolCallPart, fileNames: Record<string, string>) =>
+				describeStep(call, new Map(Object.entries(fileNames))),
+			stepDetails,
+			outputValue,
+			noteOf,
+			toolLineText: (calls: ToolCallPart[], looks: Record<string, ConnectionLook>) =>
+				toolLineText(calls, new Map(Object.entries(looks))),
+			durationOf,
+			formatDuration,
+			formatTotal,
+		},
+	},
+	{
 		file: "routine-schedule.cases.json",
 		cases: routineScheduleCases,
 		rules: {
@@ -81,11 +135,15 @@ it("runs every case file", () => {
 for (const { file, cases, rules } of suites) {
 	describe(file, () => {
 		it("covers each of its rules, and only those", () => {
-			expect(Object.keys(cases).sort()).toEqual(Object.keys(rules).sort());
+			expect(
+				rulesIn(cases)
+					.map(([name]) => name)
+					.sort(),
+			).toEqual(Object.keys(rules).sort());
 		});
-		for (const [name, entries] of Object.entries(cases)) {
+		for (const [name, entries] of rulesIn(cases)) {
 			it.each(entries)(`${name}(%j)`, ({ given, expect: expected }) => {
-				expect((rules[name] as Rule)(...(given as never[]))).toEqual(expected);
+				expect((rules[name] as Rule)(...(given as never[])) ?? null).toEqual(expected);
 			});
 		}
 	});
