@@ -85,10 +85,11 @@ desktop() {
 	# websockify serves. -ac: any program in this sandbox may draw on it. -s 0:
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and agents drive the browser through
-	# Playwright, not the X server.
+	# Playwright, not the X server. -SendPrimary=0: viewers get what's
+	# copied, not every selection, which would replace the person's clipboard.
 	Xvnc "$DISPLAY" -geometry 1280x960 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
-		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared >>"$log" 2>&1 &
+		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared -SendPrimary=0 >>"$log" 2>&1 &
 	echo $! >"$pids"
 	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
 	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &

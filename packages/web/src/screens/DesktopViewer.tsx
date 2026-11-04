@@ -347,7 +347,7 @@ export function DesktopScreen({
 		// Linux apps know, Command on a Mac included.
 		let pasting = false;
 		const keepPasteShortcut = (event: KeyboardEvent) => {
-			if (viewOnlyNow.current || !isPasteShortcut(event)) return;
+			if (viewOnlyNow.current || !isCommandShortcut(event, "KeyV")) return;
 			pasting = true;
 			event.stopPropagation();
 		};
@@ -358,12 +358,40 @@ export function DesktopScreen({
 			const text = event.clipboardData?.getData("text/plain");
 			if (!text) return;
 			viewer.clipboardPasteFrom(text);
-			viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
-			viewer.sendKey(XK_V, "KeyV");
-			viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
+			pressControlWith(viewer, XK_V, "KeyV");
+		};
+		// On a Mac, noVNC sends ⌘C as Super+C, which the desktop's Linux apps
+		// don't treat as copying.
+		const copyWithControl = (event: KeyboardEvent) => {
+			if (!IS_MAC || viewOnlyNow.current || !viewer) return;
+			const copyKey = COPY_KEYS.find(({ code }) => isCommandShortcut(event, code));
+			if (!copyKey) return;
+			event.preventDefault();
+			event.stopPropagation();
+			pressControlWith(viewer, copyKey.keysym, copyKey.code);
+		};
+		// What the desktop copies arrives from the network, outside any gesture
+		// of the person's, and most browsers only let a page write the clipboard
+		// shortly after one. Usually the copy shortcut just pressed counts; when
+		// it doesn't, the text waits for the person's next click or key.
+		let copied: string | undefined;
+		const copyOut = () => {
+			if (copied === undefined) return;
+			const text = copied;
+			copied = undefined;
+			void navigator.clipboard.writeText(text).catch(() => {
+				copied ??= text;
+			});
+		};
+		const copyOutWhileInControl = (event: Event) => {
+			if (viewOnlyNow.current) return;
+			copied = (event as CustomEvent<{ text: string }>).detail.text;
+			copyOut();
 		};
 		element.addEventListener("keydown", keepPasteShortcut, { capture: true });
+		element.addEventListener("keydown", copyWithControl, { capture: true });
 		document.addEventListener("paste", pasteIntoDesktop);
+		for (const event of GESTURE_EVENTS) element.addEventListener(event, copyOut, { capture: true });
 		// A hidden page's connection may be closed, and only reported closed once the page is shown.
 		let hiddenWhileConnected = document.hidden;
 		let droppedWhileHidden = false;
@@ -398,6 +426,7 @@ export function DesktopScreen({
 			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => setStanding("connected"));
+			opened.addEventListener("clipboard", copyOutWhileInControl);
 			opened.addEventListener("disconnect", () => {
 				if (viewer !== opened) return;
 				viewer = undefined;
@@ -413,7 +442,11 @@ export function DesktopScreen({
 			clearInterval(idleCheck);
 			for (const event of INPUT_EVENTS) element.removeEventListener(event, used, { capture: true });
 			element.removeEventListener("keydown", keepPasteShortcut, { capture: true });
+			element.removeEventListener("keydown", copyWithControl, { capture: true });
 			document.removeEventListener("paste", pasteIntoDesktop);
+			for (const event of GESTURE_EVENTS) {
+				element.removeEventListener(event, copyOut, { capture: true });
+			}
 			document.removeEventListener("visibilitychange", reconnectWhenShown);
 			const closing = viewer;
 			viewer = undefined;
@@ -450,7 +483,11 @@ export function DesktopScreen({
 
 /** X11's keysyms for the keys sent by hand, which noVNC passes on as they are. */
 const XK_CONTROL_L = 0xffe3;
+const XK_SUPER_L = 0xffeb;
+const XK_SUPER_R = 0xffec;
+const XK_C = 0x0063;
 const XK_V = 0x0076;
+const XK_X = 0x0078;
 const XK_BACKSPACE = 0xff08;
 const XK_RETURN = 0xff0d;
 
@@ -536,10 +573,35 @@ function keysymFor(character: string): number {
 	return codePoint < 0x100 ? codePoint : 0x1000000 | codePoint;
 }
 
-/** ⌘V on a Mac, Ctrl+V elsewhere, without the Shift or Alt of a different shortcut. */
-function isPasteShortcut(event: KeyboardEvent): boolean {
-	const command = navigator.userAgent.includes("Mac") ? event.metaKey : event.ctrlKey;
-	return command && !event.shiftKey && !event.altKey && event.code === "KeyV";
+const COPY_KEYS = [
+	{ code: "KeyC", keysym: XK_C },
+	{ code: "KeyX", keysym: XK_X },
+] as const;
+
+/** The person's input a browser counts as a gesture, letting the page write the clipboard. */
+const GESTURE_EVENTS = ["pointerdown", "keydown"] as const;
+
+const IS_MAC = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
+/** ⌘ and `code` on a Mac, Ctrl and `code` elsewhere, without the Shift or Alt of a different shortcut. */
+function isCommandShortcut(event: KeyboardEvent, code: string): boolean {
+	const command = IS_MAC ? event.metaKey : event.ctrlKey;
+	return command && !event.shiftKey && !event.altKey && event.code === code;
+}
+
+/**
+ * Presses Ctrl and `keysym` on the desktop, the shortcuts its Linux apps know.
+ * ⌘, which noVNC has already sent down as Super, is let go first, or the app
+ * would see Super+Ctrl.
+ */
+function pressControlWith(viewer: RFB, keysym: number, code: string) {
+	if (IS_MAC) {
+		viewer.sendKey(XK_SUPER_L, "MetaLeft", false);
+		viewer.sendKey(XK_SUPER_R, "MetaRight", false);
+	}
+	viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
+	viewer.sendKey(keysym, code);
+	viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
 }
 
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
