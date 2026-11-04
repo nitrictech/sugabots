@@ -167,32 +167,6 @@ struct HeaderBack: View {
 	}
 }
 
-/// A face over its name in a glass pill, which opens Details.
-struct FaceBadge<Face: View>: View {
-	let name: String
-	let open: () -> Void
-	@ViewBuilder var face: Face
-
-	var body: some View {
-		Button(action: open) {
-			VStack(spacing: 0) {
-				face
-				Text(name)
-					.font(Typeface.rubik(15, .semibold))
-					.foregroundStyle(Palette.foreground)
-					.lineLimit(1)
-					.padding(.horizontal, 14)
-					.frame(height: 32)
-					.glass(in: Capsule())
-					.frame(maxWidth: 220)
-					.padding(.top, -8)
-			}
-		}
-		.buttonStyle(.plain)
-		.accessibilityLabel("\(name), details")
-	}
-}
-
 /// What a conversation is, in a glass row 44 points tall: its face, its name,
 /// and a quieter line under it, after Slack's. Opens Details.
 private struct TitleRow<Face: View>: View {

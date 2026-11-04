@@ -25,8 +25,7 @@ struct NewThreadScreen: View {
 		VStack(spacing: 0) {
 			HStack(alignment: .top, spacing: 8) {
 				HStack { HeaderBack() }.frame(maxWidth: .infinity, alignment: .leading)
-				FaceBadge(name: title, open: {}) { ChannelFace(size: 60) }
-					.allowsHitTesting(false)
+				TitleBadge(title: title)
 				Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
 			}
 			.pageHeaderInsets()
@@ -160,5 +159,28 @@ struct NewThreadScreen: View {
 			}
 			starting = false
 		}
+	}
+}
+
+/// A channel's face over the page's title in a glass pill, heading the page.
+private struct TitleBadge: View {
+	let title: String
+
+	var body: some View {
+		VStack(spacing: 0) {
+			ChannelFace(size: 60)
+			Text(title)
+				.font(Typeface.rubik(15, .semibold))
+				.foregroundStyle(Palette.foreground)
+				.lineLimit(1)
+				.padding(.horizontal, 14)
+				.frame(height: 32)
+				.glass(in: Capsule())
+				.frame(maxWidth: 220)
+				.padding(.top, -8)
+		}
+		.accessibilityElement(children: .ignore)
+		.accessibilityLabel(title)
+		.accessibilityAddTraits(.isHeader)
 	}
 }
