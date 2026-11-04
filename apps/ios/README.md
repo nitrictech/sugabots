@@ -60,7 +60,7 @@ These files are generated, each by its script in `scripts/`, from the web's pack
 
 | Script | Writes | From |
 | --- | --- | --- |
-| `generate-api.ts` | `API/API.generated.swift` | `packages/contracts/openapi.json` |
+| `generate-api.ts` | `API/API.generated.swift`, and Android's `apps/android/api` client | `packages/contracts/openapi.json`, read by `api/model.ts` and written by `api/swift.ts` and `api/kotlin.ts` |
 | `generate-palette.ts` | `Design/Palette.generated.swift` | the colour tokens on `:root` in `packages/web/src/app.css` |
 | `generate-built-in-tools.ts` | `Conversation/BuiltInTools.generated.swift` | `builtInToolCatalog` in `@sugabots/contracts` |
 | `generate-bot-looks.ts` | `Design/BotLooks.generated.swift` | `@sugabots/avatars`, the pod palette |
