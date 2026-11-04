@@ -44,10 +44,17 @@ struct MessageMarkdown: View {
 			VStack(alignment: .leading, spacing: 4) {
 				ForEach(Array(items.enumerated()), id: \.offset) { index, item in
 					HStack(alignment: .firstTextBaseline, spacing: 8) {
-						Text(ordered ? "\(start + index)." : "•")
-							.font(Typeface.rubik(size))
-							.foregroundStyle(Palette.mutedForeground)
-							.frame(minWidth: 14, alignment: .trailing)
+						Group {
+							if let checked = item.checked {
+								Image(systemName: checked ? "checkmark.square.fill" : "square")
+									.font(.system(size: size * 0.9))
+									.accessibilityLabel(checked ? "Done" : "Not done")
+							} else {
+								Text(ordered ? "\(start + index)." : "•").font(Typeface.rubik(size))
+							}
+						}
+						.foregroundStyle(Palette.mutedForeground)
+						.frame(minWidth: 14, alignment: .trailing)
 						VStack(alignment: .leading, spacing: 4) {
 							inline(item.text)
 							if !item.children.isEmpty {
