@@ -124,6 +124,17 @@ enum DebugLaunch {
 		return true
 	}
 
+	/// Whether `SUGABOTS_HOLD=1` asks for a message's actions to be held open, as for a screenshot.
+	private static let holdsMessage = environment["SUGABOTS_HOLD"] == "1"
+	@MainActor private static var messageHeld = false
+
+	/// Whether to hold the message now showing: the first only.
+	@MainActor static func takeMessageHolding() -> Bool {
+		guard holdsMessage, !messageHeld else { return false }
+		messageHeld = true
+		return true
+	}
+
 	/// Whether `SUGABOTS_DETAILS=1` asks for Details over a conversation.
 	private static let opensDetails = environment["SUGABOTS_DETAILS"] == "1"
 	@MainActor private static var detailsOpened = false

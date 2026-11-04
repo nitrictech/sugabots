@@ -49,6 +49,10 @@ struct MessageRow: View {
 	var compact = false
 	@State private var timeTapped = false
 	@State private var pickingReaction = false
+	/// Whether the message is held, with what can be done with it slid up from the foot.
+	@State private var holding = false
+	/// Whether the emoji picker opens once the held message's sheet has gone.
+	@State private var pickAfterHolding = false
 	@Environment(Toaster.self) private var toaster
 
 	private var faceSize: CGFloat { compact ? 32 : 36 }
@@ -103,7 +107,27 @@ struct MessageRow: View {
 				guard !startsGroup else { return }
 				timeTapped.toggle()
 			}
-			.contextMenu { menu(words: segments.compactMap(\.text).joined(separator: "\n\n")) }
+			.onLongPressGesture(minimumDuration: 0.35) {
+				guard hasActions(words: segments.compactMap(\.text).joined()) else { return }
+				UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+				holding = true
+			}
+			#if DEBUG
+			.task {
+				guard finished, DebugLaunch.takeMessageHolding() else { return }
+				try? await Task.sleep(for: .seconds(2))
+				holding = true
+			}
+			#endif
+			.sheet(isPresented: $holding, onDismiss: {
+				// One sheet at a time: the picker waits for the actions to slide away.
+				if pickAfterHolding {
+					pickAfterHolding = false
+					pickingReaction = true
+				}
+			}) {
+				actionsSheet(words: segments.compactMap(\.text).joined(separator: "\n\n"))
+			}
 			.sheet(isPresented: $pickingReaction) {
 				let used = Set((message.reactions ?? []).map(\.emoji))
 				EmojiPicker(full: used.count >= EmojiPicker.maxReactionEmojiPerMessage, used: used) { emoji in
@@ -205,24 +229,101 @@ struct MessageRow: View {
 		}
 	}
 
-	@ViewBuilder private func menu(words: String) -> some View {
-		if finished, actions.react != nil {
-			Button { pickingReaction = true } label: { Label("Add reaction", systemImage: "face.smiling") }
-		}
-		if finished, let reply = actions.reply, message.author.isReplyable {
-			Button { reply(message) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
-		}
-		if finished, let startThread = actions.startThread {
-			Button { startThread(message) } label: { Label("Start a thread", systemImage: "text.bubble") }
-		}
-		if !words.isEmpty {
-			Button {
+	/// Whether holding the message has anything to offer, given its `words`.
+	private func hasActions(words: String) -> Bool {
+		finished && (actions.react != nil || actions.reply != nil || actions.startThread != nil) || !words.isEmpty
+	}
+
+	private func actionsSheet(words: String) -> some View {
+		MessageActionsSheet(
+			react: finished && actions.react != nil ? { emoji in
+				holding = false
+				actions.react?(message, emoji)
+			} : nil,
+			pickReaction: {
+				pickAfterHolding = true
+				holding = false
+			},
+			reply: finished && message.author.isReplyable ? actions.reply.map { reply in { holding = false; reply(message) } } : nil,
+			startThread: finished ? actions.startThread.map { start in { holding = false; start(message) } } : nil,
+			copy: words.isEmpty ? nil : {
+				holding = false
 				UIPasteboard.general.string = words
 				toaster.show("Copied")
-			} label: {
-				Label("Copy text", systemImage: "doc.on.doc")
+			}
+		)
+	}
+}
+
+/// What can be done with a held message, slid up from the foot as Slack's is:
+/// a row of quick reactions, then its actions as tiles.
+private struct MessageActionsSheet: View {
+	/// Reacts with an emoji; nil when the message can't take reactions.
+	let react: ((String) -> Void)?
+	let pickReaction: () -> Void
+	let reply: (() -> Void)?
+	let startThread: (() -> Void)?
+	let copy: (() -> Void)?
+	@State private var height: CGFloat = 240
+
+	/// How many emoji the quick row offers before the picker's button.
+	private static let quickCount = 5
+	/// What fills the quick row after the emoji chosen lately on this device.
+	private static let usualReactions = ["👍", "❤️", "😂", "🎉", "👀"]
+
+	private var quick: [String] {
+		var seen = Set<String>()
+		return (RecentEmoji.all + Self.usualReactions).filter { seen.insert($0).inserted }.prefix(Self.quickCount).map { $0 }
+	}
+
+	var body: some View {
+		VStack(spacing: 18) {
+			SheetGrabber()
+			if let react {
+				HStack(spacing: 10) {
+					ForEach(quick, id: \.self) { emoji in
+						Button { react(emoji) } label: {
+							Text(emoji).font(.system(size: 26)).frame(maxWidth: .infinity).frame(height: 52)
+								.background(Palette.chip, in: Circle())
+						}
+						.buttonStyle(.plain)
+						.accessibilityLabel("React with \(emoji)")
+					}
+					Button(action: pickReaction) {
+						Image(systemName: "face.smiling").font(.system(size: 22, weight: .medium))
+							.foregroundStyle(Palette.foreground)
+							.frame(maxWidth: .infinity).frame(height: 52)
+							.background(Palette.chip, in: Circle())
+					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Add reaction")
+				}
+			}
+			HStack(spacing: 10) {
+				if let reply { tile("Reply", systemImage: "arrowshape.turn.up.left", action: reply) }
+				if let startThread { tile("Thread", systemImage: "text.bubble", action: startThread) }
+				if let copy { tile("Copy", systemImage: "doc.on.doc", action: copy) }
 			}
 		}
+		.padding(.horizontal, 16)
+		.padding(.bottom, 12)
+		.fixedSize(horizontal: false, vertical: true)
+		.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+		.phoneSheet(detents: [.height(height)])
+	}
+
+	private func tile(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+		Button(action: action) {
+			VStack(spacing: 8) {
+				Image(systemName: systemImage).font(.system(size: 21, weight: .medium))
+				Text(title).font(Typeface.rubik(14, .medium))
+			}
+			.foregroundStyle(Palette.foreground)
+			.frame(maxWidth: .infinity)
+			.frame(height: 84)
+			.background(Palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+		}
+		.buttonStyle(.plain)
 	}
 }
 
