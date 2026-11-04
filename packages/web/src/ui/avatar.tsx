@@ -51,13 +51,14 @@ const GRAVATAR_PIXEL_RATIO = 2;
  * CSS pixels. The address answers 404 when `email` has no Gravatar, rather than
  * serving a generated placeholder.
  */
-function gravatarUrl(email: string, size: number): string {
+export function gravatarUrl(email: string, size: number): string {
 	// Not `crypto.subtle`: browsers leave it undefined on pages served over plain HTTP.
 	const hash = bytesToHex(sha256(utf8ToBytes(email.trim().toLowerCase())));
 	return `https://gravatar.com/avatar/${hash}?s=${size * GRAVATAR_PIXEL_RATIO}&d=404`;
 }
 
-function initials(name: string): string {
+/** The first and last names' first letters, or a single name's first two, capitalised. */
+export function initials(name: string): string {
 	const parts = name.trim().split(/\s+/).filter(Boolean);
 	const first = parts[0] ?? "?";
 	const last = parts.length > 1 ? (parts[parts.length - 1] ?? "") : "";

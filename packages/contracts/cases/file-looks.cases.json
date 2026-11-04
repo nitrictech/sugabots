@@ -1,0 +1,42 @@
+{
+	"fileLookOf": [
+		{ "given": [{ "name": "photo.heic", "type": "image/heic" }], "expect": "image" },
+		{ "given": [{ "name": "photo", "type": " IMAGE/PNG ; q=1" }], "expect": "image" },
+		{ "given": [{ "name": "report.pdf", "type": "application/octet-stream" }], "expect": "pdf" },
+		{ "given": [{ "name": "report", "type": "application/pdf" }], "expect": "pdf" },
+		{ "given": [{ "name": "data.CSV", "type": "text/plain" }], "expect": "sheet" },
+		{ "given": [{ "name": "data", "type": "text/csv; charset=utf-8" }], "expect": "sheet" },
+		{ "given": [{ "name": "budget.numbers", "type": "" }], "expect": "sheet" },
+		{
+			"given": [
+				{
+					"name": "budget.xlsx",
+					"type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+				}
+			],
+			"expect": "sheet"
+		},
+		{ "given": [{ "name": "notes.txt", "type": "text/plain" }], "expect": "other" },
+		{ "given": [{ "name": ".pdf", "type": "" }], "expect": "other" }
+	],
+	"extensionOf": [
+		{ "given": ["report.PDF"], "expect": "pdf" },
+		{ "given": ["archive.tar.gz"], "expect": "gz" },
+		{ "given": ["README"], "expect": "" },
+		{ "given": [".env"], "expect": "" },
+		{ "given": ["trailing."], "expect": "" },
+		{ "given": [""], "expect": "" }
+	],
+	"fileSizeLabel": [
+		{ "given": [0], "expect": "0 B" },
+		{ "given": [1023], "expect": "1023 B" },
+		{ "given": [1024], "expect": "1 KB" },
+		{ "given": [1536], "expect": "2 KB" },
+		{ "given": [245760], "expect": "240 KB" },
+		{ "given": [1048000], "expect": "1023 KB" },
+		{ "given": [1048100], "expect": "1.0 MB" },
+		{ "given": [1048576], "expect": "1.0 MB" },
+		{ "given": [2202009], "expect": "2.1 MB" },
+		{ "given": [5000000000], "expect": "4768.4 MB" }
+	]
+}

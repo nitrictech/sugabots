@@ -13,11 +13,14 @@ import {
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
+import avatarCases from "../../../contracts/cases/avatar.cases.json" with { type: "json" };
+import fileLookCases from "../../../contracts/cases/file-looks.cases.json" with { type: "json" };
 import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
 import mentionCases from "../../../contracts/cases/mentions.cases.json" with { type: "json" };
 import messagePreviewCases from "../../../contracts/cases/message-preview.cases.json" with {
 	type: "json",
 };
+import muteCases from "../../../contracts/cases/mute.cases.json" with { type: "json" };
 import nameListCases from "../../../contracts/cases/name-list.cases.json" with { type: "json" };
 import routineScheduleCases from "../../../contracts/cases/routine-schedule.cases.json" with {
 	type: "json",
@@ -25,6 +28,7 @@ import routineScheduleCases from "../../../contracts/cases/routine-schedule.case
 import threadLayoutCases from "../../../contracts/cases/thread-layout.cases.json" with {
 	type: "json",
 };
+import timeZoneCases from "../../../contracts/cases/time-zones.cases.json" with { type: "json" };
 import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
 import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
 import {
@@ -52,7 +56,9 @@ import {
 	toolLineText,
 	toolStepRuns,
 } from "../screens/tool-steps.ts";
+import { gravatarUrl, initials } from "../ui/avatar.tsx";
 import type { ConnectionLook } from "./connections.ts";
+import { extensionOf, fileLookOf, fileSizeLabel } from "./file-looks.ts";
 import {
 	formatAge,
 	formatClockTime,
@@ -60,6 +66,7 @@ import {
 	formatListTimeInSentence,
 } from "./list-time.ts";
 import { countOf, listNames } from "./name-list.ts";
+import { formatUntil, MUTE_DURATIONS } from "./notifications.ts";
 import {
 	formatDayOfMonth,
 	formatEvery,
@@ -69,6 +76,7 @@ import {
 	stepTime,
 	triggerLabel,
 } from "./routine-schedule.ts";
+import { timeZonePlace, timeZoneRegions, utcOffset } from "./time-zones.ts";
 import { connectionLabel, stepLabel, toolTitle, wordsFromKey } from "./tool-names.ts";
 
 /*
@@ -88,6 +96,15 @@ type Case = { given: readonly unknown[]; expect: unknown };
 type Cases = Record<string, unknown>;
 
 const NOTE_PREFIX = "//";
+
+/** How many image pixels the web draws a CSS pixel of a face with, as `gravatarUrl` sizes its pictures. */
+const GRAVATAR_PIXEL_RATIO = 2;
+
+/** A date as a local date-time with no offset, `2026-09-25T06:12`, as the cases write one. */
+function localTimeText(date: Date): string {
+	const twoDigits = (value: number) => String(value).padStart(2, "0");
+	return `${date.getFullYear()}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())}T${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+}
 
 /** The file's rules and their cases, without its notes. */
 function rulesIn(cases: Cases): [string, Case[]][] {
@@ -157,6 +174,47 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 			formatDay: (date: string, now: string, locale: string) =>
 				formatDay(new Date(date), { now: new Date(now), locale }),
 			findAnsweringFace,
+		},
+	},
+	{
+		file: "file-looks.cases.json",
+		cases: fileLookCases,
+		rules: { fileLookOf, extensionOf, fileSizeLabel },
+	},
+	{
+		// A region is its name and its zones' names.
+		file: "time-zones.cases.json",
+		cases: timeZoneCases,
+		rules: {
+			timeZonePlace,
+			utcOffset: (zone: string, now: string) => utcOffset(zone, new Date(now)),
+			timeZoneRegions: (zones: string[]) =>
+				timeZoneRegions(
+					zones.map((zone) => ({ zone, place: timeZonePlace(zone), offset: "" })),
+				).map(({ name, choices }) => ({ name, zones: choices.map(({ zone }) => zone) })),
+		},
+	},
+	{
+		// A Gravatar's size is in image pixels, which each platform draws a face at its own density with.
+		file: "avatar.cases.json",
+		cases: avatarCases,
+		rules: {
+			initials,
+			gravatarUrl: (email: string, pixels: number) =>
+				gravatarUrl(email, pixels / GRAVATAR_PIXEL_RATIO),
+		},
+	},
+	{
+		// Times are local date-times, as in list-time's cases; a mute is chosen by its label.
+		file: "mute.cases.json",
+		cases: muteCases,
+		rules: {
+			formatUntil: (until: string, now: string, locale: string) =>
+				formatUntil(new Date(until), new Date(now), locale),
+			muteUntil: (label: string, now: string) => {
+				const duration = MUTE_DURATIONS.find((one) => one.label === label);
+				return duration && localTimeText(duration.until(new Date(now)));
+			},
 		},
 	},
 	{

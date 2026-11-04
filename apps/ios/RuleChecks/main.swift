@@ -90,6 +90,17 @@ func looks(_ arguments: [JSONValue], _ index: Int) throws -> [String: Connection
 	}
 }
 
+/// A date as a local date-time with no offset, `2026-09-25T06:12`, as the cases write one.
+func localTimeText(_ date: Date) -> String {
+	let formatter = DateFormatter()
+	formatter.locale = Locale(identifier: "en_US_POSIX")
+	formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
+	return formatter.string(from: date)
+}
+
+/// How many image pixels the app draws a point with, as `Gravatar` sizes its pictures.
+let pixelsPerPoint: CGFloat = 3
+
 /// Each case file, with the Swift rule for each web rule it covers, and the
 /// rules it has cases for that this app doesn't copy, with why.
 let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])] = [
@@ -152,6 +163,39 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 	], [
 		"findAnsweringFace": "The app draws no face coming alive for the bot answering yet.",
 	]),
+	("file-looks.cases.json", [
+		"fileLookOf": { arguments in
+			let file = try argument(arguments, 0, as: [String: String].self)
+			let look = FileLook.of(FilePart(id: "", name: file["name"] ?? "", contentType: file["type"] ?? "", size: 0))
+			return "\(look)"
+		},
+		"extensionOf": { try FileLook.extensionOf(argument($0, 0)) },
+		"fileSizeLabel": { try FileLook.sizeLabel(argument($0, 0)) },
+	], [:]),
+	("time-zones.cases.json", [
+		"timeZonePlace": { try TimeZoneChoice.place(of: argument($0, 0)) },
+		"utcOffset": { arguments in
+			let now = try argument(arguments, 1, as: String.self)
+			guard let date = Date(iso8601: now) else { throw CocoaError(.formatting) }
+			return try TimeZoneChoice.offset(of: argument(arguments, 0), at: date)
+		},
+		"timeZoneRegions": { arguments in
+			let zones: [String] = try argument(arguments, 0)
+			let choices = zones.map { TimeZoneChoice(zone: $0, place: TimeZoneChoice.place(of: $0), offset: "") }
+			return TimeZoneRegion.of(choices).map { object(["name": .string($0.name), "zones": .array($0.choices.map { .string($0.zone) })]) }
+		},
+	], [:]),
+	("avatar.cases.json", [
+		"initials": { try Initials.of(argument($0, 0)) },
+		"gravatarUrl": { try Gravatar.url(for: argument($0, 0), points: CGFloat(argument($0, 1, as: Double.self)) / pixelsPerPoint).absoluteString },
+	], [:]),
+	("mute.cases.json", [
+		"formatUntil": { try MuteDuration.formatUntil(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
+		"muteUntil": { arguments in
+			let label: String = try argument(arguments, 0)
+			return try MuteDuration.all.first { $0.label == label }.map { localTimeText($0.until(try localTime(arguments, 1))) }
+		},
+	], [:]),
 	("list-time.cases.json", [
 		"formatClockTime": { try Times.clock(localTime($0, 0), locale: locale($0, 1)) },
 		"formatListTime": { try Times.list(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },

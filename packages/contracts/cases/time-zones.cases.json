@@ -1,0 +1,64 @@
+{
+	"//": [
+		"utcOffset reads each platform's own time zone data, so an offset a government has changed lately can differ until both have the change."
+	],
+	"timeZonePlace": [
+		{ "given": ["America/Los_Angeles"], "expect": "Los Angeles" },
+		{ "given": ["America/Argentina/Buenos_Aires"], "expect": "Buenos Aires" },
+		{ "given": ["UTC"], "expect": "UTC" },
+		{ "given": ["Etc/GMT+5"], "expect": "GMT+5" },
+		{ "given": ["Asia/Ho_Chi_Minh"], "expect": "Ho Chi Minh" }
+	],
+	"utcOffset": [
+		{ "given": ["UTC", "2026-09-25T06:12:00Z"], "expect": "UTC" },
+		{ "given": ["Europe/London", "2026-01-15T12:00:00Z"], "expect": "UTC" },
+		{ "given": ["Europe/London", "2026-07-15T12:00:00Z"], "expect": "UTC+1" },
+		{ "given": ["Australia/Sydney", "2026-01-15T12:00:00Z"], "expect": "UTC+11" },
+		{ "given": ["Australia/Sydney", "2026-07-15T12:00:00Z"], "expect": "UTC+10" },
+		{ "given": ["America/New_York", "2026-01-15T12:00:00Z"], "expect": "UTC-5" },
+		{ "given": ["America/St_Johns", "2026-07-15T12:00:00Z"], "expect": "UTC-2:30" },
+		{ "given": ["Asia/Kolkata", "2026-07-15T12:00:00Z"], "expect": "UTC+5:30" },
+		{ "given": ["Asia/Kathmandu", "2026-07-15T12:00:00Z"], "expect": "UTC+5:45" },
+		{ "given": ["Pacific/Chatham", "2026-01-15T12:00:00Z"], "expect": "UTC+13:45" },
+		{ "given": ["Pacific/Kiritimati", "2026-01-15T12:00:00Z"], "expect": "UTC+14" },
+		{ "given": ["Pacific/Pago_Pago", "2026-01-15T12:00:00Z"], "expect": "UTC-11" }
+	],
+	"timeZoneRegions": [
+		{
+			"given": [
+				[
+					"Europe/Paris",
+					"America/New_York",
+					"UTC",
+					"Asia/Tokyo",
+					"America/Argentina/Buenos_Aires",
+					"Atlantic/Reykjavik",
+					"Africa/Cairo",
+					"Australia/Perth",
+					"Pacific/Auckland",
+					"Antarctica/Troll",
+					"Europe/Amsterdam",
+					"America/Los_Angeles"
+				]
+			],
+			"expect": [
+				{ "name": "Africa", "zones": ["Africa/Cairo"] },
+				{
+					"name": "Americas",
+					"zones": ["America/Argentina/Buenos_Aires", "America/Los_Angeles", "America/New_York"]
+				},
+				{ "name": "Asia", "zones": ["Asia/Tokyo"] },
+				{ "name": "Australia", "zones": ["Australia/Perth"] },
+				{ "name": "Europe", "zones": ["Europe/Amsterdam", "Europe/Paris"] },
+				{ "name": "Pacific", "zones": ["Pacific/Auckland"] },
+				{ "name": "Other", "zones": ["Atlantic/Reykjavik", "Antarctica/Troll", "UTC"] }
+			]
+		},
+		{
+			"given": [["Asia/Tokyo", "Asia/Ho_Chi_Minh", "Asia/Hong_Kong"]],
+			"expect": [{ "name": "Asia", "zones": ["Asia/Ho_Chi_Minh", "Asia/Hong_Kong", "Asia/Tokyo"] }]
+		},
+		{ "given": [["UTC"]], "expect": [{ "name": "Other", "zones": ["UTC"] }] },
+		{ "given": [[]], "expect": [] }
+	]
+}

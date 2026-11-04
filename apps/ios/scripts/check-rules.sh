@@ -24,6 +24,10 @@ xcrun swiftc -o "$build/rule-checks" \
 	Conversation/Mentions.swift \
 	Conversation/Segments.swift \
 	Conversation/ChatGroups.swift \
+	Conversation/FileLook.swift \
+	Design/Avatars.swift \
+	Home/Mutes.swift \
+	Settings/TimeZoneChoices.swift \
 	Routines/ScheduleWords.swift \
 	"$app/RuleChecks/main.swift"
 "$build/rule-checks" "$app/../../packages/contracts/cases"
