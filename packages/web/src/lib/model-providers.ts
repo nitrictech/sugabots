@@ -160,6 +160,30 @@ export function useProviderActions() {
 			},
 			onSuccess: refresh,
 		}),
+		switchOffModel: useMutation({
+			mutationFn: ({
+				providerId,
+				modelId,
+				moveBotsTo,
+			}: {
+				providerId: string;
+				modelId: string;
+				moveBotsTo: string;
+			}) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.switchOffModel({
+						params: { workspace: workspaceId, providerId, modelId },
+						payload: { moveBotsTo },
+					}),
+				);
+			},
+			onSuccess: () =>
+				Promise.all([
+					refresh(),
+					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+				]),
+		}),
 		updateModel: useMutation({
 			mutationFn: ({
 				providerId,

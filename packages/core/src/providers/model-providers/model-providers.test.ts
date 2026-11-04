@@ -1,9 +1,16 @@
 import type { NewModelProvider } from "@sugabots/contracts";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { agent, modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
+import {
+	agent,
+	modelProvider,
+	pod,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -677,6 +684,86 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				setup.removeModel({ workspace: workspaceId, providerId, modelId: ids.first ?? "" }),
 			).rejects.toBeInstanceOf(ModelInUse);
 			expect((await view(providerId))?.models.map(({ modelId }) => modelId)).toEqual(["first"]);
+		});
+
+		describe("switching off a model bots run on", () => {
+			/** Ready to switch off `first`: three models on, `third` the default, and two bots on `first`. */
+			const withBotsOnFirst = async () => {
+				const ids = await offerable("first", "second", "third");
+				const setup = await answering();
+				await setup.setModelsEnabled({
+					workspace: workspaceId,
+					providerId,
+					modelIds: Object.values(ids),
+					enabled: true,
+				});
+				await setup.setDefaultModel({ workspace: workspaceId, model: "third" });
+				const [crew] = await onDatabase((db) =>
+					db
+						.insert(pod)
+						.values({ workspaceId, kind: "shared", name: "Crew", slug: "crew" })
+						.returning({ id: pod.id }),
+				);
+				if (!crew) throw new Error("could not create the test pod");
+				await onDatabase((db) =>
+					db.insert(agent).values(
+						["Ada", "Grace"].map((name) => ({
+							workspaceId,
+							podId: crew.id,
+							name,
+							handle: name.toLowerCase(),
+							color: "red" as const,
+							face: "dot" as const,
+							model: "first",
+						})),
+					),
+				);
+				return { ids, setup };
+			};
+
+			const crewModels = () =>
+				onDatabase((db) =>
+					db
+						.select({ model: agent.model })
+						.from(agent)
+						.where(and(eq(agent.workspaceId, workspaceId), isNull(agent.systemAgentKey))),
+				).then((rows) => rows.map(({ model }) => model));
+
+			it("moves the bots to the chosen model as it switches the model off", async () => {
+				const { ids, setup } = await withBotsOnFirst();
+
+				const moved = await setup.switchOffModel({
+					workspace: workspaceId,
+					providerId,
+					modelId: ids.first ?? "",
+					moveBotsTo: "second",
+				});
+
+				expect(moved).toBe(2);
+				expect(await crewModels()).toEqual(["second", "second"]);
+				expect(
+					(await setup.listEnabledModels({ workspace: workspaceId })).models.map(
+						({ modelId }) => modelId,
+					),
+				).toEqual(["second", "third"]);
+			});
+
+			it("changes nothing when the model to move to is the one switching off", async () => {
+				const { ids, setup } = await withBotsOnFirst();
+
+				await expect(
+					setup.switchOffModel({
+						workspace: workspaceId,
+						providerId,
+						modelId: ids.first ?? "",
+						moveBotsTo: "first",
+					}),
+				).rejects.toMatchObject({ _tag: "ModelNotEnabled" });
+				expect(await crewModels()).toEqual(["first", "first"]);
+				expect(
+					(await view(providerId))?.models.find(({ modelId }) => modelId === "first"),
+				).toMatchObject({ enabled: true });
+			});
 		});
 
 		it("refuses a default the workspace does not offer", async () => {
