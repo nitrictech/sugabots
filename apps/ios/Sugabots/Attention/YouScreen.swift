@@ -18,23 +18,16 @@ struct YouScreen: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 24) {
 				SettingsListGroups(permissions: store.permissions, members: members)
-				SettingsGroup(label: others.isEmpty ? nil : "Other workspaces") {
-					ForEach(others) { other in
-						Button { session.switchWorkspace(to: other) } label: {
-							SettingsRow.icon(label: other.name, chevron: true) { LetterTile(name: other.name) }
-						}
-						.buttonStyle(SettingsRowPressStyle())
-						SettingsDivider()
-					}
-					Button { session.startWorkspaceSetup() } label: {
-						SettingsRow.icon(label: "New workspace", chevron: true) {
-							RoundedRectangle(cornerRadius: 6, style: .continuous)
-								.strokeBorder(Palette.borderDashed, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-								.frame(width: 24, height: 24)
-								.overlay { Icon(.plus, size: 14, strokeWidth: 2.25).foregroundStyle(Palette.mutedForeground) }
+				// No New workspace: a workspace is its own server now, found when signing in.
+				if !others.isEmpty {
+					SettingsGroup(label: "Other workspaces") {
+						DividedRows(data: others) { other in
+							Button { session.switchWorkspace(to: other) } label: {
+								SettingsRow.icon(label: other.name, chevron: true) { LetterTile(name: other.name) }
+							}
+							.buttonStyle(SettingsRowPressStyle())
 						}
 					}
-					.buttonStyle(SettingsRowPressStyle())
 				}
 				SettingsGroup {
 					Button { openURL(Self.documentation) } label: {

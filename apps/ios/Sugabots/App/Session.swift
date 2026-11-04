@@ -100,13 +100,6 @@ final class Session {
 		Task { state = await WorkspaceSetup.stateOpening(workspace, client: store.client, user: store.user, workspaces: store.workspaces) }
 	}
 
-	/// Starts making another workspace, from You, coming back to this one if it's cancelled.
-	func startWorkspaceSetup() {
-		guard case let .signedIn(store) = state else { return }
-		store.stop()
-		state = .settingUp(WorkspaceSetup(client: store.client, user: store.user, workspaces: store.workspaces, returnTo: store.workspace))
-	}
-
 	/// Leaves setup for a workspace: the one it set up, the one it was opened from, or whatever the person has.
 	/// The bot whose channel opens once the workspace does, as setup's Start chatting opens it.
 	var botToOpen: (podId: String, agentId: String)?
