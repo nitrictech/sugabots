@@ -65,6 +65,7 @@ These files are generated, each by its script in `scripts/`, from the web's pack
 | `generate-built-in-tools.ts` | `Conversation/BuiltInTools.generated.swift` | `builtInToolCatalog` in `@sugabots/contracts` |
 | `generate-limits.ts` | `API/Limits.generated.swift` | the limits in `@sugabots/contracts`, including the screens' own in `client-limits.ts` |
 | `generate-catalogs.ts` | `API/Catalogs.generated.swift` | the search and computer provider catalogs, role labels and webhook prefixes in `@sugabots/contracts`; the web's words and lists in `packages/web/src/lib` (`notification-choices.ts`, `model-makers.ts`, `tool-access-words.ts`, `routine-trigger-words.ts`, `artifact-kind-files.ts`, `provider-hues.ts`) |
+| `generate-artifact-pages.ts` | `Artifacts/ArtifactPages.generated.swift` | `artifact-pages.ts` in `@sugabots/contracts`, `lib/page-frame.ts`, and `app.css`'s colours |
 
 The web modules these read are plain data, imported by the web's components and by the scripts, which Node runs as they are: they import nothing but types, so no React and no `@/` paths. Each script builds its data apart from the Swift it writes, so another app's copy can be written from the same data.
 | `generate-bot-looks.ts` | `Design/BotLooks.generated.swift` | `@sugabots/avatars`, the pod palette |

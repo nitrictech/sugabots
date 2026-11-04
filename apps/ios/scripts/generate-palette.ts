@@ -10,7 +10,7 @@ import type { GeneratedFiles } from "./generated-files.ts";
 const stylesheet = new URL("../../../packages/web/src/app.css", import.meta.url);
 
 /** A colour in sRGB, each channel from 0 to 1. */
-interface Rgba {
+export interface Rgba {
 	red: number;
 	green: number;
 	blue: number;
@@ -134,6 +134,16 @@ function tokens(css: string): Token[] {
 		comment = undefined;
 	}
 	return found;
+}
+
+/** Each colour token on `:root` by name, as light and dark draw it, with an alias resolved to the colour it names. */
+export function colourTokens(): Map<string, { light: Rgba; dark: Rgba }> {
+	const resolved = new Map<string, { light: Rgba; dark: Rgba }>();
+	for (const { name, value } of tokens(readFileSync(stylesheet, "utf8"))) {
+		const colour = value.kind === "colour" ? value : resolved.get(value.token);
+		if (colour) resolved.set(name, { light: colour.light, dark: colour.dark });
+	}
+	return resolved;
 }
 
 /** `border-subtle` as a Swift name: `borderSubtle`. */

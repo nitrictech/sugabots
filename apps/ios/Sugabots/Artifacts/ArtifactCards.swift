@@ -36,7 +36,7 @@ private struct ArtifactCard: View {
 	@Environment(WorkspaceStore.self) private var store
 	@State private var content: Content = .loading
 	@State private var expanded = false
-	@State private var pageHeight = ArtifactFrame.fitHeight.min
+	@State private var pageHeight = PageFrame.fitHeight.min
 	@State private var pageExpanded = false
 
 	private enum Content: Equatable {
@@ -125,9 +125,9 @@ private struct ArtifactCard: View {
 		switch content {
 		case let .loaded(text):
 			if artifact.kind == .html {
-				let tall = pageHeight > ArtifactFrame.fitHeight.max
-				ArtifactFrame(html: text, title: artifact.title, podId: podId, artifactId: artifact.artifactId, version: artifact.version, fitHeight: true) { pageHeight = max(ArtifactFrame.fitHeight.min, $0.rounded(.up)) }
-					.frame(height: pageExpanded ? pageHeight : min(pageHeight, ArtifactFrame.fitHeight.max))
+				let tall = pageHeight > PageFrame.fitHeight.max
+				ArtifactFrame(html: text, title: artifact.title, podId: podId, artifactId: artifact.artifactId, version: artifact.version, fitHeight: true) { pageHeight = max(PageFrame.fitHeight.min, $0.rounded(.up)) }
+					.frame(height: pageExpanded ? pageHeight : min(pageHeight, PageFrame.fitHeight.max))
 					.overlay(alignment: .bottom) {
 						if tall, !pageExpanded {
 							LinearGradient(colors: [Palette.panel.opacity(0), Palette.panel], startPoint: .top, endPoint: .bottom)

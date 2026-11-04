@@ -9,6 +9,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import * as api from "./generate-api.ts";
+import * as artifactPages from "./generate-artifact-pages.ts";
 import * as botLooks from "./generate-bot-looks.ts";
 import * as builtInTools from "./generate-built-in-tools.ts";
 import * as catalogs from "./generate-catalogs.ts";
@@ -23,6 +24,7 @@ import { iosOnly, type RegisteredGenerator, register, targetRoots } from "./gene
 /** Every generator, by the script that holds it. */
 export const generators: Record<string, RegisteredGenerator> = {
 	"generate-api.ts": register(api.generator),
+	"generate-artifact-pages.ts": iosOnly(artifactPages.generate),
 	"generate-bot-looks.ts": iosOnly(botLooks.generate),
 	"generate-built-in-tools.ts": iosOnly(builtInTools.generate),
 	"generate-catalogs.ts": iosOnly(catalogs.generate),

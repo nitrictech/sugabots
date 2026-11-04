@@ -76,6 +76,7 @@
 		55B17967038D5B785C8C668B /* ArtifactModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DF8FADC896F2CFA236BC02B /* ArtifactModels.swift */; };
 		73F58CFA1996A4F95F96E3B9 /* WorkspaceStore+Artifacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558E3307ED370217C59EB036 /* WorkspaceStore+Artifacts.swift */; };
 		919ADFCB6E9C069177C4531B /* ArtifactFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C9564343685BD6C83549998 /* ArtifactFrame.swift */; };
+		33FAF92D880C887E17B893FE /* ArtifactPages.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61943FB0A6104BBB460ADDE0 /* ArtifactPages.generated.swift */; };
 		280C73D7B253F98D6219B5FC /* ArtifactsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953C3A03EF2114702F254CE1 /* ArtifactsPage.swift */; };
 		6A969BD9219C38B3950F7709 /* ArtifactCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822F7F6BBE6BABD74B894486 /* ArtifactCards.swift */; };
 		1E4A434548D45BC8A547D21D /* RoutinePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E50772926836D5DE04CBAA6 /* RoutinePanel.swift */; };
@@ -181,6 +182,7 @@
 		7DF8FADC896F2CFA236BC02B /* ArtifactModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactModels.swift; sourceTree = "<group>"; };
 		558E3307ED370217C59EB036 /* WorkspaceStore+Artifacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceStore+Artifacts.swift"; sourceTree = "<group>"; };
 		7C9564343685BD6C83549998 /* ArtifactFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactFrame.swift; sourceTree = "<group>"; };
+		61943FB0A6104BBB460ADDE0 /* ArtifactPages.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactPages.generated.swift; sourceTree = "<group>"; };
 		953C3A03EF2114702F254CE1 /* ArtifactsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsPage.swift; sourceTree = "<group>"; };
 		822F7F6BBE6BABD74B894486 /* ArtifactCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactCards.swift; sourceTree = "<group>"; };
 		4E50772926836D5DE04CBAA6 /* RoutinePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePanel.swift; sourceTree = "<group>"; };
@@ -422,6 +424,7 @@
 				822F7F6BBE6BABD74B894486 /* ArtifactCards.swift */,
 				953C3A03EF2114702F254CE1 /* ArtifactsPage.swift */,
 				7C9564343685BD6C83549998 /* ArtifactFrame.swift */,
+				61943FB0A6104BBB460ADDE0 /* ArtifactPages.generated.swift */,
 			);
 			path = Artifacts;
 			sourceTree = "<group>";
@@ -601,6 +604,7 @@
 				6A969BD9219C38B3950F7709 /* ArtifactCards.swift in Sources */,
 				280C73D7B253F98D6219B5FC /* ArtifactsPage.swift in Sources */,
 				919ADFCB6E9C069177C4531B /* ArtifactFrame.swift in Sources */,
+				33FAF92D880C887E17B893FE /* ArtifactPages.generated.swift in Sources */,
 				73F58CFA1996A4F95F96E3B9 /* WorkspaceStore+Artifacts.swift in Sources */,
 				55B17967038D5B785C8C668B /* ArtifactModels.swift in Sources */,
 				4F846D56D14917E85E96531F /* DebugOpenHome.swift in Sources */,

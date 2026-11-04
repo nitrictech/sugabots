@@ -4,7 +4,8 @@ import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from
 import { type ReactNode, useRef, useState } from "react";
 import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-files.ts";
 import type { PageAt } from "@/lib/artifacts.ts";
-import { FIT_HEIGHT_PX, HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
+import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
+import { HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
 /**

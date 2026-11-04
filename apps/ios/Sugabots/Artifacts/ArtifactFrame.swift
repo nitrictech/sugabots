@@ -48,17 +48,14 @@ struct ArtifactFrame: View {
 					FormAlert(text: "This page couldn't be loaded.").fixedSize()
 					Button("Try again") { Task { await load() } }.buttonStyle(WebButtonStyle(variant: .secondary, size: .small))
 				}
-				.frame(maxWidth: .infinity, minHeight: ArtifactFrame.fitHeight.min)
+				.frame(maxWidth: .infinity, minHeight: PageFrame.fitHeight.min)
 			} else {
-				Color.clear.frame(minHeight: ArtifactFrame.fitHeight.min)
+				Color.clear.frame(minHeight: PageFrame.fitHeight.min)
 			}
 		}
 		.task(id: colorScheme) { await load() }
 		.accessibilityLabel(title)
 	}
-
-	/// How tall a page in a card may be, as `FIT_HEIGHT_PX`.
-	static let fitHeight = (min: CGFloat(120), max: CGFloat(560))
 
 	private func load() async {
 		failed = false
@@ -81,36 +78,8 @@ struct ArtifactFrame: View {
 struct PageTheme {
 	let dark: Bool
 
-	/// As `PAGE_CONTENT_POLICY` in `@sugabots/contracts/artifact-pages`.
-	static let contentPolicy = [
-		"default-src 'none'",
-		"script-src 'unsafe-inline' https://cdn.jsdelivr.net",
-		"style-src 'unsafe-inline'",
-		"img-src data: blob:",
-		"font-src data:",
-		"media-src data: blob:",
-		"form-action 'none'",
-	].joined(separator: "; ")
-
-	/// `FRAME_TOKENS` with the values `app.css` gives each in light and dark.
-	private static let tokens: [(name: String, light: String, dark: String)] = [
-		("--background", "#ffffff", "#0a0a0a"),
-		("--card", "#f7f7f8", "#111113"),
-		("--panel", "#ffffff", "#111113"),
-		("--chip", "#f1f1f3", "#17171a"),
-		("--hover", "#e4e4e7", "#1f1f23"),
-		("--foreground", "#111113", "#ededed"),
-		("--body-foreground", "#1c1c1f", "#ededed"),
-		("--muted-foreground", "#52525b", "#a1a1aa"),
-		("--subtle-foreground", "#6b6b73", "#808089"),
-		("--border", "#e4e4e7", "#1c1c1f"),
-		("--border-strong", "#d4d4d8", "#26262a"),
-		("--primary", "#111113", "#ededed"),
-		("--primary-foreground", "#ffffff", "#0a0a0a"),
-		("--link", "#111113", "#ededed"),
-		("--success-text", "#1a7f37", "#4ade80"),
-		("--destructive-text", "#c42d45", "#f08a94"),
-		("--warning", "#8a5a12", "#e0b67b"),
+	/// The colour tokens, then the font tokens, which name the app's own fonts.
+	private static let tokens = PageFrame.colourTokens + [
 		("--font-sans", "\"Rubik\", system-ui, sans-serif", "\"Rubik\", system-ui, sans-serif"),
 		("--font-mono", "\"JetBrains Mono\", ui-monospace, Menlo, monospace", "\"JetBrains Mono\", ui-monospace, Menlo, monospace"),
 	]
@@ -121,9 +90,7 @@ struct PageTheme {
 		Self.tokens.map { "\($0.name): \(dark ? $0.dark : $0.light);" }.joined(separator: " ")
 	}
 
-	var css: String {
-		":root { color-scheme: \(colorScheme); \(tokenDeclarations) } html, body { background: transparent; } body { margin: 0; color: var(--body-foreground); font-family: var(--font-sans); }"
-	}
+	var css: String { PageFrame.themeCss(colorScheme: colorScheme, tokens: tokenDeclarations) }
 
 	/// The theme as the page served from the content origin reads it from its fragment.
 	var json: String {
@@ -134,7 +101,7 @@ struct PageTheme {
 
 	/// `html` with the content policy and the theme before anything else in it, after any doctype.
 	func written(into html: String) -> String {
-		let tags = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(Self.contentPolicy)\"><style>\(css)</style>"
+		let tags = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(PageFrame.contentPolicy)\"><style>\(css)</style>"
 		let trimmed = html.drop { $0.isWhitespace }
 		guard trimmed.lowercased().hasPrefix("<!doctype"), let end = trimmed.firstIndex(of: ">") else { return tags + html }
 		return String(trimmed[...end]) + tags + String(trimmed[trimmed.index(after: end)...])
@@ -151,20 +118,15 @@ struct PageWebView: UIViewRepresentable {
 	let source: Source
 	var onPageHeight: ((CGFloat) -> Void)?
 
-	/// Reports the page's height whenever it changes, as the web's `PAGE_HEIGHT_REPORT` does.
-	private static let heightReport = """
-	new ResizeObserver(() => window.webkit.messageHandlers.pageHeight.postMessage(document.documentElement.scrollHeight)).observe(document.documentElement);
-	"""
-
 	func makeCoordinator() -> Coordinator { Coordinator() }
 
 	func makeUIView(context: Context) -> WKWebView {
 		let configuration = WKWebViewConfiguration()
 		configuration.websiteDataStore = .nonPersistent()
 		if onPageHeight != nil {
-			configuration.userContentController.add(context.coordinator, name: "pageHeight")
+			configuration.userContentController.add(context.coordinator, name: PageFrame.heightMessageHandler)
 			configuration.userContentController.addUserScript(
-				WKUserScript(source: Self.heightReport, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+				WKUserScript(source: PageFrame.heightReport, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
 			)
 		}
 		let view = WKWebView(frame: .zero, configuration: configuration)
