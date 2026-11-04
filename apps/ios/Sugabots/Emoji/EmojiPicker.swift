@@ -148,6 +148,12 @@ struct EmojiPicker: View {
 		.accessibilityLabel("Change skin tone" + (next.flatMap { dataset.skinTones[$0.rawValue] }.map { " (\($0))" } ?? ""))
 	}
 
+	/// Whether a message with the reactions `used` may take `emoji`: once it
+	/// has `maxReactionEmojiPerMessage` different ones, only one of those.
+	static func admits(_ emoji: String, besides used: Set<String>) -> Bool {
+		used.count < maxReactionEmojiPerMessage || used.contains(emoji)
+	}
+
 	private func choose(_ emoji: String) {
 		// A full message takes only the emoji already on it.
 		if full, !used.contains(emoji) { return }

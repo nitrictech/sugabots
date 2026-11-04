@@ -130,10 +130,9 @@ struct MessageRow: View {
 				actionsSheet(words: segments.compactMap(\.text).joined(separator: "\n\n"))
 			}
 			.sheet(isPresented: $pickingReaction) {
-				let used = Set((message.reactions ?? []).map(\.emoji))
-				EmojiPicker(full: used.count >= EmojiPicker.maxReactionEmojiPerMessage, used: used) { emoji in
+				EmojiPicker(full: reactionEmoji.count >= EmojiPicker.maxReactionEmojiPerMessage, used: reactionEmoji) { emoji in
 					pickingReaction = false
-					actions.react?(message, emoji)
+					addReaction(emoji)
 				}
 			}
 			.accessibilityElement(children: .contain)
@@ -230,6 +229,18 @@ struct MessageRow: View {
 		}
 	}
 
+	/// The different emoji the message has been reacted with.
+	private var reactionEmoji: Set<String> { Set((message.reactions ?? []).map(\.emoji)) }
+
+	/// Adds the person's `emoji` to the message as the picker chooses one: a
+	/// message with the most different emoji takes only one of those, and
+	/// `emoji` becomes the one chosen last on this device.
+	private func addReaction(_ emoji: String) {
+		guard EmojiPicker.admits(emoji, besides: reactionEmoji) else { return }
+		RecentEmoji.remember(emoji)
+		actions.react?(message, emoji)
+	}
+
 	/// Whether holding the message has anything to offer, given its `words`.
 	private func hasActions(words: String) -> Bool {
 		finished && (actions.react != nil || actions.reply != nil || actions.startThread != nil) || !words.isEmpty
@@ -239,7 +250,7 @@ struct MessageRow: View {
 		MessageActionsSheet(
 			react: finished && actions.react != nil ? { emoji in
 				holding = false
-				actions.react?(message, emoji)
+				addReaction(emoji)
 			} : nil,
 			pickReaction: {
 				pickAfterHolding = true
