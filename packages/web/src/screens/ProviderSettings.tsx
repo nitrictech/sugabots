@@ -18,6 +18,7 @@ import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
 	Check,
+	ChevronDown,
 	Eye,
 	Grid2X2,
 	Image,
@@ -50,6 +51,13 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -268,23 +276,33 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
 	const cannotTurnOff = provider.active && heldOn !== undefined;
+	const stranded = useStrandedModels(provider);
+	const [movingBotsTo, setMovingBotsTo] = useState<"switch off" | "disconnect">();
+
+	async function disconnectProvider() {
+		if (!seeded) {
+			await actions.remove.mutateAsync({ providerId: provider.id });
+			return;
+		}
+		if (provider.signedIn) {
+			await actions.signOut.mutateAsync({ providerId: provider.id });
+		}
+		await actions.update.mutateAsync({
+			providerId: provider.id,
+			json: { active: false, ...(provider.hasApiKey ? { apiKey: null } : {}) },
+		});
+	}
 
 	async function confirmDisconnect() {
 		try {
-			if (seeded) {
-				if (provider.signedIn) {
-					await actions.signOut.mutateAsync({ providerId: provider.id });
-				}
-				await actions.update.mutateAsync({
-					providerId: provider.id,
-					json: { active: false, ...(provider.hasApiKey ? { apiKey: null } : {}) },
-				});
-			} else {
-				await actions.remove.mutateAsync({ providerId: provider.id });
-			}
+			await disconnectProvider();
 		} catch {
 			return;
 		}
+		leaveDisconnected();
+	}
+
+	function leaveDisconnected() {
 		setDisconnecting(false);
 		// Back to Models, or Models in the provider's place, so Back never returns to one
 		// no longer connected.
@@ -324,9 +342,13 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 							checked={provider.active}
 							disabled={cannotTurnOff || actions.update.isPending}
 							label={`Use ${provider.name}`}
-							onChange={(active) =>
-								actions.update.mutate({ providerId: provider.id, json: { active } })
-							}
+							onChange={(active) => {
+								if (!active && stranded.length > 0) {
+									setMovingBotsTo("switch off");
+									return;
+								}
+								actions.update.mutate({ providerId: provider.id, json: { active } });
+							}}
 						/>
 					}
 				/>
@@ -335,11 +357,33 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			<Models provider={provider} />
 			<SettingsDanger
 				label={`Disconnect ${provider.name}`}
-				description="Bots using these models stop working until you pick another."
+				description="Bots using these models move to the ones you pick."
 				action="Disconnect"
-				onClick={() => setDisconnecting(true)}
+				onClick={() =>
+					stranded.length > 0 ? setMovingBotsTo("disconnect") : setDisconnecting(true)
+				}
 				disabledReason={held && heldReason(held, "one of its models")}
 			/>
+			<Dialog
+				open={movingBotsTo !== undefined}
+				onOpenChange={(open) => !open && setMovingBotsTo(undefined)}
+			>
+				{movingBotsTo && (
+					<MoveBotsOffProviderDialog
+						provider={provider}
+						stranded={stranded}
+						then={movingBotsTo}
+						onMoved={async () => {
+							if (movingBotsTo === "disconnect") {
+								await disconnectProvider();
+								leaveDisconnected();
+							}
+							setMovingBotsTo(undefined);
+						}}
+						done={() => setMovingBotsTo(undefined)}
+					/>
+				)}
+			</Dialog>
 			<DeleteDialog
 				open={disconnecting}
 				onOpenChange={setDisconnecting}
@@ -592,6 +636,162 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 	};
 }
 
+/**
+ * The crew bots a model would leave on a model that is off if this provider
+ * stopped offering it: none while another provider offers the same model.
+ */
+function useStrandedBotsOf(provider: ModelProvider): (model: ProviderModel) => Agent[] {
+	const botsOn = useBotsByModel();
+	const offered = useModels().data?.models ?? [];
+	return (model) =>
+		offered.some(
+			(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
+		)
+			? []
+			: botsOn(model.modelId);
+}
+
+interface StrandedModel {
+	model: ProviderModel;
+	bots: Agent[];
+}
+
+/** The provider's offered models that bots would be left on if it went off. */
+function useStrandedModels(provider: ModelProvider): StrandedModel[] {
+	const strandedBotsOf = useStrandedBotsOf(provider);
+	return offeredModelsOf(provider).flatMap((model) => {
+		const bots = strandedBotsOf(model);
+		return bots.length > 0 ? [{ model, bots }] : [];
+	});
+}
+
+/**
+ * Switching off or disconnecting a provider whose models bots still run on:
+ * where each model's bots move, from the models other providers offer,
+ * starting on the one new bots use. They move and the provider goes off
+ * together, so no bot is left on a model that is off.
+ */
+function MoveBotsOffProviderDialog({
+	provider,
+	stranded,
+	then,
+	onMoved,
+	done,
+}: {
+	provider: ModelProvider;
+	stranded: readonly StrandedModel[];
+	then: "switch off" | "disconnect";
+	/** After the bots have moved and the provider is off. */
+	onMoved: () => Promise<void>;
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.providerId !== provider.id,
+	);
+	const firstChoice = candidates.some((candidate) => candidate.modelId === models?.defaultModel)
+		? models?.defaultModel
+		: candidates[0]?.modelId;
+	const [chosen, setChosen] = useState<Record<string, string>>({});
+	const moveBots = stranded.flatMap(({ model }) => {
+		const to = chosen[model.modelId] ?? firstChoice;
+		return to ? [{ from: model.modelId, to }] : [];
+	});
+	const [error, setError] = useState<unknown>();
+	const [pending, setPending] = useState(false);
+	const botCount = stranded.reduce((total, { bots }) => total + bots.length, 0);
+	const verb = then === "disconnect" ? "disconnect" : "switch off";
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		setError(undefined);
+		setPending(true);
+		try {
+			await actions.switchOff.mutateAsync({ providerId: provider.id, moveBots });
+			await onMoved();
+		} catch (cause) {
+			setError(cause);
+		} finally {
+			setPending(false);
+		}
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader
+				title={
+					then === "disconnect" ? `Disconnect ${provider.name}` : `Switch off ${provider.name}`
+				}
+			/>
+			<DialogFormBody>
+				<DialogDescription>
+					{botCount} {botCount === 1 ? "bot uses" : "bots use"} {provider.name}'s models. Choose the
+					model each moves to.
+				</DialogDescription>
+				{candidates.length === 0 ? (
+					<Alert>
+						Switch on a model at another provider first, so the bots have one to move to.
+					</Alert>
+				) : (
+					<SettingsGroup>
+						{stranded.map(({ model, bots }) => {
+							const to = chosen[model.modelId] ?? firstChoice;
+							const toName =
+								candidates.find((candidate) => candidate.modelId === to)?.displayName ?? to;
+							return (
+								<SettingsRow
+									key={model.id}
+									label={modelName(model)}
+									sub={bots.map((bot) => bot.name).join(", ")}
+									trailing={
+										<DropdownMenu>
+											<DropdownMenuTrigger
+												aria-label={`Move ${modelName(model)} bots to: ${toName}`}
+												className="focus-ring flex h-8 min-w-0 max-w-48 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
+											>
+												<span className="truncate">{toName}</span>
+												<ChevronDown
+													aria-hidden
+													size={14}
+													className="shrink-0 text-muted-foreground"
+												/>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end" className="min-w-48">
+												<DropdownMenuRadioGroup
+													value={to}
+													onValueChange={(modelId: string) =>
+														setChosen({ ...chosen, [model.modelId]: modelId })
+													}
+												>
+													{candidates.map((candidate) => (
+														<DropdownMenuRadioItem
+															key={`${candidate.providerId}:${candidate.modelId}`}
+															value={candidate.modelId}
+														>
+															{candidate.displayName ?? candidate.modelId}
+														</DropdownMenuRadioItem>
+													))}
+												</DropdownMenuRadioGroup>
+											</DropdownMenuContent>
+										</DropdownMenu>
+									}
+								/>
+							);
+						})}
+					</SettingsGroup>
+				)}
+				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={`Move bots and ${verb}`}
+				actionDisabled={candidates.length === 0 || pending}
+				onCancel={done}
+			/>
+		</DialogForm>
+	);
+}
+
 /** The models the provider offers agents: none while it is not connected. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
@@ -801,7 +1001,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const botsOn = useBotsByModel();
 	const botsKnown = useAgents().agents !== undefined;
 	const holdersOf = useModelHolders();
-	const offered = useModels().data?.models ?? [];
+	const strandedBotsOf = useStrandedBotsOf(provider);
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
 	const [movingBotsOff, setMovingBotsOff] = useState<ProviderModel>();
@@ -854,13 +1054,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
-					// Another provider offering the same model keeps its bots running.
-					const strandsBots =
-						bots.length > 0 &&
-						!offered.some(
-							(candidate) =>
-								candidate.modelId === model.modelId && candidate.providerId !== provider.id,
-						);
+					const strandsBots = strandedBotsOf(model).length > 0;
 					return (
 						<SettingsRow
 							key={model.id}
