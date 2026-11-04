@@ -2,7 +2,6 @@ import type { Me } from "@sugabots/contracts";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { failureMessage } from "@/lib/failure.ts";
 import { LivelinessProvider } from "@/lib/liveliness.tsx";
 import { createQueryClient } from "@/lib/query.ts";
 import { type Session, useSessionFromApi } from "@/lib/session.ts";
@@ -10,8 +9,7 @@ import { reloadWhenADeployReplacesChunks } from "@/lib/stale-chunks.ts";
 import { workspacesQuery } from "@/lib/workspace.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { PagesFromContentOrigin } from "@/screens/HtmlFrame.tsx";
-import { Button } from "@/ui/button.tsx";
-import { EmptyState } from "@/ui/empty-state.tsx";
+import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 import "@/app.css";
 
@@ -29,30 +27,14 @@ const router = createAppRouter();
 
 function App() {
 	const session = useSessionFromApi();
-	const [retryingSession, setRetryingSession] = useState(false);
 
 	if (session.user === undefined) {
 		return session.error ? (
-			<div className="grid h-full place-items-center bg-list">
-				<EmptyState title="Could not check your session">
-					<div className="flex flex-col items-center gap-3">
-						<p>{failureMessage(session.error)}</p>
-						<Button
-							variant="outline"
-							disabled={retryingSession}
-							onClick={() => {
-								setRetryingSession(true);
-								void session
-									.refresh()
-									.catch(() => {})
-									.finally(() => setRetryingSession(false));
-							}}
-						>
-							{retryingSession ? "Trying again…" : "Try again"}
-						</Button>
-					</div>
-				</EmptyState>
-			</div>
+			<LoadFailure
+				title="Could not check your session"
+				error={session.error}
+				retry={session.refresh}
+			/>
 		) : (
 			<Splash />
 		);

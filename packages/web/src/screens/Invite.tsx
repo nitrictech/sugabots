@@ -83,8 +83,10 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 		try {
 			chooseWorkspace(workspaceId);
 			// Nothing here reads the list, but the page this leads to does, and
-			// it has to find the workspace just joined there to open it.
-			await queries.invalidateQueries({ queryKey: workspacesQuery.queryKey, refetchType: "all" });
+			// it has to find the workspace just joined there to open it. Fetched
+			// rather than invalidated: a list the session started with was put in
+			// the cache without a way to fetch it, so invalidating could not refresh it.
+			await queries.fetchQuery({ ...workspacesQuery, staleTime: 0 });
 			await onDone();
 		} catch (failure) {
 			setError(
