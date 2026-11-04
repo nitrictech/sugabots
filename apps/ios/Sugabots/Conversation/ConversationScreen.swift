@@ -76,6 +76,8 @@ private struct ConversationContent: View {
 	/// How often a person still typing says so again, as the web's composer does.
 	private static let typingSignalInterval: TimeInterval = 3
 	private static let foot = "foot"
+	/// The space between the composer and the keyboard, over the hint row's own.
+	private static let keyboardGap: CGFloat = 8
 	/// How long a message jumped to stays highlighted.
 	private static let pointedOutFor: Duration = .seconds(2)
 	/// The space over the first message, under the floating header.
@@ -367,6 +369,8 @@ private struct ConversationContent: View {
 			}
 			.padding(.horizontal, barSideInset)
 			.padding(.top, 4)
+			// Clear of the keyboard while typing, as the tab bar keeps it clear of the foot otherwise.
+			.padding(.bottom, composing ? Self.keyboardGap : 0)
 			.background(Palette.background)
 		}
 	}

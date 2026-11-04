@@ -23,7 +23,8 @@ struct ConversationHeader: View {
 	@Environment(\.dismiss) private var dismiss
 
 	/// How big a face is in the title row.
-	private static let faceSize: CGFloat = 36
+	/// A face in the title pill: 6 points inside its rounded end, and 6 over and under in its 44.
+	private static let faceSize: CGFloat = 32
 
 	var body: some View {
 		HStack(spacing: 8) {
@@ -214,7 +215,7 @@ private struct TitleRow<Face: View>: View {
 				Spacer(minLength: 0)
 			}
 			// A face sits close to the pill's round end; text alone gets the same inset as the other end.
-			.padding(.leading, Face.self == EmptyView.self ? 16 : 4)
+			.padding(.leading, Face.self == EmptyView.self ? 16 : 6)
 			.padding(.trailing, 16)
 			.frame(height: 44)
 			.glass(in: Capsule())
