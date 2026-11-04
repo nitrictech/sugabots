@@ -101,115 +101,137 @@ struct WorkspaceAddress: Equatable {
 	var server: String { "https://\(host)" }
 }
 
-/// Which workspace to sign in to, as Slack asks: one large address field, the
-/// name typed into it and the ending written straight after, `.sugabots.ai`
-/// unless a self-hosted server's ending is typed over it.
+/// Which workspace to sign in to, as Slack asks: a box for the name with
+/// `.sugabots.ai` written after it. A self-hosted server is a whole address
+/// typed into one box instead.
 @MainActor
 private struct WorkspaceStep: View {
-	private enum Field { case name, ending }
-
 	@Binding var address: WorkspaceAddress
 	let onBack: () -> Void
 	let onFound: () -> Void
 	@Environment(Session.self) private var session
-	@FocusState private var focus: Field?
+	@FocusState private var focused: Bool
+	@State private var selfHosted = false
+	/// A self-hosted server's whole address, as typed.
+	@State private var serverAddress = ""
 	@State private var checking = false
 	@State private var failure: String?
 
 	var body: some View {
-		// Near the top rather than centred, so the field and Continue stay clear of the keyboard it opens.
-		AuthLayout(title: "Find your workspace", subtitle: "Type its name: the start of the address your team opens Sugabots at.", centred: false, onBack: onBack) {
-			VStack(alignment: .leading, spacing: 12) {
-				addressField
-				endingHint
+		// From the top rather than centred, so the box and Continue stay clear of the keyboard it opens.
+		AuthLayout(
+			title: "Sign in to your workspace",
+			subtitle: selfHosted ? "Enter the address your team opens Sugabots at." : "Enter your workspace's Sugabots address.",
+			centred: false,
+			showsMark: true,
+			onBack: onBack
+		) {
+			HStack(spacing: 10) {
+				field
+				if !selfHosted {
+					Text(WorkspaceAddress.hostedEnding)
+						.font(Typeface.rubik(19, .medium))
+						.foregroundStyle(Palette.foreground)
+						.fixedSize()
+						.accessibilityHidden(true)
+				}
 			}
 			if let failure { FormAlert(text: failure) }
 			Button(action: check) {
-				if checking {
-					ProgressView().tint(Palette.primaryForeground)
-				} else {
-					Text("Continue")
+				HStack(spacing: 8) {
+					if checking {
+						ProgressView().tint(Palette.primaryForeground)
+					} else {
+						Text("Continue")
+						Image(systemName: "arrow.right").font(.system(size: 15, weight: .semibold))
+					}
 				}
 			}
 			.buttonStyle(WebButtonStyle(size: .large, fullWidth: true))
-			.disabled(checking || address.resolved.name.isEmpty)
-			.padding(.top, 6)
+			.disabled(checking || chosen.name.isEmpty)
+			.padding(.top, 4)
+			switchLink
+				.frame(maxWidth: .infinity)
+				.padding(.top, 4)
 		}
-		.onAppear { focus = .name }
+		.onAppear {
+			selfHosted = address.ending != WorkspaceAddress.hostedEnding
+			if selfHosted { serverAddress = address.host }
+			focused = true
+		}
 	}
 
-	private var addressField: some View {
-		HStack(spacing: 12) {
-			WorkspaceInitial(name: address.resolved.name, size: 36)
-			HStack(spacing: 0) {
+	/// The box: the name before `.sugabots.ai`, or a self-hosted server's whole address.
+	private var field: some View {
+		Group {
+			if selfHosted {
+				TextField("", text: $serverAddress, prompt: Text(verbatim: "sugabots.yourcompany.com").foregroundStyle(Palette.subtleForeground))
+					.accessibilityLabel("Server address")
+			} else {
 				TextField("", text: $address.name, prompt: Text(verbatim: "your-team").foregroundStyle(Palette.subtleForeground))
-					.focused($focus, equals: .name)
-					.foregroundStyle(Palette.foreground)
-					.submitLabel(.continue)
-					.onSubmit(check)
-					.fixedSize()
-				// Typed over for a self-hosted server; grey while it's only the default.
-				TextField("", text: $address.ending, prompt: Text(verbatim: WorkspaceAddress.hostedEnding).foregroundStyle(Palette.subtleForeground))
-					.focused($focus, equals: .ending)
-					.foregroundStyle(focus == .ending ? Palette.foreground : Palette.mutedForeground)
-					.submitLabel(.continue)
-					.onSubmit(check)
-					.fixedSize()
-					.accessibilityLabel("Address ending")
-				Spacer(minLength: 0)
+					// Up against `.sugabots.ai`, so the two read as one address.
+					.multilineTextAlignment(.trailing)
+					.accessibilityLabel("Workspace name, before \(WorkspaceAddress.hostedEnding)")
 			}
-			.font(Typeface.rubik(19, .medium))
-			.keyboardType(.URL)
-			.textContentType(.URL)
-			.textInputAutocapitalization(.never)
-			.autocorrectionDisabled()
-			.lineLimit(1)
-			// The field's own width, however long the address: what doesn't fit is cut off, not pushed out.
-			.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-			.clipped()
 		}
-		.padding(.leading, 12)
-		.padding(.trailing, 16)
-		.frame(height: 64)
-		.background(Palette.list, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+		.focused($focused)
+		.font(Typeface.rubik(19, .medium))
+		.foregroundStyle(Palette.foreground)
+		.keyboardType(.URL)
+		.textContentType(.URL)
+		.textInputAutocapitalization(.never)
+		.autocorrectionDisabled()
+		.submitLabel(.continue)
+		.onSubmit(check)
+		.padding(.horizontal, 16)
+		.frame(height: 56)
+		.background(Palette.list, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 		.overlay(
-			RoundedRectangle(cornerRadius: 18, style: .continuous)
-				.strokeBorder(focus == nil ? Palette.border : Palette.ring, lineWidth: focus == nil ? 1 : 1.5)
+			RoundedRectangle(cornerRadius: 12, style: .continuous)
+				.strokeBorder(focused ? Palette.ring : Palette.borderStrong, lineWidth: focused ? 1.5 : 1)
 		)
-		.animation(.easeOut(duration: 0.15), value: focus)
+		.animation(.easeOut(duration: 0.15), value: focused)
 	}
 
-	/// How to reach a self-hosted server, or the way back to the hosted ending once it's changed.
-	@ViewBuilder private var endingHint: some View {
-		if address.ending == WorkspaceAddress.hostedEnding {
-			Text("Self-hosted? Tap \(WorkspaceAddress.hostedEnding) to type your own domain.")
-				.font(Typeface.rubik(13))
-				.foregroundStyle(Palette.subtleForeground)
-				.padding(.horizontal, 4)
-		} else {
-			Button("Use \(WorkspaceAddress.hostedEnding)") {
-				address.ending = WorkspaceAddress.hostedEnding
-				focus = .name
+	/// Between a workspace on Sugabots and a self-hosted server's address.
+	private var switchLink: some View {
+		HStack(spacing: 4) {
+			Text(selfHosted ? "On Sugabots?" : "Self-hosted?").foregroundStyle(Palette.mutedForeground)
+			Button(selfHosted ? "Enter your workspace's name" : "Enter your server's address") {
+				failure = nil
+				if selfHosted {
+					address = WorkspaceAddress(name: address.name, ending: WorkspaceAddress.hostedEnding)
+				} else {
+					serverAddress = address.name.isEmpty ? "" : address.host
+				}
+				selfHosted.toggle()
+				focused = true
 			}
-			.font(Typeface.rubik(13, .medium))
-			.foregroundStyle(Palette.mutedForeground)
-			.padding(.horizontal, 4)
+			.foregroundStyle(Palette.link)
 		}
+		.font(Typeface.rubik(14))
+	}
+
+	/// The workspace as typed in either box.
+	private var chosen: WorkspaceAddress {
+		selfHosted ? WorkspaceAddress(server: serverAddress) : address.resolved
 	}
 
 	private func check() {
 		guard !checking else { return }
-		guard !address.resolved.name.isEmpty else {
-			failure = "Type your workspace's name."
-			focus = .name
+		let workspace = chosen
+		guard !workspace.name.isEmpty else {
+			failure = selfHosted ? "Enter your server's address." : "Enter your workspace's name."
+			focused = true
 			return
 		}
-		focus = nil
+		focused = false
 		checking = true
 		failure = nil
 		Task {
 			do {
-				try await session.checkServer(address.server)
+				try await session.checkServer(workspace.server)
+				address = workspace
 				onFound()
 			} catch {
 				failure = error.localizedDescription
@@ -482,6 +504,8 @@ struct AuthLayout<Content: View>: View {
 	var subtitle: String?
 	/// Centred on the screen, or from the top for a page that opens the keyboard.
 	var centred = true
+	/// Sugabots' mark and name over the title, as a page that starts signing in has.
+	var showsMark = false
 	var onBack: (() -> Void)?
 	@ViewBuilder var content: Content
 
@@ -497,6 +521,15 @@ struct AuthLayout<Content: View>: View {
 			ScrollView {
 				VStack(alignment: .leading, spacing: 14) {
 					VStack(spacing: 10) {
+						if showsMark {
+							HStack(spacing: 8) {
+								Image("Mark").resizable().frame(width: 30, height: 30)
+								Text("sugabots").font(Typeface.rubik(22, .bold)).tracking(-0.4).foregroundStyle(Palette.foreground)
+							}
+							.accessibilityElement(children: .ignore)
+							.accessibilityLabel("Sugabots")
+							.padding(.bottom, 18)
+						}
 						Text(title)
 							.font(Typeface.rubik(30, .bold))
 							.tracking(-0.6)
