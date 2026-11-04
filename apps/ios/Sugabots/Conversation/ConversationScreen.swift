@@ -178,7 +178,9 @@ private struct ConversationContent: View {
 	}
 
 	private var kind: ConversationKind {
-		guard let thread = model.thread else { return .peopleThread }
+		// Until the thread loads, its kind as the pods' chat lists know it, so the header
+		// shows the bot's face and model from the start rather than changing as it loads.
+		guard let thread = model.thread else { return store.listedKind(of: model.threadId) ?? .peopleThread }
 		if thread.type == .podChat {
 			// The pod's list has a rename as soon as it's made; the thread's own title waits for its details to reload.
 			return .podChat(name: store.podChat(model.conversationId, in: thread.podId)?.title ?? thread.title)

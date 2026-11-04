@@ -9,6 +9,24 @@ extension WorkspaceStore {
 
 	/// One of a pod's channels as the pod's list has it, renames included; nil
 	/// until the list has loaded, or once the channel is archived.
+	/// What kind of conversation `conversationId` is, as a pod's chat list already
+	/// says, before its own details load; nil when no loaded list has it.
+	func listedKind(of conversationId: String) -> ConversationKind? {
+		for list in chatLists.values {
+			if let chat = list.chats.first(where: { $0.conversation.id == conversationId }) {
+				return .podChat(name: chat.conversation.title)
+			}
+			if let channel = list.channels.first(where: { $0.conversation.id == conversationId }) {
+				return .botChannel(channel.agent)
+			}
+			if let thread = list.threads.first(where: { $0.conversation.id == conversationId }) {
+				// As the loaded thread decides: a bot's thread is one a bot hosts.
+				return thread.conversation.hostAgentId.flatMap(agent(id:)).map(ConversationKind.botThread) ?? .peopleThread
+			}
+		}
+		return nil
+	}
+
 	func podChat(_ conversationId: String, in podId: String) -> PodChat? {
 		chatLists[podId]?.chats.first { $0.id == conversationId }?.conversation
 	}
