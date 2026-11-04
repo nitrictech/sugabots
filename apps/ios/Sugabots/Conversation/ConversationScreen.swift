@@ -98,7 +98,7 @@ private struct ConversationContent: View {
 							.onDisappear { latestInView = false }
 					}
 					.padding(.top, Self.headerRoom)
-					.frame(minHeight: viewport.size.height, alignment: .bottom)
+					.modifier(FootOfShortConversation(height: viewport.size.height))
 				}
 				.defaultScrollAnchor(.bottom)
 				.scrollDismissesKeyboard(.interactively)
@@ -808,6 +808,23 @@ enum Drafts {
 			UserDefaults.standard.removeObject(forKey: key)
 		} else {
 			UserDefaults.standard.set(value, forKey: key)
+		}
+	}
+}
+
+/// Keeps a short conversation at the foot of its scroll view, just over the
+/// composer. iOS 18 does this itself with the scroll view's bottom anchor. Before
+/// it, the list is given at least the scroll view's height, aligned to its foot.
+/// Not from iOS 18 on: there that frame leaves a long conversation blank when it
+/// arrives all at once, until something lays the list out again.
+private struct FootOfShortConversation: ViewModifier {
+	let height: CGFloat
+
+	func body(content: Content) -> some View {
+		if #available(iOS 18, *) {
+			content
+		} else {
+			content.frame(minHeight: height, alignment: .bottom)
 		}
 	}
 }
