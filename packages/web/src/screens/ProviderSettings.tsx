@@ -173,7 +173,7 @@ function NamedBotFace({ bot }: { bot: Agent }) {
 				aria-label={bot.name}
 				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
 				tabIndex={0}
-				className="focus-ring rounded-full"
+				className="focus-ring flex rounded-full"
 				onPointerEnter={() => face.current?.play("hop")}
 				onFocus={(event) =>
 					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
