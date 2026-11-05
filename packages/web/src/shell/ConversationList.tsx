@@ -19,6 +19,7 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
 import { useOpenBots } from "@/lib/open-bots.ts";
+import { THREADS_SHOWN } from "@/lib/screen-limits.ts";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { FailedDot } from "@/shell/FailedDot.tsx";
@@ -380,9 +381,6 @@ const PHONE_ROW =
 /** A bot's own part of its row: its face and name, filling the row up to its end. */
 const botClassName =
 	"focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left text-sm max-md:gap-3 max-md:rounded-lg max-md:text-base";
-
-/** How many of a bot's open threads show under it, before All threads leads to the rest. */
-const THREADS_SHOWN = 6;
 
 /**
  * A bot on one line, which opens its channel, with its threads under it

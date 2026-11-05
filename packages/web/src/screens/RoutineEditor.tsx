@@ -14,6 +14,7 @@ import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import type { TriggerKind } from "@/lib/routine-trigger-words.ts";
 import { useRoutineActions } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -37,7 +38,6 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import type { TriggerKind } from "./RoutineTriggerKinds.tsx";
 import {
 	TriggerDialog,
 	type TriggerDraft,

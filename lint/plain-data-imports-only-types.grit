@@ -1,0 +1,12 @@
+language js(typescript)
+
+or {
+	`import $_ from $_`,
+	`import $_`,
+	`export { $_ } from $_`,
+	`export * from $_`,
+	`export * as $_ from $_`
+} as $import where {
+	$import <: not r"(?s)^(?:import|export)\s+type\b.*",
+	register_diagnostic(span=$import, message="apps/codegen loads this module with Node, which resolves none of the web app's `@/` paths and loads none of its components, styles or browser-only code, so it imports only types, with `import type`.")
+}

@@ -20,6 +20,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { type PageAt, usePageAddress } from "@/lib/artifacts.ts";
+import { FIT_HEIGHT_PX, FRAME_TOKENS } from "@/lib/page-frame.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 
@@ -209,37 +210,6 @@ function useSeen(element: RefObject<HTMLElement | null>): boolean {
 	}, [element, seen]);
 	return seen;
 }
-
-/** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a conversation. */
-export const FIT_HEIGHT_PX = { min: 120, max: 560 } as const;
-
-/**
- * The app's tokens a page is given as CSS variables of the same names, which
- * the artifact tools tell bots about. Each is copied as the stylesheet
- * declares it, `light-dark()` and all, so it follows the frame's
- * `color-scheme`, which is the app's.
- */
-export const FRAME_TOKENS = [
-	"--background",
-	"--card",
-	"--panel",
-	"--chip",
-	"--hover",
-	"--foreground",
-	"--body-foreground",
-	"--muted-foreground",
-	"--subtle-foreground",
-	"--border",
-	"--border-strong",
-	"--primary",
-	"--primary-foreground",
-	"--link",
-	"--success-text",
-	"--destructive-text",
-	"--warning",
-	"--font-sans",
-	"--font-mono",
-] as const;
 
 /**
  * The app's colour scheme and tokens, read from the root element and read

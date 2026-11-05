@@ -1,11 +1,22 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
-import { BROWSER_TOOL_PREFIX, stepLabel } from "@/lib/tool-names.ts";
+import type { ConnectionLook } from "@/lib/connections.ts";
+import {
+	ARTIFACT_TOOL_PREFIX,
+	BROWSER_TOOL_PREFIX,
+	BUILT_IN_HANDLE,
+	connectionLabel,
+	splitToolKey,
+	stepLabel,
+	wordsFromKey,
+} from "@/lib/tool-names.ts";
+import { awaitsApproval, durationOf, formatTotal } from "./tool-activity.ts";
 
 /*
- * A reply's tool calls as the tool line lists them once opened: in runs under
- * what the bot said it was about to do, each call written as what it did to
- * what ("Read image.png", "Ran ls -la"), rather than as the tool's name and
- * its raw output.
+ * A reply's tool calls as the tool line says them: in one line over the reply
+ * (`toolLineText`), and once it is opened, in runs under what the bot said it
+ * was about to do, each call written as what it did to what ("Read
+ * image.png", "Ran ls -la") with a note on how it went (`noteOf`), rather
+ * than as the tool's name and its raw output.
  *
  * The built-in tools are matched by key, as `@/lib/tool-names.ts` does; a
  * connection's tool, or a built-in one not listed here, is named by its key and
@@ -253,4 +264,131 @@ function withoutScheme(value: unknown): string | undefined {
 
 function pageTitle(output: Record<string, unknown>): unknown {
 	return asRecord(output.page).title;
+}
+
+/** The app a call reached, by name: the connection, or the built-in tool itself ("Web search"). */
+export function appOf(call: ToolCallPart, look?: ConnectionLook): string {
+	const { handle } = splitToolKey(call.tool);
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
+	if (call.tool.startsWith(ARTIFACT_TOOL_PREFIX)) return "Artifacts";
+	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
+}
+
+/**
+ * The line's words. Finished calls are "used"; then, at most one of what the
+ * reply is stopped on: a call waiting for approval, one still running, or one
+ * that was refused.
+ */
+export function toolLineText(
+	calls: readonly ToolCallPart[],
+	looks: ReadonlyMap<string, ConnectionLook>,
+): string {
+	const apps = (matching: (call: ToolCallPart) => boolean) =>
+		listed([
+			...new Set(
+				calls
+					.filter(matching)
+					.map((call) => appOf(call, looks.get(splitToolKey(call.tool).handle))),
+			),
+		]);
+	const denied = (call: ToolCallPart) => call.approval?.status === "denied";
+	const waiting = awaitsApproval;
+	// An allowed call is as good as running: its turn starts it a moment later.
+	const running = (call: ToolCallPart) =>
+		call.status === "running" ||
+		(call.status === "awaiting_approval" && call.approval?.status === "allowed");
+	const finished = (call: ToolCallPart) =>
+		(call.status === "completed" || call.status === "failed") && !denied(call);
+
+	const used = apps(finished);
+	const tail = calls.some(waiting)
+		? `waiting on ${apps(waiting)} approval`
+		: calls.some(running)
+			? `using ${apps(running)}`
+			: calls.some(denied)
+				? `${apps(denied)} denied`
+				: undefined;
+
+	if (!tail) {
+		const totalMs = calls.filter(finished).reduce((sum, call) => sum + durationOf(call), 0);
+		return `Used ${used} for ${formatTotal(totalMs)}`;
+	}
+	return used ? `Used ${used}, ${tail}` : capitalised(tail);
+}
+
+/** "A", "A and B", "A, B and C". */
+function listed(names: readonly string[]): string {
+	if (names.length <= 1) return names[0] ?? "";
+	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+function capitalised(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * What there is to say about how a call went beyond what it did: that it is
+ * waiting, running, was refused or failed and why, or how many results it
+ * found. Nothing, for a call that simply worked.
+ */
+export function noteOf(call: ToolCallPart): { text: string; failed: boolean } | undefined {
+	const failed = (text: string) => ({ text, failed: true });
+	const said = (text: string) => ({ text, failed: false });
+	if (call.approval?.status === "denied") {
+		return failed(
+			call.approval.decidedByName ? `Denied by ${call.approval.decidedByName}` : "Denied",
+		);
+	}
+	if (call.status === "failed") return failed(call.error ?? "Failed");
+	if (awaitsApproval(call)) return said("Waiting for approval");
+	if (call.status === "awaiting_approval") {
+		return said(
+			call.approval?.decidedByName ? `Allowed by ${call.approval.decidedByName}` : "Allowed",
+		);
+	}
+	if (call.status === "running") return said("Running");
+	const refusal = refusalIn(call.output);
+	if (refusal) return failed(refusal);
+	const count = resultCountIn(outputValue(call.output));
+	return count === undefined ? undefined : said(resultCount(count));
+}
+
+/**
+ * Why a tool that answered said no, for the shapes tools refuse in:
+ * `{ ok: false, reason }`, `{ status: "refused" | "failed", reason | error }`,
+ * `{ refused }`, an MCP server's `{ isError, content }`, and a command's
+ * non-zero `exitCode` or timeout.
+ */
+function refusalIn(output: unknown): string | undefined {
+	if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+	const answer = output as Record<string, unknown>;
+	const why = [answer.reason, answer.error, answer.message].find(
+		(value): value is string => typeof value === "string",
+	);
+	if (typeof answer.refused === "string") return answer.refused;
+	if (answer.ok === false || answer.status === "refused" || answer.status === "failed") {
+		return why ?? "Failed";
+	}
+	if (answer.isError === true) {
+		const said = outputValue(output);
+		return typeof said === "string" ? said : "Failed";
+	}
+	if (typeof answer.exitCode === "number" && answer.exitCode !== 0)
+		return `Exit ${answer.exitCode}`;
+	if (answer.timedOut === true) return "Timed out";
+	return undefined;
+}
+
+/** How many things a call found: its output's list, or the one list inside it. Images it was shown are not results. */
+function resultCountIn(output: unknown): number | undefined {
+	if (Array.isArray(output)) return output.length;
+	if (output === null || typeof output !== "object") return undefined;
+	const list = Object.entries(output).find(
+		([key, value]) => key !== "images" && Array.isArray(value),
+	)?.[1] as unknown[] | undefined;
+	return list?.length;
+}
+
+function resultCount(count: number): string {
+	return `${count} ${count === 1 ? "result" : "results"}`;
 }

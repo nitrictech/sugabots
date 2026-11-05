@@ -10,6 +10,7 @@ import {
 	scheduleSummary,
 	triggerLabel,
 } from "@/lib/routine-schedule.ts";
+import type { TriggerKind } from "@/lib/routine-trigger-words.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import {
@@ -28,12 +29,7 @@ import {
 	repositoryTrigger,
 } from "./RoutineRepository.tsx";
 import { ScheduleGroups } from "./RoutineSchedule.tsx";
-import {
-	type TriggerKind,
-	TriggerKindMark,
-	TriggerKindStep,
-	triggerKindChoice,
-} from "./RoutineTriggerKinds.tsx";
+import { TriggerKindMark, TriggerKindStep, triggerKindChoice } from "./RoutineTriggerKinds.tsx";
 import {
 	authNote,
 	NEW_WEBHOOK,

@@ -1,4 +1,5 @@
 import type { ConnectionAccess, ToolAccessCounts } from "@sugabots/contracts";
+import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
@@ -9,14 +10,7 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 const ACCESSES = ["allow", "ask", "off"] as const;
 
-/** A setting in words, as a connection's own page puts it: Allowed, Ask first, Off. */
-export const ACCESS_WORDS: Record<ConnectionAccess, string> = {
-	allow: "Allowed",
-	ask: "Ask first",
-	off: "Off",
-};
-
-const toolOptions = ACCESSES.map((value) => ({ value, label: ACCESS_WORDS[value] }));
+const toolOptions = ACCESSES.map((value) => ({ value, label: TOOL_ACCESS_LABELS[value] }));
 
 /** How many of a connection's tools are at each setting, in the order the sentence gives them. */
 const COUNTED: { access: ConnectionAccess; words: string }[] = [
@@ -65,7 +59,9 @@ export function AccessToggle({
 	onChange: (access: ConnectionAccess) => void;
 }) {
 	if (!canManage) {
-		return <span className="shrink-0 text-xs text-muted-foreground">{ACCESS_WORDS[value]}</span>;
+		return (
+			<span className="shrink-0 text-xs text-muted-foreground">{TOOL_ACCESS_LABELS[value]}</span>
+		);
 	}
 	return <SegmentedControl label={label} options={toolOptions} value={value} onChange={onChange} />;
 }

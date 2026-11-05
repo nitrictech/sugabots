@@ -33,14 +33,6 @@ import { TextEntryRow } from "./text-entry-row.tsx";
  * switch disabled until the key is added.
  */
 
-/** What each provider is good for, in the line under its name. */
-const providerDescriptions: Record<SearchProviderPresetId, string> = {
-	exa: "Works out of the box",
-	brave: "Independent index, simple pricing",
-	tavily: "Made for AI agents",
-	searxng: "Runs on your own server",
-};
-
 export function WebSearchSettings() {
 	const provider = useSearchProvider();
 	if (provider.isPending) return null;
@@ -177,7 +169,7 @@ function ProviderChoice({
 						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 							<span className="truncate font-medium text-sm text-foreground">{candidate.name}</span>
 							<span className="text-pretty text-subtle-foreground text-xs">
-								{providerDescriptions[candidate.id]}
+								{candidate.description}
 							</span>
 						</span>
 						<SettingsRadioMark checked={candidate.id === chosen} />

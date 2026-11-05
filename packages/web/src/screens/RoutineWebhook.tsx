@@ -6,8 +6,6 @@ import {
 	type WebhookAuth,
 	type WebhookAuthKind,
 	type WebhookCondition,
-	type WebhookHmacAlgorithm,
-	type WebhookSignatureEncoding,
 	type WebhookSource,
 	webhookSecretLongEnough,
 } from "@sugabots/contracts";
@@ -15,6 +13,17 @@ import { ChevronDown, Eye, EyeOff, Webhook } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import {
+	WEBHOOK_ALGORITHM_OPTIONS,
+	WEBHOOK_AUTH_OPTIONS,
+	WEBHOOK_ENCODING_OPTIONS,
+	WEBHOOK_SECRET_LABELS,
+	WEBHOOK_SOURCE_LABELS,
+	WEBHOOK_SOURCE_NOTES,
+	WEBHOOK_SOURCE_SECRET_PLACEHOLDERS,
+	type WebhookGenericKind,
+	type WebhookSourceChoice,
+} from "@/lib/routine-trigger-words.ts";
 import { type TriggerAddress, useRoutineActions, useRoutineSecret } from "@/lib/routines.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
@@ -43,78 +52,31 @@ export const DEFAULT_WEBHOOK_AUTH: WebhookAuth = {
 	encoding: "hex",
 };
 
-type GenericKind = Exclude<WebhookAuthKind, WebhookSource>;
-
 /** What each generic kind asks for when it is chosen. */
-const AUTH_DEFAULTS: Record<GenericKind, WebhookAuth> = {
+const AUTH_DEFAULTS: Record<WebhookGenericKind, WebhookAuth> = {
 	hmac: DEFAULT_WEBHOOK_AUTH,
 	api_key: { kind: "api_key", header: "X-API-Key" },
 	bearer: { kind: "bearer" },
 	basic: { kind: "basic", username: "sugabots" },
 };
 
-const AUTH_OPTIONS = [
-	{ value: "basic", label: "Basic" },
-	{ value: "bearer", label: "Bearer" },
-	{ value: "api_key", label: "API key" },
-	{ value: "hmac", label: "HMAC" },
-] as const satisfies readonly { value: GenericKind; label: string }[];
-
-/** "generic" for any sender, else the source whose own way of signing is known. */
-type SourceChoice = "generic" | WebhookSource;
-
-const SOURCE_LABELS: Record<SourceChoice, string> = {
-	generic: "Generic",
-	github: "GitHub",
-	stripe: "Stripe",
-	slack: "Slack",
-	linear: "Linear",
-};
-
-/** How each source's signing secret looks, as the placeholder for it. */
-const SOURCE_SECRET_PLACEHOLDERS: Record<WebhookSource, string> = {
-	github: "The secret set on the webhook in GitHub",
-	stripe: "whsec_…",
-	slack: "The app's Signing Secret",
-	linear: "lin_wh_…",
-};
-
-const ALGORITHM_OPTIONS = [
-	{ value: "sha1", label: "SHA-1" },
-	{ value: "sha256", label: "SHA-256" },
-	{ value: "sha512", label: "SHA-512" },
-] as const satisfies readonly { value: WebhookHmacAlgorithm; label: string }[];
-
-const ENCODING_OPTIONS = [
-	{ value: "hex", label: "Hex" },
-	{ value: "base64", label: "Base64" },
-] as const satisfies readonly { value: WebhookSignatureEncoding; label: string }[];
-
-/** What each generic kind calls its secret; every source calls it a signing secret. */
-const SECRET_LABELS: Record<GenericKind, string> = {
-	hmac: "Signing secret",
-	api_key: "Key",
-	bearer: "Token",
-	basic: "Password",
-};
-
 function isSource(kind: WebhookAuthKind): kind is WebhookSource {
 	return (WEBHOOK_SOURCES as readonly string[]).includes(kind);
 }
 
-function sourceOf(auth: WebhookAuth): SourceChoice {
+function sourceOf(auth: WebhookAuth): WebhookSourceChoice {
 	return isSource(auth.kind) ? auth.kind : "generic";
 }
 
 /** How the secret looks: a source's format, or the prefix of a kind's own secrets. */
 function secretPlaceholder(auth: WebhookAuth): string | undefined {
-	if (isSource(auth.kind)) return SOURCE_SECRET_PLACEHOLDERS[auth.kind];
+	if (isSource(auth.kind)) return WEBHOOK_SOURCE_SECRET_PLACEHOLDERS[auth.kind];
 	const prefix = WEBHOOK_SECRET_PREFIXES[auth.kind];
 	return prefix === "" ? undefined : `${prefix}…`;
 }
 
 function secretLabel(auth: WebhookAuth): string {
-	return isSource(auth.kind) ? "Signing secret" : SECRET_LABELS[auth.kind];
+	return isSource(auth.kind) ? "Signing secret" : WEBHOOK_SECRET_LABELS[auth.kind];
 }
 
 /** A webhook routine being made: how it will check callers, and its secret. */
@@ -156,15 +118,12 @@ export const NO_SECRET_NOTE =
 export function authNote(auth: WebhookAuth): string {
 	switch (auth.kind) {
 		case "github":
-			return "Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret.";
 		case "stripe":
-			return "Add the address as an endpoint in Stripe, and paste its signing secret.";
 		case "slack":
-			return "Set the address as your Slack app's Request URL, and paste its Signing Secret.";
 		case "linear":
-			return "Add the address as a webhook in Linear, and paste its signing secret.";
+			return WEBHOOK_SOURCE_NOTES[auth.kind];
 		case "hmac":
-			return `Sign the raw request body with the secret using HMAC ${labelOf(ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(ENCODING_OPTIONS, auth.encoding).toLowerCase()}.`;
+			return `Sign the raw request body with the secret using HMAC ${labelOf(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}.`;
 		case "api_key":
 			return `Send the key in the ${auth.header} header.`;
 		case "bearer":
@@ -317,7 +276,7 @@ function AuthRows({
 			{!isSource(auth.kind) && (
 				<MenuRow
 					label="Auth"
-					options={AUTH_OPTIONS}
+					options={WEBHOOK_AUTH_OPTIONS}
 					value={auth.kind}
 					onChange={(kind) => onChange(AUTH_DEFAULTS[kind])}
 				/>
@@ -335,13 +294,13 @@ function AuthRows({
 				<>
 					<MenuRow
 						label="Algorithm"
-						options={ALGORITHM_OPTIONS}
+						options={WEBHOOK_ALGORITHM_OPTIONS}
 						value={auth.algorithm}
 						onChange={(algorithm) => onChange({ ...auth, algorithm })}
 					/>
 					<MenuRow
 						label="Encoding"
-						options={ENCODING_OPTIONS}
+						options={WEBHOOK_ENCODING_OPTIONS}
 						value={auth.encoding}
 						onChange={(encoding) => onChange({ ...auth, encoding })}
 					/>
@@ -385,10 +344,12 @@ function AuthRows({
 	);
 }
 
-const SOURCE_OPTIONS = (Object.keys(SOURCE_LABELS) as SourceChoice[]).map((source) => ({
-	value: source,
-	label: SOURCE_LABELS[source],
-}));
+const SOURCE_OPTIONS = (Object.keys(WEBHOOK_SOURCE_LABELS) as WebhookSourceChoice[]).map(
+	(source) => ({
+		value: source,
+		label: WEBHOOK_SOURCE_LABELS[source],
+	}),
+);
 
 /** Where the webhook comes from: a known source, each with its logo, or Generic for any other sender. */
 function SourceRow({
@@ -460,9 +421,9 @@ function MenuRow<Value extends string>({
 }
 
 /** A source's logo, or a webhook's for Generic. */
-function SourceMark({ source }: { source: SourceChoice }) {
+function SourceMark({ source }: { source: WebhookSourceChoice }) {
 	if (source !== "generic") {
-		return <ConnectionMark presetId={source} name={SOURCE_LABELS[source]} size="md" />;
+		return <ConnectionMark presetId={source} name={WEBHOOK_SOURCE_LABELS[source]} size="md" />;
 	}
 	return (
 		<span

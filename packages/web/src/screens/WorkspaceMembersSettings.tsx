@@ -2,6 +2,7 @@ import {
 	ASSIGNABLE_WORKSPACE_ROLES,
 	type AssignableWorkspaceRole,
 	administersWorkspace,
+	INVITE_LIFETIME_DAYS,
 	type Pod,
 	workspaceRoleDescription,
 	workspaceRoleLabel,
@@ -262,8 +263,6 @@ function Invitations({
 	);
 }
 
-/** How long an invitation link lasts: the auth library's default, which the server keeps. */
-const INVITE_LIFETIME_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Whole days left, so a link with a day and a half to go says one day rather than two. */

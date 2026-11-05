@@ -2,8 +2,6 @@ import { botColorVariables } from "@sugabots/avatars";
 import {
 	type CollaborationPart,
 	type FilePart,
-	isAttached,
-	isNarration,
 	type Message,
 	type MessageReplyTo,
 	messageAuthorName,
@@ -37,7 +35,17 @@ import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
-import { awaitsApproval } from "./tool-activity.ts";
+import {
+	type AnsweringFace,
+	formatDay,
+	isTyping,
+	sameDay,
+	segmentsOf,
+	showsNothingYet,
+	startsGroup,
+	startsNewDay,
+	startsRun,
+} from "./thread-layout.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -292,54 +300,6 @@ interface AnsweringFaceState {
 	viewerWriting: boolean;
 }
 
-/** Where the face of the bot answering is drawn, and whether it's typing now. */
-export interface AnsweringFace {
-	messageId: string;
-	botTyping: boolean;
-}
-
-/**
- * The face that stands for the bot that wrote the newest message: the last
- * face drawn for that bot. A reply just begun shows only as its typing line,
- * so its face may be on the bot's reply before.
- */
-export function findAnsweringFace(
-	messages: readonly Message[],
-	dividers: boolean,
-): AnsweringFace | undefined {
-	const newest = messages.at(-1);
-	if (newest?.author.kind !== "agent") return undefined;
-	const drawn = messages.findLast(
-		(message, index) =>
-			sameAuthor(message, newest) &&
-			startsRun(messages[index - 1], message, dividers) &&
-			!showsNothingYet(message),
-	);
-	return drawn && { messageId: drawn.id, botTyping: isTyping(newest) };
-}
-
-/** Whether `message` heads a run drawn with its author's face: after a day marker, or as `startsGroup` says. */
-function startsRun(previous: Message | undefined, message: Message, dividers: boolean): boolean {
-	return (
-		(dividers && startsNewDay(previous?.createdAt, message.createdAt)) ||
-		startsGroup(previous, message)
-	);
-}
-
-/**
- * Whether `message` heads a group of its own, with its author's face and name:
- * a new author, an hour's quiet, a reply, whose quote sits over its author's
- * name, or a message after one that opened a collaboration, whose thread line
- * ends that group.
- */
-function startsGroup(previous: Message | undefined, message: Message): boolean {
-	if (!previous || !sameAuthor(previous, message) || message.replyTo) return true;
-	if (previous.parts.some((part) => part.type === "collaboration")) return true;
-	return (
-		new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() >= LONG_QUIET_MS
-	);
-}
-
 /**
  * The ids of replies this thread has seen while they were still being written.
  * One that is finished and in here arrived while someone watched, as opposed
@@ -371,26 +331,6 @@ function revealDurationMs(text: string): number {
 	return Math.round(Math.min(scaled, REVEAL_MS.maximum));
 }
 
-/**
- * Whether a reply's turn is still going, so the typing line stands in for it.
- * A call waiting to be approved has its own card saying the turn is stopped on
- * it, and the line would say the same thing twice.
- */
-function isTyping(message: Message): boolean {
-	// While a collaboration runs the bot is quiet in its own chat; the collaboration line says so.
-	if (waitingOn(message)) return false;
-	const awaitingApproval = message.parts.some(
-		(part) => part.type === "tool_call" && awaitsApproval(part),
-	);
-	return message.status === "streaming" && !awaitingApproval;
-}
-
-/** The collaborator a running reply has asked and not yet heard back from. */
-function waitingOn(message: Message): string | undefined {
-	const last = message.parts.at(-1);
-	return last?.type === "collaboration" ? last.agentName : undefined;
-}
-
 /** The names of the files attached in the thread, by id. */
 function fileNamesIn(messages: readonly Message[]): ReadonlyMap<string, string> {
 	return new Map(
@@ -400,73 +340,6 @@ function fileNamesIn(messages: readonly Message[]): ReadonlyMap<string, string> 
 			),
 		),
 	);
-}
-
-/** Whether a person was asked to allow the call, rather than policy allowing it on its own. */
-function wasPutToSomeone(call: ToolCallPart): boolean {
-	const status = call.approval?.status;
-	return status === "pending" || status === "allowed" || status === "denied";
-}
-
-type Segment =
-	| { type: "text"; key: string; text: string }
-	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
-	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
-
-/** Whether a reply being written has nothing settled to show yet, so shows only as its typing line. */
-function showsNothingYet(message: Message): boolean {
-	if (message.status !== "streaming") return false;
-	const shows =
-		message.parts.some((part) => part.type === "tool_call" || part.type === "file") ||
-		segmentsOf(message).some((segment) => segment.type !== "text" || segment.text);
-	return !shows;
-}
-
-/**
- * The message's parts as things to draw, leaving out narration and every tool
- * call but those somebody was asked to approve. A reply still being written shows
- * only those, its collaborations, and text that something has followed: the
- * run it is still writing waits until it is finished.
- */
-
-function segmentsOf(message: Message): Segment[] {
-	const finished = message.status !== "streaming";
-	// A text run is keyed by where in the message it starts; a collaboration or
-	// tool call by its id.
-	let written = 0;
-	const segments: Segment[] = [];
-	message.parts.forEach((part, index) => {
-		if (part.type === "collaboration") {
-			segments.push({ type: "collaboration", key: part.id, collaboration: part });
-			return;
-		}
-		if (part.type === "tool_call") {
-			// A call somebody had to answer is the only one drawn among the bubbles, as its card.
-			if (wasPutToSomeone(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
-			return;
-		}
-		// Attached files, and a routine result's artifacts, are not part of the message's text.
-		if (isAttached(part)) return;
-		// Files go after all of a reply's text as they are attached, so one shared
-		// mid-reply does not mean the text before it is finished.
-		const followed =
-			part.text.trim() !== "" && message.parts.slice(index + 1).some((later) => !isAttached(later));
-		const settled = finished || followed;
-		if (settled && !isNarration(message.parts, index)) {
-			segments.push({ type: "text", key: `text@${written}`, text: part.text });
-		}
-		written += part.text.length;
-	});
-	/*
-	 * A reply that called a tool and wrote nothing has no text part at all —
-	 * `messagePartsFor` adds none to empty content. It still needs a bubble: that
-	 * is where its author, its time, a failure and the way into its activity all
-	 * hang.
-	 */
-	if (finished && !segments.some((segment) => segment.type === "text")) {
-		segments.push({ type: "text", key: `text@${written}`, text: "" });
-	}
-	return segments;
 }
 
 /** How each part of a row is sized: the regular chat, or the sidebar's narrower thread. */
@@ -962,72 +835,15 @@ export function DaySeparator({ at }: { at: string }) {
 	);
 }
 
-/** An hour without a message starts a new group, with its author's face and name again. */
-const LONG_QUIET_MS = 60 * 60_000;
-
-/** Whether `at` is the first thing shown, or falls on a new day from `previousAt`, and so wants a day marker. */
-export function startsNewDay(previousAt: string | undefined, at: string): boolean {
-	return previousAt === undefined || !sameDate(new Date(previousAt), new Date(at));
-}
-
-function sameAuthor(left: Message, right: Message): boolean {
-	if (left.author.kind === "routine_trigger" || right.author.kind === "routine_trigger") {
-		return false;
-	}
-	return left.author.kind === right.author.kind && left.author.id === right.author.id;
-}
-
-function shortDateFor(date: Date): Intl.DateTimeFormatOptions {
-	return date.getFullYear() === new Date().getFullYear()
-		? { month: "short", day: "numeric" }
-		: dateWithYear;
-}
-
-const dateWithYear: Intl.DateTimeFormatOptions = {
-	month: "short",
-	day: "numeric",
-	year: "numeric",
-};
-
-/** "Today", "Yesterday", or the date in `dateFormat`: by default the month and day, and the year only for another year. */
-export function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
-	const today = new Date();
-	if (sameDate(date, today)) {
-		return "Today";
-	}
-	const yesterday = new Date(today);
-	yesterday.setDate(today.getDate() - 1);
-	if (sameDate(date, yesterday)) {
-		return "Yesterday";
-	}
-	return new Intl.DateTimeFormat(undefined, dateFormat).format(date);
-}
-
 /** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */
 export function formatFullTimestamp(createdAt: string): string {
 	const date = new Date(createdAt);
-	const dateFormat: Intl.DateTimeFormatOptions =
-		date.getFullYear() === new Date().getFullYear()
-			? { month: "short", day: "numeric" }
-			: dateWithYear;
 	const time = new Intl.DateTimeFormat(undefined, {
 		hour: "numeric",
 		minute: "2-digit",
 		second: "2-digit",
 	}).format(date);
-	return `${formatDay(date, dateFormat)} at ${time}`;
-}
-
-function sameDay(left: { createdAt: string }, right: { createdAt: string }): boolean {
-	return sameDate(new Date(left.createdAt), new Date(right.createdAt));
-}
-
-function sameDate(left: Date, right: Date): boolean {
-	return (
-		left.getFullYear() === right.getFullYear() &&
-		left.getMonth() === right.getMonth() &&
-		left.getDate() === right.getDate()
-	);
+	return `${formatDay(date)} at ${time}`;
 }
 
 function formatTime(createdAt: string): string {

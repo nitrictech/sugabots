@@ -18,8 +18,9 @@ import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { FailedRunMessage } from "./RoutineRun.tsx";
-import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
+import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
+import { findAnsweringFace } from "./thread-layout.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 

@@ -37,6 +37,7 @@ import {
 	useListFirstProviderModels,
 } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
+import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import type { Session } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
@@ -45,7 +46,7 @@ import {
 	useUpdateWorkspace,
 	useWorkspace,
 } from "@/lib/workspace.ts";
-import { isConnected, LARGE_CATALOG, modelName } from "@/screens/ProviderSettings.tsx";
+import { isConnected, modelName } from "@/screens/ProviderSettings.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -475,7 +476,7 @@ function ChooseModelStep({
 		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,
 	);
 	const chosen = choices.find((model) => model.id === chosenId);
-	const large = choices.length > LARGE_CATALOG;
+	const large = choices.length > MODEL_SEARCH_THRESHOLD;
 	const needle = search.trim().toLowerCase();
 	const shown = choices.filter(
 		(model) =>

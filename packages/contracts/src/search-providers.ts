@@ -33,6 +33,8 @@ export interface SearchProviderPreset {
 	/** A remote preset has a fixed address and wants a key; a local one is a server you run. */
 	hosting: "remote" | "local";
 	requiresApiKey: boolean;
+	/** What it is good for, in the line under its name where one is chosen. */
+	description: string;
 }
 
 export const searchProviderCatalog: readonly SearchProviderPreset[] = [
@@ -42,6 +44,7 @@ export const searchProviderCatalog: readonly SearchProviderPreset[] = [
 		baseUrl: "https://api.exa.ai",
 		hosting: "remote",
 		requiresApiKey: false,
+		description: "Works out of the box",
 	},
 	{
 		id: "brave",
@@ -49,6 +52,7 @@ export const searchProviderCatalog: readonly SearchProviderPreset[] = [
 		baseUrl: "https://api.search.brave.com/res/v1",
 		hosting: "remote",
 		requiresApiKey: true,
+		description: "Independent index, simple pricing",
 	},
 	{
 		id: "tavily",
@@ -56,6 +60,7 @@ export const searchProviderCatalog: readonly SearchProviderPreset[] = [
 		baseUrl: "https://api.tavily.com",
 		hosting: "remote",
 		requiresApiKey: true,
+		description: "Made for AI agents",
 	},
 	{
 		id: "searxng",
@@ -63,6 +68,7 @@ export const searchProviderCatalog: readonly SearchProviderPreset[] = [
 		baseUrl: "http://127.0.0.1:8080",
 		hosting: "local",
 		requiresApiKey: false,
+		description: "Runs on your own server",
 	},
 ];
 

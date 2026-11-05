@@ -20,6 +20,7 @@ import {
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
 import { podSettingsPageLink } from "@/lib/links.ts";
+import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -39,7 +40,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
-import { ACCESS_WORDS, AccessToggle } from "./tool-access.tsx";
+import { AccessToggle } from "./tool-access.tsx";
 
 /*
  * One connection, on a page of its own under its pod: who connected it and
@@ -441,7 +442,7 @@ function toolKinds(tools: readonly ConnectionToolSetting[]): ToolKind[] {
 }
 
 /** The access most of `tools` have, leaning as the kind does when two are tied. */
-function settingOf(tools: readonly ConnectionToolSetting[], kind: ToolKind["kind"]) {
+export function settingOf(tools: readonly ConnectionToolSetting[], kind: ToolKind["kind"]) {
 	const count = (access: ConnectionAccess) => tools.filter((tool) => tool.access === access).length;
 	const leaning = KIND_LEANING[kind];
 	return (["allow", "ask", "off"] as const).reduce<ConnectionAccess>(
@@ -646,7 +647,7 @@ function IndividualTools({
 					{tool.name}
 				</span>
 			}
-			sub={changed ? `Default: ${ACCESS_WORDS[setting].toLowerCase()}` : undefined}
+			sub={changed ? `Default: ${TOOL_ACCESS_LABELS[setting].toLowerCase()}` : undefined}
 			trailing={
 				<AccessToggle
 					label={tool.name}
@@ -724,7 +725,7 @@ function IndividualTools({
 							<ToolSection
 								key={kind}
 								heading={KIND_WORDS[kind].heading}
-								description={`Follow the group's setting, ${ACCESS_WORDS[setting]}, until one is set differently.`}
+								description={`Follow the group's setting, ${TOOL_ACCESS_LABELS[setting]}, until one is set differently.`}
 							>
 								{shown.map((tool) => row(tool, setting, false))}
 							</ToolSection>
