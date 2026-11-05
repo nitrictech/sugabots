@@ -593,7 +593,7 @@ export type RoutineWebhookChallenge = typeof routineWebhookChallengeSchema.Type;
 export const routineWriteResultSchema = Schema.Struct({
 	routine: routineSchema,
 	secrets: Schema.Array(Schema.Struct({ triggerId: uuidSchema, secret: Schema.String })),
-});
+}).annotate({ identifier: "RoutineWriteResult" });
 export type RoutineWriteResult = typeof routineWriteResultSchema.Type;
 
 export const routineSchedulePreviewSchema = Schema.Struct({

@@ -151,8 +151,12 @@ export const sandboxProviderSettingsSchema = providerSettingsWithImageSchema(ima
 /**
  * Settings as they are read back. An image saved before images' names were
  * checked is shown as it is, so the page that would correct it still loads.
+ * Its JSON is that of {@link sandboxProviderSettingsSchema}, so the API
+ * document names it the same.
  */
-const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema);
+const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema).annotate({
+	identifier: "SandboxProviderSettings",
+});
 
 export type SandboxProviderSettings = typeof sandboxProviderSettingsSchema.Type;
 
@@ -169,7 +173,7 @@ export const sandboxProviderSchema = Schema.Struct({
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
-});
+}).annotate({ identifier: "SandboxProvider" });
 
 export type SandboxProvider = typeof sandboxProviderSchema.Type;
 

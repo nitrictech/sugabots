@@ -373,7 +373,7 @@ export type NewChat = typeof newChatSchema.Type;
 export const startedThreadSchema = Schema.Struct({
 	conversation: conversationThreadSchema,
 	message: messageSchema,
-});
+}).annotate({ identifier: "StartedThread" });
 
 export type StartedThread = typeof startedThreadSchema.Type;
 
