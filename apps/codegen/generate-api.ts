@@ -3,6 +3,7 @@
  * for each schema the API names, and a typed request for each route, grouped as
  * the web's client groups them.
  *
+ * - iOS: `Sugabots/API/API.generated.swift`, written by `api/swift.ts`.
  * - Android: `api/src/main/kotlin/ai/sugabots/api/Api.generated.kt`, written by
  *   `api/kotlin.ts`.
  *
@@ -13,13 +14,16 @@
 import document from "../../packages/contracts/openapi.json" with { type: "json" };
 import { kotlinApi } from "./api/kotlin.ts";
 import { type OpenApiDocument, readModel } from "./api/model.ts";
+import { swiftApi } from "./api/swift.ts";
 import type { Generator } from "./generated-files.ts";
 
 export const generator: Generator = {
-	targets: ["android"],
+	targets: ["ios", "android"],
 	generate(target) {
 		const model = readModel(document as unknown as OpenApiDocument);
 		switch (target) {
+			case "ios":
+				return { files: new Map([["Sugabots/API/API.generated.swift", swiftApi(model)]]) };
 			case "android":
 				return {
 					files: new Map([
