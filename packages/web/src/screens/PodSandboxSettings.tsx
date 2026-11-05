@@ -91,7 +91,10 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 		>
 			<SettingsRow
 				label={sandbox.providerName}
-				sub={sandbox.image ?? "Image unknown"}
+				sub={
+					// Pinned to a digest, an image is one long word.
+					sandbox.image ? <span className="break-all">{sandbox.image}</span> : "Image unknown"
+				}
 				trailing={<SettingsValue>{STATE_WORDS[sandbox.state]}</SettingsValue>}
 			/>
 			<SettingsRow
@@ -111,7 +114,7 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 				<>
 					<SettingsRow
 						label={sandbox.upgradeAvailable ? "Upgrade available" : "Upgrade"}
-						sub="Moves the pod's work to a new sandbox made from the current image."
+						sub="Moves its files to a new computer with the latest software."
 						onClick={pending || inUse ? undefined : () => setConfirm("upgrade")}
 					/>
 					<SettingsRow
@@ -124,8 +127,8 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 			<DeleteDialog
 				open={confirm === "upgrade"}
 				onOpenChange={(open) => setConfirm(open ? "upgrade" : undefined)}
-				title="Upgrade the sandbox?"
-				description="Its workspace, every thread's folder and every bot's home, moves to a new sandbox made from the current image. Running programs and open browser tabs are lost."
+				title="Upgrade the computer?"
+				description="The files in its workspace move to a new computer with the latest software. Programs installed outside the workspace are lost, and running programs and open browser tabs are closed."
 				confirmLabel="Upgrade"
 				pending={actions.upgrade.isPending}
 				error={actions.upgrade.error ? failureMessage(actions.upgrade.error) : undefined}

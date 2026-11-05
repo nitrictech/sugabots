@@ -174,8 +174,13 @@ bun run check           # lint, typecheck, and test
 bun run build           # build all packages
 bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
-bun run build:sandbox   # build the sandbox image, ghcr.io/nitrictech/sugabots-sandbox:latest
+bun run build:sandbox   # build the sandbox image, as sugabots-sandbox:dev
 ```
+
+Sandboxes are made from the published image their tag names on its registry,
+so a local build under the published name is never used. To try one, set the
+OpenSandbox provider's image to `sugabots-sandbox:dev` in the workspace's
+settings. The pods' sandboxes move to it once idle.
 
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing
 lines in `.env` (see `.env.example`). For local development,

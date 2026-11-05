@@ -38,7 +38,7 @@
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/demo/src/development.ts",
 		"db:seed:showcase": "node --env-file-if-exists=.env packages/demo/src/showcase/seed.ts",
-		"build:sandbox": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest docker/sandbox && node packages/core/src/conversations/tools/browser/list-tools.ts && biome format --write packages/core/src/conversations/tools/browser/playwright-tools.json"
+		"build:sandbox": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest -t sugabots-sandbox:dev docker/sandbox && node packages/core/src/conversations/tools/browser/list-tools.ts && biome format --write packages/core/src/conversations/tools/browser/playwright-tools.json"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",

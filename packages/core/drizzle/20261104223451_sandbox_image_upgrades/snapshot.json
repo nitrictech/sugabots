@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "40c62adc-c538-4b1c-8097-6b6f065058cc",
+  "prevIds": [
+    "760e7a69-acfa-49ba-952a-7af92b9a3995"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "sandbox",
+        "image"
+      ],
+      "writes": [
+        "s|col|public.sandbox.image",
+        "n|col|public.sandbox.image",
+        "e|col|public.sandbox.image"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "image",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

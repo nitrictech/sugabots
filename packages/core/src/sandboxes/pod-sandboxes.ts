@@ -2,12 +2,14 @@ export * as PodSandboxes from "./pod-sandboxes.ts";
 
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
+import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
 import { Database, query, serviceOperations } from "../database/database.ts";
 import { sandboxLease, sandbox as sandboxTable } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
+import { Egress } from "../providers/network/egress.ts";
 import type { UserFacing } from "../user-message.ts";
 import { reachOf } from "./allowed-hosts.ts";
+import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { type DiskUsage, measureDisk } from "./sandbox-disk.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
@@ -28,6 +30,12 @@ const SWEEP_INTERVAL = Duration.minutes(1);
 const DISK_MEASUREMENT_INTERVAL = Duration.minutes(2);
 /** How many sandboxes' disks are measured at once. */
 const DISK_MEASUREMENT_CONCURRENCY = 4;
+/** How long what an image's tag names is relied on before its registry is asked again. */
+const IMAGE_RECHECK = Duration.minutes(10);
+/** How long a registry has to say what an image's tag names. */
+const REGISTRY_TIMEOUT = Duration.seconds(5);
+/** How long after a sandbox fails to upgrade on its own before it is tried again. */
+const UPGRADE_RETRY = Duration.hours(1);
 
 /**
  * The only writer of `sandbox` and `sandbox_lease`: each pod's one sandbox,
@@ -57,6 +65,15 @@ export interface Interface {
 	readonly release: (holder: Holder) => Effect.Effect<void>;
 	/** Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. */
 	readonly pauseIdle: Effect.Effect<void>;
+	/**
+	 * Upgrades every sandbox nobody has used or watched for
+	 * {@link IDLE_BEFORE_PAUSE} whose image is behind what the workspace's
+	 * enabled provider makes sandboxes from now, as {@link upgrade} does, and
+	 * leaves the new one paused. Only at a provider that takes images as they
+	 * are; a template is left to be rebuilt and upgraded to by hand. Skips for
+	 * {@link UPGRADE_RETRY} a sandbox that failed to upgrade.
+	 */
+	readonly upgradeIdle: Effect.Effect<void>;
 	/**
 	 * Measures the disk of every running sandbox not measured for
 	 * {@link DISK_MEASUREMENT_INTERVAL}, without resuming any: a paused
@@ -116,6 +133,7 @@ export const make = Effect.gen(function* () {
 	const ids = yield* Ids.Service;
 	const providers = yield* SandboxProviderRepository.Service;
 	const signIns = yield* SandboxCredentials.Service;
+	const egress = yield* Egress.Service;
 	const operation = yield* serviceOperations<Interface>("PodSandboxes");
 	// One change to a pod's sandbox at a time: two turns' first commands make
 	// one sandbox, and the sweep never pauses one a turn is opening.
@@ -132,6 +150,50 @@ export const make = Effect.gen(function* () {
 	// When each pod's sandbox must be signed in again, from when it last was by
 	// this process. Another process's sandboxes are signed in on first renewal.
 	const signInDue = new Map<string, number>();
+
+	// What each image's tag named when its registry was last asked, and until when that is relied on.
+	const tagged = new Map<string, { pinned: string | undefined; until: number }>();
+	/** `image` pinned to the digest its tag names now, if its registry says. */
+	const pinnedNow = (image: string) =>
+		Effect.gen(function* () {
+			const now = yield* Clock.currentTimeMillis;
+			const known = tagged.get(image);
+			if (known && known.until > now) return known.pinned;
+			// Asked on the way to making a turn's sandbox, so a registry that
+			// doesn't answer soon leaves the image as it is configured.
+			const pinned = yield* Effect.tryPromise((signal) =>
+				pinnedToDigest(image, egress.providers, signal),
+			).pipe(
+				Effect.timeout(REGISTRY_TIMEOUT),
+				Effect.orElseSucceed(() => undefined),
+			);
+			tagged.set(image, { pinned, until: now + Duration.toMillis(IMAGE_RECHECK) });
+			return pinned;
+		});
+
+	/**
+	 * The connection with an image its provider takes as it is pinned to the
+	 * digest its tag names now, so a new sandbox gets that image rather than
+	 * whatever the provider's host last pulled for the tag.
+	 */
+	const pinnedConnection = (connection: Sandboxes.Connection) =>
+		connection.provider === "opensandbox"
+			? Effect.map(
+					pinnedNow(connection.image),
+					(pinned): Sandboxes.Connection => ({ ...connection, image: pinned ?? connection.image }),
+				)
+			: Effect.succeed(connection);
+
+	/** Whether a sandbox made from `madeFrom` is behind what `connection` makes sandboxes from now. */
+	const isBehind = (madeFrom: string | null, connection: Sandboxes.Connection) =>
+		connection.provider === "opensandbox"
+			? Effect.map(pinnedNow(connection.image), (pinned) =>
+					imageIsBehind(madeFrom, connection.image, pinned),
+				)
+			: Effect.succeed(madeFrom !== imageOf(connection));
+
+	// When a sandbox that failed to upgrade on its own may be tried again, by its record's id.
+	const upgradeRetryAt = new Map<string, number>();
 
 	/**
 	 * Sets what the pod's sandbox may reach and what it is signed in with,
@@ -206,36 +268,46 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Makes a sandbox at `at` and hands it to `record`, as one step that isn't
-	 * stopped part-way when whoever asked goes away: a sandbox made but never
-	 * recorded is one nothing would find to destroy. One whose recording
-	 * fails is destroyed.
+	 * Makes a sandbox through `connection`, from its image pinned to its
+	 * digest, and hands it to `record` with what it was made from, as one step
+	 * that isn't stopped part-way when whoever asked goes away: a sandbox made
+	 * but never recorded is one nothing would find to destroy. One whose
+	 * recording fails is destroyed.
 	 */
 	const madeAndRecorded = <E, R>(
-		at: Sandboxes.Provider,
+		connection: Sandboxes.Connection,
 		spec: Sandboxes.Spec,
-		record: (sandbox: Sandboxes.Sandbox) => Effect.Effect<unknown, E, R>,
+		record: (sandbox: Sandboxes.Sandbox, image: string) => Effect.Effect<unknown, E, R>,
 	) =>
-		Effect.uninterruptible(
-			Effect.tap(at.create(spec), (sandbox) =>
-				record(sandbox).pipe(Effect.onError(() => at.destroy(sandbox.id).pipe(Effect.ignore))),
-			),
-		);
+		Effect.flatMap(pinnedConnection(connection), (pinned) => {
+			const at = sandboxes.forConnection(pinned);
+			return Effect.uninterruptible(
+				Effect.tap(at.create(spec), (sandbox) =>
+					record(sandbox, imageOf(pinned)).pipe(
+						Effect.onError(() => at.destroy(sandbox.id).pipe(Effect.ignore)),
+					),
+				),
+			);
+		});
 
 	const made = (pod: Pod, provider: SandboxProviderRepository.Configured) =>
 		Effect.gen(function* () {
 			const id = yield* ids.next;
 			const at = sandboxes.forConnection(provider.connection);
-			return yield* madeAndRecorded(at, yield* specFor(pod, id, at), (sandbox) =>
-				query((db) =>
-					db.insert(sandboxTable).values({
-						id,
-						workspaceId: pod.workspaceId,
-						podId: pod.podId,
-						sandboxProviderId: provider.id,
-						providerSandboxId: sandbox.id,
-					}),
-				),
+			return yield* madeAndRecorded(
+				provider.connection,
+				yield* specFor(pod, id, at),
+				(sandbox, image) =>
+					query((db) =>
+						db.insert(sandboxTable).values({
+							id,
+							workspaceId: pod.workspaceId,
+							podId: pod.podId,
+							sandboxProviderId: provider.id,
+							providerSandboxId: sandbox.id,
+							image,
+						}),
+					),
 			);
 		});
 
@@ -283,10 +355,12 @@ export const make = Effect.gen(function* () {
 								: "resumed",
 					}),
 				),
-				Effect.catchTag("SandboxMissing", () => Effect.map(restarted(pod, row, at), replaced)),
+				Effect.catchTag("SandboxMissing", () =>
+					Effect.map(restarted(pod, row, provider.connection), replaced),
+				),
 				Effect.catchTag("SandboxStopped", (stopped) =>
 					Effect.map(
-						restarted(pod, row, at),
+						restarted(pod, row, provider.connection),
 						(sandbox): Opened => ({
 							sandbox,
 							arrival: stopped.workKept ? "rebooted" : "replaced",
@@ -300,10 +374,13 @@ export const make = Effect.gen(function* () {
 	 * A new sandbox in place of one that is gone or stopped for good, made
 	 * with its work name, so it carries on with any work kept apart from it.
 	 */
-	const restarted = (pod: Pod, row: SandboxRow, at: Sandboxes.Provider) =>
+	const restarted = (pod: Pod, row: SandboxRow, connection: Sandboxes.Connection) =>
 		Effect.gen(function* () {
-			const fresh = yield* madeAndRecorded(at, yield* specFor(pod, row.id, at), (sandbox) =>
-				moveRecord(row.id, row.sandboxProviderId, sandbox.id),
+			const at = sandboxes.forConnection(connection);
+			const fresh = yield* madeAndRecorded(
+				connection,
+				yield* specFor(pod, row.id, at),
+				(sandbox, image) => moveRecord(row.id, row.sandboxProviderId, sandbox.id, image),
 			);
 			yield* at
 				.destroy(row.providerSandboxId)
@@ -315,8 +392,13 @@ export const make = Effect.gen(function* () {
 			return fresh;
 		}).pipe(Effect.uninterruptible);
 
-	/** Points the pod's record at its new sandbox, which is running and unused. */
-	const moveRecord = (recordId: string, providerId: string, sandboxId: Sandboxes.SandboxId) =>
+	/** Points the pod's record at its new sandbox, made from `image`, which is running and unused. */
+	const moveRecord = (
+		recordId: string,
+		providerId: string,
+		sandboxId: Sandboxes.SandboxId,
+		image: string,
+	) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			yield* query((db) =>
@@ -325,6 +407,7 @@ export const make = Effect.gen(function* () {
 					.set({
 						sandboxProviderId: providerId,
 						providerSandboxId: sandboxId,
+						image,
 						pausedAt: null,
 						lastUsedAt: now,
 						diskUsage: null,
@@ -474,6 +557,195 @@ export const make = Effect.gen(function* () {
 	const requireIdle = (sandboxId: string) =>
 		Effect.flatMap(holders(sandboxId), ({ turns }) =>
 			turns > 0 ? Effect.fail(new SandboxInUse({ turns })) : Effect.void,
+		);
+
+	/**
+	 * Moves the work of the pod's sandbox, `row`, to a new one `provider`
+	 * makes, as {@link Interface.upgrade} describes, and destroys the old one.
+	 * The caller holds the pod's lock and has checked nobody is using it.
+	 */
+	const movedToNewSandbox = (row: SandboxRow, provider: SandboxProviderRepository.Configured) =>
+		Effect.gen(function* () {
+			const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
+			if (!configured) {
+				return yield* new UpgradeFailed({
+					reason: userText`The sandbox's provider has lost its settings, so its work can't be copied. Reset it instead.`,
+				});
+			}
+			const from = sandboxes.forConnection(configured.connection);
+			const to = sandboxes.forConnection(provider.connection);
+			const destroyOld = from
+				.destroy(row.providerSandboxId)
+				.pipe(
+					Effect.catchTag("SandboxUnavailable", (failure) =>
+						Effect.logWarning("Could not destroy a sandbox after upgrading its pod", failure),
+					),
+				);
+			const { workKeptApart } = yield* from
+				.info(row.providerSandboxId)
+				.pipe(Effect.catchTag("SandboxMissing", () => Effect.fail(new NoSandbox())));
+			if (workKeptApart && provider.id === row.sandboxProviderId) {
+				const fresh = yield* madeAndRecorded(
+					provider.connection,
+					yield* specFor(row, row.id, to),
+					(sandbox, image) => moveRecord(row.id, provider.id, sandbox.id, image),
+				);
+				yield* destroyOld;
+				return fresh;
+			}
+			const old = yield* from.open(row.providerSandboxId).pipe(
+				Effect.map(({ sandbox }) => sandbox),
+				Effect.catchTags({
+					SandboxMissing: () => Effect.fail(new NoSandbox()),
+					SandboxStopped: () =>
+						Effect.fail(
+							new UpgradeFailed({
+								reason: userText`The sandbox has stopped, so its work can't be copied to another provider. Have an agent use it once to start it again, then upgrade.`,
+							}),
+						),
+				}),
+			);
+			const archivePath = `/tmp/sugabots-workspace-${yield* ids.random}.tgz`;
+			const packed = yield* old.exec(
+				`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores -czf ${archivePath} .`,
+				COPY_STEP,
+			);
+			if (packed.exitCode !== 0) {
+				return yield* new UpgradeFailed({
+					reason: userText`The sandbox's work couldn't be packed up to copy.`,
+				});
+			}
+			const archive = yield* old
+				.downloadFile(archivePath)
+				.pipe(
+					Effect.catchTag("SandboxFileFailed", () =>
+						Effect.fail(
+							new UpgradeFailed({ reason: userText`The sandbox's work couldn't be read to copy.` }),
+						),
+					),
+				);
+			const fresh = yield* madeAndRecorded(
+				provider.connection,
+				yield* specFor(row, row.id, to),
+				(sandbox, image) =>
+					sandbox.uploadFile(archivePath, archive).pipe(
+						Effect.andThen(
+							sandbox.exec(
+								`tar -xzf ${archivePath} -C ${Sandboxes.WORKSPACE_DIRECTORY} && rm ${archivePath}`,
+								COPY_STEP,
+							),
+						),
+						Effect.map((execution) => execution.exitCode === 0),
+						Effect.catchTag("SandboxFileFailed", () => Effect.succeed(false)),
+						Effect.flatMap((unpacked) =>
+							unpacked
+								? moveRecord(row.id, provider.id, sandbox.id, image)
+								: Effect.fail(
+										new UpgradeFailed({
+											reason: userText`The work couldn't be unpacked in the new sandbox. The old one is untouched.`,
+										}),
+									),
+						),
+					),
+			);
+			yield* destroyOld;
+			return fresh;
+		});
+
+	/**
+	 * Upgrades the workspace's idle sandboxes, found as
+	 * {@link Interface.upgradeIdle} describes, that are behind its enabled
+	 * provider.
+	 */
+	const upgradeBehindIn = (
+		workspaceId: string,
+		idle: readonly SandboxRow[],
+		idleSince: Date,
+		now: Date,
+	) =>
+		Effect.gen(function* () {
+			const provider = yield* providers.enabled(workspaceId);
+			if (!provider) return;
+			const at = sandboxes.forConnection(provider.connection);
+			if (at.templates) return;
+			for (const row of idle) {
+				// One at a provider no longer enabled moves when next opened.
+				if (row.sandboxProviderId !== provider.id) continue;
+				if ((upgradeRetryAt.get(row.id) ?? 0) > now.getTime()) continue;
+				if (!(yield* isBehind(row.image, provider.connection))) continue;
+				yield* upgradeIfStillIdle(row, provider, at, idleSince, now).pipe(
+					Effect.catchCause((cause) => Effect.logError("Upgrading an idle sandbox failed", cause)),
+					Effect.annotateLogs({ sandboxId: row.id }),
+				);
+			}
+		});
+
+	/** Upgrades one idle sandbox, unless someone took it since it was found. */
+	const upgradeIfStillIdle = (
+		row: SandboxRow,
+		provider: SandboxProviderRepository.Configured,
+		at: Sandboxes.Provider,
+		idleSince: Date,
+		now: Date,
+	) =>
+		oneAtATime(row.podId)(
+			Effect.uninterruptible(
+				Effect.gen(function* () {
+					const [still] = yield* query((db) =>
+						db
+							.select({ id: sandboxTable.id })
+							.from(sandboxTable)
+							.where(
+								and(sameSandbox(row), lt(sandboxTable.lastUsedAt, idleSince), noLiveLease(now)),
+							),
+					);
+					if (!still) return;
+					const fresh = yield* movedToNewSandbox(row, provider);
+					yield* pausedUnused(row, fresh.id, at);
+				}),
+			),
+		).pipe(
+			Effect.catchTags({
+				// Gone at the provider: the next use makes a new one.
+				NoSandbox: () => Effect.void,
+				UpgradeFailed: (failure) => retryUpgradeLater(row.id, now, failure),
+				SandboxUnavailable: (failure) => retryUpgradeLater(row.id, now, failure),
+			}),
+		);
+
+	/**
+	 * Gives the pod's record back the time `row` was last used, since nobody
+	 * has used the sandbox it was upgraded to, then pauses that sandbox. One
+	 * that can't be paused now is paused by the idle sweep, as idle as before.
+	 */
+	const pausedUnused = (row: SandboxRow, freshId: Sandboxes.SandboxId, at: Sandboxes.Provider) =>
+		query((db) =>
+			db
+				.update(sandboxTable)
+				.set({ lastUsedAt: row.lastUsedAt })
+				.where(eq(sandboxTable.id, row.id)),
+		).pipe(
+			Effect.andThen(at.pause(freshId)),
+			Effect.andThen(
+				Effect.flatMap(DateTime.nowAsDate, (now) =>
+					query((db) =>
+						db.update(sandboxTable).set({ pausedAt: now }).where(eq(sandboxTable.id, row.id)),
+					),
+				),
+			),
+			Effect.catchTags({
+				SandboxMissing: () => Effect.void,
+				SandboxUnavailable: (failure) =>
+					Effect.logWarning("Could not pause an upgraded sandbox; it is paused once idle", failure),
+			}),
+		);
+
+	const retryUpgradeLater = (recordId: string, now: Date, failure: unknown) =>
+		Effect.andThen(
+			Effect.sync(() =>
+				upgradeRetryAt.set(recordId, now.getTime() + Duration.toMillis(UPGRADE_RETRY)),
+			),
+			Effect.logWarning("Could not upgrade an idle sandbox; trying again later", failure),
 		);
 
 	return Service.of({
@@ -713,17 +985,23 @@ export const make = Effect.gen(function* () {
 						.forConnection(configured.connection)
 						.info(row.providerSandboxId)
 						.pipe(
-							Effect.map(
-								(info): Status => ({
-									...present,
-									state: info.state,
-									image: info.image,
-									upgradeAvailable:
-										current !== undefined &&
-										(current.id !== row.sandboxProviderId ||
-											imageOf(current.connection) !== info.image),
-								}),
-							),
+							Effect.flatMap((info) => {
+								// What Sugabots asked for, since a provider may name the image
+								// by a tag it has for it: OpenSandbox answers a sandbox made
+								// from `debian@sha256:…` with `debian:bookworm-slim`.
+								const image = row.image ?? info.image;
+								return Effect.map(
+									current === undefined || current.id !== row.sandboxProviderId
+										? Effect.succeed(current !== undefined)
+										: isBehind(image, current.connection),
+									(upgradeAvailable): Status => ({
+										...present,
+										state: info.state,
+										image,
+										upgradeAvailable,
+									}),
+								);
+							}),
 							Effect.catchTags({
 								SandboxMissing: () =>
 									Effect.succeed<Status>({ ...present, state: "lost", upgradeAvailable: false }),
@@ -773,93 +1051,37 @@ export const make = Effect.gen(function* () {
 							const row = yield* recorded(pod);
 							if (!row) return yield* new NoSandbox();
 							yield* requireIdle(row.id);
-							const configured = yield* providers.connection(
-								row.workspaceId,
-								row.sandboxProviderId,
-							);
-							if (!configured) {
-								return yield* new UpgradeFailed({
-									reason: userText`The sandbox's provider has lost its settings, so its work can't be copied. Reset it instead.`,
-								});
-							}
-							const from = sandboxes.forConnection(configured.connection);
-							const to = sandboxes.forConnection(provider.connection);
-							const destroyOld = from
-								.destroy(row.providerSandboxId)
-								.pipe(
-									Effect.catchTag("SandboxUnavailable", (failure) =>
-										Effect.logWarning(
-											"Could not destroy a sandbox after upgrading its pod",
-											failure,
-										),
-									),
-								);
-							const { workKeptApart } = yield* from
-								.info(row.providerSandboxId)
-								.pipe(Effect.catchTag("SandboxMissing", () => Effect.fail(new NoSandbox())));
-							if (workKeptApart && provider.id === row.sandboxProviderId) {
-								yield* madeAndRecorded(to, yield* specFor(pod, row.id, to), (fresh) =>
-									moveRecord(row.id, provider.id, fresh.id),
-								);
-								return yield* destroyOld;
-							}
-							const old = yield* from.open(row.providerSandboxId).pipe(
-								Effect.map(({ sandbox }) => sandbox),
-								Effect.catchTags({
-									SandboxMissing: () => Effect.fail(new NoSandbox()),
-									SandboxStopped: () =>
-										Effect.fail(
-											new UpgradeFailed({
-												reason: userText`The sandbox has stopped, so its work can't be copied to another provider. Have an agent use it once to start it again, then upgrade.`,
-											}),
-										),
-								}),
-							);
-							const archivePath = `/tmp/sugabots-workspace-${yield* ids.random}.tgz`;
-							const packed = yield* old.exec(
-								`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores -czf ${archivePath} .`,
-								COPY_STEP,
-							);
-							if (packed.exitCode !== 0) {
-								return yield* new UpgradeFailed({
-									reason: userText`The sandbox's work couldn't be packed up to copy.`,
-								});
-							}
-							const archive = yield* old.downloadFile(archivePath).pipe(
-								Effect.catchTag("SandboxFileFailed", () =>
-									Effect.fail(
-										new UpgradeFailed({
-											reason: userText`The sandbox's work couldn't be read to copy.`,
-										}),
-									),
-								),
-							);
-							yield* madeAndRecorded(to, yield* specFor(pod, row.id, to), (fresh) =>
-								fresh.uploadFile(archivePath, archive).pipe(
-									Effect.andThen(
-										fresh.exec(
-											`tar -xzf ${archivePath} -C ${Sandboxes.WORKSPACE_DIRECTORY} && rm ${archivePath}`,
-											COPY_STEP,
-										),
-									),
-									Effect.map((execution) => execution.exitCode === 0),
-									Effect.catchTag("SandboxFileFailed", () => Effect.succeed(false)),
-									Effect.flatMap((unpacked) =>
-										unpacked
-											? moveRecord(row.id, provider.id, fresh.id)
-											: Effect.fail(
-													new UpgradeFailed({
-														reason: userText`The work couldn't be unpacked in the new sandbox. The old one is untouched.`,
-													}),
-												),
-									),
-								),
-							);
-							yield* destroyOld;
+							yield* movedToNewSandbox(row, provider);
 						}),
 					),
 				),
 			),
+
+		upgradeIdle: operation(
+			"upgradeIdle",
+			Effect.gen(function* () {
+				const now = yield* DateTime.now;
+				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_PAUSE));
+				const idle = yield* query((db) =>
+					db
+						.select()
+						.from(sandboxTable)
+						.where(
+							and(lt(sandboxTable.lastUsedAt, idleSince), noLiveLease(DateTime.toDateUtc(now))),
+						),
+				);
+				// A workspace whose provider can't be read, such as one whose key no
+				// longer decrypts, is logged once, and the others still upgrade.
+				for (const [workspaceId, rows] of Map.groupBy(idle, (row) => row.workspaceId)) {
+					yield* upgradeBehindIn(workspaceId, rows, idleSince, DateTime.toDateUtc(now)).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logError("Upgrading a workspace's idle sandboxes failed", cause),
+						),
+						Effect.annotateLogs({ workspaceId }),
+					);
+				}
+			}),
+		),
 	});
 });
 
@@ -870,8 +1092,9 @@ export const layer = layerNoDeps.pipe(
 );
 
 /**
- * Runs `pauseIdle` and `measureDisks` every minute, each on its own so a slow
- * measurement never holds up a pause, for as long as the layer's scope is open.
+ * Runs `pauseIdle`, `measureDisks` and `upgradeIdle` every minute, each on its
+ * own so a slow measurement or upgrade never holds up a pause, for as long as
+ * the layer's scope is open.
  */
 export const sweepLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -889,6 +1112,7 @@ export const sweepLayer = Layer.effectDiscard(
 			);
 		yield* repeatedly(podSandboxes.pauseIdle, "Pausing idle sandboxes failed");
 		yield* repeatedly(podSandboxes.measureDisks, "Measuring sandboxes' disks failed");
+		yield* repeatedly(podSandboxes.upgradeIdle, "Upgrading idle sandboxes failed");
 	}),
 ).pipe(Layer.provide(layer));
 
@@ -922,6 +1146,21 @@ function liveLease(now: Date) {
 /** No lease on the sandbox that is still in force at `now`. */
 function noLiveLease(now: Date) {
 	return sql`not ${liveLease(now)}`;
+}
+
+/**
+ * Whether a sandbox made from `madeFrom` is behind `configured`, whose tag
+ * names `pinned` now if its registry said. A sandbox made before images were
+ * recorded, from whatever its provider's host had for the tag, counts as
+ * behind, so each is upgraded once onto a digest that is known. When the
+ * registry didn't say, only a sandbox made from another image altogether is
+ * known to be behind: one pinned from `configured`, or made before images
+ * were recorded, may still be what its tag names.
+ */
+function imageIsBehind(madeFrom: string | null, configured: string, pinned: string | undefined) {
+	if (pinned !== undefined) return madeFrom !== pinned;
+	if (madeFrom === null) return false;
+	return madeFrom !== configured && !madeFrom.startsWith(`${withoutTag(configured)}@`);
 }
 
 type SandboxRow = typeof sandboxTable.$inferSelect;
@@ -966,7 +1205,11 @@ export type Status =
 			 * didn't answer, or has lost its settings.
 			 */
 			readonly state: "running" | "paused" | "lost" | "unreachable";
-			/** As its provider names it, when the provider answered. */
+			/**
+			 * What it was made from, as Sugabots asked for it, or, for one made
+			 * before that was recorded, as its provider names it; only when the
+			 * provider answered.
+			 */
 			readonly image?: string;
 			readonly providerId: string;
 			readonly createdAt: Date;
