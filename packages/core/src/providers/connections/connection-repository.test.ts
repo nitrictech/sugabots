@@ -238,9 +238,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		const made = await create({ name: "Linear", url: "https://mcp.linear.app/mcp" });
 		await listTools(made.id, [lookup]);
 
-		expect((await shown(made.id))?.tools.map(({ name, access }) => ({ name, access }))).toEqual([
-			{ name: "lookup", access: "allow" },
-			{ name: "upload_file", access: "allow" },
+		expect(
+			(await shown(made.id))?.tools.map(({ name, readOnly, access }) => ({
+				name,
+				readOnly,
+				access,
+			})),
+		).toEqual([
+			{ name: "lookup", readOnly: true, access: "allow" },
+			{ name: "upload_file", readOnly: false, access: "allow" },
 		]);
 		await connections.update(workspaceId, podId, made.id, { toolAccess: { upload_file: "off" } });
 		expect((await shown(made.id))?.tools).toContainEqual(

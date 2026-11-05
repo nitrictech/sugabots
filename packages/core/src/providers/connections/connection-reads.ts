@@ -80,11 +80,11 @@ function toConnection(
 	connectedBy: string | null,
 	cipher: Credentials.Interface,
 ): { connection: Connection; tools: ConnectionToolSetting[] } {
-	const tools = toolsOf(row).map(({ name, readOnly, destructive }) => ({
-		name,
-		readOnly,
-		destructive,
-		access: toolAccessOf(row.toolAccess, { name, readOnly, destructive }),
+	const tools = toolsOf(row).map((tool) => ({
+		name: tool.name,
+		readOnly: tool.readOnly,
+		destructive: tool.destructive,
+		access: toolAccessOf(row.toolAccess, tool),
 	}));
 	return {
 		tools,

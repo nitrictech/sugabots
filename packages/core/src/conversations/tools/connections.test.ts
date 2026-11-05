@@ -204,7 +204,7 @@ describe("a turn's connection tools", () => {
 			expect(set.tools.linear__upload_file).toMatchObject({
 				handle: "linear",
 				access: "allow",
-				mutating: false,
+				mutating: true,
 				remoteToolName: "upload_file",
 			});
 			expect(set.tools.linear__upload_file?.description).toContain(

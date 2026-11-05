@@ -31,10 +31,10 @@ import {
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
+import { offerAugmentationTools } from "./augmentations.ts";
 import type { Workspace } from "./github/push-tool.ts";
 import { gitHubNote, gitHubTools } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
-import { linearTools } from "./linear/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 
 /**
@@ -56,7 +56,7 @@ import type { UploadSide } from "./signed-upload/tool.ts";
  * A GitHub connection's tools are Sugabots' own (see `github/tools.ts`), with
  * no server to reach; they are offered the same way, keyed by its handle. So
  * are an HTTP connection's, a request per method (see `http/tools.ts`), and
- * those Sugabots adds to a Linear server's own (see `linear/tools.ts`).
+ * an MCP server's augmentation tools (see `augmentations.ts`).
  */
 
 export interface OfferedTool {
@@ -290,7 +290,7 @@ export function from({
 					tools: Object.assign(
 						{},
 						...listed.map(({ target, listing }) => ({
-							...linearTools(
+							...offerAugmentationTools(
 								target,
 								listing.tools.map(({ described }) => described),
 								uploadSide,
