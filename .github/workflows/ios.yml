@@ -1,0 +1,38 @@
+name: iOS
+
+# Runs the web's shared rule cases against the iOS app's Swift copies of those
+# rules whenever they or the API they're generated from change, so a change the
+# app hasn't caught up with fails here. That the generated files match their
+# sources is checked by the `codegen` and `contracts` tests in CI's Test job.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - "apps/codegen/**"
+      - "packages/contracts/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - "apps/codegen/**"
+      - "packages/contracts/**"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rules:
+    name: Rules
+    # The app is written for a newer Swift than macOS 14's Xcode 15 builds;
+    # macOS 26's image has Xcode 26 by default.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the rules copied from the web
+        run: apps/ios/check-rules.sh
