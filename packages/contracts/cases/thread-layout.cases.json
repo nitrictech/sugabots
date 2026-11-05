@@ -2,8 +2,7 @@
 	"//": [
 		"Times given as a local date-time, with no offset, are read in the reader's own time zone; a message's createdAt is as the API sends it.",
 		"Dates are written in each platform's own locale data, which can differ between them (en-GB's September is Sept in Node and Sep on Apple's); a locale where they differ is left out.",
-		"segmentsOf gives each segment as its type, and a text segment's words as its text.",
-		"findAnsweringFace: the iOS app draws no face coming alive for the bot answering yet, so it doesn't copy the rule."
+		"segmentsOf gives each segment as its type, and a text segment's words as its text."
 	],
 	"segmentsOf": [
 		{

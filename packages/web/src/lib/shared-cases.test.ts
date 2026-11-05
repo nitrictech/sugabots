@@ -1,3 +1,5 @@
+import { hopPaths } from "@sugabots/avatars/hop";
+import { type Path, sequence, type Values } from "@sugabots/avatars/layer-motion";
 import {
 	type ConnectionToolSetting,
 	canStartMention,
@@ -132,6 +134,25 @@ function decoding<const Schemas extends readonly ArgumentSchema[]>(
 /** `run` as a rule whose arguments are plain JSON values, with no schema to decode them with. */
 function plain(run: (...given: never[]) => unknown): Rule {
 	return { argumentSchemas: [], run };
+}
+
+/** How many decimal places a face's motion cases write their numbers to. */
+const FACE_MOTION_DECIMAL_PLACES = 4;
+
+/** `value` with every number in it rounded to `FACE_MOTION_DECIMAL_PLACES`. */
+function roundedNumbers(value: unknown): unknown {
+	if (typeof value === "number") {
+		const scale = 10 ** FACE_MOTION_DECIMAL_PLACES;
+		// Plus zero, so a negative number rounded to nothing is written as 0.
+		return Math.round(value * scale) / scale + 0;
+	}
+	if (Array.isArray(value)) return value.map(roundedNumbers);
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, field]) => [key, roundedNumbers(field)]),
+		);
+	}
+	return value;
 }
 
 /** A date as a local date-time with no offset, `2026-09-25T06:12`, as the cases write one. */
@@ -287,6 +308,14 @@ const rulesByFile: Record<string, Record<string, Rule>> = {
 		durationOf: decoding([toolCallPartSchema], durationOf),
 		formatDuration: plain(formatDuration),
 		formatTotal: plain(formatTotal),
+	},
+	// Numbers are rounded, so the cases read clearly and an app can be checked against them within a tolerance.
+	"face-motion.cases.json": {
+		sequence: plain((from: Values, paths: Path[], velocity: Values | null, times: number[]) => {
+			const { valuesAt, seconds } = sequence(from, paths, velocity ?? undefined);
+			return roundedNumbers({ seconds, values: times.map(valuesAt) });
+		}),
+		hopPaths: plain((size: number) => roundedNumbers(hopPaths(size))),
 	},
 	"routine-schedule.cases.json": {
 		formatTime: plain(formatTime),

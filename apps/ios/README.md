@@ -75,6 +75,7 @@ These files are generated, each by its script in `apps/codegen`, from the web's 
 | `generate-artifact-pages.ts` | `Artifacts/ArtifactPages.generated.swift` | `artifact-pages.ts` in `@sugabots/contracts`, `lib/page-frame.ts`, `app.css`'s colours and fonts, and `lib/artifact-kind-catalog.ts` |
 | `generate-native-constants.ts` | `Design/NativeConstants.generated.swift` | `apps/native-constants.json` |
 | `generate-bot-looks.ts` | `Design/BotLooks.generated.swift` | `@sugabots/avatars`, the pod palette |
+| `generate-face-motion.ts` | `Design/FaceMotion.generated.swift` | how `@sugabots/avatars` moves bots' faces, and the web's mood loops |
 | `generate-lucide-icons.ts` | `Design/Lucide.generated.swift` | every icon `packages/web` imports from `lucide-react` |
 | `generate-connection-marks.ts` | `Design/ConnectionMarks.generated.swift` | `ui/connection-mark.tsx` |
 | `generate-provider-logos.ts` | `Assets.xcassets/ProviderLogos`, `Design/ProviderLogos.generated.swift` | `@sugabots/provider-logos`, contracts |

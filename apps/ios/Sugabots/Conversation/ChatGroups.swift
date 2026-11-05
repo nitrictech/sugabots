@@ -82,6 +82,33 @@ enum ChatGroups {
 		return message.createdAt.timeIntervalSince(previous.createdAt) >= longQuiet
 	}
 
+	/// Whether `message` heads a run drawn with its author's face: after a day
+	/// marker, when `dividers` mark days, or as `startsGroup` says, as the web's `startsRun`.
+	static func startsRun(_ previous: Message?, _ message: Message, dividers: Bool) -> Bool {
+		(dividers && startsNewDay(previous?.createdAt, message.createdAt)) || startsGroup(previous, message)
+	}
+
+	/// Where the face of the bot answering is drawn, and whether it's typing now.
+	struct AnsweringFace {
+		let messageId: String
+		let botTyping: Bool
+	}
+
+	/// The face that stands for the bot that wrote the newest of `messages`,
+	/// as the web's `findAnsweringFace`: the last face drawn for that bot, with
+	/// a day marker before each new day when `dividers`. A reply just begun
+	/// shows only as its typing line, so its face may be on the bot's reply before.
+	static func answeringFace(in messages: [Message], dividers: Bool) -> AnsweringFace? {
+		guard let newest = messages.last, case .agent = newest.author else { return nil }
+		let drawn = messages.indices.last { index in
+			let message = messages[index]
+			return sameAuthor(message, newest)
+				&& startsRun(index > 0 ? messages[index - 1] : nil, message, dividers: dividers)
+				&& !Segments.showsNothingYet(message)
+		}
+		return drawn.map { AnsweringFace(messageId: messages[$0].id, botTyping: isTyping(newest)) }
+	}
+
 	private static func sameAuthor(_ left: Message, _ right: Message) -> Bool {
 		switch (left.author, right.author) {
 		case let (.person(a), .person(b)): a.id == b.id

@@ -243,9 +243,11 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String], 
 		"startsGroup": { try ChatGroups.startsGroup(argument($0, 0, as: Message?.self), argument($0, 1)) },
 		"startsNewDay": { try ChatGroups.startsNewDay($0[0] == .null ? nil : localTime($0, 0), localTime($0, 1)) },
 		"formatDay": { try Times.day(localTime($0, 0), now: localTime($0, 1), locale: locale($0, 2)) },
-	], [
-		"findAnsweringFace": "The app draws no face coming alive for the bot answering yet.",
-	], [:]),
+		"findAnsweringFace": { arguments in
+			guard let face = try ChatGroups.answeringFace(in: argument(arguments, 0), dividers: argument(arguments, 1)) else { return JSONValue.null }
+			return object(["messageId": .string(face.messageId), "botTyping": .bool(face.botTyping)])
+		},
+	], [:], [:]),
 	("file-looks.cases.json", [
 		"fileLookOf": { arguments in
 			let file = try argument(arguments, 0, as: [String: String].self)
@@ -291,6 +293,22 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String], 
 		"listNames": { try Names.list(argument($0, 0)) },
 		"countOf": { try Names.count(argument($0, 0), argument($0, 1), argument($0, 2)) },
 	], [:], [:]),
+	("face-motion.cases.json", [
+		"sequence": { arguments in
+			let paths = try argument(arguments, 1, as: [PathCase].self).map { try $0.path() }
+			let timeline = try Timeline.of(paths, from: argument(arguments, 0), velocity: argument(arguments, 2))
+			let times: [Double] = try argument(arguments, 3)
+			return object([
+				"seconds": .number(timeline.seconds),
+				"values": .array(times.map { .array(timeline.valuesAt($0).map(JSONValue.number)) }),
+			])
+		},
+		"hopPaths": { arguments in
+			try FacePath.hop(size: argument(arguments, 0)).reduce(into: [String: [PathCase]]()) { paths, layer in
+				paths[layer.key.rawValue] = layer.value.map(PathCase.init)
+			}
+		},
+	], [:], [:]),
 	("slug.cases.json", [
 		"slugify": { try slugify(argument($0, 0)) },
 	], [:], [:]),
@@ -334,6 +352,23 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String], 
 	]),
 ]
 
+/// How far a number in a case file's results may be from what the case expects, for files whose numbers are rounded.
+let numberTolerances = ["face-motion.cases.json": 0.001]
+
+/// Whether `result` is `expected`, with each number within `tolerance` of the one expected.
+func matches(_ result: JSONValue, _ expected: JSONValue, within tolerance: Double) -> Bool {
+	switch (result, expected) {
+	case let (.number(number), .number(expectedNumber)):
+		abs(number - expectedNumber) <= tolerance
+	case let (.array(values), .array(expectedValues)):
+		values.count == expectedValues.count && zip(values, expectedValues).allSatisfy { matches($0, $1, within: tolerance) }
+	case let (.object(fields), .object(expectedFields)):
+		Set(fields.keys) == Set(expectedFields.keys) && fields.allSatisfy { key, value in expectedFields[key].map { matches(value, $0, within: tolerance) } ?? false }
+	default:
+		result == expected
+	}
+}
+
 let casesFolder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 var failures = 0
 var passed = 0
@@ -376,7 +411,7 @@ for (file, rules, uncopied, withoutCases) in suites {
 			let given = entry.given.map(compact).joined(separator: ", ")
 			do {
 				let result = try json(rule(entry.given))
-				if result == entry.expect {
+				if matches(result, entry.expect, within: numberTolerances[file] ?? 0) {
 					passed += 1
 				} else {
 					fail("\(file): \(name)(\(given)) is \(compact(result)), not \(compact(entry.expect))")
@@ -398,6 +433,50 @@ exit(failures == 0 ? 0 : 1)
 struct Writer: Decodable {
 	let kind: String
 	let id: String?
+}
+
+/// A face's path as the face motion cases write it, as the web's `Path`: a
+/// spring's `to`, `stiffness` and `damping`, or keyframes' `frames`, `times`, `ease` and `seconds`.
+struct PathCase: Codable {
+	let kind: String
+	var to: [Double]?
+	var stiffness: Double?
+	var damping: Double?
+	var frames: [[Double]]?
+	var times: [Double]?
+	var ease: [String]?
+	var seconds: Double?
+
+	init(_ path: FacePath) {
+		switch path {
+		case let .spring(to, tuning):
+			kind = "spring"
+			self.to = to
+			stiffness = tuning.stiffness
+			damping = tuning.damping
+		case let .keyframes(keyframes):
+			kind = "keyframes"
+			frames = keyframes.frames
+			times = keyframes.times
+			ease = keyframes.ease.map(\.rawValue)
+			seconds = keyframes.seconds
+		}
+	}
+
+	func path() throws -> FacePath {
+		if kind == "spring", let to, let stiffness, let damping {
+			return .spring(to: to, SpringTuning(stiffness: stiffness, damping: damping))
+		}
+		if kind == "keyframes", let frames, let times, let seconds, let ease = try ease?.map(Self.easing) {
+			return .keyframes(Keyframes(frames: frames, times: times, ease: ease, seconds: seconds))
+		}
+		throw CocoaError(.coderReadCorrupt)
+	}
+
+	private static func easing(_ name: String) throws -> Easing {
+		guard let easing = Easing(rawValue: name) else { throw CocoaError(.coderReadCorrupt) }
+		return easing
+	}
 }
 
 /// A group mention as the cases write it: its handle and the ids of whom it notifies.

@@ -30,6 +30,9 @@ xcrun swiftc -enable-bare-slash-regex -o "$build/rule-checks" \
 	Conversation/MarkdownBlocks.swift \
 	Design/Avatars.swift \
 	App/Slugify.swift \
+	Design/FaceMotion.generated.swift \
+	Design/FacePaths.swift \
+	Design/FaceRig.swift \
 	Design/ProviderLogos.generated.swift \
 	Home/Mutes.swift \
 	Home/Mutes.generated.swift \

@@ -1,0 +1,295 @@
+{
+	"//": [
+		"How a lively face's parts move. sequence(from, paths, velocity, times) plays paths one after another from `from`, the first spring starting at `velocity` (null for still), and gives how long they take and the values at each of `times`, in seconds. A path is a spring, { kind, to, stiffness, damping }, or keyframes, { kind, frames, times, ease, seconds }, whose first frame is replaced by wherever the part is. hopPaths(size) gives each layer's paths for a hop `size` times as big as a full one.",
+		"Numbers are rounded to four decimal places, and an app may differ from them by up to 0.001, as each platform's floating point and step-by-step search for where a curve is differ in their last digits."
+	],
+	"sequence": [
+		{
+			"given": [
+				[0.3],
+				[
+					{
+						"kind": "keyframes",
+						"frames": [[1], [0.1], [0.1], [1]],
+						"times": [0, 0.33, 0.5, 1],
+						"ease": ["easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.24
+					}
+				],
+				null,
+				[0, 0.03, 0.06, 0.1, 0.15, 0.2, 0.24, 0.5]
+			],
+			"expect": {
+				"seconds": 0.24,
+				"values": [[0.3], [0.2403], [0.1243], [0.1], [0.216], [0.7915], [1], [1]]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "keyframes",
+						"frames": [[0], [0], [-11.25], [-17.5], [0], [0]],
+						"times": [
+							0, 0.14285714285714285, 0.35714285714285715, 0.5714285714285714, 0.8928571428571428, 1
+						],
+						"ease": ["linear", "linear", "easeOut", "easeIn", "linear"],
+						"seconds": 0.56
+					}
+				],
+				null,
+				[0, 0.1, 0.15, 0.25, 0.4, 0.45, 0.53, 0.56]
+			],
+			"expect": {
+				"seconds": 0.56,
+				"values": [[0], [-1.875], [-6.5625], [-14.9421], [-12.9876], [-7.2759], [0], [0]]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "keyframes",
+						"frames": [[0], [0.5], [0]],
+						"times": [0, 0.3, 1],
+						"ease": ["easeOut", "easeIn"],
+						"seconds": 1.2
+					}
+				],
+				null,
+				[0.1, 0.36, 0.7, 1.1]
+			],
+			"expect": {
+				"seconds": 1.2,
+				"values": [[0.2079], [0.5], [0.3904], [0.0948]]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "spring",
+						"to": [17.5],
+						"stiffness": 140,
+						"damping": 13
+					}
+				],
+				[0],
+				[0, 0.05, 0.1, 0.3, 0.6, 1]
+			],
+			"expect": {
+				"seconds": 0.6,
+				"values": [[0], [2.4255], [7.4602], [19.6657], [17.5], [17.5]]
+			}
+		},
+		{
+			"given": [
+				[0, 0, 1],
+				[
+					{
+						"kind": "spring",
+						"to": [12.5, 7.5, 0.82],
+						"stiffness": 1000,
+						"damping": 60
+					}
+				],
+				null,
+				[0.02, 0.05, 0.1, 0.2]
+			],
+			"expect": {
+				"seconds": 0.2417,
+				"values": [
+					[1.6879, 1.0127, 0.9757],
+					[6.0408, 3.6245, 0.913],
+					[10.5927, 6.3556, 0.8475],
+					[12.4284, 7.5, 0.821]
+				]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "spring",
+						"to": [0],
+						"stiffness": 500,
+						"damping": 12
+					}
+				],
+				[50],
+				[0.01, 0.03, 0.08, 0.2]
+			],
+			"expect": {
+				"seconds": 1.0833,
+				"values": [[0.4672], [1.1675], [1.4197], [-0.6428]]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "spring",
+						"to": [3],
+						"stiffness": 120,
+						"damping": 30
+					}
+				],
+				null,
+				[0.1, 0.3, 0.8]
+			],
+			"expect": {
+				"seconds": 1.575,
+				"values": [[0.7581], [2.1123], [2.9175]]
+			}
+		},
+		{
+			"given": [
+				[0],
+				[
+					{
+						"kind": "spring",
+						"to": [10],
+						"stiffness": 100,
+						"damping": 20
+					}
+				],
+				[-20],
+				[0.05, 0.2, 0.5]
+			],
+			"expect": {
+				"seconds": 0.5833,
+				"values": [[0.2955], [5.3986], [9.5283]]
+			}
+		},
+		{
+			"given": [
+				[1, 1],
+				[
+					{
+						"kind": "keyframes",
+						"frames": [[1, 1], [1.1, 0.88], [0.92, 1.1], [1, 1], [0.95, 1.06], [1.1, 0.88]],
+						"times": [
+							0, 0.14285714285714285, 0.35714285714285715, 0.5714285714285714, 0.8928571428571428, 1
+						],
+						"ease": ["easeInOut", "easeInOut", "easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.56
+					},
+					{
+						"kind": "spring",
+						"to": [1, 1],
+						"stiffness": 500,
+						"damping": 12
+					}
+				],
+				null,
+				[0.2, 0.5, 0.56, 0.6, 0.7, 0.9]
+			],
+			"expect": {
+				"seconds": 1.1433,
+				"values": [
+					[0.92, 1.1],
+					[0.95, 1.06],
+					[1.1, 0.88],
+					[1.0679, 0.9186],
+					[0.9587, 1.0496],
+					[1.0097, 0.9884]
+				]
+			}
+		}
+	],
+	"hopPaths": [
+		{
+			"given": [1],
+			"expect": {
+				"hopRise": [
+					{
+						"kind": "keyframes",
+						"frames": [[0], [0], [-11.25], [-17.5], [0], [0]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["linear", "linear", "easeOut", "easeIn", "linear"],
+						"seconds": 0.56
+					}
+				],
+				"hopSquash": [
+					{
+						"kind": "keyframes",
+						"frames": [[1, 1], [1.1, 0.88], [0.92, 1.1], [1, 1], [0.95, 1.06], [1.1, 0.88]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["easeInOut", "easeInOut", "easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.56
+					},
+					{
+						"kind": "spring",
+						"to": [1, 1],
+						"stiffness": 500,
+						"damping": 12
+					}
+				],
+				"hopEyesDrop": [
+					{
+						"kind": "keyframes",
+						"frames": [[0], [2], [3], [-2], [-1.5], [3.75]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["easeInOut", "easeInOut", "easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.56
+					},
+					{
+						"kind": "spring",
+						"to": [0],
+						"stiffness": 500,
+						"damping": 12
+					}
+				]
+			}
+		},
+		{
+			"given": [0.4],
+			"expect": {
+				"hopRise": [
+					{
+						"kind": "keyframes",
+						"frames": [[0], [0], [-4.5], [-7], [0], [0]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["linear", "linear", "easeOut", "easeIn", "linear"],
+						"seconds": 0.56
+					}
+				],
+				"hopSquash": [
+					{
+						"kind": "keyframes",
+						"frames": [[1, 1], [1.04, 0.952], [0.968, 1.04], [1, 1], [0.98, 1.024], [1.04, 0.952]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["easeInOut", "easeInOut", "easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.56
+					},
+					{
+						"kind": "spring",
+						"to": [1, 1],
+						"stiffness": 500,
+						"damping": 12
+					}
+				],
+				"hopEyesDrop": [
+					{
+						"kind": "keyframes",
+						"frames": [[0], [0.8], [1.2], [-0.8], [-0.6], [1.5]],
+						"times": [0, 0.1429, 0.3571, 0.5714, 0.8929, 1],
+						"ease": ["easeInOut", "easeInOut", "easeInOut", "easeInOut", "easeInOut"],
+						"seconds": 0.56
+					},
+					{
+						"kind": "spring",
+						"to": [0],
+						"stiffness": 500,
+						"damping": 12
+					}
+				]
+			}
+		}
+	]
+}
