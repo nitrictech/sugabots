@@ -105,7 +105,7 @@ const meta = preview.meta({
 export const Navigation = meta.story({
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		const nav = await canvas.findByRole("navigation", { name: "Settings" }, { timeout: 10_000 });
+		const nav = await canvas.findByRole("navigation", { name: "Settings" });
 		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toHaveAttribute(
 			"aria-expanded",
 			"true",
@@ -122,9 +122,7 @@ export const Navigation = meta.story({
 export const SharedPod = meta.story({
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "Revenue" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Delete pod" })).toBeInTheDocument();
 	},
 });
@@ -133,9 +131,7 @@ export const SharedPod = meta.story({
 export const Connections = meta.story({
 	render: () => <StoryApp path={revenuePage("connections")} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "Connections" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
 		await expect(await canvas.findByRole("article", { name: "HubSpot" })).toBeInTheDocument();
 		await expect(canvas.getByRole("article", { name: "Gmail" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
@@ -149,9 +145,7 @@ export const Connections = meta.story({
 export const People = meta.story({
 	render: () => <StoryApp path={revenuePage("people")} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "People" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
 		await expect(await canvas.findByText("Jay Young")).toBeInTheDocument();
 		await expect(await canvas.findByText("Admin")).toBeInTheDocument();
 		await expect(
@@ -167,10 +161,8 @@ export const People = meta.story({
 export const Bots = meta.story({
 	render: () => <StoryApp path={revenuePage("bots")} />,
 	play: async ({ canvas }) => {
-		const page = await canvas.findByRole("main", {}, { timeout: 10_000 });
-		await expect(
-			await within(page).findByRole("heading", { name: "Bots" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		const page = await canvas.findByRole("main");
+		await expect(await within(page).findByRole("heading", { name: "Bots" })).toBeInTheDocument();
 		await expect(
 			await within(page).findByRole("link", { name: /^Growth Desk/ }),
 		).toBeInTheDocument();
@@ -186,7 +178,7 @@ export const PersonalPod = meta.story({
 	render: () => <StoryApp path={`${pods}/personal`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Connections", level: 2 }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Connections", level: 2 }),
 		).toBeInTheDocument();
 		const personal = canvas.getByRole("group", { name: "Personal pods" });
 		await expect(within(personal).queryByRole("link", { name: "General" })).toBeNull();
@@ -215,9 +207,7 @@ export const AsAMember = meta.story({
 	},
 	render: () => <StoryApp path={revenuePage("people")} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "People" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Add people" })).toBeNull();
 		await expect(await canvas.findByRole("button", { name: "Leave Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Remove Mara Kent" })).toBeNull();
@@ -229,9 +219,7 @@ export const GeneralAsAMember = meta.story({
 	beforeEach: AsAMember.input.beforeEach,
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "Revenue" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
 		await expect(canvas.queryByRole("textbox", { name: "Name" })).toBeNull();
 	},
@@ -242,9 +230,10 @@ export const Phone = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: revenue.name }, { timeout: 10_000 }),
-		).toHaveAttribute("href", `/${storyWorkspace.slug}/you/pods/${revenue.slug}`);
+		await expect(await canvas.findByRole("link", { name: revenue.name })).toHaveAttribute(
+			"href",
+			`/${storyWorkspace.slug}/you/pods/${revenue.slug}`,
+		);
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 	},
 });

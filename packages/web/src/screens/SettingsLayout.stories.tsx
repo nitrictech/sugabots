@@ -27,13 +27,13 @@ const meta = preview.meta({
 export const General = meta.story({
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
-		const nav = await canvas.findByRole("navigation", { name: "Settings" }, { timeout: 10_000 });
+		const nav = await canvas.findByRole("navigation", { name: "Settings" });
 		await expect(
 			within(within(nav).getByRole("group", { name: "Workspace" })).getByRole("link", {
 				name: "General",
 			}),
 		).toHaveAttribute("aria-current", "page");
-		await expect(await canvas.findByText("Time zone", {}, { timeout: 10_000 })).toBeInTheDocument();
+		await expect(await canvas.findByText("Time zone")).toBeInTheDocument();
 		const trail = canvas.getByRole("navigation", { name: "Breadcrumb" });
 		await expect(
 			within(trail).getByRole("link", { name: "Workspace settings" }),
@@ -45,9 +45,7 @@ export const General = meta.story({
 export const DeleteWorkspace = meta.story({
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Delete workspace" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Delete workspace" }));
 		const dialog = await screen.findByRole("dialog", { name: /^Delete .+\?$/ });
 		// The dialog moves focus to Cancel just after it appears.
 		await waitFor(() =>
@@ -60,9 +58,7 @@ export const DeleteWorkspace = meta.story({
 export const Profile = meta.story({
 	render: () => <StoryApp path={`${settings}/profile`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: storyUser.name }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: storyUser.name })).toBeInTheDocument();
 		const nav = canvas.getByRole("navigation", { name: "Settings" });
 		await expect(
 			within(within(nav).getByRole("group", { name: "You" })).getByRole("link", {
@@ -88,7 +84,7 @@ export const ProfileWithReferralLink = meta.story({
 	render: () => <StoryApp path={`${settings}/profile`} />,
 	play: async ({ canvas, userEvent }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Share your invite link" }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Share your invite link" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText(/join\/k7x2p9qa4m/)).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Reset link" }));
@@ -103,7 +99,7 @@ export const AsAMember = meta.story({
 	},
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
-		const nav = await canvas.findByRole("navigation", { name: "Settings" }, { timeout: 10_000 });
+		const nav = await canvas.findByRole("navigation", { name: "Settings" });
 		// Waiting on their pods waits on the answers the list is drawn from.
 		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toBeInTheDocument();
 		await expect(within(nav).queryByRole("link", { name: "Models" })).toBeNull();
@@ -116,11 +112,7 @@ export const TabletList = meta.story({
 	globals: TABLET,
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
-		const list = await canvas.findByRole(
-			"navigation",
-			{ name: "Settings sections" },
-			{ timeout: 10_000 },
-		);
+		const list = await canvas.findByRole("navigation", { name: "Settings sections" });
 		// The sidebar beside it is the way out, so there is no Done.
 		await expect(within(list).queryByRole("link", { name: "Done" })).toBeNull();
 		await expect(
@@ -135,9 +127,7 @@ export const PhoneList = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { level: 1, name: "Settings" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
 	},
 });
 
@@ -146,7 +136,7 @@ export const PhoneSection = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${settings}/members`} />,
 	play: async ({ canvas }) => {
-		const page = await canvas.findByRole("main", {}, { timeout: 10_000 });
+		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
 		await expect(await within(page).findByRole("heading", { name: "Members" })).toBeInTheDocument();
 	},
@@ -157,7 +147,7 @@ export const TabletSection = meta.story({
 	globals: TABLET,
 	render: () => <StoryApp path={`${settings}/pods/revenue/bots`} />,
 	play: async ({ canvas }) => {
-		const page = await canvas.findByRole("main", {}, { timeout: 10_000 });
+		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
 		await expect(await within(page).findByRole("heading", { name: "Bots" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("navigation", { name: "Settings" })).toBeNull();

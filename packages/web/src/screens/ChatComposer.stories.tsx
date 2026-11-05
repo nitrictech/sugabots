@@ -262,11 +262,7 @@ export const EmojiShortcode = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Hmm :thin");
-		const list = await canvas.findByRole(
-			"listbox",
-			{ name: "Emoji matching what was typed" },
-			{ timeout: 5_000 },
-		);
+		const list = await canvas.findByRole("listbox", { name: "Emoji matching what was typed" });
 		await expect(within(list).getAllByRole("option")[0]).toHaveAccessibleName("🤔 :thinking:");
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Hmm 🤔 ");
@@ -283,11 +279,7 @@ export const ClosedShortcode = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Shipped :tad");
-		await canvas.findByRole(
-			"listbox",
-			{ name: "Emoji matching what was typed" },
-			{ timeout: 5_000 },
-		);
+		await canvas.findByRole("listbox", { name: "Emoji matching what was typed" });
 		await userEvent.type(input, "a:");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Shipped 🎉");
 	},
@@ -296,33 +288,17 @@ export const ClosedShortcode = meta.story({
 /** The smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
 export const EmojiButton = meta.story({
 	args: { value: "Nice work" },
-	parameters: {
-		a11y: {
-			config: {
-				rules: [
-					{
-						// As in the picker's own stories: Frimousse numbers its grid from 0, where ARIA starts at 1.
-						id: "aria-valid-attr-value",
-						selector: "[frimousse-row], [frimousse-emoji]",
-						enabled: false,
-					},
-				],
-			},
-		},
-	},
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
 		const page = within(document.body);
-		await page.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await page.findByRole("gridcell", { name: "Grinning face" });
 		await userEvent.keyboard("hundred points");
-		await waitFor(
-			() =>
-				expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Nice work💯");

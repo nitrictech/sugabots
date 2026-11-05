@@ -1248,13 +1248,11 @@ export const Reactions = meta.story({
 		await userEvent.keyboard("hundred points");
 		// The search's only result is active once it applies, and Enter chooses it. A
 		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(
-			() =>
-				expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "💯");
@@ -1291,13 +1289,11 @@ export const ReactFromToolbar = meta.story({
 		await userEvent.keyboard("thumbs up");
 		// The search's only result is active once it applies, and Enter chooses it. A
 		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(
-			() =>
-				expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		// The picker's data writes 👍 with a variation selector after it, which a reaction leaves off.

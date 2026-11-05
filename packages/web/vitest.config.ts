@@ -16,6 +16,9 @@ export default mergeConfig(
 		publicDir: fileURLToPath(new URL("./.storybook/public", import.meta.url)),
 		test: {
 			name: "storybook",
+			// A story's waits each take up to 10 seconds on a busy machine (see the preview), and the
+			// accessibility check up to 5 more, so this leaves room for a real miss to fail as itself.
+			testTimeout: 30_000,
 			browser: {
 				enabled: true,
 				provider: playwright(),

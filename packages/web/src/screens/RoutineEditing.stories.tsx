@@ -302,21 +302,18 @@ type Canvas = ReturnType<typeof within>;
 
 /** The routine's panel, opened with Details if the page didn't open it already. */
 async function openPanel(canvas: Canvas) {
-	return waitFor(
-		async () => {
-			const existing = canvas.queryByRole("complementary", { name: "Routine" });
-			if (existing) return within(existing);
-			await userEvent.click(canvas.getByRole("button", { name: "Details" }));
-			throw new Error("The routine panel has not opened yet");
-		},
-		{ timeout: 10_000 },
-	);
+	return waitFor(async () => {
+		const existing = canvas.queryByRole("complementary", { name: "Routine" });
+		if (existing) return within(existing);
+		await userEvent.click(canvas.getByRole("button", { name: "Details" }));
+		throw new Error("The routine panel has not opened yet");
+	});
 }
 
 /** The rows of the panel's Triggers, once the routine has loaded. */
 async function triggerRows(canvas: Canvas) {
 	const panel = await openPanel(canvas);
-	const group = await panel.findByRole("region", { name: "Triggers" }, { timeout: 10_000 });
+	const group = await panel.findByRole("region", { name: "Triggers" });
 	return within(group).getAllByRole("button");
 }
 
@@ -331,9 +328,7 @@ async function openFirstTrigger(canvas: Canvas) {
 /** Opens Add trigger's first step, the kinds of trigger: in the panel, or on a routine being made. */
 async function openAddTrigger(canvas: Canvas, inPanel = false) {
 	const where = inPanel ? await openPanel(canvas) : canvas;
-	await userEvent.click(
-		await where.findByRole("button", { name: "Add trigger" }, { timeout: 10_000 }),
-	);
+	await userEvent.click(await where.findByRole("button", { name: "Add trigger" }));
 	return screen.findByRole("dialog", { name: "Add a trigger" });
 }
 
@@ -352,7 +347,7 @@ export const Scheduled = meta.story({
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(
-			await panel.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+			await panel.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(panel.getByRole("switch", { name: "Routine on" })).toBeChecked();
 		await expect(await triggerRows(canvas)).toHaveLength(2);
@@ -471,11 +466,7 @@ export const MoreMenu = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		const panel = await openPanel(canvas);
 		await userEvent.click(
-			await panel.findByRole(
-				"button",
-				{ name: "More for Overnight outbound" },
-				{ timeout: 10_000 },
-			),
+			await panel.findByRole("button", { name: "More for Overnight outbound" }),
 		);
 		const menu = await screen.findByRole("menu");
 		await expect(within(menu).getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
@@ -491,9 +482,7 @@ export const Paused = meta.story({
 	render: () => <StoryApp path={pageOf(churnReport)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
-		await expect(
-			await panel.findByRole("switch", { name: "Routine on" }, { timeout: 10_000 }),
-		).not.toBeChecked();
+		await expect(await panel.findByRole("switch", { name: "Routine on" })).not.toBeChecked();
 		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 	},
 });
@@ -579,16 +568,13 @@ export const DeliveryIdHeaderOnAPhone = meta.story({
 	...DeliveryIdHeader.input,
 	globals: { ...PHONE, theme: "light" },
 	play: async (context) => {
-		await waitFor(
-			async () => {
-				if (context.canvas.queryByRole("complementary", { name: "Routine" })) return;
-				await userEvent.click(
-					context.canvas.getByText("Incident intake", { selector: "button > span > span" }),
-				);
-				throw new Error("The routine panel has not opened yet");
-			},
-			{ timeout: 10_000 },
-		);
+		await waitFor(async () => {
+			if (context.canvas.queryByRole("complementary", { name: "Routine" })) return;
+			await userEvent.click(
+				context.canvas.getByText("Incident intake", { selector: "button > span > span" }),
+			);
+			throw new Error("The routine panel has not opened yet");
+		});
 		await DeliveryIdHeader.input.play?.(context);
 	},
 });
@@ -658,7 +644,7 @@ export const RepositoryTrigger = meta.story({
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(
-			await panel.findByRole("button", { name: /^GitHub.*On acme\/web/ }, { timeout: 10_000 }),
+			await panel.findByRole("button", { name: /^GitHub.*On acme\/web/ }),
 		).toBeInTheDocument();
 		const dialog = within(await openFirstTrigger(canvas));
 		// The pod's GitHub connection, then its repositories, load once the trigger opens.
@@ -695,9 +681,7 @@ export const NewRepositoryRoutine = meta.story({
 export const NewRoutine = meta.story({
 	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "New routine" })).toBeInTheDocument();
 		await expect(canvas.getByText("No triggers")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
 		await expect(canvas.queryByRole("switch", { name: "On" })).toBeNull();
@@ -738,7 +722,7 @@ export const AsAMember = meta.story({
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(
-			await panel.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+			await panel.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(panel.getByRole("switch", { name: "Routine on" })).toBeDisabled();
 		await expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
@@ -756,9 +740,7 @@ export const PhoneNewRoutine = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${newInRevenue}?bot=${accountManager.handle}`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "Routines" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("link", { name: "Routines" })).toBeInTheDocument();
 		await expect(await canvas.findByRole("heading", { name: "New routine" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeInTheDocument();
 	},

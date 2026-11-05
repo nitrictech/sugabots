@@ -57,11 +57,7 @@ export const NothingChosen = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		const level = await canvas.findByRole(
-			"group",
-			{ name: "Notify me about" },
-			{ timeout: 10_000 },
-		);
+		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await expect(within(level).getByRole("radio", { name: "Mentions and replies" })).toBeChecked();
 		await expect(canvas.getByText(/replies in conversations you're part of/)).toBeInTheDocument();
 		if (firstPod) {
@@ -79,11 +75,7 @@ export const ChoosingEverything = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		const level = await canvas.findByRole(
-			"group",
-			{ name: "Notify me about" },
-			{ timeout: 10_000 },
-		);
+		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await userEvent.click(within(level).getByRole("radio", { name: "Everything" }));
 		await expect(
 			await canvas.findByText(/Every new message in the conversations you can see/),
@@ -99,9 +91,7 @@ export const Chosen = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByLabelText("From", undefined, { timeout: 10_000 })).toHaveValue(
-			"22:00",
-		);
+		await expect(await canvas.findByLabelText("From", undefined)).toHaveValue("22:00");
 		await expect(canvas.getByLabelText("To")).toHaveValue("07:30");
 		if (secondPod) {
 			await expect(
@@ -124,9 +114,7 @@ export const Paused = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/^Paused until/, undefined, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(/^Paused until/, undefined)).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Resume" }));
 		await expect(await canvas.findByRole("button", { name: "Pause" })).toBeInTheDocument();
 	},
@@ -139,11 +127,9 @@ export const ChoosingWhatElseNotifies = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		const failedReplies = await canvas.findByRole(
-			"switch",
-			{ name: "A bot can't finish its reply to me" },
-			{ timeout: 10_000 },
-		);
+		const failedReplies = await canvas.findByRole("switch", {
+			name: "A bot can't finish its reply to me",
+		});
 		await expect(failedReplies).toBeChecked();
 		await userEvent.click(failedReplies);
 		await waitFor(() => expect(failedReplies).not.toBeChecked());

@@ -15,21 +15,6 @@ const meta = preview.meta({
 		localStorage.removeItem(RECENT_KEY);
 		return () => localStorage.removeItem(RECENT_KEY);
 	},
-	parameters: {
-		a11y: {
-			config: {
-				rules: [
-					{
-						// Frimousse numbers its grid's rows and columns from 0, where ARIA starts at 1, and
-						// finds a row by that number to scroll it into view, so it cannot be renumbered here.
-						id: "aria-valid-attr-value",
-						selector: "[frimousse-row], [frimousse-emoji]",
-						enabled: false,
-					},
-				],
-			},
-		},
-	},
 	decorators: [
 		(Story) => (
 			<div className="w-fit rounded-lg border border-border-strong bg-panel shadow-popover">
@@ -42,18 +27,16 @@ const meta = preview.meta({
 /** Every emoji by category. Typing narrows them, and choosing one gives it. */
 export const Default = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
-		await canvas.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await canvas.findByRole("gridcell", { name: "Grinning face" });
 		await userEvent.click(canvas.getByRole("searchbox", { name: "Search emoji" }));
 		await userEvent.keyboard("hundred points");
 		// The search's only result is active once it applies, and Enter chooses it. A
 		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(
-			() =>
-				expect(canvas.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(canvas.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onSelect).toHaveBeenCalledWith("💯");
@@ -63,7 +46,7 @@ export const Default = meta.story({
 /** A search that matches nothing says so. */
 export const NothingFound = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await canvas.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await canvas.findByRole("gridcell", { name: "Grinning face" });
 		await userEvent.click(canvas.getByRole("searchbox", { name: "Search emoji" }));
 		await userEvent.keyboard("zzzzqq");
 		await expect(await canvas.findByText("No emoji found")).toBeVisible();
@@ -80,9 +63,7 @@ export const Recent = meta.story({
 	},
 	play: async ({ args, canvas, userEvent }) => {
 		const recent = canvas.getByRole("region", { name: "Recent" });
-		await expect(
-			await within(recent).findByRole("button", { name: "Party popper" }, { timeout: 5_000 }),
-		).toBeVisible();
+		await expect(await within(recent).findByRole("button", { name: "Party popper" })).toBeVisible();
 		await expect(
 			within(recent)
 				.getAllByRole("button")
@@ -104,7 +85,7 @@ export const Recent = meta.story({
 /** Nothing chosen yet in this browser, so there is no recent row. */
 export const NoneRecent = meta.story({
 	play: async ({ canvas }) => {
-		await canvas.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await canvas.findByRole("gridcell", { name: "Grinning face" });
 		await expect(canvas.queryByRole("region", { name: "Recent" })).toBeNull();
 	},
 });

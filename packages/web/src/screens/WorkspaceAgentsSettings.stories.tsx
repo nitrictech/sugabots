@@ -156,9 +156,7 @@ const meta = preview.meta({
  */
 export const ContactCard = meta.story({
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		const trail = canvas.getByRole("navigation", { name: "Breadcrumb" });
 		await expect(within(trail).getByRole("link", { name: "Bots" })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Built-in tools" })).toBeInTheDocument();
@@ -184,9 +182,7 @@ export const ContactCard = meta.story({
  */
 export const Look = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Change look" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Change look" }));
 		const dialog = await within(document.body).findByRole("dialog", {
 			name: `${growthDesk.name}'s look`,
 		});
@@ -199,9 +195,7 @@ export const Look = meta.story({
 /** The Model page: the switched-on models grouped by provider, the one in use checked. */
 export const ModelPage = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Model/ }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: /^Model/ }));
 		await expect(await canvas.findByRole("heading", { name: "OpenAI" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 		// The model in use is checked, with nothing to press.
@@ -239,9 +233,7 @@ export const MemberModelPage = meta.story({
 		msw.use(...memberHandlers());
 	},
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Model/ }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: /^Model/ }));
 		await expect(await canvas.findByText(/ask a workspace admin/)).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("main")).queryByRole("link", { name: "Models" }),
@@ -252,9 +244,7 @@ export const MemberModelPage = meta.story({
 /** The Instructions page: the bot's instructions, counted against their limit. */
 export const InstructionsPage = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: /^Instructions/ }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: /^Instructions/ }));
 		await expect(await canvas.findByLabelText("Instructions")).toBeInTheDocument();
 		await expect(canvas.getByText(/of 20,000 characters/)).toBeInTheDocument();
 	},
@@ -269,11 +259,7 @@ export const ToolsAndRoutines = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const inherited = await canvas.findByRole(
-			"region",
-			{ name: /^Inherited from / },
-			{ timeout: 10_000 },
-		);
+		const inherited = await canvas.findByRole("region", { name: /^Inherited from / });
 		await expect(await within(inherited).findByText("HubSpot")).toBeInTheDocument();
 		await expect(within(inherited).queryByRole("switch")).toBeNull();
 		const routinesRow = canvas.getByRole("link", { name: /^Routines/ });
@@ -288,9 +274,7 @@ export const Member = meta.story({
 		msw.use(...memberHandlers());
 	},
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete bot" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Change look" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
@@ -301,9 +285,7 @@ export const Member = meta.story({
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("main")).getByRole("link", { name: "Bots" }),
 		).toBeInTheDocument();

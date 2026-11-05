@@ -102,7 +102,7 @@ const meta = preview.meta({
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		const card = await canvas.findByRole("article", { name: /Send quote/ }, { timeout: 10_000 });
+		const card = await canvas.findByRole("article", { name: /Send quote/ });
 		await expect(card).toHaveTextContent("Acme Retail");
 		await expect(within(card).getByRole("button", { name: /^Allow/ })).toBeVisible();
 		await expect(within(card).getByRole("button", { name: /^Deny/ })).toBeVisible();
@@ -119,15 +119,13 @@ export const Opened = meta.story({
 		<StoryApp path={`/${storyWorkspace.slug}/approvals/0199a3a0-0000-7000-8000-000000000701`} />
 	),
 	play: async ({ canvas }) => {
-		const page = await canvas.findByRole(
-			"article",
-			{ name: "Approval request: Send quote in Stripe" },
-			{ timeout: 10_000 },
-		);
+		const page = await canvas.findByRole("article", {
+			name: "Approval request: Send quote in Stripe",
+		});
 		await expect(page).toHaveTextContent("Acme Retail");
 		// The link waits for the pods and bots too, which can answer after the request.
 		await expect(
-			await canvas.findByRole("link", { name: "Open conversation" }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: "Open conversation" }),
 		).toBeInTheDocument();
 	},
 });
@@ -149,9 +147,7 @@ export const Clear = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/^Nothing waiting/, {}, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByText(/^Nothing waiting/)).toBeVisible();
 		await expect(canvas.getByRole("link", { name: /Send email/ })).toHaveTextContent("Allowed");
 	},
 });

@@ -151,7 +151,7 @@ const meta = preview.meta({
  */
 export const States = meta.story({
 	play: async ({ canvas }) => {
-		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
+		const github = await canvas.findByRole("article", { name: "GitHub" });
 		await expect(
 			within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off"),
 		).toBeInTheDocument();
@@ -183,9 +183,7 @@ export const States = meta.story({
 /** Adding one: the apps not yet connected, searchable, and any other server by its address. */
 export const AddConnection = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
 		const dialog = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
 		await expect(within(dialog).getByRole("button", { name: /^Jira/ })).toBeInTheDocument();
 		await expect(within(dialog).queryByRole("button", { name: /^Linear/ })).toBeNull();
@@ -198,9 +196,7 @@ export const AddConnection = meta.story({
 /** An app chosen: what it reaches, and Connect, which signs in next. */
 export const AddingAnApp = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
 		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
 		await userEvent.click(within(list).getByRole("button", { name: /^Jira/ }));
 		const step = await screen.findByRole("dialog", { name: "Jira" });
@@ -211,9 +207,7 @@ export const AddingAnApp = meta.story({
 /** GitHub chosen: the pod gets an app of its own, made on GitHub for the organization named or the person. */
 export const AddingGitHub = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
 		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
 		await expect(within(list).queryByText("Code")).toBeNull();
 		await userEvent.type(within(list).getByRole("searchbox", { name: "Search apps" }), "pull");
@@ -247,9 +241,7 @@ export const AddingByUrlWithHeader = meta.story({
 /** An HTTP endpoint: its base address, and a token, a header or neither; nothing to test before adding. */
 export const AddingAnHttpEndpoint = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
 		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
 		await userEvent.click(within(list).getByRole("button", { name: /HTTP endpoint/ }));
 		const step = await screen.findByRole("dialog", { name: "HTTP endpoint" });
@@ -260,9 +252,7 @@ export const AddingAnHttpEndpoint = meta.story({
 });
 
 async function openConnectByUrl(canvas: ReturnType<typeof within>) {
-	await userEvent.click(
-		await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-	);
+	await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
 	const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
 	await userEvent.click(within(list).getByRole("button", { name: /Connect by URL/ }));
 	return screen.findByRole("dialog", { name: "Connect by URL" });
@@ -274,9 +264,7 @@ export const Empty = meta.story({
 		msw.use(http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json([])));
 	},
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("button", { name: "Add connection" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("article")).toBeNull();
 	},
 });
@@ -303,7 +291,7 @@ export const Member = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const linear = await canvas.findByRole("article", { name: "Linear" }, { timeout: 10_000 });
+		const linear = await canvas.findByRole("article", { name: "Linear" });
 		await expect(within(linear).queryByRole("radio", { name: "Allow" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Add connection" })).toBeNull();
 	},
@@ -313,7 +301,7 @@ export const Member = meta.story({
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
+		const github = await canvas.findByRole("article", { name: "GitHub" });
 		await expect(within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off")).toBeVisible();
 		await expect(within(github).queryByRole("button", { name: /all tools/ })).toBeNull();
 	},
