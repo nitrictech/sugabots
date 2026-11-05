@@ -52,6 +52,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "codegen",
+					root: "apps/codegen",
+					environment: "node",
+					include: ["**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "sdk",
 					root: "packages/sdk",
 					environment: "node",
