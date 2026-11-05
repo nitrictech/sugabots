@@ -85,6 +85,7 @@ struct SideThreadSheet: View {
 				if type == .routine, case .routineTrigger = message.author { return nil }
 				return message
 			}
+			let answering = ChatGroups.answeringFace(in: messages, dividers: false)
 			ScrollView {
 				LazyVStack(alignment: .leading, spacing: 0) {
 					ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
@@ -93,7 +94,9 @@ struct SideThreadSheet: View {
 							startsGroup: ChatGroups.startsGroup(index > 0 ? messages[index - 1] : nil, message),
 							context: context,
 							actions: MessageActions(openThread: openThread),
-							compact: true
+							compact: true,
+							// No one writes back here, so the face only thinks while the bot types.
+							liveFace: answering?.messageId == message.id ? LiveFace(botTyping: answering?.botTyping ?? false, viewerWriting: false) : nil
 						)
 					}
 					if details.thread.status == .running, model.notices.isEmpty, messages.last?.author.personId != nil {

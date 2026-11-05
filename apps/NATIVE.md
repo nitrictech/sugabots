@@ -68,7 +68,7 @@ The numbers and strings below live in [`native-constants.json`](native-constants
 
 - **Value:** the bot's face at the top of its Details moves as the web's faces do where a bot is answering.
 - **Why:** Details is where a person meets the bot on a phone, and the face is large there.
-- **Replaces:** the web's still face in Details. The face's own values come with the face work on its own branch and join `native-constants.json` then.
+- **Replaces:** the web's still face in Details.
 
 ## Holding a pod's icon brings up its notifications
 

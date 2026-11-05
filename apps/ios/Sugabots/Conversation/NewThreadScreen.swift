@@ -42,7 +42,8 @@ struct NewThreadScreen: View {
 	private func chosen(_ agent: Agent) -> some View {
 		VStack(spacing: 24) {
 			VStack(spacing: 8) {
-				BotFace(look: agent.look, size: 64).padding(.bottom, 12)
+				// It watches the question being written, and thinks while the thread starts.
+				WatchingFace(look: agent.look, size: 64, busy: starting, watching: true).padding(.bottom, 12)
 				Text("What should \(agent.name) work on?").font(Typeface.rubik(18, .semibold)).foregroundStyle(Palette.foreground)
 				if let description = agent.description, !description.isEmpty {
 					Text(description).font(Typeface.rubik(13)).foregroundStyle(Palette.mutedForeground)
@@ -75,7 +76,7 @@ struct NewThreadScreen: View {
 								composing = true
 							} label: {
 								HStack(spacing: 8) {
-									BotFace(look: bot.look, size: 20)
+									TurnTakingFace(look: bot.look, size: 20)
 									Text(bot.name).font(Typeface.rubik(13.5, .medium)).foregroundStyle(Palette.foreground)
 								}
 								.padding(.leading, 6)
@@ -86,6 +87,8 @@ struct NewThreadScreen: View {
 							.buttonStyle(.plain)
 						}
 					}
+					// The bots' faces take turns to move, so the row never fidgets all at once.
+					.livelyGroup()
 				}
 			}
 			.padding(.horizontal, 20)

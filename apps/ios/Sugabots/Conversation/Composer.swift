@@ -140,6 +140,7 @@ struct Composer: View {
 	@State private var picking = false
 	@State private var importing = false
 	@State private var photos: [PhotosPickerItem] = []
+	@Environment(TypingWatch.self) private var typingWatch: TypingWatch?
 
 	var body: some View {
 		let shortcode = shortcodeBeingTyped
@@ -220,7 +221,10 @@ struct Composer: View {
 				.disabled(attachments == nil || attachments?.isFull == true)
 				.opacity(attachments == nil || attachments?.isFull == true ? 0.4 : 1)
 				.accessibilityLabel("Attach files")
-				MentionEditor(text: $text, isFocused: $focused, mentionable: mentionable, edited: edited)
+				MentionEditor(text: $text, isFocused: $focused, mentionable: mentionable) { caret in
+					typingWatch?.typed(at: caret)
+					edited()
+				}
 					.overlay(alignment: .topLeading) {
 						if text.isEmpty {
 							Text(placeholder ?? label)
