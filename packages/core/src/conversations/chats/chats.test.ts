@@ -1401,6 +1401,35 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
+	it("asks the bot a message in the pod's chat replies to, though it names nobody", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const [answer] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: podChat.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Nothing logged for yesterday." }],
+					content: "Nothing logged for yesterday.",
+				})
+				.returning({ id: message.id }),
+		);
+		if (!answer) throw new Error("The bot's message was not written");
+
+		await chats.post({
+			conversationId: podChat.id,
+			messageId: crypto.randomUUID(),
+			content: "Do you have saved routines?",
+			replyTo: answer.id,
+		});
+
+		expect(await runOnPostgres(runningTurns(podChat.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "reply" }) }),
+		]);
+	});
+
 	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		await onDatabase((db) =>

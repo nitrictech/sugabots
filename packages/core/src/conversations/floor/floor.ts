@@ -1,5 +1,6 @@
 import { mentionedHandles, type ThreadType } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import type { Executor, QueryFailure } from "../../database/database.ts";
 import {
@@ -11,6 +12,9 @@ import {
 } from "../../database/schema.ts";
 import { crewOf } from "../threads/participants.ts";
 
+/** The message a person's message replies to. */
+const repliedTo = alias(message, "replied_to");
+
 /**
  * Who has the floor: which agent, if any, speaks after a person's message.
  * An agent's message hands the floor to nobody: the person who asked reads
@@ -20,8 +24,10 @@ import { crewOf } from "../threads/participants.ts";
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
  * applies it, and asks for the turns. People post in four types of thread:
  *
- * - A pod's chat (`pod_chat`): the bots its message mentions, which reply
- *   in the chat itself; otherwise nobody, as its people talk to each other.
+ * - A pod's chat (`pod_chat`), where bots reply in the chat itself:
+ *   1. Mentioning anyone: the bots it mentions, if any.
+ *   2. Otherwise, replying to a bot's message: that bot.
+ *   3. Otherwise nobody, as its people talk to each other.
  * - A bot's channel (`bot_channel`), or a conversation (`conversation`) with
  *   a bot or between people:
  *   1. Between people, or mentioning only people: nobody.
@@ -46,6 +52,8 @@ export interface FloorInput {
 	agentParticipantIds: ReadonlySet<string>;
 	/** The agent that completed the last message before this one, if an agent did. */
 	lastAgentSpeakerId: string | undefined;
+	/** The agent that wrote the message this one replies to, if an agent did. */
+	repliedToAgentId: string | undefined;
 }
 
 export type FloorDecision =
@@ -59,11 +67,15 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
 	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
 	if (input.threadType === "pod_chat") {
-		return mentionedAgents.length > 0
-			? {
-					kind: "turns",
-					agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
-				}
+		if (mentionedAgents.length > 0) {
+			return {
+				kind: "turns",
+				agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
+			};
+		}
+		const repliedTo = input.crew.find((member) => member.id === input.repliedToAgentId);
+		return repliedTo && !mentionsOnlyPeople
+			? { kind: "turns", agents: [{ agentId: repliedTo.id, reason: "reply" }] }
 			: NOBODY;
 	}
 	const { hostAgentId } = input;
@@ -138,6 +150,11 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 				order by ${message.createdAt} desc, ${message.id} desc
 				limit 1
 			)`,
+			repliedToAgentId: sql<string | null>`(${db
+				.select({ authorAgentId: repliedTo.authorAgentId })
+				.from(message)
+				.innerJoin(repliedTo, eq(repliedTo.id, message.replyToMessageId))
+				.where(eq(message.id, committed.id))})`,
 		})
 		.from(thread)
 		.where(eq(thread.id, committed.threadId))
@@ -151,5 +168,6 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		crew: scope.crew,
 		agentParticipantIds: new Set(scope.participantAgentIds),
 		lastAgentSpeakerId: scope.lastAgentSpeakerId ?? undefined,
+		repliedToAgentId: scope.repliedToAgentId ?? undefined,
 	};
 });
