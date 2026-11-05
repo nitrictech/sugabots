@@ -1,3 +1,4 @@
+import { LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	effectiveCapabilities,
@@ -37,7 +38,7 @@ import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -137,36 +138,38 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 /** Every bot in `bots` as its face, each named on hover or keyboard focus. */
 function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
 	return (
-		<ul aria-label={label} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-			{bots.map((bot) => (
-				<li key={bot.id} className="flex">
-					<Tooltip
-						label={bot.name}
-						side="top"
-						// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
-						onOpenChange={(open, details) => {
-							if (
-								open &&
-								details.reason === "trigger-focus" &&
-								!(details.event.target as Element).matches(":focus-visible")
-							) {
-								details.cancel();
-							}
-						}}
-					>
-						<span
-							role="img"
-							aria-label={bot.name}
-							// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
-							tabIndex={0}
-							className="focus-ring rounded-full"
+		<LivelyGroup>
+			<ul aria-label={label} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+				{bots.map((bot) => (
+					<li key={bot.id} className="flex">
+						<Tooltip
+							label={bot.name}
+							side="top"
+							// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
+							onOpenChange={(open, details) => {
+								if (
+									open &&
+									details.reason === "trigger-focus" &&
+									!(details.event.target as Element).matches(":focus-visible")
+								) {
+									details.cancel();
+								}
+							}}
 						>
-							<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={28} />
-						</span>
-					</Tooltip>
-				</li>
-			))}
-		</ul>
+							<span
+								role="img"
+								aria-label={bot.name}
+								// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+								tabIndex={0}
+								className="focus-ring rounded-full"
+							>
+								<TurnTakingAvatar bot={bot} size={28} faceRef={null} />
+							</span>
+						</Tooltip>
+					</li>
+				))}
+			</ul>
+		</LivelyGroup>
 	);
 }
 
@@ -919,7 +922,6 @@ function MoveBotsDialog({
 	);
 	const providerNames = [...new Set(candidates.map((candidate) => candidate.providerName))];
 	const name = modelName(model);
-	const count = `${bots.length} ${bots.length === 1 ? "bot uses" : "bots use"}`;
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -941,7 +943,8 @@ function MoveBotsDialog({
 			<DialogFormHeader title={`Switch off ${name}`} />
 			<DialogFormBody>
 				<DialogDescription>
-					{count} {name}. Choose the model to move {bots.length === 1 ? "it" : "them"} to.
+					{bots.length === 1 ? "This bot uses" : "These bots use"} {name}. Choose the model to move{" "}
+					{bots.length === 1 ? "it" : "them"} to.
 				</DialogDescription>
 				<NamedBotFaces bots={bots} label={`Bots on ${name}`} />
 				{candidates.length === 0 ? (
