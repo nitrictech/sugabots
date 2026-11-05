@@ -143,6 +143,20 @@ export interface Interface {
 		messageId: string,
 	) => Effect.Effect<ConversationThread, ResourceHidden, CurrentActor.Service>;
 	/**
+	 * Starts a thread for the actor in the pod `podId` with its crew bot
+	 * `hostAgentId`, which takes its turn on `brief`, the first message, written
+	 * by the bot `briefingAgentId` that started it for them. Refused unless the
+	 * actor reaches the pod and the host is its crew with a model.
+	 */
+	readonly startBriefedThread: (input: {
+		workspaceId: string;
+		podId: string;
+		hostAgentId: string;
+		briefingAgentId: string;
+		title: string;
+		brief: string;
+	}) => Effect.Effect<ConversationThread, HostNotCrew | HostHasNoModel, CurrentActor.Service>;
+	/**
 	 * Marks the thread `conversationId` done, or reopens it. A pod's chat and a
 	 * routine's thread are never done, so they are hidden from this.
 	 */
@@ -439,6 +453,25 @@ export const make = Effect.gen(function* () {
 							initiatorUserId: userId,
 						});
 						return toConversationThread(started.thread);
+					}),
+				),
+			),
+
+		startBriefedThread: (input) =>
+			operation(
+				"startBriefedThread",
+				transaction(
+					Effect.gen(function* () {
+						if (!(yield* placementAllowed(input, yield* visibility.reachesPod))) {
+							return yield* new HostNotCrew();
+						}
+						if ((yield* hostModelOf(input.hostAgentId)) === null) {
+							return yield* new HostHasNoModel();
+						}
+						const { userId } = yield* CurrentActor.Service;
+						return toConversationThread(
+							yield* threads.startBriefedThread({ ...input, initiatorUserId: userId }),
+						);
 					}),
 				),
 			),

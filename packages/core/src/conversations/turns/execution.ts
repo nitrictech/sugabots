@@ -201,6 +201,7 @@ export const make = Effect.gen(function* () {
 								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
 								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
+								startedFor: request.reason === "brief" ? loaded.initiatorUserId : null,
 								crew: loaded.pod.agents
 									.filter(({ id }) => id !== speaker.id)
 									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
@@ -310,10 +311,17 @@ export interface TurnContext {
 	workspaceTimeZone: string;
 	/**
 	 * The person whose message this turn answers, who the agent acts for when
-	 * it changes something on their behalf. None when it answers an agent or a
-	 * routine's trigger.
+	 * it changes something on their behalf. None when it answers an agent, a
+	 * bot's brief, or a routine's trigger.
 	 */
 	askedBy: string | null;
+	/**
+	 * On a bot's brief, the person the bot started the thread for. The agent
+	 * may mark this thread done for them, and nothing more: the brief is a
+	 * bot's words, not theirs, so it never vouches for anything else they could
+	 * do, such as starting another thread or changing instructions.
+	 */
+	startedFor: string | null;
 	/** The other crew agents in the pod, who this agent may collaborate with. */
 	crew: Array<{ id: string; name: string; handle: string; description: string | null }>;
 	participants: ThreadParticipant[];
@@ -378,6 +386,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			parentThreadId: true,
 			title: true,
 			type: true,
+			initiatorUserId: true,
 		},
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },

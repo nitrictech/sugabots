@@ -23,6 +23,7 @@ import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotThreads } from "../chats/bot-threads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
@@ -95,6 +96,7 @@ type SegmentServices =
 	| ThreadFiles.Service
 	| BotRoutines.Service
 	| Installation.Service
+	| BotThreads.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -398,6 +400,7 @@ const streamReply = (
 			const files = yield* ThreadFiles.Service;
 			const routines = yield* BotRoutines.Service;
 			const installation = yield* Installation.Service;
+			const botThreads = yield* BotThreads.Service;
 			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
@@ -493,6 +496,7 @@ const streamReply = (
 				agents,
 				webAppUrl: installation.webAppUrl,
 				routines,
+				threads: botThreads,
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
 				reply: {
