@@ -12,7 +12,7 @@ export function PersonAvatar({
 	size?: number;
 	className?: string;
 }) {
-	const gravatar = useMemo(() => gravatarUrl(email, size), [email, size]);
+	const gravatar = useMemo(() => gravatarUrl(email, size * GRAVATAR_PIXEL_RATIO), [email, size]);
 	const [missingGravatar, setMissingGravatar] = useState<string>();
 
 	return (
@@ -47,17 +47,18 @@ export function PersonAvatar({
 const GRAVATAR_PIXEL_RATIO = 2;
 
 /**
- * gravatarUrl returns the address of `email`'s Gravatar image, sized for `size`
- * CSS pixels. The address answers 404 when `email` has no Gravatar, rather than
- * serving a generated placeholder.
+ * gravatarUrl returns the address of `email`'s Gravatar image, `pixels` image
+ * pixels square. The address answers 404 when `email` has no Gravatar, rather
+ * than serving a generated placeholder.
  */
-function gravatarUrl(email: string, size: number): string {
+export function gravatarUrl(email: string, pixels: number): string {
 	// Not `crypto.subtle`: browsers leave it undefined on pages served over plain HTTP.
 	const hash = bytesToHex(sha256(utf8ToBytes(email.trim().toLowerCase())));
-	return `https://gravatar.com/avatar/${hash}?s=${size * GRAVATAR_PIXEL_RATIO}&d=404`;
+	return `https://gravatar.com/avatar/${hash}?s=${pixels}&d=404`;
 }
 
-function initials(name: string): string {
+/** The first and last names' first letters, or a single name's first two, capitalised. */
+export function initials(name: string): string {
 	const parts = name.trim().split(/\s+/).filter(Boolean);
 	const first = parts[0] ?? "?";
 	const last = parts.length > 1 ? (parts[parts.length - 1] ?? "") : "";

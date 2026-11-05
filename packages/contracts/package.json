@@ -7,6 +7,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./http": "./src/http/index.ts",
+		"./cases/*": "./cases/*",
 		"./*": "./src/*.ts"
 	},
 	"scripts": {

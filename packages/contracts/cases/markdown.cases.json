@@ -1,0 +1,327 @@
+{
+	"//": [
+		"An outline gives each block's words as they read, without their marks: what is bold, code or a link is each renderer's own, and mentions are left to mentions.cases.json.",
+		"Images aren't given: the web draws one as its picture, the app as its words."
+	],
+	"markdownOutline": [
+		{
+			"given": ["Just a paragraph."],
+			"expect": [{ "type": "paragraph", "text": "Just a paragraph." }]
+		},
+		{
+			"given": ["Two lines\nin one paragraph"],
+			"expect": [{ "type": "paragraph", "text": "Two lines in one paragraph" }]
+		},
+		{
+			"given": ["First paragraph.\n\nSecond paragraph."],
+			"expect": [
+				{ "type": "paragraph", "text": "First paragraph." },
+				{ "type": "paragraph", "text": "Second paragraph." }
+			]
+		},
+		{
+			"given": ["# One\n## Two\n### Three\n#### Four\n##### Five\n###### Six"],
+			"expect": [
+				{ "type": "heading", "level": 1, "text": "One" },
+				{ "type": "heading", "level": 2, "text": "Two" },
+				{ "type": "heading", "level": 3, "text": "Three" },
+				{ "type": "heading", "level": 4, "text": "Four" },
+				{ "type": "heading", "level": 5, "text": "Five" },
+				{ "type": "heading", "level": 6, "text": "Six" }
+			]
+		},
+		{
+			"given": ["## Closed heading ##"],
+			"expect": [{ "type": "heading", "level": 2, "text": "Closed heading" }]
+		},
+		{ "given": ["#Not a heading"], "expect": [{ "type": "paragraph", "text": "#Not a heading" }] },
+		{
+			"given": ["Title\n=====\n\nSubtitle\n--------"],
+			"expect": [
+				{ "type": "heading", "level": 1, "text": "Title" },
+				{ "type": "heading", "level": 2, "text": "Subtitle" }
+			]
+		},
+		{
+			"given": ["Some **bold**, *italic*, `code` and [a link](https://example.com)."],
+			"expect": [{ "type": "paragraph", "text": "Some bold, italic, code and a link." }]
+		},
+		{
+			"given": ["~~gone~~ text and \\*escaped\\*"],
+			"expect": [{ "type": "paragraph", "text": "gone text and *escaped*" }]
+		},
+		{
+			"given": ["Visit https://example.com or <https://sugabots.ai>"],
+			"expect": [
+				{ "type": "paragraph", "text": "Visit https://example.com or https://sugabots.ai" }
+			]
+		},
+		{
+			"given": ["Hard  \nbreak and\\\nbackslash"],
+			"expect": [{ "type": "paragraph", "text": "Hard\nbreak and\nbackslash" }]
+		},
+		{
+			"given": ["Spaced    out\n   indented continuation"],
+			"expect": [{ "type": "paragraph", "text": "Spaced out indented continuation" }]
+		},
+		{
+			"given": ["- one\n- two\n- three"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [
+						{ "text": "one", "blocks": [] },
+						{ "text": "two", "blocks": [] },
+						{ "text": "three", "blocks": [] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["* star\n* again"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [{ "text": "star", "blocks": [] }, { "text": "again", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["- dash\n+ plus"],
+			"expect": [
+				{ "type": "list", "ordered": false, "items": [{ "text": "dash", "blocks": [] }] },
+				{ "type": "list", "ordered": false, "items": [{ "text": "plus", "blocks": [] }] }
+			]
+		},
+		{
+			"given": ["1. one\n2. two"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": true,
+					"start": 1,
+					"items": [{ "text": "one", "blocks": [] }, { "text": "two", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["3. three\n4. four"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": true,
+					"start": 3,
+					"items": [{ "text": "three", "blocks": [] }, { "text": "four", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["1) paren\n2) more"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": true,
+					"start": 1,
+					"items": [{ "text": "paren", "blocks": [] }, { "text": "more", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["- one\n  - nested\n  - nested two\n- two"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [
+						{
+							"text": "one",
+							"blocks": [
+								{
+									"type": "list",
+									"ordered": false,
+									"items": [
+										{ "text": "nested", "blocks": [] },
+										{ "text": "nested two", "blocks": [] }
+									]
+								}
+							]
+						},
+						{ "text": "two", "blocks": [] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["- a\n  1. x\n  2. y"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [
+						{
+							"text": "a",
+							"blocks": [
+								{
+									"type": "list",
+									"ordered": true,
+									"start": 1,
+									"items": [{ "text": "x", "blocks": [] }, { "text": "y", "blocks": [] }]
+								}
+							]
+						}
+					]
+				}
+			]
+		},
+		{
+			"given": ["1. a\n\n2. b"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": true,
+					"start": 1,
+					"items": [{ "text": "a", "blocks": [] }, { "text": "b", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["- a\n\n  more of a\n- b"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [
+						{ "text": "a", "blocks": [{ "type": "paragraph", "text": "more of a" }] },
+						{ "text": "b", "blocks": [] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["- item\ncontinued"],
+			"expect": [
+				{ "type": "list", "ordered": false, "items": [{ "text": "item continued", "blocks": [] }] }
+			]
+		},
+		{
+			"given": ["Paragraph\n- list right after"],
+			"expect": [
+				{ "type": "paragraph", "text": "Paragraph" },
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [{ "text": "list right after", "blocks": [] }]
+				}
+			]
+		},
+		{
+			"given": ["Paragraph\n2. not a list"],
+			"expect": [{ "type": "paragraph", "text": "Paragraph 2. not a list" }]
+		},
+		{
+			"given": ["- [ ] todo\n- [x] done\n- plain"],
+			"expect": [
+				{
+					"type": "list",
+					"ordered": false,
+					"items": [
+						{ "text": "todo", "checked": false, "blocks": [] },
+						{ "text": "done", "checked": true, "blocks": [] },
+						{ "text": "plain", "blocks": [] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["> quoted\n> lines"],
+			"expect": [{ "type": "quote", "blocks": [{ "type": "paragraph", "text": "quoted lines" }] }]
+		},
+		{
+			"given": ["> # Heading in a quote\n> - and a list"],
+			"expect": [
+				{
+					"type": "quote",
+					"blocks": [
+						{ "type": "heading", "level": 1, "text": "Heading in a quote" },
+						{ "type": "list", "ordered": false, "items": [{ "text": "and a list", "blocks": [] }] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["> outer\n>> inner"],
+			"expect": [
+				{
+					"type": "quote",
+					"blocks": [
+						{ "type": "paragraph", "text": "outer" },
+						{ "type": "quote", "blocks": [{ "type": "paragraph", "text": "inner" }] }
+					]
+				}
+			]
+		},
+		{
+			"given": ["```\nplain code\n```"],
+			"expect": [{ "type": "code", "language": null, "code": "plain code" }]
+		},
+		{
+			"given": ["```python\nprint(1)\n\n# comment\n```"],
+			"expect": [{ "type": "code", "language": "python", "code": "print(1)\n\n# comment" }]
+		},
+		{
+			"given": ["~~~\ntilde fence\n~~~"],
+			"expect": [{ "type": "code", "language": null, "code": "tilde fence" }]
+		},
+		{
+			"given": ["```js\nconst a = 1"],
+			"expect": [{ "type": "code", "language": "js", "code": "const a = 1" }]
+		},
+		{
+			"given": ["Before\n```\ncode\n```\nAfter"],
+			"expect": [
+				{ "type": "paragraph", "text": "Before" },
+				{ "type": "code", "language": null, "code": "code" },
+				{ "type": "paragraph", "text": "After" }
+			]
+		},
+		{
+			"given": ["| A | B |\n|---|:-:|\n| 1 | 2 |\n| x | `y` |"],
+			"expect": [{ "type": "table", "header": ["A", "B"], "rows": [["1", "2"], ["x", "y"]] }]
+		},
+		{
+			"given": ["A | B\n--|--\n1 | 2"],
+			"expect": [{ "type": "table", "header": ["A", "B"], "rows": [["1", "2"]] }]
+		},
+		{
+			"given": ["| Only | Header |\n|------|--------|"],
+			"expect": [{ "type": "table", "header": ["Only", "Header"], "rows": [] }]
+		},
+		{
+			"given": ["| a \\| b | c |\n|---|---|\n| 1 | 2 |"],
+			"expect": [{ "type": "table", "header": ["a | b", "c"], "rows": [["1", "2"]] }]
+		},
+		{ "given": ["---"], "expect": [{ "type": "rule" }] },
+		{
+			"given": ["***\n\n___\n\n- - -"],
+			"expect": [{ "type": "rule" }, { "type": "rule" }, { "type": "rule" }]
+		},
+		{
+			"given": ["Text\n\n---\n\nMore"],
+			"expect": [
+				{ "type": "paragraph", "text": "Text" },
+				{ "type": "rule" },
+				{ "type": "paragraph", "text": "More" }
+			]
+		},
+		{
+			"given": ["    indented code"],
+			"expect": [{ "type": "code", "language": null, "code": "indented code" }]
+		},
+		{
+			"given": ["<b>bold</b> html"],
+			"expect": [{ "type": "paragraph", "text": "<b>bold</b> html" }]
+		}
+	]
+}
