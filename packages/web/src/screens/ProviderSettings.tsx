@@ -1,4 +1,4 @@
-import { LivelyGroup } from "@sugabots/avatars";
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	effectiveCapabilities,
@@ -28,7 +28,7 @@ import {
 	Search,
 	Wrench,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useDeferredValue, useId, useRef, useState } from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -139,37 +139,49 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
 	return (
 		<LivelyGroup>
-			<ul aria-label={label} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+			<ul aria-label={label} className="m-0 flex list-none flex-wrap justify-center gap-1.5 p-0">
 				{bots.map((bot) => (
 					<li key={bot.id} className="flex">
-						<Tooltip
-							label={bot.name}
-							side="top"
-							// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
-							onOpenChange={(open, details) => {
-								if (
-									open &&
-									details.reason === "trigger-focus" &&
-									!(details.event.target as Element).matches(":focus-visible")
-								) {
-									details.cancel();
-								}
-							}}
-						>
-							<span
-								role="img"
-								aria-label={bot.name}
-								// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
-								tabIndex={0}
-								className="focus-ring rounded-full"
-							>
-								<TurnTakingAvatar bot={bot} size={28} faceRef={null} />
-							</span>
-						</Tooltip>
+						<NamedBotFace bot={bot} />
 					</li>
 				))}
 			</ul>
 		</LivelyGroup>
+	);
+}
+
+/** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
+function NamedBotFace({ bot }: { bot: Agent }) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<Tooltip
+			label={bot.name}
+			side="top"
+			// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
+			onOpenChange={(open, details) => {
+				if (
+					open &&
+					details.reason === "trigger-focus" &&
+					!(details.event.target as Element).matches(":focus-visible")
+				) {
+					details.cancel();
+				}
+			}}
+		>
+			<span
+				role="img"
+				aria-label={bot.name}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring rounded-full"
+				onPointerEnter={() => face.current?.play("hop")}
+				onFocus={(event) =>
+					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
+				}
+			>
+				<TurnTakingAvatar bot={bot} size={28} faceRef={face} />
+			</span>
+		</Tooltip>
 	);
 }
 
