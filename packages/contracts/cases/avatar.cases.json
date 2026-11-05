@@ -1,0 +1,30 @@
+{
+	"//": [
+		"gravatarUrl is given the size in image pixels, as each platform draws a face at its own density: the web at twice its CSS size, the iOS app at three times its points."
+	],
+	"initials": [
+		{ "given": ["Ada Lovelace"], "expect": "AL" },
+		{ "given": ["  grace   brewster  hopper "], "expect": "GH" },
+		{ "given": ["Cher"], "expect": "CH" },
+		{ "given": ["x"], "expect": "X" },
+		{ "given": [""], "expect": "?" },
+		{ "given": ["   "], "expect": "?" },
+		{ "given": ["ada\tlovelace"], "expect": "AL" },
+		{ "given": ["Émile zola"], "expect": "ÉZ" },
+		{ "given": ["straße"], "expect": "ST" }
+	],
+	"gravatarUrl": [
+		{
+			"given": ["ada@example.com", 72],
+			"expect": "https://gravatar.com/avatar/b5fc85e55755f9e0d030a10ab4429b6b2944855f9a0d60077fe832becbc41d72?s=72&d=404"
+		},
+		{
+			"given": ["  Ada@Example.COM\n", 72],
+			"expect": "https://gravatar.com/avatar/b5fc85e55755f9e0d030a10ab4429b6b2944855f9a0d60077fe832becbc41d72?s=72&d=404"
+		},
+		{
+			"given": ["grace@example.com", 192],
+			"expect": "https://gravatar.com/avatar/b533d4547eaa5a0fa955965a1ca393ccd2ea013032a105726f232eb41bddc4fa?s=192&d=404"
+		}
+	]
+}
