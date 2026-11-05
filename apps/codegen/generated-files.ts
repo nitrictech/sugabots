@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 
 /** The apps generated files are written for, by the folder each one's paths are relative to. */
 export const targetRoots = {
+	ios: fileURLToPath(new URL("../ios/", import.meta.url)),
 	android: fileURLToPath(new URL("../android/", import.meta.url)),
 };
 
@@ -23,4 +24,9 @@ export interface GeneratedFiles {
 export interface Generator {
 	targets: readonly Target[];
 	generate: (target: Target) => GeneratedFiles;
+}
+
+/** A generator that only the iOS app has yet. */
+export function iosOnly(generate: () => GeneratedFiles): Generator {
+	return { targets: ["ios"], generate };
 }

@@ -11,11 +11,35 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import * as api from "./generate-api.ts";
-import { type Generator, targetRoots } from "./generated-files.ts";
+import * as artifactPages from "./generate-artifact-pages.ts";
+import * as botLooks from "./generate-bot-looks.ts";
+import * as builtInTools from "./generate-built-in-tools.ts";
+import * as catalogs from "./generate-catalogs.ts";
+import * as connectionMarks from "./generate-connection-marks.ts";
+import * as emoji from "./generate-emoji.ts";
+import * as fileAndZoneLists from "./generate-file-and-zone-lists.ts";
+import * as limits from "./generate-limits.ts";
+import * as lucideIcons from "./generate-lucide-icons.ts";
+import * as nativeConstants from "./generate-native-constants.ts";
+import * as palette from "./generate-palette.ts";
+import * as providerLogos from "./generate-provider-logos.ts";
+import { type Generator, iosOnly, targetRoots } from "./generated-files.ts";
 
 /** Every generator, by the script that holds it; a test checks each `generate-*.ts` is here. */
 export const generators: Record<string, Generator> = {
 	"generate-api.ts": api.generator,
+	"generate-artifact-pages.ts": iosOnly(artifactPages.generate),
+	"generate-bot-looks.ts": iosOnly(botLooks.generate),
+	"generate-built-in-tools.ts": iosOnly(builtInTools.generate),
+	"generate-catalogs.ts": iosOnly(catalogs.generate),
+	"generate-connection-marks.ts": iosOnly(connectionMarks.generate),
+	"generate-emoji.ts": iosOnly(emoji.generate),
+	"generate-file-and-zone-lists.ts": iosOnly(fileAndZoneLists.generate),
+	"generate-limits.ts": iosOnly(limits.generate),
+	"generate-lucide-icons.ts": iosOnly(lucideIcons.generate),
+	"generate-native-constants.ts": iosOnly(nativeConstants.generate),
+	"generate-palette.ts": iosOnly(palette.generate),
+	"generate-provider-logos.ts": iosOnly(providerLogos.generate),
 };
 
 if (import.meta.main) {
