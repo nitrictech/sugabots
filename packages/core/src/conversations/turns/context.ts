@@ -381,7 +381,10 @@ function whyYou(context: TurnContext): string {
 		case "resume":
 			return "It is your turn because an answer you were waiting on has arrived.";
 		case "brief":
-			return "It is your turn because a bot started this thread for the person in it, and its first message is your brief. Start on the work it describes now.";
+			// With no other bot named, the bot briefs itself, so the brief reads as its own reply.
+			return context.messages[0] && isOwnMessage(context.messages[0], context.agent.id)
+				? "It is your turn because you started this thread for the person in it, and its first message, which you wrote, is your brief. None of the work it describes is done yet: start on it now."
+				: "It is your turn because a bot started this thread for the person in it, and its first message is your brief. Start on the work it describes now.";
 		case "routine":
 			return "It is your turn because this Routine was triggered.";
 		default:

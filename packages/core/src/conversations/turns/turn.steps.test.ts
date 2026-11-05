@@ -28,7 +28,6 @@ import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
-import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -113,6 +112,7 @@ const prepared: PreparedTurn = {
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
 		askedBy: null,
+		startedFor: null,
 		crew: [],
 		participants: [],
 		messages: [],
@@ -362,7 +362,7 @@ describe("runSegment", () => {
 			READ_THREAD_TOOL,
 			READ_THREAD_FILE_TOOL,
 			...ROUTINE_TOOLS,
-			START_THREAD_TOOL,
+			// No person asked this turn, so it is offered no start_thread.
 			MARK_DONE_TOOL,
 			SAVE_INSTRUCTIONS_TOOL,
 			"collaborate",

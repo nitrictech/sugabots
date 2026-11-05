@@ -419,8 +419,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			expect(prepared.context.agent.id).toBe(recipientAgentId);
-			// It acts for the person the thread was started for, though a bot wrote its brief.
-			expect(prepared.context.askedBy).toBe(userId);
+			// A bot wrote its brief, so it acts for the person only to mark the thread done.
+			expect(prepared.context.askedBy).toBeNull();
+			expect(prepared.context.startedFor).toBe(userId);
 			expect(prepared.context.messages).toEqual([
 				expect.objectContaining({
 					content: "Pull the refunds issued in March.",
@@ -444,7 +445,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			expect(prepared.context.agent.id).toBe(agentId);
-			expect(prepared.context.askedBy).toBe(userId);
+			expect(prepared.context.askedBy).toBeNull();
+			expect(prepared.context.startedFor).toBe(userId);
 		});
 
 		it("marks the thread it is in done for the person who asked, but never a channel or a pod's chat", async () => {
@@ -481,7 +483,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			).rejects.toMatchObject({ _tag: "NobodyAsked" });
 		});
 
-		it("refuses when nobody asked, the bot is not in the pod, or the person can't reach the pod", async () => {
+		it("refuses when nobody asked, the bot is not in the pod, or the person can't reach the pod or thread", async () => {
 			const [outsider] = await onDatabase((db) =>
 				db
 					.insert(user)
@@ -506,6 +508,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await expect(
 				botThreads().start({ agentId, workspaceId, podId, askedBy: outsider.id }, brief),
 			).rejects.toMatchObject({ _tag: "HostNotCrew" });
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const { conversation: opened } = await chats.startThread({
+				conversationId: podChat.id,
+				messageId: crypto.randomUUID(),
+				content: "Can you check the renewal numbers?",
+				hostAgentId: agentId,
+			});
+			await expect(
+				botThreads().markDone({ agentId, workspaceId, podId, askedBy: outsider.id }, opened.id),
+			).rejects.toMatchObject({ _tag: "ThreadHiddenFromAsker" });
 		});
 	});
 

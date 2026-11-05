@@ -272,17 +272,25 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		podId: prepared.context.agent.podId,
 		askedBy: prepared.context.askedBy,
 	};
-	tools[START_THREAD_TOOL] = recorded(
-		START_THREAD_TOOL,
-		startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
-		{ ...recording, mutating: true },
-	);
+	// Offered only when a person asked: a turn answering a bot, a brief or a
+	// routine could only be refused, and a briefed bot starting threads of its
+	// own would let bots brief each other without end.
+	if (prepared.context.askedBy) {
+		tools[START_THREAD_TOOL] = recorded(
+			START_THREAD_TOOL,
+			startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
+			{ ...recording, mutating: true },
+		);
+	}
 	// Only a thread is ever done; a channel, a pod's chat or a routine's thread is not.
 	if (prepared.context.thread.type === "conversation") {
 		tools[MARK_DONE_TOOL] = recorded(
 			MARK_DONE_TOOL,
 			markDoneTool({
-				bot: threadsBot,
+				bot: {
+					...threadsBot,
+					askedBy: prepared.context.askedBy ?? prepared.context.startedFor,
+				},
 				threadId: prepared.context.thread.id,
 				threads: deps.threads,
 				run: deps.run,

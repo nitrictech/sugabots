@@ -16,6 +16,7 @@ import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../..
 import { loadFileParts } from "../../threads/file-parts.ts";
 import { describeAttachmentElsewhere, formatHistoryTime } from "../../threads/message-text.ts";
 import { participantColumns } from "../../threads/participants.ts";
+import { MAX_READ_CHARACTERS } from "../read-thread-file/tool.ts";
 import {
 	escapeLike,
 	type HistoryMatch,
@@ -29,13 +30,6 @@ export const READ_THREAD_TOOL = "read_thread";
 const MAX_LISTED_THREADS = 30;
 /** Messages one read returns, at most. */
 const MAX_READ_MESSAGES = 20;
-/**
- * Most characters of messages one read returns, as JSON escapes them: fewer
- * messages than `MAX_READ_MESSAGES` when they are long. Below the size at
- * which a tool's result is kept as a file instead, so a read is never itself
- * turned into one.
- */
-const MAX_READ_CHARACTERS = 40_000;
 
 /** What a thread is, as the bot is told: what people see it as in the pod. */
 type ThreadKind = "thread" | "channel" | "pod chat" | "routine";
@@ -346,7 +340,8 @@ const foundMessages = Effect.fn("PodThreads.foundMessages")(function* (
 
 /**
  * The first of `messages` that fit in `MAX_READ_CHARACTERS` as JSON, and at
- * least one, so a read always moves on.
+ * least one, so a read always moves on: fewer than `MAX_READ_MESSAGES` when
+ * they are long, as escaping can take even cut messages past it.
  */
 function withinCharacters(messages: readonly FoundMessage[]): FoundMessage[] {
 	const fitting: FoundMessage[] = [];

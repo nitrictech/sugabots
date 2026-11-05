@@ -1,11 +1,11 @@
 export * as BotThreads from "./bot-threads.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { agent } from "../../database/schema.ts";
+import { agent, thread } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewOf } from "../threads/participants.ts";
 import { Chats } from "./chats.ts";
@@ -41,10 +41,10 @@ export const make = Effect.gen(function* () {
 	 * Runs `work` as the person the bot is answering. They signed in to post
 	 * the message the turn answers, which is the claim `vouchedFor` makes.
 	 */
-	const forAsker = <A, E>(
+	const forAsker = <A, E, R>(
 		bot: Bot,
-		work: Effect.Effect<A, E, CurrentActor.Service>,
-	): Effect.Effect<A, E | NobodyAsked> =>
+		work: Effect.Effect<A, E, R>,
+	): Effect.Effect<A, E | NobodyAsked, Exclude<R, CurrentActor.Service>> =>
 		bot.askedBy
 			? work.pipe(CurrentActor.provide(AuthenticatedUserId.vouchedFor(bot.askedBy)))
 			: Effect.fail(new NobodyAsked());
@@ -53,32 +53,40 @@ export const make = Effect.gen(function* () {
 		start: (bot, input) =>
 			operation(
 				"start",
-				Effect.gen(function* () {
-					if (!bot.askedBy) return yield* new NobodyAsked();
-					const host = input.withHandle
-						? yield* crewNamed(bot.podId, input.withHandle)
-						: { id: bot.agentId, name: undefined };
-					if (!host) return yield* new BotNotInPod();
-					const started = yield* forAsker(
-						bot,
-						chats.startBriefedThread({
+				forAsker(
+					bot,
+					Effect.gen(function* () {
+						const host = input.withHandle
+							? yield* crewNamed(bot.podId, input.withHandle)
+							: { id: bot.agentId, name: undefined };
+						if (!host) return yield* new BotNotInPod();
+						const started = yield* chats.startBriefedThread({
 							workspaceId: bot.workspaceId,
 							podId: bot.podId,
 							hostAgentId: host.id,
 							briefingAgentId: bot.agentId,
 							title: input.title,
 							brief: input.brief,
-						}),
-					);
-					return { id: started.id, title: started.title, ...(host.name && { with: host.name }) };
-				}),
+						});
+						const otherBot = host.id === bot.agentId ? undefined : host.name;
+						return { id: started.id, title: started.title, ...(otherBot && { with: otherBot }) };
+					}),
+				),
 			),
 
 		markDone: (bot, conversationId) =>
 			operation(
 				"markDone",
 				forAsker(bot, chats.setDone({ conversationId, done: true })).pipe(
-					Effect.catchTag("ResourceHidden", () => Effect.fail(new NotAThread())),
+					Effect.catchTag("ResourceHidden", () =>
+						Effect.flatMap(podThreadType(bot.podId, conversationId), (type) =>
+							Effect.fail(
+								type !== undefined && type !== "conversation"
+									? new NotAThread()
+									: new ThreadHiddenFromAsker(),
+							),
+						),
+					),
 				),
 			),
 	});
@@ -93,11 +101,16 @@ export const layerNoDeps = Layer.effect(Service, make);
  */
 export const layer = Layer.suspend(() => layerNoDeps.pipe(Layer.provide(Chats.layer)));
 
-/** The bot, where it is, and the person whose message it is answering, if a person asked. */
+/** The bot, where it is, and the person it acts for, if any. */
 export interface Bot {
 	readonly agentId: string;
 	readonly workspaceId: string;
 	readonly podId: string;
+	/**
+	 * Whose permissions it acts with: the person whose message it is
+	 * answering or, to mark its own thread done, the person a bot's brief
+	 * started that thread for. None when nobody asked.
+	 */
 	readonly askedBy: string | null;
 }
 
@@ -135,11 +148,25 @@ const crewNamed = (podId: string, handle: string) =>
 		([row]) => row,
 	);
 
+/** The type of the pod's thread `threadId`, if the pod has it. */
+const podThreadType = (podId: string, threadId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ type: thread.type })
+				.from(thread)
+				.where(and(eq(thread.id, threadId), eq(thread.podId, podId)))
+				.limit(1),
+		),
+		([row]) => row?.type,
+	);
+
 /** Why the bot could not start the thread, in words it can pass on. */
 export type Refused =
 	| NobodyAsked
 	| BotNotInPod
 	| NotAThread
+	| ThreadHiddenFromAsker
 	| Chats.HostNotCrew
 	| Chats.HostHasNoModel;
 
@@ -158,5 +185,14 @@ export class BotNotInPod extends Data.TaggedError("BotNotInPod") implements User
 export class NotAThread extends Data.TaggedError("NotAThread") implements UserFacing {
 	get userMessage() {
 		return userText`Only a thread can be marked done, not a bot's channel, a pod's chat, a routine's thread or a collaboration.`;
+	}
+}
+
+export class ThreadHiddenFromAsker
+	extends Data.TaggedError("ThreadHiddenFromAsker")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`The person this turn acts for can no longer see this thread, so it can't be marked done for them.`;
 	}
 }
