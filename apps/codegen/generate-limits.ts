@@ -3,9 +3,6 @@
  * schemas check, in `@sugabots/contracts`, and the ones the web's screens are
  * drawn with, in the plain data modules of `packages/web/src/lib`, so a field
  * stops where the web's does.
- *
- * The file builds for macOS without UIKit, since `check-rules.sh` builds the
- * rules that read it off the simulator.
  */
 import {
 	AGENT_NAME_MAX_LENGTH,
