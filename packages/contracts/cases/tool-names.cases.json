@@ -1,0 +1,38 @@
+{
+	"stepLabel": [
+		{ "given": ["sentry__search_issues"], "expect": "Search issues" },
+		{ "given": ["linear__searchIssues"], "expect": "Search issues" },
+		{ "given": ["web_fetch"], "expect": "Read web pages" },
+		{ "given": ["web_search"], "expect": "Search the web" },
+		{ "given": ["routines"], "expect": "Manage its routines" },
+		{ "given": ["artifact_list"], "expect": "List artifacts" },
+		{ "given": ["artifact_read"], "expect": "Read artifacts" },
+		{ "given": ["artifact_write"], "expect": "Write artifacts" },
+		{ "given": ["artifact_edit"], "expect": "Edit artifacts" },
+		{ "given": ["browser_take_screenshot"], "expect": "Take screenshot" },
+		{ "given": ["github__API-post-search"], "expect": "API post search" },
+		{ "given": ["notion__fetch__page"], "expect": "Fetch page" }
+	],
+	"toolTitle": [
+		{ "given": ["linear__list_issues"], "expect": "List issues in Linear" },
+		{ "given": ["google_drive__search"], "expect": "Search in Google drive" },
+		{ "given": ["web_fetch"], "expect": "Read web pages" },
+		{ "given": ["browser_click"], "expect": "Click" }
+	],
+	"connectionLabel": [
+		{ "given": ["linear"], "expect": "Linear" },
+		{ "given": ["linear", "Linear (work)"], "expect": "Linear (work)" },
+		{ "given": [""], "expect": "Built-in tools" }
+	],
+	"wordsFromKey": [
+		{ "given": ["search_issues"], "expect": "Search issues" },
+		{ "given": ["sentry"], "expect": "Sentry" },
+		{ "given": ["due_date"], "expect": "Due date" },
+		{ "given": ["dueDate"], "expect": "Due date" },
+		{ "given": ["page2Id"], "expect": "Page2 id" },
+		{ "given": ["get--item"], "expect": "Get item" },
+		{ "given": ["_private"], "expect": "Private" },
+		{ "given": ["__"], "expect": "__" },
+		{ "given": [""], "expect": "" }
+	]
+}

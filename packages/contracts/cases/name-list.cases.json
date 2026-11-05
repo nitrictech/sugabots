@@ -1,0 +1,15 @@
+{
+	"listNames": [
+		{ "given": [[]], "expect": "" },
+		{ "given": [["Jay Yu"]], "expect": "Jay Yu" },
+		{ "given": [["Jay Yu", "Priya Kaur"]], "expect": "Jay Yu and Priya Kaur" },
+		{ "given": [["Jay", "Priya", "Sam"]], "expect": "Jay, Priya and Sam" },
+		{ "given": [["Jay", "Priya", "Sam", "Ana"]], "expect": "Jay, Priya and 2 others" },
+		{ "given": [["Jay", "Priya", "Sam", "Ana", "Ben"]], "expect": "Jay, Priya and 3 others" }
+	],
+	"countOf": [
+		{ "given": [0, "reply", "replies"], "expect": "0 replies" },
+		{ "given": [1, "reply", "replies"], "expect": "1 reply" },
+		{ "given": [3, "reply", "replies"], "expect": "3 replies" }
+	]
+}

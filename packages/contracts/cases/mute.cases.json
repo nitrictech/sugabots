@@ -1,0 +1,22 @@
+{
+	"//": [
+		"Times are local date-times with no offset, read in the reader's own time zone.",
+		"Times are written in each platform's own locale data, which can differ between them (German puts a comma after the weekday in Node and not on Apple's); a locale where they differ is left out. Apple's narrow space before AM or PM is written as a plain one, as the web's is.",
+		"muteUntil is given a mute by its label, and gives when it ends as a local date-time with no offset."
+	],
+	"formatUntil": [
+		{ "given": ["2026-09-25T15:30", "2026-09-25T09:00", "en-US"], "expect": "3:30 PM" },
+		{ "given": ["2026-09-25T09:05", "2026-09-25T09:00", "en-US"], "expect": "9:05 AM" },
+		{ "given": ["2026-09-26T09:00", "2026-09-25T21:00", "en-US"], "expect": "Sat 9:00 AM" },
+		{ "given": ["2026-09-25T15:30", "2026-09-25T09:00", "en-GB"], "expect": "15:30" },
+		{ "given": ["2026-09-26T09:00", "2026-09-25T21:00", "en-GB"], "expect": "Sat 09:00" }
+	],
+	"muteUntil": [
+		{ "given": ["For 30 minutes", "2026-09-25T23:45"], "expect": "2026-09-26T00:15" },
+		{ "given": ["For 1 hour", "2026-09-25T06:12"], "expect": "2026-09-25T07:12" },
+		{ "given": ["For 2 hours", "2026-09-25T23:00"], "expect": "2026-09-26T01:00" },
+		{ "given": ["Until tomorrow", "2026-09-25T06:12"], "expect": "2026-09-26T09:00" },
+		{ "given": ["Until tomorrow", "2026-09-30T23:59"], "expect": "2026-10-01T09:00" },
+		{ "given": ["Until tomorrow", "2026-12-31T08:00"], "expect": "2027-01-01T09:00" }
+	]
+}

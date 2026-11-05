@@ -1,0 +1,170 @@
+{
+	"//": [
+		"The web reads markdown as CommonMark, the app as GitHub's flavour, so the app's preview of ~~struck~~ text leaves out the tildes the web's keeps; no case gives it.",
+		"Lengths are counted in UTF-16 units on the web and in characters in the app, so no case is cut where emoji would count differently."
+	],
+	"messagePreview": [
+		{ "given": ["Plain words."], "expect": "Plain words." },
+		{ "given": ["\n\n  First line  \nSecond line"], "expect": "First line" },
+		{ "given": ["**Bold** and _italic_ and `code`"], "expect": "Bold and italic and code" },
+		{ "given": ["# A heading"], "expect": "A heading" },
+		{ "given": ["> A quote"], "expect": "A quote" },
+		{ "given": ["- A list item"], "expect": "A list item" },
+		{ "given": ["1. First"], "expect": "First" },
+		{
+			"given": ["See [the docs](https://example.com) and ![a chart](chart.png)"],
+			"expect": "See the docs and a chart"
+		},
+		{ "given": ["snake_case_name and 2 * 3 * 4"], "expect": "snake_case_name and 2 * 3 * 4" },
+		{ "given": ["```ts\nconst a = 1;\n```"], "expect": "const a = 1;" },
+		{ "given": ["---\nAfter the rule"], "expect": "After the rule" },
+		{ "given": ["<https://example.com>"], "expect": "https://example.com" },
+		{ "given": ["Escaped \\*stars\\*"], "expect": "Escaped *stars*" },
+		{ "given": ["Spaces    and\ttabs"], "expect": "Spaces and tabs" },
+		{ "given": ["   "], "expect": "" },
+		{ "given": [""], "expect": "" },
+		{
+			"given": [
+				"word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word end"
+			],
+			"expect": "word word word word word word word word word word word word word word word word word word word word word word word word word word word…"
+		},
+		{
+			"given": [
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			],
+			"expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+		},
+		{
+			"given": [
+				"word word word word word word word word word word word word word word word word word word word word word word word word word word word abcdefghij"
+			],
+			"expect": "word word word word word word word word word word word word word word word word word word word word word word word word word word word…"
+		}
+	],
+	"quotedPreview": [
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000002",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Let me check:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000001",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z"
+						},
+						{ "type": "text", "text": "It works." }
+					],
+					"content": "Let me check:It works.",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": "It works."
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000004",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "agent",
+						"id": "b-scout",
+						"name": "Scout",
+						"handle": "scout",
+						"color": "red",
+						"face": "pill",
+						"shape": "circle"
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "text", "text": "Checking:" },
+						{
+							"type": "tool_call",
+							"id": "00000000-0000-4000-8000-000000000003",
+							"tool": "run_command",
+							"input": {},
+							"output": null,
+							"status": "completed",
+							"error": null,
+							"mutating": false,
+							"atOffset": 0,
+							"startedAt": "2026-09-25T06:12:00.000Z",
+							"finishedAt": "2026-09-25T06:12:01.400Z"
+						}
+					],
+					"content": "Checking:",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": "Checking:"
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000005",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [{ "type": "text", "text": "Hello " }, { "type": "text", "text": "**world**" }],
+					"content": "Hello **world**",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": "Hello world"
+		},
+		{
+			"given": [
+				{
+					"id": "00000000-0000-4000-8000-000000000006",
+					"threadId": "00000000-0000-4000-9000-000000000001",
+					"author": {
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					},
+					"kind": "text",
+					"status": "complete",
+					"parts": [
+						{ "type": "file", "id": "f-1", "name": "a.png", "contentType": "image/png", "size": 10 }
+					],
+					"content": "",
+					"createdAt": "2026-09-25T06:12:00.000Z"
+				}
+			],
+			"expect": ""
+		}
+	]
+}
