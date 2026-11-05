@@ -165,6 +165,10 @@ private struct BotDetails: View {
 				RoundActionLabel(icon: .settings, label: "Settings")
 			}
 			.buttonStyle(.plain)
+			NavigationLink(value: Route.threads(pod, agent: agent)) {
+				RoundActionLabel(icon: .messagesSquare, label: "Threads")
+			}
+			.buttonStyle(.plain)
 			NavigationLink(value: Route.routines(pod, agent: agent)) {
 				RoundActionLabel(icon: .refreshCcw, label: "Routines")
 			}

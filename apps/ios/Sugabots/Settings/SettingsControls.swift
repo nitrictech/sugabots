@@ -9,8 +9,20 @@ struct SegmentedChoice<Value: Hashable>: View {
 	let value: Value?
 	/// Stretches the choices across the row, as on a phone's narrow rows.
 	var fill = false
+	var size = Size.regular
 	let choose: (Value) -> Void
 	@Environment(\.isEnabled) private var isEnabled
+
+	enum Size {
+		/// The web's, beside a setting's label.
+		case regular
+		/// Across the top of a page, where the choice is what the page shows, as a phone's tabs are.
+		case large
+
+		var fontSize: CGFloat { self == .large ? 15 : 12.5 }
+		var minHeight: CGFloat { self == .large ? 38 : 28 }
+		var cornerRadius: CGFloat { self == .large ? 10 : 8 }
+	}
 
 	var body: some View {
 		HStack(spacing: 0) {
@@ -18,7 +30,7 @@ struct SegmentedChoice<Value: Hashable>: View {
 				let chosen = option.value == value
 				Button { choose(option.value) } label: {
 					Text(option.label)
-						.font(Typeface.rubik(12.5, .medium))
+						.font(Typeface.rubik(size.fontSize, .medium))
 						// Stretched across a row, a long choice wraps rather than being cut short, as on the web.
 						.lineLimit(fill ? 2 : 1)
 						.multilineTextAlignment(.center)
@@ -26,8 +38,8 @@ struct SegmentedChoice<Value: Hashable>: View {
 						.padding(.horizontal, 11)
 						.padding(.vertical, 5)
 						// The web's 5px either side of a line of `text-sm`.
-						.frame(maxWidth: fill ? .infinity : nil, minHeight: 28, maxHeight: fill ? .infinity : nil)
-						.background(chosen ? Palette.personAvatar : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+						.frame(maxWidth: fill ? .infinity : nil, minHeight: size.minHeight, maxHeight: fill ? .infinity : nil)
+						.background(chosen ? Palette.personAvatar : .clear, in: RoundedRectangle(cornerRadius: size.cornerRadius, style: .continuous))
 						.contentShape(Rectangle())
 				}
 				.buttonStyle(.plain)
@@ -35,7 +47,7 @@ struct SegmentedChoice<Value: Hashable>: View {
 			}
 		}
 		.padding(2)
-		.background(Palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+		.background(Palette.chip, in: RoundedRectangle(cornerRadius: size.cornerRadius + 2, style: .continuous))
 		// Beside a label, the choices keep their width, as the web's `shrink-0`.
 		.fixedSize(horizontal: !fill, vertical: false)
 		.opacity(isEnabled ? 1 : 0.5)

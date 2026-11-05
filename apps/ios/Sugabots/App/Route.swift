@@ -16,6 +16,8 @@ enum Route: Hashable {
 	case approval(callId: String)
 	/// Starting a thread in a pod from its first message, with `agent`, or between people.
 	case newThread(Pod, agent: Agent?)
+	/// A bot's threads, those still going or those done.
+	case threads(Pod, agent: Agent)
 	/// A bot's routines, or every routine in the pod.
 	case routines(Pod, agent: Agent?)
 	/// Making a routine in a pod, for `agent` when begun from its routines.

@@ -24,6 +24,8 @@ enum DebugLaunch {
 		case general(pod: String)
 		/// `bot/Pod/Bot`: the bot's channel.
 		case bot(pod: String, bot: String)
+		/// `threads/Pod/Bot`: the bot's threads.
+		case threads(pod: String, bot: String)
 		/// `newthread/Pod[/Bot]`.
 		case newThread(pod: String, bot: String?)
 		/// `conversation/<id>`.
@@ -54,7 +56,7 @@ enum DebugLaunch {
 		/// The name of the pod the page is in, if it's in one.
 		var podName: String? {
 			switch self {
-			case let .home(pod), let .general(pod), let .bot(pod, _), let .newThread(pod, _), let .podSettings(pod),
+			case let .home(pod), let .general(pod), let .bot(pod, _), let .threads(pod, _), let .newThread(pod, _), let .podSettings(pod),
 				let .routines(pod), let .newRoutine(pod), let .artifacts(pod), let .newBot(pod),
 				let .routinePanel(pod, _), let .trigger(pod, _), let .emoji(pod, _),
 				let .youPod(pod), let .podPage(pod, _), let .agentSettings(pod, _):
@@ -87,6 +89,7 @@ enum DebugLaunch {
 			case let ("pod", pod?, nil): return .home(pod: pod)
 			case let ("general", pod?, _): return .general(pod: pod)
 			case let ("bot", pod?, bot?): return .bot(pod: pod, bot: bot)
+			case let ("threads", pod?, bot?): return .threads(pod: pod, bot: bot)
 			case let ("newthread", pod?, bot): return .newThread(pod: pod, bot: bot)
 			case let ("settings", pod?, _): return .podSettings(pod: pod)
 			case let ("routines", pod?, _): return .routines(pod: pod)
@@ -154,6 +157,9 @@ enum DebugLaunch {
 		case let .bot(_, name):
 			guard let pod, let bot = bot(named: name, in: pod, store: store) else { return nil }
 			return (.home, .botChannel(pod, bot))
+		case let .threads(_, name):
+			guard let pod, let bot = bot(named: name, in: pod, store: store) else { return nil }
+			return (.home, .threads(pod, agent: bot))
 		case let .newThread(_, name):
 			guard let pod else { return nil }
 			return (.home, .newThread(pod, agent: name.flatMap { bot(named: $0, in: pod, store: store) }))

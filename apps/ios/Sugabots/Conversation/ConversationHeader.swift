@@ -18,6 +18,7 @@ struct ConversationHeader: View {
 	let openDetails: () -> Void
 	let openComputer: () -> Void
 	let openRoutines: () -> Void
+	let openThreads: () -> Void
 	@Environment(WorkspaceStore.self) private var store
 	@Environment(Toaster.self) private var toaster
 	@Environment(\.dismiss) private var dismiss
@@ -81,6 +82,7 @@ struct ConversationHeader: View {
 				label: failed ? "More for \(agent.name), a routine's latest run failed" : "More for \(agent.name)",
 				items: [
 					.init(title: "Computer", systemImage: "desktopcomputer", action: openComputer),
+					.init(title: "Threads", systemImage: "bubble.left.and.bubble.right", action: openThreads),
 					.init(title: "Routines", systemImage: "arrow.triangle.2.circlepath", action: openRoutines),
 				]
 			)

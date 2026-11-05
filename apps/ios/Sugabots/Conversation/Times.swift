@@ -62,6 +62,38 @@ enum Times {
 		return date.formatted(sameYear ? style : style.year())
 	}
 
+	/// How long ago `date` was, as `formatDistanceToNowStrict` with `addSuffix`
+	/// writes it: one unit, the largest under its next, rounded to the nearest
+	/// whole one ("4 minutes ago", "18 days ago", "6 months ago"). Days run to
+	/// 30 and months to 12, with no weeks; a time after `now` is "in 1 second".
+	static func ago(_ date: Date, now: Date = .now) -> String {
+		let seconds = now.timeIntervalSince(date)
+		let words = distance(abs(seconds))
+		return seconds < 0 ? "in \(words)" : "\(words) ago"
+	}
+
+	private static let secondsInMinute = 60.0
+	private static let secondsInHour = 60 * secondsInMinute
+	private static let secondsInDay = 24 * secondsInHour
+	private static let secondsInMonth = 30 * secondsInDay
+	private static let secondsInYear = 365 * secondsInDay
+
+	private static func distance(_ seconds: TimeInterval) -> String {
+		func count(_ amount: Double, _ unit: String) -> String {
+			let whole = Int(amount.rounded())
+			return whole == 1 ? "1 \(unit)" : "\(whole) \(unit)s"
+		}
+		if seconds < secondsInMinute { return count(seconds, "second") }
+		if seconds < secondsInHour { return count(seconds / secondsInMinute, "minute") }
+		if seconds < secondsInDay { return count(seconds / secondsInHour, "hour") }
+		if seconds < secondsInMonth { return count(seconds / secondsInDay, "day") }
+		if seconds < secondsInYear {
+			let months = (seconds / secondsInMonth).rounded()
+			return months == Double(monthsInYear) ? "1 year" : count(months, "month")
+		}
+		return count(seconds / secondsInYear, "year")
+	}
+
 	/// How many days before `now`'s day `date`'s day is: 0 today, 1 yesterday, negative in the future.
 	static func daysAgo(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> Int {
 		calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0

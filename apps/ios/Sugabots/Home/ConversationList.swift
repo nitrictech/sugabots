@@ -17,8 +17,8 @@ struct ConversationList: View {
 	var body: some View {
 		let list = store.chatLists[pod.id]
 		let bots = store.bots(in: pod)
-		// Done threads leave the list.
-		let threads = (list?.threads ?? []).filter { $0.conversation.doneAt == nil }
+		// Done threads are kept for the counts of what is open; the tree under each leaves them out.
+		let threads = list?.threads ?? []
 		let chats = list?.chats ?? []
 		let byChat = Self.threadsByChat(chats, threads)
 		let groups = Self.groupByBot(
@@ -32,7 +32,7 @@ struct ConversationList: View {
 				SectionHeading(
 					label: "Channels",
 					open: chatsOpen,
-					news: .of(chats.map { ($0.unreadMessages, false) } + byChat.values.flatMap { $0 }.map { ($0.unreadMessages, $0.needsYou) }),
+					news: .of(chats.map { ($0.unreadMessages, false) } + byChat.values.flatMap(Self.open).map { ($0.unreadMessages, $0.needsYou) }),
 					toggle: { toggle("chats") },
 					actionLabel: "New channel in \(pod.name)",
 					action: { namingChannel = true }
@@ -64,7 +64,7 @@ struct ConversationList: View {
 				label: "Bots",
 				open: botsOpen,
 				news: .of(groups.flatMap { group in
-					group.threads.map { ($0.unreadMessages, $0.needsYou) }
+					Self.open(group.threads).map { ($0.unreadMessages, $0.needsYou) }
 						+ (group.channel.map { [($0.unreadMessages, $0.needsYou)] } ?? [])
 				}),
 				toggle: { toggle("bots") },
@@ -144,6 +144,11 @@ struct ConversationList: View {
 		store.preferences.toggleFolded(section, in: pod.id)
 	}
 
+	/// The threads in `rows` not yet marked done.
+	static func open(_ rows: [ChatListItem]) -> [ChatListItem] {
+		rows.filter { $0.conversation.doneAt == nil }
+	}
+
 	/// The threads between people started from each of `chats`, newest first, by the chat's id; only chats with one.
 	private static func threadsByChat(_ chats: [ChatList.Chat], _ threads: [ChatListItem]) -> [String: [ChatListItem]] {
 		let chatIds = Set(chats.map(\.conversation.id))
@@ -168,7 +173,14 @@ struct ConversationList: View {
 		for bot in bots { groups[bot.id] = BotGroup(agent: bot) }
 		for channel in channels { groups[channel.agent.id, default: BotGroup(agent: channel.agent)].channel = channel }
 		for row in threads { groups[key(row.agent), default: BotGroup(agent: row.agent)].threads.append(row) }
-		return groups.values.sorted { a, b in
+		// A group that isn't one of the pod's bots and has no channel opens
+		// nothing, so it's listed only while one of its threads is open, as it
+		// would otherwise be a row with nothing under it.
+		let podBots = Set(bots.map(\.id))
+		let listed = groups.values.filter { group in
+			group.agent.map { podBots.contains($0.id) } == true || group.channel != nil || !open(group.threads).isEmpty
+		}
+		return listed.sorted { a, b in
 			guard let first = a.agent else { return false }
 			guard let second = b.agent else { return true }
 			return first.name.localizedCompare(second.name) == .orderedAscending
@@ -176,8 +188,8 @@ struct ConversationList: View {
 	}
 }
 
-/// A bot with its channel, once somebody opened it, and its open threads,
-/// newest first; or the threads between people, when `agent` is nil.
+/// A bot with its channel, once somebody opened it, and its threads, done ones
+/// included, newest first; or the threads between people, when `agent` is nil.
 struct BotGroup: Identifiable {
 	static let peopleKey = "people"
 
@@ -335,9 +347,7 @@ private struct BotItem: View {
 			.contextMenu {
 				if let place { NotificationMenu(place: place) }
 			}
-			if !group.threads.isEmpty {
-				ThreadTree(pod: pod, threads: group.threads)
-			}
+			ThreadTree(pod: pod, threads: group.threads, allThreadsOf: group.agent)
 		}
 
 	}
@@ -357,55 +367,57 @@ private struct BotItem: View {
 	}
 }
 
-/// Threads hanging under a bot or a channel: the first few, then how many more.
+/// Threads hanging under a bot or a channel that aren't done. Under a bot,
+/// given as `allThreadsOf`, only the newest few show, then All threads, which
+/// leads to the rest, done ones included. Nothing while none is open: a bot's
+/// done threads are then reached from its channel's ⋯ and its Details.
 @MainActor
 private struct ThreadTree: View {
 	let pod: Pod
-	/// Newest first.
+	/// Newest first, done ones included.
 	let threads: [ChatListItem]
-	@State private var unclipped = false
-
-	/// How many threads show before Show more, as the web's `THREADS_SHOWN`.
-	private static let threadsBeforeShowMore = Limits.threadsShown
+	var allThreadsOf: Agent?
 
 	var body: some View {
-		let shown = unclipped ? threads : Array(threads.prefix(Self.threadsBeforeShowMore))
-		let hidden = threads.count - shown.count
-		VStack(alignment: .leading, spacing: 1) {
-			ForEach(shown) { row in
-				NavigationLink(value: Route.conversation(threadId: row.conversation.id, title: row.conversation.title)) {
-					threadRow(lit: row.unreadMessages > 0 || row.needsYou) {
-						// In a Personal pod a conversation is with the bot, so goes by its name.
-						Text(pod.kind == .personal ? row.agent?.name ?? row.conversation.title : row.conversation.title)
-							.lineLimit(1)
-						Spacer(minLength: 0)
-						UnreadMarker(unreadMessages: row.unreadMessages, needsYou: row.needsYou).frame(width: 22)
+		let open = ConversationList.open(threads)
+		let shown = allThreadsOf == nil ? open : Array(open.prefix(Limits.threadsShown))
+		if !shown.isEmpty {
+			VStack(alignment: .leading, spacing: 1) {
+				ForEach(shown) { row in
+					NavigationLink(value: Route.conversation(threadId: row.conversation.id, title: row.conversation.title)) {
+						threadRow(lit: row.unreadMessages > 0 || row.needsYou) {
+							// In a Personal pod a conversation is with the bot, so goes by its name.
+							Text(pod.kind == .personal ? row.agent?.name ?? row.conversation.title : row.conversation.title)
+								.lineLimit(1)
+							Spacer(minLength: 0)
+							UnreadMarker(unreadMessages: row.unreadMessages, needsYou: row.needsYou).frame(width: 22)
+						}
 					}
+					.buttonStyle(PressableRowStyle(cornerRadius: 6))
 				}
-				.buttonStyle(PressableRowStyle(cornerRadius: 6))
-			}
-			if hidden > 0 {
-				Button { unclipped = true } label: {
-					Text("Show \(hidden) more")
-						.font(Typeface.rubik(12))
-						.foregroundStyle(Palette.subtleForeground)
-						.padding(.horizontal, 8)
-						.frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-						.contentShape(Rectangle())
+				if let agent = allThreadsOf {
+					NavigationLink(value: Route.threads(pod, agent: agent)) {
+						threadRow(lit: false, quiet: true) {
+							Text("All threads").lineLimit(1)
+							Spacer(minLength: 0)
+							Icon(.chevronRight, size: 14, strokeWidth: 2).frame(width: 22)
+						}
+					}
+					.buttonStyle(PressableRowStyle(cornerRadius: 6))
 				}
-				.buttonStyle(.plain)
 			}
+			.padding(.leading, ConversationList.nestedIndent)
+			.overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 1) }
+			.padding(.leading, 17)
+			.padding(.top, 1)
 		}
-		.padding(.leading, ConversationList.nestedIndent)
-		.overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 1) }
-		.padding(.leading, 17)
-		.padding(.top, 1)
 	}
 
-	private func threadRow(lit: Bool, @ViewBuilder content: () -> some View) -> some View {
+	/// `lit` while it has something new; `quiet`, greyer still, for the way to all of a bot's threads.
+	private func threadRow(lit: Bool, quiet: Bool = false, @ViewBuilder content: () -> some View) -> some View {
 		HStack(spacing: 8) { content() }
 			.font(Typeface.rubik(15, lit ? .semibold : .regular))
-			.foregroundStyle(lit ? Palette.foreground : Palette.mutedForeground)
+			.foregroundStyle(lit ? Palette.foreground : quiet ? Palette.subtleForeground : Palette.mutedForeground)
 			.padding(.leading, 8)
 			.padding(.trailing, 6)
 			.frame(height: 40)
