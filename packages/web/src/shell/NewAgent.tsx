@@ -1,4 +1,4 @@
-import { botColors, type LivelyFace, type MoodLoop, useMoodLoop } from "@sugabots/avatars";
+import { botColors, CREATION_MOODS, type LivelyFace, useMoodLoop } from "@sugabots/avatars";
 import {
 	AGENT_NAME_MAX_LENGTH,
 	type Agent,
@@ -643,16 +643,6 @@ function ModelRow({
 		</button>
 	);
 }
-
-/**
- * How the bot being made carries itself: mostly at ease, often pleased, and
- * now and then briefly excited.
- */
-const CREATION_MOODS: MoodLoop = [
-	{ mood: "idle", weight: 1, seconds: { least: 4, most: 9 } },
-	{ mood: "happy", weight: 3, seconds: { least: 2, most: 4 } },
-	{ mood: "excited", weight: 1, seconds: { least: 1.2, most: 2 } },
-];
 
 /** The bot being made, large: hopping each time its look changes, and moving through `CREATION_MOODS`. */
 function CreationFace({ look }: { look: Look }) {
