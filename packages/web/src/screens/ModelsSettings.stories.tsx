@@ -359,6 +359,22 @@ export const SwitchOffModelInUse = meta.story({
 });
 
 /**
+ * Switching off a provider whose model many bots run on names the first few
+ * and counts the rest.
+ */
+export const SwitchOffProviderLongLists = meta.story({
+	parameters: { bots: crowdOnGpt5, providers: everyModelOn },
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Use OpenAI" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off OpenAI" });
+		await expect(
+			within(dialog).getByText("Helper 1, Helper 2, Helper 3 and 37 more"),
+		).toBeInTheDocument();
+	},
+});
+
+/**
  * Switching off a provider whose models bots still run on asks, for each of
  * those models, which model at another provider its bots move to.
  */
