@@ -9,7 +9,13 @@ import {
 import { createRef, type RefObject, useEffect, useRef, useState } from "react";
 import { THINKING_DOT_RADIUS, viewboxPercentage } from "./face-marks.ts";
 import { HOP_SECONDS, hopPaths } from "./hop.ts";
-import { LayerMotion, type LayerName, layerKinds } from "./layer-motion.ts";
+import {
+	type KeyframesPath,
+	LayerMotion,
+	type LayerName,
+	layerKinds,
+	type Values,
+} from "./layer-motion.ts";
 
 /*
  * Why the face is built from HTML layers: Chrome can't hand a transform on an
@@ -93,37 +99,65 @@ export interface FaceDrawing {
  * as depth.
  */
 /** How far the eyes slide sideways, and up or down, looking all the way. */
-const EYE_TRAVEL_X = 5;
-const EYE_TRAVEL_Y = 3;
+export const EYE_TRAVEL_X = 5;
+export const EYE_TRAVEL_Y = 3;
 /** How far the eyes dip as they near the side, so they follow the head's curve rather than a straight line. */
-const EYE_EDGE_DIP = 0.8;
+export const EYE_EDGE_DIP = 0.8;
 /** How much narrower the eyes get looking all the way to one side, as if turned away on a ball. */
-const EYE_FORESHORTENING = 0.18;
-const HEAD_TRAVEL_X = 1.2;
-const HEAD_TRAVEL_Y = 0.6;
-const HEAD_TILT_DEGREES = 4;
+export const EYE_FORESHORTENING = 0.18;
+export const HEAD_TRAVEL_X = 1.2;
+export const HEAD_TRAVEL_Y = 0.6;
+export const HEAD_TILT_DEGREES = 4;
 
 /** Eyes jump to what they look at almost at once; they never drift. */
-const EYES_SPRING = { stiffness: 1000, damping: 60 };
+export const EYES_SPRING = { stiffness: 1000, damping: 60 } as const;
 /** The head follows the eyes late, and overshoots a little before it settles. */
-const HEAD_SPRING = { stiffness: 140, damping: 13 };
+export const HEAD_SPRING = { stiffness: 140, damping: 13 } as const;
 /** How a mood settles in when it changes: gently, without overshoot. */
-const MOOD_SPRING = { stiffness: 120, damping: 20 };
+export const MOOD_SPRING = { stiffness: 120, damping: 20 } as const;
 /**
  * The same, for the eyes' shapes, which ease in script: they stop once within
  * `restDelta` of where they're going and slower than `restSpeed`, far below
  * what shows even on a large face.
  */
-const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 };
+export const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 } as const;
 
-/** How far a blink squeezes an eye, and its timing: quick to shut, a beat closed, slower to open. */
-const BLINK_CLOSED = 0.1;
-const BLINK = { duration: 0.24, times: [0, 0.33, 0.5, 1] };
+/**
+ * One value's keyframes, as motion's `animate` plays them on a motion value:
+ * through `frames` at `times` (shares of `seconds`), eased between each pair by `ease`.
+ */
+export interface ValueKeyframes {
+	readonly frames: readonly number[];
+	readonly times: readonly number[];
+	readonly ease: readonly Easing[];
+	readonly seconds: number;
+}
+
+const easeEachWay = (segments: number): Easing[] =>
+	Array.from({ length: segments }, () => "easeInOut");
+
+/** How far a blink squeezes an eye. */
+export const BLINK_CLOSED = 0.1;
+/** A blink, as how open the eye is: quick to shut, a beat closed, slower to open. */
+export const BLINK: ValueKeyframes = {
+	frames: [1, BLINK_CLOSED, BLINK_CLOSED, 1],
+	times: [0, 0.33, 0.5, 1],
+	ease: easeEachWay(3),
+	seconds: 0.24,
+};
+/** How long a double blink waits between its two blinks. */
+export const BLINK_TWICE_GAP_SECONDS = 0.08;
 /** Once the pointer and typing have rested this long, idle glances take over again. */
-const WATCHING_REST_MS = 4000;
-/** How far open a sleepy bot's eyes flutter, and how long the flutter takes. */
-const FLUTTER_OPEN = 0.5;
-const FLUTTER_SECONDS = 1.2;
+export const WATCHING_REST_MS = 4000;
+/** How far open a sleepy bot's eyes flutter. */
+export const FLUTTER_OPEN = 0.5;
+/** A flutter, as how far open it holds the eyes: quickly open, slowly shut. */
+export const FLUTTER: ValueKeyframes = {
+	frames: [0, FLUTTER_OPEN, 0],
+	times: [0, 0.3, 1],
+	ease: ["easeOut", "easeIn"],
+	seconds: 1.2,
+};
 /** The width a face is taken to have, in CSS pixels, while it can't be measured. */
 const UNMEASURED_FACE_PIXELS = 128;
 /** How long a face's measured size is trusted before it's measured again. */
@@ -137,17 +171,77 @@ const WIGGLE_SECONDS = 0.7;
 const WIGGLE_SIDES = [0, 1, 0, -1, 0];
 const WIGGLE_TIMES = [0, 0.25, 0.5, 0.75, 1];
 
-/** How high a thinking dot rises against its own height, and its timing, like the app's typing dots. */
+/** One wiggle there and back, for a layer that leans `reach` to each side. */
+function wiggleSway(reach: number): KeyframesPath {
+	return {
+		kind: "keyframes",
+		frames: WIGGLE_SIDES.map((side) => [side * reach]),
+		times: WIGGLE_TIMES,
+		ease: easeEachWay(WIGGLE_SIDES.length - 1),
+		seconds: WIGGLE_SECONDS,
+	};
+}
+
+/** One wiggle of the head's sideways move, in percentages of the face, and of its lean, in degrees. */
+export const WIGGLE_MOVE = wiggleSway(viewboxPercentage(WIGGLE_SHIFT));
+export const WIGGLE_TILT = wiggleSway(WIGGLE_DEGREES);
+
+/** How high a thinking dot rises against its own height, like the app's typing dots, and how bright it is then. */
 const DOT_RISE_SHARE = 2.6 / (THINKING_DOT_RADIUS * 2);
-const DOT_CYCLE_SECONDS = 1.2;
-const DOT_STAGGER_SECONDS = 0.15;
 const DOT_BRIGHTEST = 1;
+/** When in each rise a dot is at its height and back down, as shares of the cycle; it rests for the rest. */
+const DOT_RISE_TIMES = [0, 0.3, 0.6, 1];
 
-/** How quickly a wiggle or the thinking dots ease back to rest when they stop. */
-const STILLING_SECONDS = 0.25;
+/** One rise of a thinking dot, from where it rests and back. */
+export const DOT_RISE: KeyframesPath = {
+	kind: "keyframes",
+	frames: [
+		layerKinds.dot.rest,
+		[DOT_RISE_SHARE, DOT_BRIGHTEST],
+		layerKinds.dot.rest,
+		layerKinds.dot.rest,
+	],
+	times: DOT_RISE_TIMES,
+	ease: easeEachWay(DOT_RISE_TIMES.length - 1),
+	seconds: 1.2,
+};
+/** How long each thinking dot rises after the one before. */
+export const DOT_STAGGER_SECONDS = 0.15;
+/**
+ * How far the mood has turned to thinking when the outer dots, and then the
+ * middle one, start and finish growing, from 0 to 1; the middle one comes last.
+ */
+export const OUTER_DOTS_GROW = [0, 0.6] as const;
+export const MIDDLE_DOT_GROWS = [0.4, 1] as const;
 
-const easeEachWay = (segments: number): Easing[] =>
-	Array.from({ length: segments }, () => "easeInOut");
+/** How a wiggle or the thinking dots ease back to rest when they stop: quickly, slowing as they arrive. */
+export const STILLING = { seconds: 0.25, ease: "easeOut" } as const;
+
+/** Eases from wherever a layer is to `rest`, as a wiggle or the thinking dots do when they stop. */
+function stillingTo(rest: Values): KeyframesPath {
+	return {
+		kind: "keyframes",
+		frames: [rest, rest],
+		times: [0, 1],
+		ease: [STILLING.ease],
+		seconds: STILLING.seconds,
+	};
+}
+
+/** Plays `keyframes` on `value`, `repeat` more times after the first, waiting `repeatDelay` seconds between. */
+function playKeyframes(
+	value: MotionValue<number>,
+	{ frames, times, ease, seconds }: ValueKeyframes,
+	{ repeat = 0, repeatDelay = 0 } = {},
+): void {
+	animate(value, [...frames], {
+		duration: seconds,
+		times: [...times],
+		ease: [...ease],
+		repeat,
+		repeatDelay,
+	});
+}
 
 /**
  * A face's moving parts, held as `look` says; `controls` move it and `drawing`
@@ -158,8 +252,8 @@ export function useFaceRig(
 	look: MoodLook,
 	face: RefObject<HTMLElement | null>,
 ): { controls: FaceControls; drawing: FaceDrawing } {
-	const [blink] = useState(() => motionValue(1));
-	const [flutter] = useState(() => motionValue(0));
+	const [blink] = useState(() => motionValue(BLINK.frames[0] ?? 1));
+	const [flutter] = useState(() => motionValue(FLUTTER.frames[0] ?? 0));
 	const [layers] = useState<FaceLayers>(() => ({
 		...(Object.fromEntries(headLayerNames.map((name) => [name, createRef()])) as Record<
 			HeadLayerName,
@@ -221,66 +315,39 @@ export function useFaceRig(
 			return performance.now() - watchedAt.current < WATCHING_REST_MS;
 		},
 		blink(twice = false) {
-			animate(blink, [1, BLINK_CLOSED, BLINK_CLOSED, 1], {
-				...BLINK,
+			playKeyframes(blink, BLINK, {
 				repeat: twice ? 1 : 0,
-				repeatDelay: 0.08,
+				repeatDelay: BLINK_TWICE_GAP_SECONDS,
 			});
 		},
 		hop(size = 1) {
 			landsAt.current = performance.now() + HOP_SECONDS * 1000;
 			const paths = hopPaths(size);
-			motions.hopRise.play(paths.rise);
-			motions.hopSquash.play(paths.squash);
-			motions.hopEyesDrop.play(paths.eyesDrop);
+			motions.hopRise.play(paths.hopRise);
+			motions.hopSquash.play(paths.hopSquash);
+			motions.hopEyesDrop.play(paths.hopEyesDrop);
 		},
 		isAirborne() {
 			return performance.now() < landsAt.current;
 		},
 		wiggle() {
-			const swing = (layer: LayerMotion, reach: number) =>
-				layer.play(
-					{
-						kind: "keyframes",
-						frames: WIGGLE_SIDES.map((side) => [side * reach]),
-						times: WIGGLE_TIMES,
-						ease: easeEachWay(WIGGLE_SIDES.length - 1),
-						seconds: WIGGLE_SECONDS,
-					},
-					{ repeat: true },
-				);
-			swing(motions.wiggleMove, viewboxPercentage(WIGGLE_SHIFT));
-			swing(motions.wiggleTilt, WIGGLE_DEGREES);
+			motions.wiggleMove.play(WIGGLE_MOVE, { repeat: true });
+			motions.wiggleTilt.play(WIGGLE_TILT, { repeat: true });
 			return () => {
 				easeToRest(motions.wiggleMove);
 				easeToRest(motions.wiggleTilt);
 			};
 		},
 		riseDots() {
-			const resting = layerKinds.dot.rest;
-			const risen = [DOT_RISE_SHARE, DOT_BRIGHTEST];
 			motions.dots.forEach((dot, index) => {
-				dot.play(
-					{
-						kind: "keyframes",
-						frames: [resting, risen, resting, resting],
-						times: [0, 0.3, 0.6, 1],
-						ease: easeEachWay(3),
-						seconds: DOT_CYCLE_SECONDS,
-					},
-					{ repeat: true, delaySeconds: index * DOT_STAGGER_SECONDS },
-				);
+				dot.play(DOT_RISE, { repeat: true, delaySeconds: index * DOT_STAGGER_SECONDS });
 			});
 			return () => {
 				for (const dot of motions.dots) easeToRest(dot);
 			};
 		},
 		flutter() {
-			animate(flutter, [0, FLUTTER_OPEN, 0], {
-				duration: FLUTTER_SECONDS,
-				times: [0, 0.3, 1],
-				ease: ["easeOut", "easeIn"],
-			});
+			playKeyframes(flutter, FLUTTER);
 		},
 	}));
 
@@ -295,8 +362,8 @@ export function useFaceRig(
 		eyesShrink: useTransform(dots, (shown) => 1 - shown),
 		smile,
 		arcsFlat,
-		outerDotsGrow: useTransform(dots, [0, 0.6], [0, 1]),
-		middleDotGrows: useTransform(dots, [0.4, 1], [0, 1]),
+		outerDotsGrow: useTransform(dots, [...OUTER_DOTS_GROW], [0, 1]),
+		middleDotGrows: useTransform(dots, [...MIDDLE_DOT_GROWS], [0, 1]),
 	};
 	return { controls, drawing };
 }
@@ -320,13 +387,7 @@ function measuredFacePixels(face: RefObject<HTMLElement | null>): () => number {
 
 /** Eases a layer back to its resting pose. */
 function easeToRest(layer: LayerMotion): void {
-	layer.play({
-		kind: "keyframes",
-		frames: [layer.rest, layer.rest],
-		times: [0, 1],
-		ease: ["easeOut"],
-		seconds: STILLING_SECONDS,
-	});
+	layer.play(stillingTo(layer.rest));
 }
 
 /** A value tracking `target`, easing to each new one the way a mood settles in. */

@@ -21,7 +21,7 @@ import { FACE_VIEWBOX_SIZE, THINKING_DOT_RADIUS } from "./face-marks.ts";
  * second, and on a small face a glance is a handful of frames.
  */
 
-type Values = readonly number[];
+export type Values = readonly number[];
 
 /** What a layer's values draw: its transform, and for some its opacity. */
 interface LayerStyle {
@@ -105,28 +105,41 @@ export function restingStyle(name: LayerName): LayerStyle {
 }
 
 /** A way of getting from one set of values to another, over time. */
-export type Path =
-	/** Springs to `to`, as motion's springs do. */
-	| { kind: "spring"; to: Values; stiffness: number; damping: number }
-	/**
-	 * Passes through `frames` at `times` (shares of `seconds`, from 0 to 1),
-	 * eased between each pair by `ease`; the first frame is ignored and replaced
-	 * by wherever the layer is.
-	 */
-	| { kind: "keyframes"; frames: Values[]; times: number[]; ease: Easing[]; seconds: number };
+export type Path = SpringPath | KeyframesPath;
+
+/** Springs to `to`, as motion's springs do. */
+export interface SpringPath {
+	readonly kind: "spring";
+	readonly to: Values;
+	readonly stiffness: number;
+	readonly damping: number;
+}
+
+/**
+ * Passes through `frames` at `times` (shares of `seconds`, from 0 to 1),
+ * eased between each pair by `ease`; the first frame is ignored and replaced
+ * by wherever the layer is.
+ */
+export interface KeyframesPath {
+	readonly kind: "keyframes";
+	readonly frames: readonly Values[];
+	readonly times: readonly number[];
+	readonly ease: readonly Easing[];
+	readonly seconds: number;
+}
 
 /** Half a device pixel: no finer move could show. */
 const STEP_PIXELS = 0.5;
 /** The shared clock's ticks, which every change falls on: a video's frame rate. */
-const TICK_SECONDS = 1 / 30;
+export const TICK_SECONDS = 1 / 30;
 /** How finely a spring is stepped through to find when it settles. */
-const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
+export const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
 /** A spring is cut off by this long at the latest, wherever it has got to. */
-const LONGEST_SPRING_MILLISECONDS = 3000;
+export const LONGEST_SPRING_MILLISECONDS = 3000;
 /** How far ahead a layer's path is looked at to tell how fast it's moving. */
-const VELOCITY_SECONDS = 1 / 240;
+export const VELOCITY_SECONDS = 1 / 240;
 /** How long a repeating path takes to ease to where it starts, from wherever the layer is. */
-const LEAD_IN_SECONDS = 0.25;
+export const LEAD_IN_SECONDS = 0.25;
 
 interface Playing {
 	animation: Animation;
@@ -141,13 +154,16 @@ interface Playing {
 export class LayerMotion {
 	private values: Values;
 	private playing: Playing | undefined;
+	private readonly layer: RefObject<HTMLElement | null>;
+	private readonly kind: LayerKind;
+	/** The face's width in device pixels, read when a path starts. */
+	private readonly facePixels: () => number;
 
-	constructor(
-		private readonly layer: RefObject<HTMLElement | null>,
-		private readonly kind: LayerKind,
-		/** The face's width in device pixels, read when a path starts. */
-		private readonly facePixels: () => number,
-	) {
+	// Fields set by hand rather than as parameter properties, so Node can load this file as it is, as the native apps' generator does.
+	constructor(layer: RefObject<HTMLElement | null>, kind: LayerKind, facePixels: () => number) {
+		this.layer = layer;
+		this.kind = kind;
+		this.facePixels = facePixels;
 		this.values = kind.rest;
 	}
 
@@ -193,14 +209,14 @@ export class LayerMotion {
 	 * `delaySeconds`. A repeating path first eases to where it starts, so each
 	 * time round begins from the same place.
 	 */
-	play(paths: Path | Path[], { repeat = false, delaySeconds = 0 } = {}): void {
+	play(paths: Path | readonly Path[], { repeat = false, delaySeconds = 0 } = {}): void {
 		const element = this.layer.current;
 		// Nothing to show it on, so nothing should be left playing.
 		if (!element) {
 			this.stop();
 			return;
 		}
-		const list = Array.isArray(paths) ? paths : [paths];
+		const list: readonly Path[] = isPathList(paths) ? paths : [paths];
 		const from = this.now();
 		const loopStart = repeat ? firstFrame(list[0]) : undefined;
 		if (loopStart && this.visiblyApart(from, loopStart)) {
@@ -317,13 +333,17 @@ export class LayerMotion {
 	}
 }
 
+function isPathList(paths: Path | readonly Path[]): paths is readonly Path[] {
+	return Array.isArray(paths);
+}
+
 /**
  * Paths one after another, each from where the last ends, as one function of
  * time; the first starts at `velocity`, where it's a spring.
  */
-function sequence(
+export function sequence(
 	from: Values,
-	paths: Path[],
+	paths: readonly Path[],
 	velocity?: Values,
 ): { valuesAt: (seconds: number) => Values; seconds: number } {
 	const parts: { valuesAt: (seconds: number) => Values; seconds: number; startsAt: number }[] = [];

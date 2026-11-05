@@ -3,13 +3,13 @@ import { type RefObject, useEffect } from "react";
 import type { FaceControls } from "./face-rig.ts";
 
 /** How many face-widths away something must be for the eyes to look all the way to it. */
-const WATCHING_REACH = 2.5;
+export const WATCHING_REACH = 2.5;
 /**
  * The least time between the eyes' jumps to what they watch. Eyes move in
  * quick jumps rather than gliding, so following the pointer this way looks
  * natural, and each jump is one short animation rather than one a frame.
  */
-const JUMP_INTERVAL_MS = 100;
+export const JUMP_INTERVAL_MS = 100;
 
 /**
  * Turns the face's eyes to the pointer as it moves and to where someone types,

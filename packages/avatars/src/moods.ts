@@ -96,32 +96,50 @@ export const moods: Record<BotMood, Mood> = {
 	},
 };
 
+/** How often an idle bot blinks instead of glancing, and how often a blink is a double one. */
+export const IDLE_BLINK_CHANCE = 0.3;
+export const DOUBLE_BLINK_CHANCE = 0.2;
+/** How often an idle bot's glance is back to straight ahead, rather than somewhere new. */
+export const LOOK_AHEAD_CHANCE = 0.35;
+/** How far an idle bot glances, at most, from straight ahead. */
+export const IDLE_GLANCE_REACH = 1;
+/** How far the eyes must turn for a glance to count as long, and how often a bot blinks with one. */
+export const LONG_GLANCE_DISTANCE = 0.6;
+export const LONG_GLANCE_BLINK_CHANCE = 0.5;
+
 /** Blinks now and then; otherwise glances somewhere new, unless it's watching the pointer or typing. */
 function glanceOrBlink(face: FaceControls): void {
-	if (face.isWatching() || Math.random() < 0.3) {
-		face.blink(Math.random() < 0.2);
+	if (face.isWatching() || Math.random() < IDLE_BLINK_CHANCE) {
+		face.blink(Math.random() < DOUBLE_BLINK_CHANCE);
 		return;
 	}
-	// Back to straight ahead about a third of the time, else somewhere new.
-	const [x, y] = Math.random() < 0.35 ? [0, 0] : randomGlance(1);
+	const [x, y] = Math.random() < LOOK_AHEAD_CHANCE ? [0, 0] : randomGlance(IDLE_GLANCE_REACH);
 	// People blink as their eyes shift a long way.
-	if (face.lookAt(x, y) > 0.6 && Math.random() < 0.5) face.blink();
+	if (face.lookAt(x, y) > LONG_GLANCE_DISTANCE && Math.random() < LONG_GLANCE_BLINK_CHANCE) {
+		face.blink();
+	}
 }
 
 /** How big a happy bot's little bounces are, against a full hop. */
-const HAPPY_BOUNCE = 0.4;
+export const HAPPY_BOUNCE = 0.4;
+/**
+ * How often a happy bot's act is a bounce, and how often a blink; otherwise it
+ * glances, by at most `HAPPY_GLANCE_REACH`, so it keeps its face towards you.
+ */
+export const HAPPY_BOUNCE_CHANCE = 0.45;
+export const HAPPY_BLINK_CHANCE = 0.25;
+export const HAPPY_GLANCE_REACH = 0.4;
 
 function bounceOrBlink(face: FaceControls): void {
 	const roll = Math.random();
-	if (roll < 0.45) face.hop(HAPPY_BOUNCE);
-	else if (roll < 0.7) face.blink();
-	// Small glances only: it keeps its face towards you.
-	else if (!face.isWatching()) face.lookAt(...randomGlance(0.4));
+	if (roll < HAPPY_BOUNCE_CHANCE) face.hop(HAPPY_BOUNCE);
+	else if (roll < HAPPY_BOUNCE_CHANCE + HAPPY_BLINK_CHANCE) face.blink();
+	else if (!face.isWatching()) face.lookAt(...randomGlance(HAPPY_GLANCE_REACH));
 }
 
 /** How big an excited bot's bounces on the spot are against a full hop, and how often one is a full hop instead. */
-const EXCITED_BOUNCE: Span = { least: 0.25, most: 0.5 };
-const EXCITED_FULL_HOP_CHANCE = 0.3;
+export const EXCITED_BOUNCE: Span = { least: 0.25, most: 0.5 };
+export const EXCITED_FULL_HOP_CHANCE = 0.3;
 
 function bounceOrHop(face: FaceControls): void {
 	// Never cuts a hop short in the air.
@@ -129,13 +147,23 @@ function bounceOrHop(face: FaceControls): void {
 	face.hop(Math.random() < EXCITED_FULL_HOP_CHANCE ? 1 : randomIn(EXCITED_BOUNCE));
 }
 
+/** How often a sleepy bot's act is a flutter; otherwise it does nothing. */
+export const FLUTTER_CHANCE = 0.5;
+
 function maybeFlutter(face: FaceControls): void {
-	if (Math.random() < 0.5) face.flutter();
+	if (Math.random() < FLUTTER_CHANCE) face.flutter();
 }
 
-/** Somewhere to glance, up to `reach` from straight ahead: any direction, at least halfway out, more sideways than up or down. */
+/**
+ * A glance goes at least `GLANCE_LEAST_SHARE` of its reach from straight
+ * ahead, and only `GLANCE_VERTICAL_SHARE` as far up or down as sideways.
+ */
+export const GLANCE_LEAST_SHARE = 0.5;
+export const GLANCE_VERTICAL_SHARE = 0.6;
+
+/** Somewhere to glance, up to `reach` from straight ahead, in any direction. */
 function randomGlance(reach: number): [number, number] {
 	const angle = Math.random() * Math.PI * 2;
-	const distance = (0.5 + Math.random() * 0.5) * reach;
-	return [Math.cos(angle) * distance, Math.sin(angle) * distance * 0.6];
+	const distance = (GLANCE_LEAST_SHARE + Math.random() * (1 - GLANCE_LEAST_SHARE)) * reach;
+	return [Math.cos(angle) * distance, Math.sin(angle) * distance * GLANCE_VERTICAL_SHARE];
 }
