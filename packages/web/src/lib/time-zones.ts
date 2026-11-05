@@ -62,9 +62,11 @@ export function timeZonePlace(zone: string): string {
 	return (zone.split("/").at(-1) ?? zone).replaceAll("_", " ");
 }
 
-function utcOffset(zone: string, now: Date): string {
+/** How far `zone` is from UTC at `now`: "UTC+11", "UTC-2:30", or "UTC" itself. */
+export function utcOffset(zone: string, now: Date): string {
 	const offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "shortOffset" })
 		.formatToParts(now)
 		.find((part) => part.type === "timeZoneName")?.value;
-	return offset ? offset.replace("GMT", "UTC") : "";
+	// Some runtimes write no offset as "GMT", others as "GMT+0".
+	return offset ? offset.replace("GMT", "UTC").replace(/^UTC\+0$/, "UTC") : "";
 }

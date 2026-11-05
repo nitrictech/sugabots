@@ -3,7 +3,6 @@ import {
 	type AgentColor,
 	type AgentFace,
 	type AgentShape,
-	type PodColor,
 	providerPreset,
 	type UsageMonth,
 	type WorkspaceUsage,
@@ -12,6 +11,7 @@ import { cn } from "cn";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { PROVIDER_HUES } from "@/lib/provider-hues.ts";
 import {
 	dateIn,
 	dayLabel,
@@ -331,21 +331,6 @@ function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
 		</li>
 	);
 }
-
-/**
- * The hues a provider's models are drawn in, from the pod colours so the
- * breakdown's views read as one family, ordered so neighbours differ.
- */
-const PROVIDER_HUES: readonly PodColor[] = [
-	"blue",
-	"purple",
-	"teal",
-	"amber",
-	"rose",
-	"green",
-	"orange",
-	"plum",
-];
 
 type ModelUsage = WorkspaceUsage["models"][number];
 

@@ -30,9 +30,11 @@ import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } fro
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -68,9 +70,6 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
  * disconnecting it. A switched-off model is still listed, in its place, so
  * turning one on or off never moves the list under your pointer.
  */
-
-/** More models than this and the list gets a search and a filter by who makes them. */
-export const LARGE_CATALOG = 20;
 
 /**
  * Whether bots can reach a provider: switched on, and holding the key or
@@ -162,7 +161,7 @@ export interface ModelHolders {
 }
 
 /** Why a model, or its provider, cannot be switched off. */
-function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
+export function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
 	const holders =
 		newBots && systemBots
 			? "New bots and system agents use"
@@ -712,18 +711,8 @@ function makerOf(model: ProviderModel): string | undefined {
 }
 
 function makerLabel(maker: string): string {
-	return MAKER_NAMES[maker] ?? maker.charAt(0).toUpperCase() + maker.slice(1);
+	return MODEL_MAKER_NAMES[maker] ?? maker.charAt(0).toUpperCase() + maker.slice(1);
 }
-
-const MAKER_NAMES: Record<string, string> = {
-	openai: "OpenAI",
-	"meta-llama": "Meta",
-	mistralai: "Mistral",
-	deepseek: "DeepSeek",
-	"x-ai": "xAI",
-	moonshotai: "Moonshot",
-	qwen: "Qwen",
-};
 
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
@@ -732,7 +721,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
-	const large = provider.models.length > LARGE_CATALOG;
+	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
 	const [onWhenOpened] = useState(
 		() => new Set(provider.models.filter((model) => model.enabled).map((model) => model.id)),

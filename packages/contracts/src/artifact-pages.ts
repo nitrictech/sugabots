@@ -20,10 +20,22 @@ export const PAGE_CONTENT_POLICY = [
 export const PAGE_HEIGHT_MESSAGE = "sugabots:frame-height";
 
 /**
+ * A script that sends the page's height whenever it changes: `send` turns
+ * `heightExpression`, JavaScript that reads the height, into the call that
+ * sends it, wherever the page's host listens.
+ */
+export function pageHeightObserver(send: (heightExpression: string) => string): string {
+	return `new ResizeObserver(() => ${send("document.documentElement.scrollHeight")}).observe(document.documentElement);`;
+}
+
+/**
  * Tells the parent the page's height whenever it changes. The page could post
  * the same message itself, which can only resize its own frame.
  */
-export const PAGE_HEIGHT_REPORT = `<script>new ResizeObserver(() => parent.postMessage({ type: "${PAGE_HEIGHT_MESSAGE}", height: document.documentElement.scrollHeight }, "*")).observe(document.documentElement);</script>`;
+export const PAGE_HEIGHT_REPORT = `<script>${pageHeightObserver(
+	(heightExpression) =>
+		`parent.postMessage({ type: "${PAGE_HEIGHT_MESSAGE}", height: ${heightExpression} }, "*")`,
+)}</script>`;
 
 /** The app's colour scheme and tokens, as `--name: value;` declarations, that a page is drawn with. */
 export interface PageTheme {

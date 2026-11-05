@@ -17,7 +17,7 @@ import { useRecentRuns, useRoutines } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
-import { formatDay } from "./ThreadConversation.tsx";
+import { formatDay } from "./thread-layout.ts";
 
 /*
  * A routine's own thread reads as its runs, one after another: a line naming

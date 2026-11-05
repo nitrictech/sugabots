@@ -17,7 +17,8 @@ import preview from "#storybook/preview";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { growthDesk } from "@/shell/story-fixtures.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { findAnsweringFace, ThreadConversation } from "./ThreadConversation.tsx";
+import { ThreadConversation } from "./ThreadConversation.tsx";
+import { findAnsweringFace } from "./thread-layout.ts";
 
 const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	kind: "agent",

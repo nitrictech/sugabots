@@ -1,16 +1,17 @@
 export * as Membership from "./membership.ts";
 
-import type {
-	AssignableWorkspaceRole,
-	InvitationPreview,
-	NewWorkspace,
-	NewWorkspaceInvitation,
-	Workspace,
-	WorkspaceDetails,
-	WorkspaceInvitation,
-	WorkspaceMember,
-	WorkspacePermissions,
-	WorkspaceRole,
+import {
+	type AssignableWorkspaceRole,
+	INVITE_LIFETIME_DAYS,
+	type InvitationPreview,
+	type NewWorkspace,
+	type NewWorkspaceInvitation,
+	type Workspace,
+	type WorkspaceDetails,
+	type WorkspaceInvitation,
+	type WorkspaceMember,
+	type WorkspacePermissions,
+	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
@@ -714,7 +715,7 @@ function workspaceView(
 	return { ...row, setupCompletedAt: row.setupCompletedAt?.toISOString() ?? null };
 }
 
-const INVITATION_LIFETIME = Duration.days(2);
+const INVITATION_LIFETIME = Duration.days(INVITE_LIFETIME_DAYS);
 
 function requireSlugUnlikeUuid(slug: string) {
 	return isUuid(slug) ? Effect.fail(new SlugShapedLikeUuid()) : Effect.void;

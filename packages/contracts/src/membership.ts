@@ -67,6 +67,9 @@ export const workspaceMemberUpdateSchema = Schema.Struct({ role: assignableWorks
 /** Who the owner hands the workspace to: one of its members, by membership id. */
 export const ownershipTransferSchema = Schema.Struct({ memberId: uuidSchema });
 
+/** How many days an invitation can be accepted for after it is sent or sent again. */
+export const INVITE_LIFETIME_DAYS = 2;
+
 /** An invitation still waiting to be accepted. */
 export const workspaceInvitationSchema = Schema.Struct({
 	id: uuidSchema,

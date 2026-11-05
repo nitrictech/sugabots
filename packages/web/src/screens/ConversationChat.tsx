@@ -99,16 +99,11 @@ import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
 import { RoutinesStage, type RoutinesView } from "./RoutinesStage.tsx";
 import { SideThreadLine } from "./SideThreadLine.tsx";
-import {
-	DaySeparator,
-	findAnsweringFace,
-	startsNewDay,
-	ThreadConversation,
-	typersAfter,
-} from "./ThreadConversation.tsx";
+import { DaySeparator, ThreadConversation, typersAfter } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { ThreadsStage } from "./ThreadsStage.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
+import { findAnsweringFace, startsNewDay } from "./thread-layout.ts";
 
 /**
  * How close to the foot of the log still counts as at the latest message, both
@@ -942,7 +937,7 @@ function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGr
 	)) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
 		// A routine's thread is marked where each run starts; any other, where each day does.
-		const separated = byRun ? startsRun(item) : startsNewDay(previousAt, at);
+		const separated = byRun ? startsRoutineRun(item) : startsNewDay(previousAt, at);
 		previousAt = at;
 		const last = groups.at(-1);
 		if (item.kind === "message") {
@@ -1346,6 +1341,6 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 }
 
 /** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
-function startsRun(item: ChatMessageItem): boolean {
+function startsRoutineRun(item: ChatMessageItem): boolean {
 	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
 }

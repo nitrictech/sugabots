@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useConnectionRepositories } from "@/lib/github-connections.ts";
+import { REPOSITORY_EVENT_LABELS } from "@/lib/routine-trigger-words.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
@@ -12,17 +13,6 @@ import { Toggle } from "@/ui/toggle.tsx";
  * What a repository routine runs on: one of its bot's pod's GitHub
  * connection's repositories, and what happening there starts a run.
  */
-
-/** Each event as its switch says it. */
-export const REPOSITORY_EVENT_LABELS: Record<RepositoryEvent, string> = {
-	pull_request_opened: "A pull request is opened",
-	pull_request_review: "A pull request is reviewed",
-	pull_request_comment: "Someone comments on a pull request",
-	issue_opened: "An issue is opened",
-	issue_comment: "Someone comments on an issue",
-	checks_failed: "Checks fail",
-	push: "A branch is pushed to",
-};
 
 /** What a repository routine runs on until somebody chooses. */
 export const DEFAULT_REPOSITORY_EVENTS: readonly RepositoryEvent[] = ["pull_request_opened"];
