@@ -1,9 +1,10 @@
 name: iOS
 
-# Runs the web's shared rule cases against the iOS app's Swift copies of those
-# rules whenever they or the API they're generated from change, so a change the
-# app hasn't caught up with fails here. That the generated files match their
-# sources is checked by the `codegen` and `contracts` tests in CI's Test job.
+# Builds the iOS app whenever it or the API it's generated from changes, so a
+# change to the API that the app hasn't caught up with fails here, and runs the
+# web's shared rule cases against the app's Swift copies of those rules. That
+# the generated files match their sources is checked by the `codegen` and
+# `contracts` tests in CI's Test job.
 
 on:
   push:
@@ -25,14 +26,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rules:
-    name: Rules
+  build:
+    name: Build
     # The app is written for a newer Swift than macOS 14's Xcode 15 builds;
     # macOS 26's image has Xcode 26 by default.
     runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+
+      - name: Build for the simulator
+        run: >-
+          xcodebuild build
+          -project apps/ios/Sugabots.xcodeproj
+          -scheme Sugabots
+          -destination "generic/platform=iOS Simulator"
+          CODE_SIGNING_ALLOWED=NO
 
       - name: Check the rules copied from the web
         run: apps/ios/check-rules.sh

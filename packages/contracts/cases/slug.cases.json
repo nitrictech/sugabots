@@ -1,0 +1,11 @@
+{
+	"slugify": [
+		{ "given": ["  Suga Team!  "], "expect": "suga-team" },
+		{ "given": ["Ünïcode Bots"], "expect": "n-code-bots" },
+		{ "given": ["!!!"], "expect": "" },
+		{
+			"given": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -- suffix"],
+			"expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		}
+	]
+}

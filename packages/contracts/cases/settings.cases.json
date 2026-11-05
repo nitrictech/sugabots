@@ -1,0 +1,141 @@
+{
+	"//": [
+		"A provider is given by the fields the rule reads: its preset, whether it is switched on, holds a key, and is signed in.",
+		"A tool's kind is read or change; a pod's pages are listed by their ids."
+	],
+	"providerLacksCredential": [
+		{ "given": [{ "preset": "anthropic", "hasApiKey": false, "signedIn": false }], "expect": true },
+		{ "given": [{ "preset": "anthropic", "hasApiKey": true, "signedIn": false }], "expect": false },
+		{ "given": [{ "preset": "ollama", "hasApiKey": false, "signedIn": false }], "expect": false },
+		{ "given": [{ "preset": "chatgpt", "hasApiKey": false, "signedIn": false }], "expect": true },
+		{ "given": [{ "preset": "chatgpt", "hasApiKey": true, "signedIn": false }], "expect": true },
+		{ "given": [{ "preset": "chatgpt", "hasApiKey": false, "signedIn": true }], "expect": false },
+		{ "given": [{ "preset": null, "hasApiKey": false, "signedIn": false }], "expect": true },
+		{ "given": [{ "preset": null, "hasApiKey": true, "signedIn": false }], "expect": false }
+	],
+	"isConnected": [
+		{
+			"given": [{ "preset": "anthropic", "active": true, "hasApiKey": true, "signedIn": false }],
+			"expect": true
+		},
+		{
+			"given": [{ "preset": "anthropic", "active": false, "hasApiKey": true, "signedIn": false }],
+			"expect": false
+		},
+		{
+			"given": [{ "preset": "openai", "active": true, "hasApiKey": false, "signedIn": false }],
+			"expect": false
+		},
+		{
+			"given": [{ "preset": "ollama", "active": true, "hasApiKey": false, "signedIn": false }],
+			"expect": true
+		},
+		{
+			"given": [{ "preset": "supergrok", "active": true, "hasApiKey": false, "signedIn": true }],
+			"expect": true
+		}
+	],
+	"heldReason": [
+		{
+			"given": [{ "newBots": true, "systemBots": false }, "one of its models"],
+			"expect": "New bots use one of its models. Choose another model for them under Models → Default first."
+		},
+		{
+			"given": [{ "newBots": false, "systemBots": true }, "this model"],
+			"expect": "System agents use this model. Choose another model for them under Models → Default first."
+		},
+		{
+			"given": [{ "newBots": true, "systemBots": true }, "one of its models"],
+			"expect": "New bots and system agents use one of its models. Choose another model for them under Models → Default first."
+		}
+	],
+	"parseProviderBaseUrl": [
+		{ "given": ["192.168.1.10:11434"], "expect": "http://192.168.1.10:11434/v1" },
+		{ "given": ["localhost:1234"], "expect": "http://localhost:1234/v1" },
+		{ "given": ["  https://llm.example.com/v1  "], "expect": "https://llm.example.com/v1" },
+		{ "given": ["https://llm.example.com/api/"], "expect": "https://llm.example.com/api" },
+		{ "given": ["https://llm.example.com"], "expect": "https://llm.example.com/v1" },
+		{ "given": [""], "expect": null },
+		{ "given": ["   "], "expect": null },
+		{ "given": ["not a server"], "expect": null },
+		{ "given": ["ftp://files.example.com"], "expect": null }
+	],
+	"settingOf": [
+		{
+			"given": [
+				[
+					{ "name": "search", "readOnly": true, "access": "allow" },
+					{ "name": "list", "readOnly": true, "access": "off" },
+					{ "name": "read", "readOnly": true, "access": "off" }
+				],
+				"read"
+			],
+			"expect": "off"
+		},
+		{
+			"given": [
+				[
+					{ "name": "search", "readOnly": true, "access": "ask" },
+					{ "name": "list", "readOnly": true, "access": "off" }
+				],
+				"read"
+			],
+			"expect": "ask"
+		},
+		{
+			"given": [
+				[
+					{ "name": "search", "readOnly": true, "access": "allow" },
+					{ "name": "list", "readOnly": true, "access": "off" }
+				],
+				"read"
+			],
+			"expect": "allow"
+		},
+		{
+			"given": [
+				[{ "name": "send", "access": "ask" }, { "name": "delete", "access": "off" }],
+				"change"
+			],
+			"expect": "ask"
+		},
+		{
+			"given": [
+				[{ "name": "send", "access": "allow" }, { "name": "delete", "access": "off" }],
+				"change"
+			],
+			"expect": "allow"
+		},
+		{
+			"given": [
+				[
+					{ "name": "send", "access": "allow" },
+					{ "name": "post", "access": "allow" },
+					{ "name": "delete", "access": "ask" }
+				],
+				"change"
+			],
+			"expect": "allow"
+		}
+	],
+	"shiftMonth": [
+		{ "given": ["2026-09", 0], "expect": "2026-09" },
+		{ "given": ["2026-09", 1], "expect": "2026-10" },
+		{ "given": ["2026-12", 1], "expect": "2027-01" },
+		{ "given": ["2026-01", -1], "expect": "2025-12" },
+		{ "given": ["2026-03", -15], "expect": "2024-12" },
+		{ "given": ["2026-11", 26], "expect": "2029-01" }
+	],
+	"podSettingsPagesOf": [
+		{
+			"given": [{ "kind": "shared" }, true],
+			"expect": ["general", "connections", "people", "bots", "computer"]
+		},
+		{
+			"given": [{ "kind": "shared" }, false],
+			"expect": ["general", "connections", "people", "bots"]
+		},
+		{ "given": [{ "kind": "personal" }, true], "expect": ["connections", "bots", "computer"] },
+		{ "given": [{ "kind": "personal" }, false], "expect": ["connections", "bots"] }
+	]
+}
