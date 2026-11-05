@@ -43,7 +43,6 @@ import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	type ConversationKind,
 	chatItemCreatedAt,
-	THREAD_NOT_STARTED,
 	useChatHistory,
 	useChatList,
 	useChatMessages,
@@ -52,7 +51,6 @@ import {
 	useSendChatMessage,
 	useSetDone,
 	useThreadFrom,
-	useThreadStarter,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
@@ -97,7 +95,7 @@ import {
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import { firstBotNamed, groupMentionsBy, mentionableIn, textWithMentions } from "./mentions.tsx";
+import { botsNamed, groupMentionsBy, mentionableIn, textWithMentions } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
@@ -118,6 +116,8 @@ const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
 /** Shown when marking a thread done, or reopening it, did not save. */
 const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try again.";
+/** Names the bots a pod's chat message asks, as "Ada, Bea and Cy". */
+const BOT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
@@ -183,7 +183,6 @@ export function ConversationChat({
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, conversationId);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, conversationId);
 	const attachments = useComposerAttachments(conversationId);
-	const threads = useThreadStarter(conversationId, attachments);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
@@ -235,17 +234,19 @@ export function ConversationChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	const threadWith = isPodChat && details ? firstBotNamed(draft, details.crew) : undefined;
+	// In the pod's chat, the bots a message names reply in the chat itself.
+	const answeringBots = isPodChat && details ? botsNamed(draft, details.crew) : [];
 	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
 	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
 	const { agents } = useAgents();
 	const answeringModel = useModelName(
-		(isPodChat ? agents?.find((one) => one.id === threadWith?.id)?.model : agent?.model) ?? null,
+		(isPodChat ? agents?.find((one) => one.id === answeringBots[0]?.id)?.model : agent?.model) ??
+			null,
 	);
 	// The people here and this chat's own bot, not yourself; the pod's other bots are not
-	// offered, except in the pod's chat, where naming one starts a thread with it.
+	// offered, except in the pod's chat, where naming one has it reply there.
 	const composerMentionable = useMemo(
 		() =>
 			details
@@ -319,12 +320,8 @@ export function ConversationChat({
 	}, []);
 
 	async function submit() {
-		if (send.isPending || threads.isPending) return;
+		if (send.isPending) return;
 		setStartError(undefined);
-		if (threadWith) {
-			await startThreadWith(threadWith);
-			return;
-		}
 		const files = attachments.takeForSending(draft);
 		if (!files) return;
 		const message = draft.trim();
@@ -348,22 +345,6 @@ export function ConversationChat({
 			setReplyingTo((current) => current ?? answering);
 			files.putBack(failure);
 		}
-	}
-
-	/** Sends the draft as the first message of a thread with `bot`, staying in the pod's chat. */
-	async function startThreadWith(bot: AgentParticipant) {
-		const submitted = draft;
-		const answering = replyingTo;
-		setDraft("");
-		setReplyingTo(undefined);
-		const started = await threads.start(submitted, {
-			hostAgentId: bot.id,
-			replyTo: answering?.id,
-		});
-		if (started.outcome === "started") return;
-		setDraft((current) => (current === "" ? submitted : current));
-		setReplyingTo((current) => current ?? answering);
-		if (started.outcome === "refused") setStartError(THREAD_NOT_STARTED);
 	}
 
 	/** Opens a thread started from a message here in its own place. */
@@ -540,9 +521,9 @@ export function ConversationChat({
 		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
 	};
 	const hint = isPodChat
-		? threadWith
-			? `Sending starts a thread with ${threadWith.name}.`
-			: "Mention a bot to start a thread."
+		? answeringBots.length > 0
+			? `${BOT_LIST.format(answeringBots.map((bot) => bot.name))} will reply here.`
+			: "Mention a bot to have it reply here."
 		: botStaysOut
 			? `${host.name} won't reply.`
 			: undefined;
@@ -749,7 +730,7 @@ export function ConversationChat({
 								onValueChange={setDraft}
 								onSubmit={submit}
 								submitLabel="Send message"
-								sending={send.isPending || threads.isPending}
+								sending={send.isPending}
 								error={
 									startError ??
 									(send.isError

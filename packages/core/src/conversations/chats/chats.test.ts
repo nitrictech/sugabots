@@ -1373,7 +1373,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
 	});
 
-	it("opens one chat per pod, where no bot answers, even one named in it", async () => {
+	it("opens one chat per pod, where a bot named in a message answers in the chat, and no bot otherwise", async () => {
 		const input = { workspace: workspaceId, podId };
 		const [first, again] = await Promise.all([chats.openPodChat(input), chats.openPodChat(input)]);
 		expect(again.id).toBe(first.id);
@@ -1385,11 +1385,28 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await chats.post({
 			conversationId: first.id,
 			messageId: crypto.randomUUID(),
-			content: `@${host?.handle} can you look at this?`,
+			content: "Morning, all.",
 		});
 
 		expect(await runOnPostgres(runningTurns(first.id))).toHaveLength(0);
-		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
+
+		await chats.post({
+			conversationId: first.id,
+			messageId: crypto.randomUUID(),
+			content: `@${host?.handle} can you look at this?`,
+		});
+
+		const runs = await runOnPostgres(runningTurns(first.id));
+		expect(runs).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "mention" }) }),
+		]);
+		const [run] = runs;
+		if (!run) throw new Error("The named bot was not asked");
+		const prepared = await prepareRunnable(
+			onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+			run,
+		);
+		expect(prepared.context.thread).toMatchObject({ id: first.id, type: "pod_chat" });
 	});
 
 	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {

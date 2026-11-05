@@ -96,10 +96,19 @@ describe("a person's message", () => {
 		).toEqual({ kind: "turns", agents: [{ agentId: reviewer, reason: "default" }] });
 	});
 
-	it("goes to nobody in a pod's chat or a conversation between people", () => {
-		expect(
-			decideFloor(input({ threadType: "pod_chat", hostAgentId: null, content: "@reviewer?" })),
-		).toEqual({ kind: "nobody" });
+	it("goes to the bots a pod's chat message mentions, and otherwise to nobody there", () => {
+		const podChat = { threadType: "pod_chat", hostAgentId: null } as const;
+		expect(decideFloor(input({ ...podChat, content: "@reviewer and @scout, thoughts?" }))).toEqual({
+			kind: "turns",
+			agents: [
+				{ agentId: reviewer, reason: "mention" },
+				{ agentId: scout, reason: "mention" },
+			],
+		});
+		expect(decideFloor(input({ ...podChat, content: "Morning all" }))).toEqual({ kind: "nobody" });
+	});
+
+	it("goes to nobody in a conversation between people", () => {
 		expect(decideFloor(input({ hostAgentId: null, content: "@reviewer?" }))).toEqual({
 			kind: "nobody",
 		});

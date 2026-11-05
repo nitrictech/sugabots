@@ -209,9 +209,9 @@ export const PodChatEmpty = meta.story({
 /**
  * A thread started from a message sits under it as a collaboration does, with
  * the faces of who started it and its bot, when it last moved and how many
- * replies it has. Naming a bot in the draft says sending starts a thread with it.
+ * replies it has. Naming bots in the draft says they will reply in the chat.
  */
-export const PodChatStartsAThread = meta.story({
+export const PodChatThreadsAndReplies = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			...appHandlers({
@@ -261,14 +261,13 @@ export const PodChatStartsAThread = meta.story({
 		await expect(
 			thread.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
-		await expect(canvas.getByText("Mention a bot to start a thread.")).toBeInTheDocument();
+		await expect(canvas.getByText("Mention a bot to have it reply here.")).toBeInTheDocument();
 		await userEvent.type(
 			canvas.getByRole("textbox", { name: "Message General" }),
 			`@${growthDesk.handle} draft the renewal note with @${accountManager.handle} `,
 		);
-		// The first bot named is the one the thread is with; the other is only mentioned.
 		await expect(
-			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
+			canvas.getByText(`${growthDesk.name} and ${accountManager.name} will reply here.`),
 		).toBeInTheDocument();
 	},
 });

@@ -42,18 +42,22 @@ export function mentionableIn(
 	];
 }
 
+/** The bots among `crew` that `draft` names, each once, in the order it first names them. */
+export function botsNamed(draft: string, crew: readonly ThreadParticipant[]): AgentParticipant[] {
+	const bots = crew.filter((member): member is AgentParticipant => member.kind === "agent");
+	const handles = new Set(mentionedHandles(draft));
+	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
+}
+
 /**
- * The bot named first in `draft` among `crew`, which sending from a pod's
- * chat starts a thread with; any named after it are only mentioned.
+ * The bot named first in `draft` among `crew`, which sending a new thread's
+ * first message starts it with; any named after it are only mentioned.
  */
 export function firstBotNamed(
 	draft: string,
 	crew: readonly ThreadParticipant[],
 ): AgentParticipant | undefined {
-	const bots = crew.filter((member): member is AgentParticipant => member.kind === "agent");
-	return mentionedHandles(draft)
-		.flatMap((handle) => bots.filter((bot) => bot.handle === handle))
-		.at(0);
+	return botsNamed(draft, crew).at(0);
 }
 
 /** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
