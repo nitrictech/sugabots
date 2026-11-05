@@ -1,3 +1,4 @@
+import { generateText } from "ai";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { capabilitiesNamed, discoveredModel } from "./dialect.ts";
@@ -248,5 +249,27 @@ describe("discovery decoding parity", () => {
 		for (const body of [null, {}, { data: null }, { data: {} }]) {
 			expect(Schema.decodeResult(openaiCompatible.listing)(body)._tag).toBe("Failure");
 		}
+	});
+});
+
+describe("OpenRouter requests", () => {
+	it("tells OpenRouter which app is calling", async () => {
+		let sent = new Headers();
+		const fetch: typeof globalThis.fetch = async (_input, init) => {
+			sent = new Headers(init?.headers);
+			throw new Error("not sent");
+		};
+		const model = openrouter.languageModel(
+			{ baseUrl: "https://openrouter.ai/api/v1", apiKey: "key", headers: {} },
+			"model",
+			fetch,
+		);
+
+		await expect(
+			generateText({ model, prompt: "Plan this week's meals", maxRetries: 0 }),
+		).rejects.toThrow("not sent");
+
+		expect(sent.get("HTTP-Referer")).toBe("https://sugabots.ai");
+		expect(sent.get("X-OpenRouter-Title")).toBe("Sugabots");
 	});
 });
