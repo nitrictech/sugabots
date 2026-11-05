@@ -215,6 +215,7 @@ struct RouteDestination: View {
 		case let .approval(callId): ApprovalPage(callId: callId)
 		case let .conversationAt(threadId, messageId): ConversationScreen(threadId: threadId, title: "", focusMessageId: messageId)
 		case let .sideThreadPage(conversationId, threadId): SideThreadSheet(threadId: threadId, conversationId: conversationId, entry: nil, chatAgentId: nil, asPage: true) { _ in }
+		case let .threads(pod, agent): ThreadsScreen(pod: pod, agent: agent)
 		case let .routines(pod, agent): RoutinesScreen(pod: pod, agent: agent)
 		case let .newRoutine(pod, agent): NewRoutineScreen(pod: pod, agent: agent)
 		case let .routine(pod, routineId): OpeningConversationScreen.routineFeed(routineId, in: pod)

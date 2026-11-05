@@ -130,6 +130,9 @@ private struct ConversationContent: View {
 				openComputer: { showingComputer = true },
 				openRoutines: {
 					if let pod, let agent = kind.agent { openPage(.routines(pod, agent: agent)) }
+				},
+				openThreads: {
+					if let pod, let agent = kind.agent { openPage(.threads(pod, agent: agent)) }
 				}
 			)
 		}
