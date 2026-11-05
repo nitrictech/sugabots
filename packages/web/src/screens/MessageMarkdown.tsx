@@ -13,17 +13,12 @@ import {
 	useState,
 } from "react";
 import { flushSync } from "react-dom";
-import {
-	type Components,
-	defaultRemarkPlugins,
-	type ExtraProps,
-	type LinkSafetyConfig,
-	Streamdown,
-} from "streamdown";
+import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
 import { Button } from "@/ui/button.tsx";
 import { codeHighlighter } from "./code-highlighter.ts";
+import { MarkdownLink } from "./MarkdownLink.tsx";
 import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
 
 /*
@@ -49,7 +44,6 @@ export function MessageMarkdown({
 				rehypePlugins={REHYPE_PLUGINS}
 				components={COMPONENTS}
 				controls={CONTROLS}
-				linkSafety={LINK_SAFETY}
 				plugins={PLUGINS}
 				// A long block folds instead (see `FoldingCodeBlock`), so the bubble never holds a scroller of its own.
 				codeBlockMaxHeight={Number.POSITIVE_INFINITY}
@@ -68,12 +62,6 @@ export function MessageMarkdown({
  * `rehypeFocusableCodeBlocks`.
  */
 const BREAK_LONG_WORDS = "break-words";
-
-/* Streamdown asks before following a link off the app; one back into it needs no warning. */
-const LINK_SAFETY: LinkSafetyConfig = {
-	enabled: true,
-	onLinkCheck: (url) => URL.parse(url, window.location.href)?.origin === window.location.origin,
-};
 
 /**
  * rehypeFocusableCodeBlocks makes fenced code scrollers keyboard-focusable
@@ -213,6 +201,8 @@ function FoldingCodeBlock({ node, children }: ExtraProps & { children?: ReactNod
 
 const COMPONENTS: Components = {
 	[MENTION_TAG]: MarkdownMention,
+	// Streamdown's own link becomes a button when it warns before leaving, losing middle-click and the hover preview.
+	a: MarkdownLink,
 	pre: FoldingCodeBlock,
 	// Streamdown's headings are sized for a page; a bubble is 520px wide.
 	h1: heading("h1", "text-base"),
