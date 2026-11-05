@@ -569,13 +569,15 @@ export const messageSchema = Schema.Struct({
 	/** People's reactions, in the order each emoji was first used. Absent when there are none. */
 	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
-}).check(
-	Schema.makeFilter(({ content, parts }) =>
-		content === parts.map((part) => (part.type === "text" ? part.text : "")).join("")
-			? undefined
-			: { issue: "Content must equal the combined text parts", path: ["content"] },
-	),
-);
+})
+	.check(
+		Schema.makeFilter(({ content, parts }) =>
+			content === parts.map((part) => (part.type === "text" ? part.text : "")).join("")
+				? undefined
+				: { issue: "Content must equal the combined text parts", path: ["content"] },
+		),
+	)
+	.annotate({ identifier: "Message" });
 
 export type Message = typeof messageSchema.Type;
 
