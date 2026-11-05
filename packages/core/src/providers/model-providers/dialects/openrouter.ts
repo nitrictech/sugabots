@@ -1,5 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { ProviderModelCapability } from "@sugabots/contracts";
+import { projectLinks } from "@sugabots/contracts/project-links";
 import { wrapLanguageModel } from "ai";
 import { Effect, Schema, SchemaGetter } from "effect";
 import { recognizeAnthropicFailure } from "./anthropic.ts";
@@ -36,6 +37,9 @@ export const openrouter: ProviderDialect = {
 	languageModel: (endpoint, modelId, fetch) =>
 		wrapLanguageModel({
 			model: createOpenRouter({
+				// Tells OpenRouter which app is calling, the same way on every installation.
+				appName: "Sugabots",
+				appUrl: projectLinks.website,
 				apiKey: endpoint.apiKey ?? "",
 				baseURL: endpoint.baseUrl,
 				headers: endpoint.headers,
