@@ -259,25 +259,14 @@ export const Overview = meta.story({
 
 /**
  * A provider with a few models: its key, which models are on (listed first),
- * and who uses each. Sonnet is the default and Haiku the system agents', so
- * neither can be switched off, nor can the provider be disconnected.
+ * and who uses each. Sonnet is the default and Haiku the system agents'.
  */
 export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Sonnet" })).toBeDisabled();
-		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Haiku" })).toBeDisabled();
-		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeDisabled();
-		await expect(canvas.getByRole("switch", { name: "Use Anthropic" })).toBeDisabled();
-		await expect(
-			canvas.getByText(/^Anthropic can't be turned off while it's in use\./),
-		).toBeInTheDocument();
-		await expect(
-			canvas.getByText(
-				"New bots and system agents use one of its models. Choose another model for them under Models → Default first.",
-			),
-		).toBeInTheDocument();
+		await expect(canvas.getByText(/^Default · 3 bots/)).toBeInTheDocument();
+		await expect(canvas.getByText(/^Summaries · 2 bots/)).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -330,6 +319,50 @@ export const SwitchOffModelLongLists = meta.story({
 		await userEvent.clear(search);
 		await userEvent.type(search, "no such model");
 		await expect(within(dialog).getByText("No models match.")).toBeInTheDocument();
+	},
+});
+
+/**
+ * Switching off the model new bots start on asks where they move as well as
+ * the bots on it, starting both on the same model.
+ */
+export const SwitchOffDefaultModel = meta.story({
+	render: () => <ProviderSettings providerId={anthropic.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("switch", { name: "Bots can use Claude Sonnet" }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: "Switch off Claude Sonnet" });
+		await expect(
+			within(dialog).getByText(
+				"These bots use Claude Sonnet, and so do new bots. Choose the model to move them to.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move new bots to: Claude Haiku" }),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
+	},
+});
+
+/**
+ * Switching off a provider whose models new bots and summaries use asks where
+ * each of those moves, beside each model's bots.
+ */
+export const SwitchOffProviderWithDefaults = meta.story({
+	render: () => <ProviderSettings providerId={anthropic.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Use Anthropic" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off Anthropic" });
+		await expect(
+			within(dialog).getByText(
+				"5 bots, new bots, and summaries use Anthropic's models. Choose the model each moves to.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move summaries to: GPT-5" }),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
 	},
 });
 
