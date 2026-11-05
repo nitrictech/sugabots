@@ -23,6 +23,7 @@ import * as lucideIcons from "./generate-lucide-icons.ts";
 import * as nativeConstants from "./generate-native-constants.ts";
 import * as palette from "./generate-palette.ts";
 import * as providerLogos from "./generate-provider-logos.ts";
+import * as triggerKinds from "./generate-trigger-kinds.ts";
 import { type Generator, iosOnly, targetRoots } from "./generated-files.ts";
 
 /** Every generator, by the script that holds it; a test checks each `generate-*.ts` is here. */
@@ -40,6 +41,7 @@ export const generators: Record<string, Generator> = {
 	"generate-native-constants.ts": iosOnly(nativeConstants.generate),
 	"generate-palette.ts": iosOnly(palette.generate),
 	"generate-provider-logos.ts": iosOnly(providerLogos.generate),
+	"generate-trigger-kinds.ts": iosOnly(triggerKinds.generate),
 };
 
 if (import.meta.main) {
