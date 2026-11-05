@@ -1,0 +1,31 @@
+name: Native apps
+
+# Checks that the files the native apps generate from the web's packages and
+# the API are what the generators make from them now. Only when the apps
+# change: until then they keep the files they last took, so a change to the
+# web or the API doesn't wait on them. Whoever changes an app regenerates
+# first, with `node apps/codegen/generate.ts`, and catches it up then.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - ".github/workflows/native.yml"
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated:
+    name: Generated files
+    runs-on: depot-ubuntu-24.04-4
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: bunx vitest run --config apps/codegen/vitest.config.ts
