@@ -56,6 +56,8 @@ struct MessageRow: View {
 	var startedThreads: [ChatMessageItem.Thread] = []
 	/// Smaller, as a side thread's sheet shows its messages.
 	var compact = false
+	/// How its face comes alive, when it's the face of the bot answering.
+	var liveFace: LiveFace?
 	@State private var timeTapped = false
 	@State private var pickingReaction = false
 	/// Whether the message is held, with what can be done with it slid up from the foot.
@@ -163,7 +165,10 @@ struct MessageRow: View {
 
 	@ViewBuilder private var face: some View {
 		Group {
-			if startsGroup {
+			if startsGroup, let liveFace, case let .agent(agent) = message.author {
+				WatchingFace(look: agent.look, size: column.faceSize, busy: liveFace.botTyping, watching: liveFace.viewerWriting)
+					.padding(.top, 2)
+			} else if startsGroup {
 				ParticipantFace(participant: message.author.participant, size: column.faceSize)
 					.padding(.top, 2)
 			} else {
@@ -572,6 +577,13 @@ struct ThreadLine: View {
 			open: open
 		)
 	}
+}
+
+/// How the face of the bot answering comes alive, as the web's `AnsweringFaceState`:
+/// thinking while the bot types, watching while the viewer writes back.
+struct LiveFace {
+	let botTyping: Bool
+	let viewerWriting: Bool
 }
 
 /// Who is typing, with the dots, as the web's `TypingIndicator`.

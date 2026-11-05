@@ -187,6 +187,9 @@ private struct ConversationContent: View {
 			let routineFeed = model.isRoutineFeed
 			let byMessage = Self.threadsByMessage(items)
 			let groups = ChatGroups.of(items, byRun: routineFeed, under: Set(byMessage.values.flatMap { $0 }.map(\.id)))
+			// Found across all the groups, not in each one, or each group would bring a face of its own alive.
+			let answering = ChatGroups.answeringFace(in: groups)
+			let viewerWriting = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 			let actions = messageActions(kind: kind, pod: pod, scroller: scroller)
 			if model.messagesFailed {
 				FormAlert(text: "Messages could not be loaded. Reload this page to try again.").padding(.horizontal, 20)
@@ -219,7 +222,8 @@ private struct ConversationContent: View {
 								actions: actions,
 								highlighted: highlighted == message.id,
 								heldOpen: heldMessageId == message.id,
-								startedThreads: byMessage[message.id] ?? []
+								startedThreads: byMessage[message.id] ?? [],
+								liveFace: answering?.messageId == message.id ? LiveFace(botTyping: answering?.botTyping ?? false, viewerWriting: viewerWriting) : nil
 							)
 							.id(message.id)
 						}

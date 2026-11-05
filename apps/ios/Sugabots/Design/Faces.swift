@@ -64,9 +64,6 @@ enum FaceMark {
 	}
 }
 
-/// The side of the square faces are drawn in, as `FACE_VIEWBOX_SIZE` in `@sugabots/avatars`.
-private let faceViewboxSize = 40.0
-
 /// A bot's face: its head in its colour, with its eyes, `size` points square.
 struct BotFace: View {
 	let look: BotLook
@@ -74,24 +71,7 @@ struct BotFace: View {
 
 	var body: some View {
 		Canvas { context, canvas in
-			let palette = BotLooks.palette(for: look.color)
-			let head = BotLooks.head(for: look.shape)
-			let marks = BotLooks.faces(for: look.face)
-			context.scaleBy(x: canvas.width / faceViewboxSize, y: canvas.height / faceViewboxSize)
-
-			for part in head.parts {
-				context.fill(part.path, with: .color(palette.face))
-			}
-
-			let eyes = head.eyes
-			let centre = faceViewboxSize / 2
-			var eyeContext = context
-			eyeContext.translateBy(x: eyes.x, y: eyes.y)
-			eyeContext.scaleBy(x: eyes.scale, y: eyes.scale)
-			eyeContext.translateBy(x: -centre, y: -centre)
-			for mark in marks {
-				mark.draw(in: eyeContext, with: .color(palette.eyes), cap: .butt)
-			}
+			FaceDrawing.draw(FaceArt(look: look), pose: FaceRig.restingPose, in: &context, canvas: canvas, overflow: 0)
 		}
 		.frame(width: size, height: size)
 		.accessibilityHidden(true)

@@ -84,6 +84,50 @@ enum ChatGroups {
 		return message.createdAt.timeIntervalSince(previous.createdAt) >= longQuiet
 	}
 
+	/// Whether `message` heads a run drawn with its author's face: after a day
+	/// marker, when `dividers` mark days, or as `startsGroup` says, as the web's `startsRun`.
+	static func startsRun(_ previous: Message?, _ message: Message, dividers: Bool) -> Bool {
+		(dividers && startsNewDay(previous?.createdAt, message.createdAt)) || startsGroup(previous, message)
+	}
+
+	/// Where the face of the bot answering is drawn, and whether it's typing now.
+	struct AnsweringFace {
+		let messageId: String
+		let botTyping: Bool
+	}
+
+	/// The face that stands for the bot that wrote the newest of `messages`,
+	/// as the web's `findAnsweringFace`: the last face drawn for that bot, with
+	/// a day marker before each new day when `dividers`. A reply just begun
+	/// shows only as its typing line, so its face may be on the bot's reply before.
+	static func answeringFace(in messages: [Message], dividers: Bool) -> AnsweringFace? {
+		answeringFace(among: messages.indices.map { index in
+			let message = messages[index]
+			return (message, startsRun(index > 0 ? messages[index - 1] : nil, message, dividers: dividers))
+		})
+	}
+
+	/// `answeringFace(in:dividers:)` for messages shown in `groups`, where a
+	/// face is drawn at the start of each group as well as where `startsGroup`
+	/// says, as a day marker, a thread line or a new run ends the group before.
+	static func answeringFace(in groups: [Group]) -> AnsweringFace? {
+		answeringFace(among: groups.flatMap { group -> [(Message, Bool)] in
+			guard case let .messages(messages) = group.content else { return [] }
+			return messages.indices.map { index in
+				(messages[index], startsGroup(index > 0 ? messages[index - 1] : nil, messages[index]))
+			}
+		})
+	}
+
+	/// The answering face among messages oldest first, each with whether a face is drawn on it.
+	private static func answeringFace(among shown: [(message: Message, drawsFace: Bool)]) -> AnsweringFace? {
+		guard let newest = shown.last?.message, case .agent = newest.author else { return nil }
+		let drawn = shown.last { message, drawsFace in
+			drawsFace && sameAuthor(message, newest) && !Segments.showsNothingYet(message)
+		}
+		return drawn.map { AnsweringFace(messageId: $0.message.id, botTyping: isTyping(newest)) }
+	}
+
 	private static func sameAuthor(_ left: Message, _ right: Message) -> Bool {
 		switch (left.author, right.author) {
 		case let (.person(a), .person(b)): a.id == b.id

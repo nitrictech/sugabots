@@ -17,6 +17,7 @@ import * as builtInTools from "./generate-built-in-tools.ts";
 import * as catalogs from "./generate-catalogs.ts";
 import * as connectionMarks from "./generate-connection-marks.ts";
 import * as emoji from "./generate-emoji.ts";
+import * as faceMotion from "./generate-face-motion.ts";
 import * as fileAndZoneLists from "./generate-file-and-zone-lists.ts";
 import * as limits from "./generate-limits.ts";
 import * as lucideIcons from "./generate-lucide-icons.ts";
@@ -35,6 +36,7 @@ export const generators: Record<string, Generator> = {
 	"generate-catalogs.ts": iosOnly(catalogs.generate),
 	"generate-connection-marks.ts": iosOnly(connectionMarks.generate),
 	"generate-emoji.ts": iosOnly(emoji.generate),
+	"generate-face-motion.ts": iosOnly(faceMotion.generate),
 	"generate-file-and-zone-lists.ts": iosOnly(fileAndZoneLists.generate),
 	"generate-limits.ts": iosOnly(limits.generate),
 	"generate-lucide-icons.ts": iosOnly(lucideIcons.generate),

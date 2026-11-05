@@ -49,7 +49,7 @@ struct NewBotScreen: View {
 				.padding(.bottom, 8)
 				VStack(spacing: 16) {
 					Button { customising = true } label: {
-						BotFace(look: look, size: 112)
+						CreationFace(look: look)
 							.scaleEffect(naming || customising ? 0.5 : 1, anchor: .top)
 							.frame(height: naming || customising ? 56 : 112, alignment: .top)
 							.overlay(alignment: .bottomTrailing) {
@@ -132,5 +132,17 @@ struct NewBotScreen: View {
 	/// A look to start from: any colour, head and eyes.
 	static func randomLook() -> BotLook {
 		BotLook(color: AgentColor.known.randomElement()!, face: AgentFace.known.randomElement()!, shape: AgentShape.known.randomElement()!)
+	}
+}
+
+/// The bot being made, large, as the web's `CreationFace`: hopping each time
+/// its look changes, and moving through `FaceMotion.creationMoods`.
+private struct CreationFace: View {
+	let look: BotLook
+	@State private var mood = FaceMotion.creationMoods.rest.mood
+
+	var body: some View {
+		LivelyBotFace(look: look, size: 112, mood: mood, hopsOnNewLook: true)
+			.moodLoop(FaceMotion.creationMoods, running: true, mood: $mood)
 	}
 }
