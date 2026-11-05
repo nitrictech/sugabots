@@ -277,6 +277,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
 	const cannotTurnOff = provider.active && heldOn !== undefined;
 	const stranded = useStrandedModels(provider);
+	// Until the bots are known, switching off could leave some on its models unasked.
+	const botsKnown = useAgents().agents !== undefined;
 	const [movingBotsTo, setMovingBotsTo] = useState<"switch off" | "disconnect">();
 
 	async function disconnectProvider() {
@@ -340,7 +342,9 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 					trailing={
 						<Toggle
 							checked={provider.active}
-							disabled={cannotTurnOff || actions.update.isPending}
+							disabled={
+								cannotTurnOff || actions.update.isPending || (provider.active && !botsKnown)
+							}
 							label={`Use ${provider.name}`}
 							onChange={(active) => {
 								if (!active && stranded.length > 0) {
@@ -362,7 +366,9 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				onClick={() =>
 					stranded.length > 0 ? setMovingBotsTo("disconnect") : setDisconnecting(true)
 				}
-				disabledReason={held && heldReason(held, "one of its models")}
+				disabledReason={
+					held ? heldReason(held, "one of its models") : botsKnown ? undefined : "Loading bots…"
+				}
 			/>
 			<Dialog
 				open={movingBotsTo !== undefined}
@@ -743,7 +749,7 @@ function MoveBotsOffProviderDialog({
 								<SettingsRow
 									key={model.id}
 									label={modelName(model)}
-									sub={bots.map((bot) => bot.name).join(", ")}
+									sub={someNames(bots)}
 									trailing={
 										<DropdownMenu>
 											<DropdownMenuTrigger
@@ -757,7 +763,7 @@ function MoveBotsOffProviderDialog({
 													className="shrink-0 text-muted-foreground"
 												/>
 											</DropdownMenuTrigger>
-											<DropdownMenuContent align="end" className="min-w-48">
+											<DropdownMenuContent align="end" className="max-h-80 min-w-48">
 												<DropdownMenuRadioGroup
 													value={to}
 													onValueChange={(modelId: string) =>
@@ -791,6 +797,18 @@ function MoveBotsOffProviderDialog({
 		</DialogForm>
 	);
 }
+
+/** How many bots' names a row spells out before saying how many more there are. */
+const NAMED_BOTS = 3;
+
+/** The first few bots' names, and how many more: "Ada, Grace, Linus and 37 more". */
+function someNames(bots: readonly Agent[]): string {
+	const names = bots.slice(0, NAMED_BOTS).map((bot) => bot.name);
+	const more = bots.length - names.length;
+	return more > 0 ? `${names.join(", ")} and ${more} more` : LIST.format(names);
+}
+
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 /** The models the provider offers agents: none while it is not connected. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
