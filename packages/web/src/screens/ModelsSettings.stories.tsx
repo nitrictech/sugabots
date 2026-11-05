@@ -287,7 +287,7 @@ export const SwitchOffModelInUse = meta.story({
 		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
 		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
 		await expect(
-			within(dialog).getByText("1 bot uses GPT-5. Choose the model to move it to."),
+			within(dialog).getByText("This bot uses GPT-5. Choose the model to move it to."),
 		).toBeInTheDocument();
 		await userEvent.hover(within(dialog).getByRole("img", { name: "On-call" }));
 		await expect(await screen.findByText("On-call")).toBeVisible();
