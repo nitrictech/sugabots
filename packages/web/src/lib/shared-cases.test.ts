@@ -1,38 +1,24 @@
 import {
-	type CalendarSchedule,
 	canStartMention,
-	type Message,
-	type MessagePart,
 	mentionedHandles,
+	messagePartSchema,
 	messagePreview,
-	type PersonParticipant,
+	messageSchema,
+	personParticipantSchema,
 	quotedPreview,
-	type RoutineTriggerInput,
+	type Routine,
+	type RoutineSchedule,
+	type RoutineTrigger,
+	routineScheduleSchema,
+	routineTriggerInputSchema,
 	splitAroundMentions,
-	type ThreadParticipant,
-	type ThreadType,
 	type ToolCallPart,
+	threadParticipantSchema,
+	threadTypeSchema,
+	toolCallPartSchema,
 } from "@sugabots/contracts";
-import { describe, expect, it } from "vitest";
-import avatarCases from "../../../contracts/cases/avatar.cases.json" with { type: "json" };
-import fileLookCases from "../../../contracts/cases/file-looks.cases.json" with { type: "json" };
-import listTimeCases from "../../../contracts/cases/list-time.cases.json" with { type: "json" };
-import markdownCases from "../../../contracts/cases/markdown.cases.json" with { type: "json" };
-import mentionCases from "../../../contracts/cases/mentions.cases.json" with { type: "json" };
-import messagePreviewCases from "../../../contracts/cases/message-preview.cases.json" with {
-	type: "json",
-};
-import muteCases from "../../../contracts/cases/mute.cases.json" with { type: "json" };
-import nameListCases from "../../../contracts/cases/name-list.cases.json" with { type: "json" };
-import routineScheduleCases from "../../../contracts/cases/routine-schedule.cases.json" with {
-	type: "json",
-};
-import threadLayoutCases from "../../../contracts/cases/thread-layout.cases.json" with {
-	type: "json",
-};
-import timeZoneCases from "../../../contracts/cases/time-zones.cases.json" with { type: "json" };
-import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with { type: "json" };
-import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
+import { Schema } from "effect";
+import { describe, expect, it, vi } from "vitest";
 import {
 	firstBotNamed,
 	groupMentionsBy,
@@ -40,6 +26,7 @@ import {
 	mentionTargetKey,
 	targetWithHandle,
 } from "../screens/mentions.tsx";
+import { scheduleNote } from "../screens/RoutineTriggers.tsx";
 import {
 	findAnsweringFace,
 	formatDay,
@@ -71,42 +58,82 @@ import {
 import { countOf, listNames } from "./name-list.ts";
 import { formatUntil, MUTE_DURATIONS } from "./notifications.ts";
 import {
+	defaultSchedule,
 	formatDayOfMonth,
 	formatEvery,
 	formatTime,
+	nextRunAt,
 	nextTime,
+	type Repeat,
+	readingLabel,
+	readSchedule,
+	type ScheduleReading,
 	scheduleSummary,
 	stepTime,
 	triggerLabel,
+	withRepeat,
 } from "./routine-schedule.ts";
 import { timeZonePlace, timeZoneRegions, utcOffset } from "./time-zones.ts";
 import { connectionLabel, stepLabel, toolTitle, wordsFromKey } from "./tool-names.ts";
 
 /*
- * The rules in `packages/contracts/cases/*.cases.json` are copied into the
- * phone apps, which run the same cases against their own copies. Change a
- * case here when the web's behaviour changes, and an app's check fails until
- * its copy does the same.
+ * The rules in `@sugabots/contracts/cases/*.cases.json` are copied into the
+ * phone apps, which run the same cases against their own copies (the iOS app's
+ * `apps/ios/check-rules.sh`). Change a case here when the web's
+ * behaviour changes, and an app's check fails until its copy does the same.
  *
  * Each file maps a rule's name to its cases: the arguments it is `given`, as
  * JSON, and what it returns for them, with null for nothing. A key starting
- * with `//` is a note to the file's readers, such as where an app knowingly
- * differs, and no rule.
+ * with `//` is a note to the file's readers, such as how a case writes what a
+ * rule takes or gives, or where an app knowingly differs, and no rule.
  */
 
-type Rule = (...given: never[]) => unknown;
 type Case = { given: readonly unknown[]; expect: unknown };
 type Cases = Record<string, unknown>;
 
+/** A schema an argument is decoded with, or null for an argument the API has no schema for. */
+type ArgumentSchema = Schema.Decoder<unknown> | null;
+
+/** What `schemas` decode their arguments to: each schema's type, or `never` for null, leaving the rule to say what it takes there. */
+type Decoded<Schemas extends readonly ArgumentSchema[]> = {
+	[Index in keyof Schemas]: Schemas[Index] extends Schema.Decoder<infer Type> ? Type : never;
+};
+
+/**
+ * A rule, called with its case's `given` arguments once each is decoded with
+ * the schema in the same place of `argumentSchemas`, so a case can't give
+ * something the API never sends.
+ */
+type Rule = {
+	argumentSchemas: readonly ArgumentSchema[];
+	run: (...given: never[]) => unknown;
+};
+
 const NOTE_PREFIX = "//";
 
-/** How many image pixels the web draws a CSS pixel of a face with, as `gravatarUrl` sizes its pictures. */
-const GRAVATAR_PIXEL_RATIO = 2;
+/** A rule whose arguments are decoded with `argumentSchemas` before `run` is called with them. */
+function decoding<const Schemas extends readonly ArgumentSchema[]>(
+	argumentSchemas: Schemas,
+	run: (...given: Decoded<Schemas>) => unknown,
+): Rule {
+	return { argumentSchemas, run: run as Rule["run"] };
+}
+
+/** `run` as a rule whose arguments are plain JSON values, with no schema to decode them with. */
+function plain(run: (...given: never[]) => unknown): Rule {
+	return { argumentSchemas: [], run };
+}
 
 /** A date as a local date-time with no offset, `2026-09-25T06:12`, as the cases write one. */
 function localTimeText(date: Date): string {
 	const twoDigits = (value: number) => String(value).padStart(2, "0");
 	return `${date.getFullYear()}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())}T${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+}
+
+/** `schedule`, which a case must give picked by its parts, since the rules have no words for cron. */
+function calendarSchedule(schedule: RoutineSchedule) {
+	if (schedule.repeat === "cron") throw new Error("A case gives a cron schedule");
+	return schedule;
 }
 
 /** The file's rules and their cases, without its notes. */
@@ -117,172 +144,183 @@ function rulesIn(cases: Cases): [string, Case[]][] {
 	][];
 }
 
-const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
-	{
-		file: "tool-names.cases.json",
-		cases: toolNameCases,
-		rules: { stepLabel, toolTitle, connectionLabel, wordsFromKey },
+/** Calls `rule` with `given`, each argument decoded with its schema. */
+function call(rule: Rule, given: readonly unknown[]): unknown {
+	const decoded = given.map((value, index) => {
+		const schema = rule.argumentSchemas[index];
+		return schema ? Schema.decodeUnknownSync(schema)(value) : value;
+	});
+	return rule.run(...(decoded as never[]));
+}
+
+const caseFiles: Record<string, Cases> = Object.fromEntries(
+	Object.entries(
+		import.meta.glob<Cases>("/node_modules/@sugabots/contracts/cases/*.cases.json", {
+			eager: true,
+			import: "default",
+		}),
+	).map(([path, cases]) => [path.slice(path.lastIndexOf("/") + 1), cases]),
+);
+
+/** The web's rules each case file has cases for, by the file's name. */
+const rulesByFile: Record<string, Record<string, Rule>> = {
+	"tool-names.cases.json": {
+		stepLabel: plain(stepLabel),
+		toolTitle: plain(toolTitle),
+		connectionLabel: plain(connectionLabel),
+		wordsFromKey: plain(wordsFromKey),
 	},
-	{
-		// Times are written as local date-times, with no offset, so both sides read them in their own time zone.
-		// Month and weekday names come from each platform's own locale data, which can differ
-		// (en-AU's September is "Sept" in Node and "Sep" on Apple's); a case where they differ is left out.
-		file: "list-time.cases.json",
-		cases: listTimeCases,
-		rules: {
-			formatClockTime: (at: string, locale: string) => formatClockTime(new Date(at), locale),
-			formatListTime: (at: string, now: string, locale: string) =>
-				formatListTime(new Date(at), new Date(now), locale),
-			formatListTimeInSentence: (at: string, now: string, locale: string) =>
-				formatListTimeInSentence(new Date(at), new Date(now), locale),
-			formatAge: (at: string, now: string, locale: string) =>
-				formatAge(new Date(at), new Date(now), locale),
-		},
+	"list-time.cases.json": {
+		formatClockTime: plain((at: string, locale: string) => formatClockTime(new Date(at), locale)),
+		formatListTime: plain((at: string, now: string, locale: string) =>
+			formatListTime(new Date(at), new Date(now), locale),
+		),
+		formatListTimeInSentence: plain((at: string, now: string, locale: string) =>
+			formatListTimeInSentence(new Date(at), new Date(now), locale),
+		),
+		formatAge: plain((at: string, now: string, locale: string) =>
+			formatAge(new Date(at), new Date(now), locale),
+		),
 	},
-	{ file: "name-list.cases.json", cases: nameListCases, rules: { listNames, countOf } },
-	{
-		// A bot is named by its id, and whom a mention can name by `mentionTargetKey`.
-		file: "mentions.cases.json",
-		cases: mentionCases,
-		rules: {
-			splitAroundMentions,
-			mentionedHandles,
-			canStartMention,
-			firstBotNamed: (draft: string, crew: ThreadParticipant[]) => firstBotNamed(draft, crew)?.id,
-			// A group mention is its handle and the ids of whom it notifies.
-			groupMentionsBy: (
-				writer: Parameters<typeof groupMentionsBy>[0],
-				members: PersonParticipant[],
-				threadType: ThreadType,
-			) =>
+	"name-list.cases.json": { listNames: plain(listNames), countOf: plain(countOf) },
+	"mentions.cases.json": {
+		splitAroundMentions: plain(splitAroundMentions),
+		mentionedHandles: plain(mentionedHandles),
+		canStartMention: plain(canStartMention),
+		firstBotNamed: decoding(
+			[null, Schema.Array(threadParticipantSchema)],
+			(draft: string, crew) => firstBotNamed(draft, crew)?.id,
+		),
+		groupMentionsBy: decoding(
+			[null, Schema.Array(personParticipantSchema), threadTypeSchema],
+			(writer: Parameters<typeof groupMentionsBy>[0], members, threadType) =>
 				groupMentionsBy(writer, members, threadType).map(({ handle, notifies }) => ({
 					handle,
 					notifies: notifies.map((person) => person.id),
 				})),
-			targetWithHandle: (mentionable: MentionTarget[], handle: string) => {
-				const target = targetWithHandle(mentionable, handle);
-				return target && mentionTargetKey(target);
-			},
-		},
+		),
+		targetWithHandle: plain((mentionable: MentionTarget[], handle: string) => {
+			const target = targetWithHandle(mentionable, handle);
+			return target && mentionTargetKey(target);
+		}),
 	},
-	{
-		// A segment is its type, its key and a text's words; a time with no offset is local, as in list-time's cases.
-		file: "thread-layout.cases.json",
-		cases: threadLayoutCases,
-		rules: {
-			segmentsOf: (message: Message) =>
-				segmentsOf(message).map((segment) =>
-					segment.type === "text"
-						? { type: segment.type, key: segment.key, text: segment.text }
-						: { type: segment.type, key: segment.key },
-				),
-			showsNothingYet,
-			isTyping,
-			startsGroup: (previous: Message | null, message: Message) =>
-				startsGroup(previous ?? undefined, message),
-			startsNewDay: (previousAt: string | null, at: string) =>
-				startsNewDay(previousAt ?? undefined, at),
-			formatDay: (date: string, now: string, locale: string) =>
-				formatDay(new Date(date), { now: new Date(now), locale }),
-			findAnsweringFace,
-		},
+	"thread-layout.cases.json": {
+		segmentsOf: decoding([messageSchema], (message) =>
+			segmentsOf(message).map((segment) =>
+				segment.type === "text"
+					? { type: segment.type, text: segment.text }
+					: { type: segment.type },
+			),
+		),
+		showsNothingYet: decoding([messageSchema], showsNothingYet),
+		isTyping: decoding([messageSchema], isTyping),
+		startsGroup: decoding([Schema.NullOr(messageSchema), messageSchema], (previous, message) =>
+			startsGroup(previous ?? undefined, message),
+		),
+		startsNewDay: plain((previousAt: string | null, at: string) =>
+			startsNewDay(previousAt ?? undefined, at),
+		),
+		formatDay: plain((date: string, now: string, locale: string) =>
+			formatDay(new Date(date), { now: new Date(now), locale }),
+		),
+		findAnsweringFace: decoding([Schema.Array(messageSchema), null], findAnsweringFace),
 	},
-	{
-		file: "file-looks.cases.json",
-		cases: fileLookCases,
-		rules: { fileLookOf, extensionOf, fileSizeLabel },
+	"file-looks.cases.json": {
+		fileLookOf: plain(fileLookOf),
+		extensionOf: plain(extensionOf),
+		fileSizeLabel: plain(fileSizeLabel),
 	},
-	{
-		// A region is its name and its zones' names.
-		file: "time-zones.cases.json",
-		cases: timeZoneCases,
-		rules: {
-			timeZonePlace,
-			utcOffset: (zone: string, now: string) => utcOffset(zone, new Date(now)),
-			timeZoneRegions: (zones: string[]) =>
-				timeZoneRegions(
-					zones.map((zone) => ({ zone, place: timeZonePlace(zone), offset: "" })),
-				).map(({ name, choices }) => ({ name, zones: choices.map(({ zone }) => zone) })),
-		},
+	"time-zones.cases.json": {
+		timeZonePlace: plain(timeZonePlace),
+		utcOffset: plain((zone: string, now: string) => utcOffset(zone, new Date(now))),
+		timeZoneRegions: plain((zones: string[]) =>
+			timeZoneRegions(zones.map((zone) => ({ zone, place: timeZonePlace(zone), offset: "" }))).map(
+				({ name, choices }) => ({ name, zones: choices.map(({ zone }) => zone) }),
+			),
+		),
 	},
-	{
-		// A Gravatar's size is in image pixels, which each platform draws a face at its own density with.
-		file: "avatar.cases.json",
-		cases: avatarCases,
-		rules: {
-			initials,
-			gravatarUrl: (email: string, pixels: number) =>
-				gravatarUrl(email, pixels / GRAVATAR_PIXEL_RATIO),
-		},
+	"avatar.cases.json": { initials: plain(initials), gravatarUrl: plain(gravatarUrl) },
+	"mute.cases.json": {
+		formatUntil: plain((until: string, now: string, locale: string) =>
+			formatUntil(new Date(until), { now: new Date(now), locale }),
+		),
+		muteUntil: plain((label: string, now: string) => {
+			const duration = MUTE_DURATIONS.find((one) => one.label === label);
+			return duration && localTimeText(duration.until(new Date(now)));
+		}),
 	},
-	{
-		// Times are local date-times, as in list-time's cases; a mute is chosen by its label.
-		file: "mute.cases.json",
-		cases: muteCases,
-		rules: {
-			formatUntil: (until: string, now: string, locale: string) =>
-				formatUntil(new Date(until), new Date(now), locale),
-			muteUntil: (label: string, now: string) => {
-				const duration = MUTE_DURATIONS.find((one) => one.label === label);
-				return duration && localTimeText(duration.until(new Date(now)));
-			},
-		},
+	// What MessageMarkdown draws, as test-markdown-outline.ts reads it from the page.
+	"markdown.cases.json": { markdownOutline: plain(markdownOutline) },
+	"message-preview.cases.json": {
+		messagePreview: plain(messagePreview),
+		quotedPreview: plain(quotedPreview),
 	},
-	{
-		// What MessageMarkdown draws, as test-markdown-outline.ts reads it from the page.
-		file: "markdown.cases.json",
-		cases: markdownCases,
-		rules: { markdownOutline },
-	},
-	{
-		file: "message-preview.cases.json",
-		cases: messagePreviewCases,
-		rules: { messagePreview, quotedPreview },
-	},
-	{
-		// Calls are as the API sends them. Runs list their calls by id; file names and connections' looks are by id and handle.
-		file: "tool-steps.cases.json",
-		cases: toolStepCases,
-		rules: {
-			toolStepRuns: (parts: MessagePart[]) =>
-				toolStepRuns(parts).map(({ narration, calls }) => ({
-					narration,
-					calls: calls.map(({ id }) => id),
-				})),
-			describeStep: (call: ToolCallPart, fileNames: Record<string, string>) =>
-				describeStep(call, new Map(Object.entries(fileNames))),
-			stepDetails,
-			outputValue,
-			noteOf,
-			toolLineText: (calls: ToolCallPart[], looks: Record<string, ConnectionLook>) =>
+	"tool-steps.cases.json": {
+		toolStepRuns: decoding([Schema.Array(messagePartSchema)], (parts) =>
+			toolStepRuns(parts).map(({ narration, calls }) => ({
+				narration,
+				calls: calls.map(({ id }) => id),
+			})),
+		),
+		describeStep: decoding([toolCallPartSchema, null], (call, fileNames: Record<string, string>) =>
+			describeStep(call, new Map(Object.entries(fileNames))),
+		),
+		stepDetails: decoding([toolCallPartSchema], stepDetails),
+		outputValue: plain(outputValue),
+		noteOf: decoding([toolCallPartSchema], noteOf),
+		toolLineText: decoding(
+			[Schema.Array(toolCallPartSchema), null],
+			(calls: readonly ToolCallPart[], looks: Record<string, ConnectionLook>) =>
 				toolLineText(calls, new Map(Object.entries(looks))),
-			durationOf,
-			formatDuration,
-			formatTotal,
-		},
+		),
+		durationOf: decoding([toolCallPartSchema], durationOf),
+		formatDuration: plain(formatDuration),
+		formatTotal: plain(formatTotal),
 	},
-	{
-		file: "routine-schedule.cases.json",
-		cases: routineScheduleCases,
-		rules: {
-			formatTime,
-			formatDayOfMonth,
-			stepTime,
-			nextTime,
-			formatEvery: (schedule: CalendarSchedule) => formatEvery(schedule),
-			scheduleSummary: (schedule: CalendarSchedule) => scheduleSummary(schedule),
-			triggerLabel: (trigger: RoutineTriggerInput) => triggerLabel(trigger),
-		},
+	"routine-schedule.cases.json": {
+		formatTime: plain(formatTime),
+		formatDayOfMonth: plain(formatDayOfMonth),
+		stepTime: plain(stepTime),
+		nextTime: plain(nextTime),
+		formatEvery: decoding([routineScheduleSchema], (schedule) =>
+			formatEvery(calendarSchedule(schedule)),
+		),
+		scheduleSummary: decoding([routineScheduleSchema], (schedule) =>
+			scheduleSummary(calendarSchedule(schedule)),
+		),
+		triggerLabel: decoding([routineTriggerInputSchema], triggerLabel),
+		// The local date-time each is given is the clock's time while it runs.
+		readSchedule: plain((schedule: RoutineSchedule, now: string) =>
+			atTime(now, () => readSchedule(schedule)),
+		),
+		readingLabel: plain(readingLabel),
+		withRepeat: plain((reading: ScheduleReading, repeat: Repeat, now: string) =>
+			atTime(now, () => withRepeat(reading, repeat)),
+		),
+		defaultSchedule: plain((now: string) => atTime(now, defaultSchedule)),
+		// Each trigger's next run is given as a local date-time, and sent as the instant it is here.
+		nextRunAt: plain((routine: { triggers: RoutineTrigger[] }, now: string) =>
+			nextRunAt(
+				{
+					triggers: routine.triggers.map((trigger) =>
+						trigger.kind === "cron" && trigger.nextScheduledAt
+							? { ...trigger, nextScheduledAt: new Date(trigger.nextScheduledAt).toISOString() }
+							: trigger,
+					),
+				} as unknown as Routine,
+				new Date(now),
+			),
+		),
+		scheduleNote: plain(scheduleNote),
 	},
-];
+};
 
-it("runs every case file", () => {
-	const files = Object.keys(import.meta.glob("../../../contracts/cases/*.cases.json"));
-	const names = files.map((path) => path.slice(path.lastIndexOf("/") + 1));
-	expect(names.sort()).toEqual(suites.map(({ file }) => file).sort());
+it("has the web's rules for every case file, and no rules without one", () => {
+	expect(Object.keys(rulesByFile).sort()).toEqual(Object.keys(caseFiles).sort());
 });
 
-for (const { file, cases, rules } of suites) {
+for (const [file, cases] of Object.entries(caseFiles)) {
+	const rules = rulesByFile[file] ?? {};
 	describe(file, () => {
 		it("covers each of its rules, and only those", () => {
 			expect(
@@ -293,8 +331,20 @@ for (const { file, cases, rules } of suites) {
 		});
 		for (const [name, entries] of rulesIn(cases)) {
 			it.each(entries)(`${name}(%j)`, ({ given, expect: expected }) => {
-				expect((rules[name] as Rule)(...(given as never[])) ?? null).toEqual(expected);
+				const rule = rules[name];
+				if (!rule) throw new Error(`No rule called ${name}`);
+				expect(call(rule, given) ?? null).toEqual(expected);
 			});
 		}
 	});
+}
+
+/** `run`'s result with the clock set to the local date-time `now`. */
+function atTime<Result>(now: string, run: () => Result): Result {
+	vi.useFakeTimers({ now: new Date(now), toFake: ["Date"] });
+	try {
+		return run();
+	} finally {
+		vi.useRealTimers();
+	}
 }
