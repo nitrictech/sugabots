@@ -1,5 +1,5 @@
 import { messageAuthorName } from "@sugabots/contracts";
-import { and, asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte, or } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent, message, thread, user } from "../../database/schema.ts";
@@ -26,6 +26,8 @@ export interface SystemAgentScope {
 	workspaceId: string;
 	threadTitle: string;
 	initiatorUserId: string | null;
+	/** On a thread started from a message in a channel: that message, which stays in the channel. */
+	startingMessageId: string | null;
 	/** The model of the agent whose reply asked for this work, which reads the thread next. */
 	agentModel: string | null;
 }
@@ -52,6 +54,7 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 			workspaceId: thread.workspaceId,
 			threadTitle: thread.title,
 			initiatorUserId: thread.initiatorUserId,
+			startingMessageId: thread.originMessageId,
 			agentModel: agent.model,
 		})
 		.from(thread)
@@ -71,13 +74,14 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 
 /**
  * Every complete message in the thread, oldest first, or only those created
- * at or after `from`. A message with nothing to read, such as a reply that only
- * called tools that left no record, has no `entry`.
+ * at or after `from`, including `startingMessageId` when provided: the message
+ * in a channel the thread was started from. A message with nothing to read,
+ * such as a reply that only called tools that left no record, has no `entry`.
  */
 export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(function* (
 	db: Executor,
 	threadId: string,
-	from?: Date,
+	{ from, startingMessageId }: { from?: Date; startingMessageId?: string | null } = {},
 ) {
 	const rows = yield* db
 		.select({
@@ -89,7 +93,10 @@ export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(fun
 		.leftJoin(agent, eq(agent.id, message.authorAgentId))
 		.where(
 			and(
-				eq(message.threadId, threadId),
+				or(
+					eq(message.threadId, threadId),
+					startingMessageId ? eq(message.id, startingMessageId) : undefined,
+				),
 				eq(message.status, "complete"),
 				from ? gte(message.createdAt, from) : undefined,
 			),

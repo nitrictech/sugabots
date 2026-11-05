@@ -86,7 +86,11 @@ export const make = Effect.gen(function* () {
 						// anyway. The driver queues them, and warns that it is about to stop accepting
 						// them at all.
 						const previous = yield* query((db) => loadThreadSummary(db, scope.threadId));
-						const transcriptRows = yield* query((db) => loadTranscript(db, scope.threadId));
+						const transcriptRows = yield* query((db) =>
+							loadTranscript(db, scope.threadId, {
+								startingMessageId: scope.startingMessageId,
+							}),
+						);
 						const sourceIndex = transcriptRows.findIndex(
 							(row) => row.id === request.sourceMessageId,
 						);

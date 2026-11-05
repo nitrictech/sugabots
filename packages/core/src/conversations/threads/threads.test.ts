@@ -107,6 +107,22 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		return viewAs(input.initiatorUserId).get(opened.id);
 	}
 
+	/** A thread with the bot, started from a message in its channel. */
+	async function startThreadWithBot(input: Parameters<typeof createThread>[0]) {
+		const chats = chatsAs(input.initiatorUserId);
+		const channel = await chats.openBotChannel({
+			workspace: input.workspaceId,
+			podId: input.podId,
+			hostAgentId: input.hostAgentId,
+		});
+		const started = await chats.startThread({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: input.message,
+		});
+		return started.conversation;
+	}
+
 	/** The agent's turn running in the thread, as its workflow runs it. */
 	async function runningTurn(threadId: string, agent = agentId) {
 		const run = (await runOnPostgres(runningTurns(threadId))).find(
@@ -768,6 +784,35 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toMatch(
 			/^Release agent /,
 		);
+	});
+
+	it("summarises a thread from the message in the channel it was started from", async () => {
+		const started = await startThreadWithBot({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Check the release notes",
+		});
+		const run = await runningTurn(started.id);
+		const reply = await prepareRunnable(turns, run);
+		await turnRecords.complete(
+			replyTurnOf(reply),
+			{ content: "They are ready.", collaborations: [], toolCalls: [] },
+			{ contextCapacity: 200_000, readKeptFrom: null },
+		);
+		await runOnPostgres(releaseTurn(run));
+
+		const summary = await preparedSummary({
+			threadId: started.id,
+			agentId,
+			sourceMessageId: reply.responseMessage.id,
+		});
+
+		expect(summary.transcript.map(({ content }) => content)).toEqual([
+			"Check the release notes",
+			"They are ready.",
+		]);
 	});
 
 	it("records a summary the model could not write as the Scribe's failed turn", async () => {
