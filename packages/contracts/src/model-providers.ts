@@ -325,10 +325,22 @@ export function effectiveCapabilities(
 	);
 }
 
+/**
+ * Where the workspace's settings move when a change stops offering the model
+ * they name: the model new bots start on, and the one summaries run on. Each
+ * is needed only when it names a model being switched off.
+ */
+const settingMovesFields = {
+	newBotsTo: Schema.optional(modelIdSchema),
+	summariesTo: Schema.optional(modelIdSchema),
+};
+
 /** Switching off a model and moving the bots that run on it to another the workspace offers. */
 export const providerModelSwitchOffSchema = Schema.Struct({
-	moveBotsTo: modelIdSchema,
+	moveBotsTo: Schema.optional(modelIdSchema),
+	...settingMovesFields,
 });
+export type ProviderModelSwitchOff = typeof providerModelSwitchOffSchema.Type;
 
 /** Moving the bots on one model to another, as the model stops being offered. */
 export const botMoveSchema = Schema.Struct({
@@ -340,7 +352,9 @@ export type BotMove = typeof botMoveSchema.Type;
 /** Switching off a provider and moving the bots on its models to models other providers offer. */
 export const providerSwitchOffSchema = Schema.Struct({
 	moveBots: Schema.Array(botMoveSchema).check(Schema.isMaxLength(MAX_PROVIDER_MODELS)),
+	...settingMovesFields,
 });
+export type ProviderSwitchOff = typeof providerSwitchOffSchema.Type;
 
 export const bulkProviderModelUpdateSchema = Schema.Struct({
 	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(

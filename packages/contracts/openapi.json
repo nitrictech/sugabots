@@ -22064,15 +22064,45 @@
 				"type": "object",
 				"properties": {
 					"moveBotsTo": {
-						"type": "string",
-						"minLength": 1,
-						"maxLength": 128,
-						"pattern": "^[\\w./:-]+$"
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"newBotsTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summariesTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
 					}
 				},
-				"required": [
-					"moveBotsTo"
-				],
 				"additionalProperties": false
 			},
 			"ProviderModelUpdate": {
@@ -22242,6 +22272,32 @@
 							"$ref": "#/components/schemas/BotMove"
 						},
 						"maxItems": 2000
+					},
+					"newBotsTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summariesTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
 					}
 				},
 				"required": [
