@@ -433,6 +433,56 @@ describe("the workspace choice", () => {
 	}
 });
 
+describe("the workspace while the API is not answering", () => {
+	/** What a request gets while a release restarts the API. */
+	const notAnswering = () => Effect.die(new Error("Failed to fetch"));
+
+	beforeEach(() => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+	});
+
+	it("stays open when checking its workspaces again fails", async () => {
+		const queries = createQueryClient();
+		const router = createAppRouter({
+			history: createMemoryHistory({ initialEntries: [linearPage] }),
+		});
+		render(
+			<TestApp
+				router={router}
+				queries={queries}
+				session={{ user: sam, error: undefined, refresh: vi.fn() }}
+			/>,
+		);
+		await screen.findByRole("navigation", { name: "Sidebar" });
+
+		client.api.workspaces.list.mockReturnValue(notAnswering());
+		const refetched = queries.refetchQueries({ queryKey: workspacesQuery.queryKey });
+		await vi.advanceTimersByTimeAsync(5_000);
+		await refetched;
+
+		expect(screen.getByRole("navigation", { name: "Sidebar" })).toBeDefined();
+		expect(screen.queryByText("Could not load your workspace")).toBeNull();
+	});
+
+	it("says it is trying again for as long as it is, and opens once the API answers", async () => {
+		client.api.workspaces.list.mockReturnValue(notAnswering());
+		mount(linearPage);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(await screen.findByText("Could not reach the API")).toBeDefined();
+
+		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+		await vi.advanceTimersByTimeAsync(500);
+		expect(screen.getByRole("button", { name: "Trying again…" })).toHaveProperty("disabled", true);
+
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
+	});
+});
+
 describe("the sidebar", () => {
 	it("lists each shared pod, then Personal, one after another", async () => {
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));

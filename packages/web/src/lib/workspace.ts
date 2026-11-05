@@ -17,6 +17,7 @@ import { useParams } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
+import { loadFailure } from "@/lib/query.ts";
 
 /**
  * Which workspace is being looked at, and what the caller may do in it.
@@ -269,10 +270,12 @@ export function useRemoveWorkspaceMember(workspaceId: string) {
 export function useWorkspace(): {
 	workspace: Workspace | undefined;
 	isPending: boolean;
-	error: unknown;
+	/** Set when the workspaces could not be loaded; see `loadFailure`. */
+	failure: { error: unknown } | undefined;
 	refetch: () => Promise<unknown>;
 } {
-	const { data, isPending, error, refetch } = useWorkspaces();
+	const workspaces = useWorkspaces();
+	const { data, isPending, refetch } = workspaces;
 	const chosen = useSyncExternalStore(subscribe, read, read);
 	const slug = useParams({ strict: false, select: (params) => params.workspace });
 
@@ -282,7 +285,7 @@ export function useWorkspace(): {
 				? (data?.find((one) => one.id === chosen) ?? data?.[0])
 				: data?.find((one) => one.slug === slug),
 		isPending,
-		error,
+		failure: loadFailure(workspaces),
 		refetch,
 	};
 }

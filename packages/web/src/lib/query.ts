@@ -29,3 +29,20 @@ export function createQueryClient(): QueryClient {
 		},
 	});
 }
+
+/**
+ * Set when a query could not load anything, to show a failure screen in its place.
+ *
+ * - A failed refresh of data already loaded is not a failure: the app keeps
+ *   using that data, so a brief outage does not replace an open page.
+ * - It stays set while the query tries again. React Query clears `error` during
+ *   each retry, so `error` is empty until the retry fails or succeeds.
+ */
+export function loadFailure(query: {
+	data: unknown;
+	error: unknown;
+	errorUpdateCount: number;
+}): { error: unknown } | undefined {
+	if (query.data !== undefined || query.errorUpdateCount === 0) return undefined;
+	return { error: query.error };
+}
