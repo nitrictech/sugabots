@@ -5,9 +5,9 @@ import { randomIn, type Span } from "./random.ts";
 
 /** One stretch of a mood in a loop: how likely it is to come next, and how long it lasts. */
 interface MoodSpell {
-	mood: BotMood;
-	weight: number;
-	seconds: Span;
+	readonly mood: BotMood;
+	readonly weight: number;
+	readonly seconds: Span;
 }
 
 /**
@@ -19,7 +19,7 @@ interface MoodSpell {
 export type MoodLoop = readonly [MoodSpell, ...MoodSpell[]];
 
 /** How much shorter the resting spell is when faces should move often. */
-const OFTEN_REST_SHARE = 0.5;
+export const OFTEN_REST_SHARE = 0.5;
 
 /**
  * The mood a bot is in now, moving through `loop`. While `running` is false it
