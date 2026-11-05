@@ -139,7 +139,11 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
 	return (
 		<LivelyGroup>
-			<ul aria-label={label} className="m-0 flex list-none flex-wrap justify-center gap-1.5 p-0">
+			<ul
+				aria-label={label}
+				// Room around each face for its focus ring and its hop, and about three rows before it scrolls.
+				className="-m-1.5 flex max-h-28 list-none flex-wrap justify-center gap-1.5 overflow-y-auto p-1.5"
+			>
 				{bots.map((bot) => (
 					<li key={bot.id} className="flex">
 						<NamedBotFace bot={bot} />
@@ -757,6 +761,31 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 	);
 }
 
+/** A box to search a list of `count` models, for one too long to scan. */
+function ModelSearch({
+	value,
+	onChange,
+	count,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	count: number;
+}) {
+	return (
+		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+			<input
+				type="search"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={`Search ${count} models`}
+				aria-label="Search models"
+				className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
+			/>
+		</label>
+	);
+}
+
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
 function makerOf(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
@@ -770,6 +799,7 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
+	const botsKnown = useAgents().agents !== undefined;
 	const holdersOf = useModelHolders();
 	const offered = useModels().data?.models ?? [];
 	const [search, setSearch] = useState("");
@@ -805,17 +835,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-						<input
-							type="search"
-							value={search}
-							onChange={(event) => setSearch(event.target.value)}
-							placeholder={`Search ${provider.models.length} models`}
-							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-						/>
-					</label>
+					<ModelSearch value={search} onChange={setSearch} count={provider.models.length} />
 				</div>
 			)}
 			<ScrollingWhen large={large}>
@@ -857,7 +877,13 @@ function Models({ provider }: { provider: ModelProvider }) {
 									{custom && <EditCapabilities provider={provider} model={model} />}
 									<Toggle
 										checked={model.enabled}
-										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
+										disabled={
+											!provider.active ||
+											actions.setModel.isPending ||
+											held !== undefined ||
+											// Until the bots are known, switching off could leave some on it unasked.
+											(model.enabled && !botsKnown)
+										}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
 										onChange={(enabled) => {
@@ -927,12 +953,15 @@ function MoveBotsDialog({
 	const candidates = (models?.models ?? []).filter(
 		(candidate) => candidate.modelId !== model.modelId,
 	);
+	const [search, setSearch] = useState("");
+	const needle = useDeferredValue(search.trim().toLowerCase());
 	const [chosen, setChosen] = useState(() =>
 		candidates.some((candidate) => candidate.modelId === models?.defaultModel)
 			? models?.defaultModel
 			: candidates[0]?.modelId,
 	);
-	const providerNames = [...new Set(candidates.map((candidate) => candidate.providerName))];
+	const shown = searchModels(candidates, needle);
+	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
 	const name = modelName(model);
 
 	async function submit(event: FormEvent) {
@@ -960,37 +989,50 @@ function MoveBotsDialog({
 				</DialogDescription>
 				<NamedBotFaces bots={bots} label={`Bots on ${name}`} />
 				{candidates.length === 0 ? (
-					<Alert>Switch on another model first, so the bots have one to move to.</Alert>
+					<Alert>
+						{name} is the only model switched on. Switch on another first, so the bots have one to
+						move to.
+					</Alert>
 				) : (
-					<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
-						{providerNames.map((providerName) => (
-							<SettingsGroup key={providerName} label={providerName}>
-								{candidates
-									.filter((candidate) => candidate.providerName === providerName)
-									.map((candidate) => {
-										const selected = candidate.modelId === chosen;
-										return (
-											<SettingsRow
-												key={candidate.modelId}
-												label={candidate.displayName ?? candidate.modelId}
-												render={<button type="button" aria-pressed={selected} />}
-												trailing={
-													selected && (
-														<Check
-															aria-hidden
-															size={16}
-															strokeWidth={2.6}
-															className="shrink-0 text-link"
-														/>
-													)
-												}
-												onClick={() => setChosen(candidate.modelId)}
-											/>
-										);
-									})}
-							</SettingsGroup>
-						))}
-					</div>
+					<>
+						{candidates.length > MODEL_SEARCH_THRESHOLD && (
+							<ModelSearch value={search} onChange={setSearch} count={candidates.length} />
+						)}
+						<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+							{shown.length === 0 && (
+								<SettingsGroup>
+									<SettingsRow label="No models match." />
+								</SettingsGroup>
+							)}
+							{providerNames.map((providerName) => (
+								<SettingsGroup key={providerName} label={providerName}>
+									{shown
+										.filter((candidate) => candidate.providerName === providerName)
+										.map((candidate) => {
+											const selected = candidate.modelId === chosen;
+											return (
+												<SettingsRow
+													key={candidate.modelId}
+													label={candidate.displayName ?? candidate.modelId}
+													render={<button type="button" aria-pressed={selected} />}
+													trailing={
+														selected && (
+															<Check
+																aria-hidden
+																size={16}
+																strokeWidth={2.6}
+																className="shrink-0 text-link"
+															/>
+														)
+													}
+													onClick={() => setChosen(candidate.modelId)}
+												/>
+											);
+										})}
+								</SettingsGroup>
+							))}
+						</div>
+					</>
 				)}
 				{actions.switchOffModel.error && (
 					<Alert>{failureMessage(actions.switchOffModel.error)}</Alert>
