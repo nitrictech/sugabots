@@ -29,9 +29,11 @@ xcrun swiftc -enable-bare-slash-regex -o "$build/rule-checks" \
 	Conversation/FileLook.generated.swift \
 	Conversation/MarkdownBlocks.swift \
 	Design/Avatars.swift \
+	App/Slugify.swift \
 	Design/ProviderLogos.generated.swift \
 	Home/Mutes.swift \
 	Home/Mutes.generated.swift \
+	Settings/SettingsRules.swift \
 	Settings/TimeZoneChoices.swift \
 	Settings/TimeZoneRegions.generated.swift \
 	Routines/ScheduleWords.swift \

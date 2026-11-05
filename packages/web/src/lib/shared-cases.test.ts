@@ -1,16 +1,21 @@
 import {
+	type ConnectionToolSetting,
 	canStartMention,
+	type ModelProvider,
 	mentionedHandles,
 	messagePartSchema,
 	messagePreview,
 	messageSchema,
+	type Pod,
 	personParticipantSchema,
+	providerLacksCredential,
 	quotedPreview,
 	type Routine,
 	type RoutineSchedule,
 	type RoutineTrigger,
 	routineScheduleSchema,
 	routineTriggerInputSchema,
+	slugify,
 	splitAroundMentions,
 	type ToolCallPart,
 	threadParticipantSchema,
@@ -19,6 +24,7 @@ import {
 } from "@sugabots/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { settingOf } from "../screens/ConnectionPage.tsx";
 import {
 	firstBotNamed,
 	groupMentionsBy,
@@ -26,6 +32,7 @@ import {
 	mentionTargetKey,
 	targetWithHandle,
 } from "../screens/mentions.tsx";
+import { heldReason, isConnected } from "../screens/ProviderSettings.tsx";
 import { scheduleNote } from "../screens/RoutineTriggers.tsx";
 import {
 	findAnsweringFace,
@@ -57,6 +64,7 @@ import {
 } from "./list-time.ts";
 import { countOf, listNames } from "./name-list.ts";
 import { formatUntil, MUTE_DURATIONS } from "./notifications.ts";
+import { parseProviderBaseUrl } from "./provider-url.ts";
 import {
 	defaultSchedule,
 	formatDayOfMonth,
@@ -75,6 +83,8 @@ import {
 } from "./routine-schedule.ts";
 import { timeZonePlace, timeZoneRegions, utcOffset } from "./time-zones.ts";
 import { connectionLabel, stepLabel, toolTitle, wordsFromKey } from "./tool-names.ts";
+import { shiftMonth } from "./usage.ts";
+import { podSettingsPagesOf } from "./workspace-settings.ts";
 
 /*
  * The rules in `@sugabots/contracts/cases/*.cases.json` are copied into the
@@ -239,6 +249,7 @@ const rulesByFile: Record<string, Record<string, Rule>> = {
 			),
 		),
 	},
+	"slug.cases.json": { slugify: plain(slugify) },
 	"avatar.cases.json": { initials: plain(initials), gravatarUrl: plain(gravatarUrl) },
 	"mute.cases.json": {
 		formatUntil: plain((until: string, now: string, locale: string) =>
@@ -312,6 +323,19 @@ const rulesByFile: Record<string, Record<string, Rule>> = {
 			),
 		),
 		scheduleNote: plain(scheduleNote),
+	},
+	"settings.cases.json": {
+		providerLacksCredential: plain(providerLacksCredential),
+		isConnected: plain((provider: ModelProvider) => isConnected(provider)),
+		heldReason: plain(heldReason),
+		parseProviderBaseUrl: plain(parseProviderBaseUrl),
+		settingOf: plain((tools: ConnectionToolSetting[], kind: "read" | "change") =>
+			settingOf(tools, kind),
+		),
+		shiftMonth: plain(shiftMonth),
+		podSettingsPagesOf: plain((pod: Pick<Pod, "kind">, computers: boolean) =>
+			podSettingsPagesOf(pod, computers).map(({ id }) => id),
+		),
 	},
 };
 

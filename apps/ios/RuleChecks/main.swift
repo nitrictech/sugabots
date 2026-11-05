@@ -156,6 +156,26 @@ func outline(_ markdown: String) -> JSONValue {
 	})
 }
 
+/// A model provider as the settings cases give one: only the fields its rules read.
+struct ProviderCase: Decodable {
+	let preset: ProviderPresetId?
+	let active: Bool?
+	let hasApiKey: Bool
+	let signedIn: Bool
+
+	var provider: ModelProvider {
+		ModelProvider(
+			id: "", workspaceId: "", preset: preset, name: "", baseUrl: "", apiFormat: .openai, active: active ?? true, status: .untested,
+			hasApiKey: hasApiKey, signedIn: signedIn, customHeaders: [], modelCount: 0, enabledModelCount: 0, lastTestedAt: nil, lastTestError: nil, models: []
+		)
+	}
+}
+
+/// A pod as the settings cases give one: only its kind.
+struct PodKindCase: Decodable {
+	let kind: Pod.Kind
+}
+
 /// Each case file, with the Swift rule for each web rule it covers; the rules
 /// it has cases for that this app doesn't copy, with why; and the web's rules
 /// this app copies that it has no cases for yet, with why.
@@ -270,6 +290,21 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String], 
 	("name-list.cases.json", [
 		"listNames": { try Names.list(argument($0, 0)) },
 		"countOf": { try Names.count(argument($0, 0), argument($0, 1), argument($0, 2)) },
+	], [:], [:]),
+	("slug.cases.json", [
+		"slugify": { try slugify(argument($0, 0)) },
+	], [:], [:]),
+	("settings.cases.json", [
+		"providerLacksCredential": { try argument($0, 0, as: ProviderCase.self).provider.lacksCredential },
+		"isConnected": { try argument($0, 0, as: ProviderCase.self).provider.connected },
+		"heldReason": { try argument($0, 0, as: ModelHolders.self).reason(argument($0, 1)) },
+		"parseProviderBaseUrl": { try parseProviderBaseURL(argument($0, 0)) },
+		"settingOf": { try ToolKind.setting(of: argument($0, 0), kind: argument($0, 1)).rawValue },
+		"shiftMonth": { arguments in
+			guard let month = try YearMonth(argument(arguments, 0)) else { throw CocoaError(.formatting) }
+			return try month.shifted(by: argument(arguments, 1)).text
+		},
+		"podSettingsPagesOf": { try PodSettingsPage.pages(for: argument($0, 0, as: PodKindCase.self).kind, computersEnabled: argument($0, 1)).map(\.rawValue) },
 	], [:], [:]),
 	("routine-schedule.cases.json", [
 		"formatTime": { try ScheduleWords.formatTime(argument($0, 0)) },
