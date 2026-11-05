@@ -174,10 +174,16 @@ const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key
 function Preview({
 	providers,
 	bots,
+	defaultModel,
+	summariesModel,
 	children,
 }: {
 	providers: readonly ModelProvider[];
 	bots: readonly Agent[];
+	/** The model new bots start on. */
+	defaultModel: string;
+	/** The model the system agents use. */
+	summariesModel: string;
 	children: ReactNode;
 }) {
 	const [queryClient] = useState(() => {
@@ -197,7 +203,10 @@ function Preview({
 		});
 		client.setQueryData(["model-providers", WORKSPACE], providers);
 		client.setQueryData(["agents", WORKSPACE], bots);
-		client.setQueryData(["built-in-agents", WORKSPACE], systemAgents);
+		client.setQueryData(
+			["built-in-agents", WORKSPACE],
+			systemAgents.map((agent) => ({ ...agent, model: summariesModel })),
+		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: providers.flatMap((provider) =>
 				provider.models
@@ -214,7 +223,7 @@ function Preview({
 						),
 					})),
 			),
-			defaultModel: "claude-sonnet",
+			defaultModel,
 		});
 		return client;
 	});
@@ -237,6 +246,8 @@ const meta = preview.meta({
 				key={context.id}
 				providers={context.parameters.providers ?? providers}
 				bots={context.parameters.bots ?? bots}
+				defaultModel={context.parameters.defaultModel ?? "claude-sonnet"}
+				summariesModel={context.parameters.summariesModel ?? "claude-haiku"}
 			>
 				<Story />
 			</Preview>
@@ -365,6 +376,27 @@ export const SwitchOffProviderWithDefaults = meta.story({
 			within(dialog).getByRole("button", { name: "Move summaries to: GPT-5" }),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
+	},
+});
+
+/**
+ * Switching off the only model switched on: there is nothing to move to, so
+ * the dialog says to switch another on first and cannot go ahead.
+ */
+export const SwitchOffLastModel = meta.story({
+	parameters: { providers: [openai], defaultModel: "gpt-5", summariesModel: "gpt-5" },
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
+		await expect(
+			within(dialog).getByText(
+				"GPT-5 is the only model switched on. Switch on another first, so there is one to move to.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move and switch off" }),
+		).toBeDisabled();
 	},
 });
 

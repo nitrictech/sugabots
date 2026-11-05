@@ -1450,8 +1450,12 @@ function MoveBotsDialog({
 			<DialogFormBody>
 				<DialogDescription>
 					{hasBots
-						? `${bots.length === 1 ? "This bot uses" : "These bots use"} ${name}${held ? `, and so do ${LIST.format(holderNames(held))}` : ""}. Choose the model to move ${bots.length === 1 && !held ? "it" : "them"} to.`
-						: `${capitalised(LIST.format(held ? holderNames(held) : []))} use ${name}. Choose the model each moves to.`}
+						? `${bots.length === 1 ? "This bot uses" : "These bots use"} ${name}${held ? `, and so do ${LIST.format(holderNames(held))}` : ""}.`
+						: `${capitalised(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
+					{candidates.length > 0 &&
+						(hasBots
+							? ` Choose the model to move ${bots.length === 1 && !held ? "it" : "them"} to.`
+							: " Choose the model each moves to.")}
 				</DialogDescription>
 				{hasBots && <NamedBotFaces bots={bots} label={`Bots on ${name}`} />}
 				{candidates.length === 0 ? (
