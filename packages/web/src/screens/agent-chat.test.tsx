@@ -1235,6 +1235,17 @@ describe("a message opened from Activity", () => {
 		);
 	});
 
+	it("reads up to the routine run chosen in Inbox, and not the rest of its chat", async () => {
+		mount(`/suga/activity/suga-team/${chat.id}?threadPage=${routineId}`);
+
+		await waitFor(() =>
+			expect(client.api.chats.markItemRead).toHaveBeenCalledWith({
+				params: { threadId: routineId },
+			}),
+		);
+		expect(client.api.chats.markRead).not.toHaveBeenCalled();
+	});
+
 	it("ignores an address naming something other than a message", async () => {
 		mount(`/suga/activity/suga-team/${chat.id}?message=a%22b`);
 
