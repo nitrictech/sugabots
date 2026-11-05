@@ -75,11 +75,7 @@ const meta = preview.meta({
  */
 export const Off = meta.story({
 	play: async ({ canvas }) => {
-		const power = await canvas.findByRole(
-			"switch",
-			{ name: "Bots can use a computer" },
-			{ timeout: 10_000 },
-		);
+		const power = await canvas.findByRole("switch", { name: "Bots can use a computer" });
 		await expect(power).toBeDisabled();
 		await expect(canvas.getByText(/Computers are experimental/)).toBeInTheDocument();
 		await expect(
@@ -107,11 +103,7 @@ export const BotsUsingAComputer = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const using = await canvas.findByRole(
-			"region",
-			{ name: "Bots using a computer" },
-			{ timeout: 10_000 },
-		);
+		const using = await canvas.findByRole("region", { name: "Bots using a computer" });
 		const [first] = storyBots;
 		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
 		await expect(row).toHaveAttribute(
@@ -325,11 +317,7 @@ export const DiskUseByPod = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const disks = await canvas.findByRole(
-			"region",
-			{ name: "Disk use by pod" },
-			{ timeout: 10_000 },
-		);
+		const disks = await canvas.findByRole("region", { name: "Disk use by pod" });
 		const [first, second] = storyPods;
 		const rows = within(disks).getAllByRole("link");
 		await expect(rows).toHaveLength(2);

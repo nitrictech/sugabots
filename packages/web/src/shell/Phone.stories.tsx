@@ -42,7 +42,7 @@ const meta = preview.meta({
 export const Home = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		const pods = await canvas.findByRole("navigation", { name: "Pods" }, { timeout: 10_000 });
+		const pods = await canvas.findByRole("navigation", { name: "Pods" });
 		await expect(within(pods).getByRole("link", { name: revenue.name })).toHaveAttribute(
 			"aria-current",
 			"page",
@@ -66,7 +66,7 @@ export const PersonalHome = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${personal.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { level: 1, name: personal.name }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { level: 1, name: personal.name }),
 		).toBeVisible();
 		await expect(canvas.getByText("Only you can see into this pod.")).toBeVisible();
 	},
@@ -76,9 +76,7 @@ export const PersonalHome = meta.story({
 export const Inbox = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { level: 1, name: "Inbox" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: "Back" })).toBeNull();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
 		await expect(within(tabs).getByRole("link", { name: /^Inbox/ })).toHaveAttribute(
@@ -92,9 +90,7 @@ export const Inbox = meta.story({
 export const Approvals = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/approvals`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/^Nothing waiting/, {}, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByText(/^Nothing waiting/)).toBeVisible();
 	},
 });
 
@@ -105,9 +101,7 @@ export const Approvals = meta.story({
 export const You = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { level: 1, name: "Settings" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
 		await expect(
 			await canvas.findByRole("link", { name: new RegExp(storyUser.name) }),
 		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/profile`);
@@ -127,9 +121,7 @@ export const You = meta.story({
 export const Profile = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/profile`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: storyUser.name }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("heading", { name: storyUser.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/notifications`,
@@ -141,9 +133,10 @@ export const Profile = meta.story({
 export const YouPod = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "Back to Settings" }, { timeout: 10_000 }),
-		).toHaveAttribute("href", `/${storyWorkspace.slug}/you`);
+		await expect(await canvas.findByRole("link", { name: "Back to Settings" })).toHaveAttribute(
+			"href",
+			`/${storyWorkspace.slug}/you`,
+		);
 		await expect(canvas.getByRole("link", { name: /^Connections/ })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/pods/${revenue.slug}/connections`,
@@ -160,9 +153,7 @@ export const YouPod = meta.story({
 export const PodPart = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/pods/${revenue.slug}/bots`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { level: 2, name: "Bots" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("heading", { level: 2, name: "Bots" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
 		await expect(canvas.queryByRole("group", { name: "Members" })).toBeNull();
 	},
@@ -200,7 +191,7 @@ export const Artifact = meta.story({
 		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/artifacts/${plan.id}`} />
 	),
 	play: async ({ canvas }) => {
-		const artifact = await canvas.findByRole("region", { name: "Artifact" }, { timeout: 10_000 });
+		const artifact = await canvas.findByRole("region", { name: "Artifact" });
 		await expect(
 			await within(artifact).findByText("Book 40 discovery calls with mid-market accounts."),
 		).toBeVisible();
@@ -217,7 +208,7 @@ export const Opened = meta.story({
 		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/agents/growth-desk`} />
 	),
 	play: async ({ canvas, userEvent }) => {
-		const composer = await canvas.findByRole("textbox", {}, { timeout: 10_000 });
+		const composer = await canvas.findByRole("textbox");
 		await expect(canvas.getByRole("link", { name: `Back to ${revenue.name}` })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
 		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
@@ -237,7 +228,7 @@ export const Artifacts = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${engineering.slug}/artifacts`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("link", { name: `Back to ${engineering.name}` }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: `Back to ${engineering.name}` }),
 		).toHaveAttribute("href", `/${storyWorkspace.slug}/pods/${engineering.slug}`);
 	},
 });
@@ -275,11 +266,7 @@ export const Thread = meta.story({
 		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/${longThread.id}`} />
 	),
 	play: async ({ canvas, userEvent }) => {
-		const more = await canvas.findByRole(
-			"button",
-			{ name: "More for this thread" },
-			{ timeout: 10_000 },
-		);
+		const more = await canvas.findByRole("button", { name: "More for this thread" });
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 		// Back returns to the bot's chat the thread is with, not the pod's Home.
 		await expect(canvas.getByRole("link", { name: `Back to ${growthDesk.name}` })).toHaveAttribute(
@@ -305,7 +292,7 @@ export const Channel = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { level: 1, name: "General" }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { level: 1, name: "General" }),
 		).toBeInTheDocument();
 	},
 });
@@ -317,8 +304,6 @@ export const Computer = meta.story({
 	),
 	// Opened, for a look at the sheet; what it says waits on the workspace's computers, which vary.
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Computer" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Computer" }));
 	},
 });

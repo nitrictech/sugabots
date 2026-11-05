@@ -33,9 +33,7 @@ const meta = preview.meta({
  */
 export const Unreachable = meta.story({
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/couldn't be reached/, {}, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByText(/couldn't be reached/)).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Reconnect" })).toBeVisible();
 	},
 });
@@ -56,7 +54,7 @@ export const LiveCard = meta.story({
 	),
 	play: async ({ canvas, userEvent }) => {
 		await expect(canvas.getByText("Growth Desk is using its browser")).toBeVisible();
-		await canvas.findByText(/couldn't be reached/, {}, { timeout: 10_000 });
+		await canvas.findByText(/couldn't be reached/);
 		await expect(canvas.queryByRole("button", { name: "Reconnect" })).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Open Growth Desk's desktop" }));
 		await expect(openDesktop).toHaveBeenCalled();
