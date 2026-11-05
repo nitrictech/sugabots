@@ -14,6 +14,37 @@ export const THINKING_DOT_RADIUS = 2.4;
 /** How thick an arc eye's line is; a shut or smiling eye is drawn as thick. */
 export const ARC_EYE_STROKE_WIDTH = 1.8;
 
+/**
+ * How far an arc eye rises as it shuts: its arcs stand on a line about two
+ * units below where open eyes are centred.
+ */
+export const ARC_SHUT_RISE = 2;
+
+/** The flattest an arc eye's arc is drawn, so it never becomes a straight line its path can't bend. */
+export const FLATTEST_ARC_HEIGHT = 0.01;
+
+/**
+ * The smile arc an open eye closes into is the top half of a ring
+ * `SMILE_ARC_WIDENING` wider on each side than the eye, standing
+ * `SMILE_ARC_BASELINE_SHARE` of its radius below the eye's centre.
+ */
+export const SMILE_ARC_WIDENING = 0.6;
+export const SMILE_ARC_BASELINE_SHARE = 0.4;
+
+/**
+ * As the bot's smile grows from 0 to 1, an open eye fades out over
+ * `OPEN_EYE_FADES` of it, and the smile arc fades in over `SMILE_ARC_SHOWS`.
+ */
+export const OPEN_EYE_FADES = [0, 0.5] as const;
+export const SMILE_ARC_SHOWS = [0, 0.3] as const;
+
+/*
+ * A thinking bot's three dots, across where its eyes were: their centres'
+ * x, left to right, and their y.
+ */
+export const THINKING_DOT_XS = [14, 20, 26] as const;
+export const THINKING_DOT_Y = 20;
+
 /** One mark drawn on the face disc: an eye, or both eyes as one stroked path. */
 export type FaceMark =
 	| { shape: "circle"; cx: number; cy: number; r: number }

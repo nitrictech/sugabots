@@ -1,32 +1,12 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
-import { type Liveliness, useLiveliness } from "./liveliness.ts";
-import { randomIn, repeatAtRandom, type Span } from "./random.ts";
+import { pacingByLiveliness } from "./group-pacing.ts";
+import { useLiveliness } from "./liveliness.ts";
+import { randomIn, repeatAtRandom } from "./random.ts";
 
 /*
  * Faces in a group, such as a list of bots, mostly sit still and take short
  * turns moving, so only a few move at once and the list doesn't fidget.
  */
-
-interface GroupPacing {
-	/** How many faces may move at once. */
-	movingAtOnce: number;
-	/** Seconds between turns starting, and how long a turn lasts, each picked at random from its range. */
-	gapSeconds: Span;
-	turnSeconds: Span;
-}
-
-const pacingByLiveliness: Record<Exclude<Liveliness, "off">, GroupPacing> = {
-	sometimes: {
-		movingAtOnce: 1,
-		gapSeconds: { least: 4, most: 10 },
-		turnSeconds: { least: 1, most: 3 },
-	},
-	often: {
-		movingAtOnce: 2,
-		gapSeconds: { least: 1.5, most: 4 },
-		turnSeconds: { least: 1.5, most: 4 },
-	},
-};
 
 /** The faces in a group, each told when its turn starts and ends. */
 class Turns {

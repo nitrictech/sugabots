@@ -1,7 +1,7 @@
 /** A span from `least` to `most`, of seconds or a size, that something is picked from at random. */
 export interface Span {
-	least: number;
-	most: number;
+	readonly least: number;
+	readonly most: number;
 }
 
 /** A number picked at random, evenly, from `span`. */
