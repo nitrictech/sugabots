@@ -122,9 +122,14 @@ export function mentionTargetKey(target: MentionTarget): string {
  */
 export function MentionChip({
 	target,
+	after,
 	className,
 	...rest
-}: { target: MentionTarget } & ComponentProps<"span">) {
+}: {
+	target: MentionTarget;
+	/** Shown after the name, inside the chip, such as a × that removes it. */
+	after?: ReactNode;
+} & ComponentProps<"span">) {
 	return (
 		<span
 			{...rest}
@@ -148,6 +153,7 @@ export function MentionChip({
 			) : (
 				`@${target.handle}`
 			)}
+			{after}
 		</span>
 	);
 }

@@ -1,5 +1,6 @@
 import { Popover } from "@base-ui/react/popover";
 import {
+	type AgentParticipant,
 	canStartMention,
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	MESSAGE_MAX_LENGTH,
@@ -21,11 +22,10 @@ import { rememberEmoji } from "@/lib/recent-emoji.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { EmojiPicker } from "@/ui/emoji-picker.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
-import { type MentionTarget, mentionTargetKey } from "./mentions.tsx";
+import { MentionChip, type MentionTarget, mentionTargetKey } from "./mentions.tsx";
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
 const toolButtonClassName =
@@ -45,7 +45,10 @@ const toolButtonClassName =
  * emoji. The smile opens a picker of every emoji and puts the one chosen at
  * the cursor. Either way it counts as a recent emoji in the picker; the emoji
  * load as the composer appears, so both have them at once. With `replyingTo`, a strip
- * over the draft names the message it answers; its × or Escape stops replying.
+ * over the draft names the message it answers, and with `addressed`, the bots the
+ * message goes to. Each is a chip that is taken off by clicking it. Escape stops
+ * the reply and takes off the bots inherited from the last message, but not
+ * those the draft names, which stay as long as the draft names them.
  */
 export function ChatComposer({
 	label,
@@ -60,6 +63,7 @@ export function ChatComposer({
 	className,
 	mentionable,
 	replyingTo,
+	addressed,
 	attachments,
 	needsText = false,
 }: {
@@ -81,6 +85,14 @@ export function ChatComposer({
 	mentionable: readonly MentionTarget[];
 	/** The message the draft answers, quoted when it is sent. */
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
+	/** The bots the message goes to, whether the draft names them or the last message did. */
+	addressed?: {
+		bots: readonly AgentParticipant[];
+		/** Takes one bot off, however it came to be addressed. */
+		onRemove: (bot: AgentParticipant) => void;
+		/** Takes off the bots inherited from the last message, leaving those the draft names. */
+		onClearInherited: () => void;
+	};
 	/** The files attached to the message, and what attaches, removes and retries them. */
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
@@ -141,9 +153,11 @@ export function ChatComposer({
 				return;
 			}
 		}
-		if (replyingTo && event.key === "Escape" && !event.nativeEvent.isComposing) {
+		const addressing = addressed && addressed.bots.length > 0;
+		if ((replyingTo || addressing) && event.key === "Escape" && !event.nativeEvent.isComposing) {
 			event.preventDefault();
-			replyingTo.onCancel();
+			replyingTo?.onCancel();
+			if (addressing) addressed.onClearInherited();
 			return;
 		}
 		if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -252,6 +266,9 @@ export function ChatComposer({
 					{replyingTo && (
 						<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
 					)}
+					{addressed && addressed.bots.length > 0 && (
+						<AddressedStrip bots={addressed.bots} onRemove={addressed.onRemove} />
+					)}
 					<AttachmentTray
 						items={attachments.items}
 						onRemove={attachments.remove}
@@ -341,22 +358,77 @@ export function ChatComposer({
 	);
 }
 
-/** Over the draft, the message it answers: its author and first line, and a × to stop replying. */
+/** Over the draft, the message it answers: its author, which stops the reply when clicked, and its first line. */
 function ReplyingToStrip({ message, onCancel }: { message: MessageReplyTo; onCancel: () => void }) {
 	const { author } = message;
 	const name = messageAuthorName(author);
 	return (
-		<div className="flex items-center gap-2 border-border border-b py-1.5 pr-1.5 pl-3 text-xs">
-			<p className="m-0 flex min-w-0 flex-1 items-center gap-1.5 text-muted-foreground">
-				<span className="shrink-0">
-					Replying to <span className="font-semibold text-soft-foreground">{name}</span>
-				</span>
-				<span className="min-w-0 truncate">{message.preview}</span>
-			</p>
-			<IconButton label="Cancel reply" side="top" onClick={onCancel}>
-				<X aria-hidden />
-			</IconButton>
+		<div className="flex min-h-9 items-center gap-1.5 border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
+			<span className="shrink-0">Replying to</span>
+			{author.kind === "routine_trigger" ? (
+				<span className="shrink-0 font-semibold text-soft-foreground">{name}</span>
+			) : (
+				<RemovableChip target={author} label={`Stop replying to ${name}`} onRemove={onCancel} />
+			)}
+			<span className="min-w-0 truncate">{message.preview}</span>
 		</div>
+	);
+}
+
+/** Over the draft, the bots it goes to, each taken off by clicking it. */
+function AddressedStrip({
+	bots,
+	onRemove,
+}: {
+	bots: readonly AgentParticipant[];
+	onRemove: (bot: AgentParticipant) => void;
+}) {
+	return (
+		<div className="flex min-h-9 flex-wrap items-center gap-1.5 border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
+			<span className="shrink-0">To</span>
+			{bots.map((bot) => (
+				<RemovableChip
+					key={bot.id}
+					target={bot}
+					label={`Stop sending to ${bot.name}`}
+					onRemove={() => onRemove(bot)}
+				/>
+			))}
+		</div>
+	);
+}
+
+/** A mention chip that takes itself off when clicked, showing its × when pointed at. */
+function RemovableChip({
+	target,
+	label,
+	onRemove,
+}: {
+	target: MentionTarget;
+	label: string;
+	onRemove: () => void;
+}) {
+	return (
+		<Tooltip label={label} side="top">
+			<button
+				type="button"
+				aria-label={label}
+				onClick={onRemove}
+				className="group/chip focus-ring shrink-0 rounded-xs"
+			>
+				<MentionChip
+					target={target}
+					className="mx-0 items-center group-hover/chip:bg-hover"
+					after={
+						<X
+							aria-hidden
+							size={12}
+							className="opacity-0 group-hover/chip:opacity-100 group-focus-visible/chip:opacity-100 max-md:opacity-100"
+						/>
+					}
+				/>
+			</button>
+		</Tooltip>
 	);
 }
 

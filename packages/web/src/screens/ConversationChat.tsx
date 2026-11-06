@@ -7,8 +7,10 @@ import {
 	type ChatMessageItem,
 	type FilePart,
 	isAttached,
+	MESSAGE_MAX_LENGTH,
 	type Message,
 	mentionedHandles,
+	mentionPattern,
 	messageAuthorName,
 	type PersonParticipant,
 	type Pod,
@@ -38,7 +40,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { useAgents, useModelName } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
+import { useChatDraft, useChatReplyDraft, useTakenOffRecipients } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	type ConversationKind,
@@ -234,8 +236,39 @@ export function ConversationChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	// In the pod's chat, the bots a message names reply in the chat itself.
-	const answeringBots = isPodChat && details ? botsNamed(draft, details.crew) : [];
+	// In the pod's chat, the bots the person's last message went to stay
+	// addressed until they take them off: talking to a bot is a conversation,
+	// not a mention every time. Taking one off lasts until they send again.
+	const crew = isPodChat ? (details?.crew ?? []) : [];
+	const lastOwnMessage = isPodChat
+		? shownMessages.findLast(
+				(message) => message.author.kind === "person" && message.author.id === user.id,
+			)
+		: undefined;
+	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, pod.id, conversationId);
+	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
+	const named = botsNamed(draft, crew);
+	const repliedToBot = crew.find(
+		(member): member is AgentParticipant =>
+			member.kind === "agent" &&
+			replyingTo?.author.kind === "agent" &&
+			member.id === replyingTo.author.id,
+	);
+	const addressedBots = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, crew) : []).filter(
+		(bot) =>
+			!takenOffIds.includes(bot.id) &&
+			bot.id !== repliedToBot?.id &&
+			!named.some((one) => one.id === bot.id),
+	);
+	function takeOff(botIds: readonly string[]) {
+		setTakenOff({ after: lastOwnMessage?.id, botIds: [...takenOffIds, ...botIds] });
+	}
+	// Taken off wherever it came from: named in the draft, or addressed by the last message.
+	function removeRecipient(bot: AgentParticipant) {
+		setDraft((current) => withoutMention(current, bot.handle));
+		takeOff([bot.id]);
+	}
+	const answeringBots = [...named, ...addressedBots, ...(repliedToBot ? [repliedToBot] : [])];
 	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
@@ -322,19 +355,32 @@ export function ConversationChat({
 	async function submit() {
 		if (send.isPending) return;
 		setStartError(undefined);
+		const message = draft.trim();
+		// The bots the message goes to but does not name are named at its start,
+		// so it shows who it was for, and they are asked as any named bot is.
+		const unnamed = answeringBots.filter((bot) => !named.includes(bot));
+		const addressedMessage =
+			unnamed.length > 0
+				? `${unnamed.map((bot) => `@${bot.handle}`).join(" ")} ${message}`
+				: message;
+		if (addressedMessage.length > MESSAGE_MAX_LENGTH) {
+			setStartError(
+				"With the bots it's sent to named, this message is too long. Shorten it a little.",
+			);
+			return;
+		}
 		const files = attachments.takeForSending(draft);
 		if (!files) return;
-		const message = draft.trim();
 		const submitted = draft;
-		const answering = replyingTo;
+		const answered = replyingTo;
 		setDraft("");
 		setReplyingTo(undefined);
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
 				id: uuidv4(),
-				message,
-				replyTo: answering,
+				message: addressedMessage,
+				replyTo: answered,
 				files: files.parts,
 			});
 			scrollToLatest();
@@ -342,7 +388,7 @@ export function ConversationChat({
 			scrollToLatest();
 		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));
-			setReplyingTo((current) => current ?? answering);
+			setReplyingTo((current) => current ?? answered);
 			files.putBack(failure);
 		}
 	}
@@ -744,6 +790,12 @@ export function ConversationChat({
 								replyingTo={
 									replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
 								}
+								addressed={{
+									// Those the draft names too, so the row shows everyone the message goes to.
+									bots: [...addressedBots, ...named],
+									onRemove: removeRecipient,
+									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
+								}}
 								attachments={attachments}
 							/>
 						)}
@@ -1381,4 +1433,23 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 /** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
 function startsRoutineRun(item: ChatMessageItem): boolean {
 	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
+}
+
+/** The bots among `crew` that `message` went to: those it names, and the one it replied to. */
+function botsAddressedBy(message: Message, crew: readonly ThreadParticipant[]): AgentParticipant[] {
+	const named = botsNamed(message.content, crew);
+	const repliedTo = message.replyTo?.author;
+	const replied =
+		repliedTo?.kind === "agent" && !named.some((bot) => bot.id === repliedTo.id)
+			? crew.filter(
+					(member): member is AgentParticipant =>
+						member.kind === "agent" && member.id === repliedTo.id,
+				)
+			: [];
+	return [...named, ...replied];
+}
+
+/** `draft` with its mentions of `handle` taken out, each with the space after it. */
+function withoutMention(draft: string, handle: string): string {
+	return draft.replace(new RegExp(`${mentionPattern(handle)} ?`, "gi"), "");
 }
