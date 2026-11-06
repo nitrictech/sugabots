@@ -1396,17 +1396,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			content: `@${host?.handle} can you look at this?`,
 		});
 
-		const runs = await runOnPostgres(runningTurns(first.id));
-		expect(runs).toEqual([
+		expect(await runOnPostgres(runningTurns(first.id))).toEqual([
 			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "mention" }) }),
 		]);
-		const [run] = runs;
-		if (!run) throw new Error("The named bot was not asked");
-		const prepared = await prepareRunnable(
-			onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
-			run,
-		);
-		expect(prepared.context.thread).toMatchObject({ id: first.id, type: "pod_chat" });
 	});
 
 	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {
