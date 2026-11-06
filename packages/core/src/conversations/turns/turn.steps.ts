@@ -55,7 +55,7 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { bindingOf, toolsForTurn } from "./tools.ts";
+import { bindingOf, toolsForTurn, withStartingFiles } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -446,6 +446,8 @@ const streamReply = (
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
 					turnId: prepared.turnId,
 					agentId: prepared.context.agent.id,
+					threadId: prepared.context.thread.id,
+					files: withStartingFiles(files, prepared.context),
 					workspace: sandbox.usable ? sandbox.workspace : undefined,
 					sandboxSignsIn: sandbox.signsIn,
 				}),

@@ -34,7 +34,7 @@ export const SHARE_FILE_TOOL = "share_file";
  * through a command that prints it as base64, which holds the whole file in
  * the server's memory on the way out.
  */
-const MAX_SHARED_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_SHARED_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SHARED_FILE_MEGABYTES = MAX_SHARED_FILE_BYTES / (1024 * 1024);
 
 /** Attaches a file, read out of the sandbox, to the reply being written. */

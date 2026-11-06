@@ -340,7 +340,7 @@ export function bindingOf(offered: OfferedTool): ToolCallRepository.ApprovalBind
  * `files`, reading as well the files on the message in a pod's chat that the
  * thread was started from, which stay in the chat with the message.
  */
-function withStartingFiles(
+export function withStartingFiles(
 	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile">,
 	{ startedFrom }: Pick<TurnContext, "startedFrom">,
 ): Pick<ThreadFiles.Interface, "read"> {

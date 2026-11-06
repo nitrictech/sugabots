@@ -129,7 +129,9 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) {
 		return { action, subject: code(withoutScheme(input.url)) };
 	}
-	return { action, subject: name(SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords)) };
+	// A file in the thread, such as one a connection uploads, is named as the thread names it.
+	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
+	return { action, subject: name(subject) };
 }
 
 /**
