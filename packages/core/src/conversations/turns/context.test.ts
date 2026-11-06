@@ -95,6 +95,11 @@ describe("modelPrompt", () => {
 			return modelPrompt(turn, environment()).messages.at(-1)?.content ?? "";
 		};
 		expect(instruction("conversation")).toContain("[Turn] You are in a thread.");
+		const betweenPeople = context();
+		betweenPeople.thread.hostAgentId = null;
+		const amongPeople = modelPrompt(betweenPeople, environment()).messages.at(-1)?.content ?? "";
+		expect(amongPeople).toContain("You are in a thread between people");
+		expect(amongPeople).not.toContain("only you reply here");
 		for (const type of ["pod_chat", "bot_channel"] as const) {
 			expect(instruction(type)).toContain("It is a channel, not a thread");
 			expect(instruction(type)).toContain("call start_thread");
@@ -526,6 +531,7 @@ function context(): TurnContext {
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
 			type: "conversation",
+			hostAgentId: "0199a3a0-0000-7000-8000-000000000003",
 			parentThreadId: null,
 		},
 		agent: {

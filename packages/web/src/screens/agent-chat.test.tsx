@@ -551,7 +551,7 @@ describe("ongoing agent Chat", () => {
 		expect(screen.getByLabelText(`Message ${linear.name}`)).toBeTruthy();
 	});
 
-	it("offers the pod's people and the chat's own bot to mention, not the pod's other bots or you", async () => {
+	it("offers the pod's people and bots to mention, so the chat's bot can bring one in, but not you", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		writeDraft(composer, "@");
@@ -559,12 +559,12 @@ describe("ongoing agent Chat", () => {
 		const list = within(await screen.findByRole("listbox"));
 		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
 		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
-		expect(list.queryByRole("option", { name: new RegExp(triager.name) })).toBeNull();
+		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
 		// After the people and bots come the two groups, which are not people the pod has.
 		expect(list.getByRole("option", { name: /@here/ })).toBeTruthy();
 		expect(list.getByRole("option", { name: /@channel/ })).toBeTruthy();
-		expect(list.getAllByRole("option")).toHaveLength(4);
+		expect(list.getAllByRole("option")).toHaveLength(5);
 	});
 
 	it("offers no @here or @channel when nobody else could be notified", async () => {

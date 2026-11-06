@@ -192,6 +192,7 @@ export const make = Effect.gen(function* () {
 									workspaceId: loaded.workspaceId,
 									title: loaded.title,
 									type: loaded.type,
+									hostAgentId: loaded.hostAgentId,
 									parentThreadId: loaded.parentThreadId,
 								},
 								agent: {
@@ -289,6 +290,8 @@ export interface TurnContext {
 		workspaceId: string;
 		title: string;
 		type: ThreadType;
+		/** The bot whose thread or channel it is; none in a pod's chat or between people. */
+		hostAgentId: string | null;
 		/** Set when another agent opened this thread by delegating to this one. */
 		parentThreadId: string | null;
 	};
@@ -434,6 +437,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			workspaceId: true,
 			podId: true,
 			parentThreadId: true,
+			hostAgentId: true,
 			title: true,
 			type: true,
 			initiatorUserId: true,

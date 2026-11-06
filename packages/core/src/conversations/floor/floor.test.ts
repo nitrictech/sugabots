@@ -128,8 +128,12 @@ describe("a person's message", () => {
 		});
 	});
 
-	it("goes to nobody in a conversation between people", () => {
+	it("goes to the bots a conversation between people names, and otherwise to nobody there", () => {
 		expect(decideFloor(input({ hostAgentId: null, content: "@reviewer?" }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: reviewer, reason: "mention" }],
+		});
+		expect(decideFloor(input({ hostAgentId: null, content: "Lunch?" }))).toEqual({
 			kind: "nobody",
 		});
 	});

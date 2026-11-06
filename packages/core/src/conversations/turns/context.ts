@@ -283,8 +283,8 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 					...crew,
 					"Use the collaborate tool when you need another agent's answer to finish your reply: they work in a child thread and you get the answer back.",
 					'Do this without being told to; a person should not have to say "ask them". Do not collaborate on what you can answer yourself, and never reach for yourself.',
-					context.thread.type === "conversation" || context.thread.type === "bot_channel"
-						? "This is a conversation with you alone: only you reply here. When the person mentions another agent, they want that agent's input, so collaborate with it and answer with what it tells you."
+					context.thread.hostAgentId === context.agent.id
+						? "This is your conversation: only you reply here. When the person mentions another agent, they want that agent's input, so collaborate with it and answer with what it tells you."
 						: undefined,
 					"Call these tools. Never write a tool call out in your reply: text describing a tool does nothing and is shown to everyone as part of your message.",
 					"A collaboration brief must stand alone: the collaborator sees only the brief, so include the question and any facts from this thread it needs.",
@@ -400,7 +400,11 @@ const BROWSE_NATURALLY = [
 
 /** Which room the turn is in, and what that means for who replies there. */
 function whereYouAre(context: TurnContext): string {
-	if (!isChannel(context.thread)) return "You are in a thread.";
+	if (!isChannel(context.thread)) {
+		return context.thread.type === "conversation" && context.thread.hostAgentId === null
+			? "You are in a thread between people, where a bot replies when someone names it or replies to its message."
+			: "You are in a thread.";
+	}
 	const channel =
 		context.thread.type === "pod_chat"
 			? `You are in the pod's channel "${context.thread.title}", where its people talk to each other and to the bots they name.`

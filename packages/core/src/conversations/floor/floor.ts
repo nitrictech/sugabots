@@ -24,16 +24,17 @@ const repliedTo = alias(message, "replied_to");
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
  * applies it, and asks for the turns. People post in four types of thread:
  *
- * - A pod's chat (`pod_chat`), where bots reply in the chat itself:
+ * - A pod's chat (`pod_chat`), or a conversation between people
+ *   (`conversation` with no bot), where bots reply only when asked:
  *   1. Mentioning anyone: the bots it mentions, if any.
  *   2. Otherwise, replying to a bot's message: that bot.
  *   3. Otherwise nobody, as its people talk to each other.
  * - A bot's channel (`bot_channel`), or a conversation (`conversation`) with
- *   a bot or between people:
- *   1. Between people, or mentioning only people: nobody.
+ *   a bot:
+ *   1. Mentioning only people: nobody.
  *   2. Otherwise its bot, whoever else is in it and whichever bots they
- *      mention. A conversation is with one bot, so another bot the person
- *      names is reached by that bot collaborating, not by joining.
+ *      mention. It is that bot's, so another bot the person names is
+ *      reached by that bot collaborating, not by joining.
  * - A routine's thread (`routine_feed`):
  *   1. Mentioning only people: nobody.
  *   2. Mentioning bots by handle: those bots, and nobody else.
@@ -66,7 +67,10 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
 	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
-	if (input.threadType === "pod_chat") {
+	if (
+		input.threadType === "pod_chat" ||
+		(input.threadType === "conversation" && input.hostAgentId === null)
+	) {
 		if (mentionedAgents.length > 0) {
 			return {
 				kind: "turns",
