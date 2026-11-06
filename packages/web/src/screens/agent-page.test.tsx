@@ -85,6 +85,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		appSettingsUrl: null,

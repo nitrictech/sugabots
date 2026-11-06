@@ -83,6 +83,7 @@ function connection(handle: string, name: string, url: string): Connection {
 		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		appSettingsUrl: null,

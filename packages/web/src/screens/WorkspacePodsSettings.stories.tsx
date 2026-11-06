@@ -54,6 +54,7 @@ function connection(
 		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		appSettingsUrl: null,

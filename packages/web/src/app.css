@@ -437,6 +437,14 @@
 }
 
 /*
+ * Text whose box runs from its capitals to its baseline, leaving out the room
+ * a line keeps for descenders, so an icon centred beside it sits on the words.
+ */
+@utility text-box-cap {
+	text-box: trim-both cap alphabetic;
+}
+
+/*
  * A phone's floating controls, such as the tabs and a chat's Back: frosted
  * over whatever scrolls under them, with a hairline edge.
  */

@@ -89,6 +89,7 @@ import {
 } from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
+import { ConnectionsNotice } from "./ConnectionsNotice.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import {
 	ChannelDetails,
@@ -802,6 +803,7 @@ export function ConversationChat({
 									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
 								}}
 								attachments={attachments}
+								notice={<ConnectionsNotice pod={pod} botName={agent?.name} />}
 							/>
 						)}
 						{/*

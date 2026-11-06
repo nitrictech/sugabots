@@ -18054,6 +18054,9 @@
 					"signedIn": {
 						"type": "boolean"
 					},
+					"signInExpired": {
+						"type": "boolean"
+					},
 					"secretHeader": {
 						"anyOf": [
 							{
@@ -18129,6 +18132,7 @@
 					"url",
 					"auth",
 					"signedIn",
+					"signInExpired",
 					"secretHeader",
 					"hasSecret",
 					"appSettingsUrl",
@@ -18454,6 +18458,9 @@
 					"signedIn": {
 						"type": "boolean"
 					},
+					"signInExpired": {
+						"type": "boolean"
+					},
 					"secretHeader": {
 						"anyOf": [
 							{
@@ -18535,6 +18542,7 @@
 					"url",
 					"auth",
 					"signedIn",
+					"signInExpired",
 					"secretHeader",
 					"hasSecret",
 					"appSettingsUrl",

@@ -23,7 +23,7 @@ import {
 	type ServerListing,
 	type ServerSession,
 } from "../../providers/connections/mcp.ts";
-import type { OAuthProviders } from "../../providers/connections/oauth.ts";
+import { needsSignIn, type OAuthProviders } from "../../providers/connections/oauth.ts";
 import { toolAccessOf } from "../../providers/connections/tool-access.ts";
 import {
 	Egress,
@@ -51,7 +51,9 @@ import type { UploadSide } from "./signed-upload/tool.ts";
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
- * has, and the connection's own test is where the owner learns why.
+ * has, and the connection's own test is where the owner learns why. One whose
+ * sign-in was refused is left out too, but named apart, since it stays out of
+ * every turn until a person signs in again.
  *
  * A GitHub connection's tools are Sugabots' own (see `github/tools.ts`), with
  * no server to reach; they are offered the same way, keyed by its handle. So
@@ -78,6 +80,8 @@ export interface ConnectionToolSet {
 	tools: Record<string, OfferedTool>;
 	/** Connections left out because their server couldn't be listed. */
 	unavailable: string[];
+	/** Connections left out until someone signs in again, by handle. */
+	signInExpired: string[];
 	/** What each connection's server says about using its tools, by handle. */
 	instructions: Record<string, string>;
 	/** Catalog servers the pod has not added. */
@@ -192,8 +196,13 @@ export function from({
 	return {
 		forPod: (workspaceId, podId, turn) =>
 			Effect.gen(function* () {
-				const reached = yield* connections.targetsForPod(workspaceId, podId);
-				const addable = presetsAddableTo(reached);
+				const { targets: reached, signInExpired: expired } = yield* connections.targetsForPod(
+					workspaceId,
+					podId,
+				);
+				// One waiting on a sign-in is still the pod's, so it isn't offered to be added again.
+				const addable = presetsAddableTo([...reached, ...expired]);
+				const signInExpired = expired.map((connection) => connection.handle);
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
@@ -203,7 +212,9 @@ export function from({
 					instructions: gitHub.instructions,
 				};
 				const targets = reached.filter((target) => target.kind === "mcp");
-				if (targets.length === 0) return { ...nothingOffered, ...ownTools, addable };
+				if (targets.length === 0) {
+					return { ...nothingOffered, ...ownTools, signInExpired, addable };
+				}
 				const uploadSide: UploadSide = {
 					threadId: turn.threadId,
 					files: turn.files,
@@ -270,22 +281,32 @@ export function from({
 					targets,
 					(target) =>
 						Effect.tryPromise(() => loadListing(target)).pipe(
-							Effect.catch((failure) =>
-								Effect.as(
+							Effect.catch((failure): Effect.Effect<ListingOutcome> => {
+								if (needsSignIn(failure.cause)) {
+									return Effect.as(
+										Effect.logWarning(
+											`Connection ${target.handle} left out of the turn until someone signs in again`,
+										),
+										"sign_in_expired" as const,
+									);
+								}
+								return Effect.as(
 									Effect.logError(
 										`Connection ${target.handle} left out of the turn`,
 										failure.cause,
 									),
-									undefined,
-								),
-							),
+									"unavailable" as const,
+								);
+							}),
 						),
 					{ concurrency: "unbounded" },
 				);
 				const listed = targets.flatMap((target, index) => {
 					const listing = listings[index];
-					return listing ? [{ target, listing }] : [];
+					return typeof listing === "object" ? [{ target, listing }] : [];
 				});
+				const leftOut = (outcome: ListingOutcome) =>
+					targets.filter((_, index) => listings[index] === outcome).map((target) => target.handle);
 				return {
 					tools: Object.assign(
 						{},
@@ -299,9 +320,8 @@ export function from({
 						})),
 						ownTools.tools,
 					),
-					unavailable: targets
-						.filter((_, index) => listings[index] === undefined)
-						.map((target) => target.handle),
+					unavailable: leftOut("unavailable"),
+					signInExpired: [...signInExpired, ...leftOut("sign_in_expired")],
 					instructions: {
 						...Object.fromEntries(
 							listed.flatMap(({ target, listing }) =>
@@ -321,16 +341,19 @@ export function from({
 	};
 }
 
-/** Catalog servers whose host does not match any of `reached`. */
-function presetsAddableTo(reached: readonly { url: string }[]): readonly ConnectionPreset[] {
+/** Catalog servers whose host does not match any of the pod's `connections`. */
+function presetsAddableTo(connections: readonly { url: string }[]): readonly ConnectionPreset[] {
 	const installed = new Set(
-		reached.flatMap((target) => {
-			const preset = connectionPresetFor(target.url);
+		connections.flatMap((connection) => {
+			const preset = connectionPresetFor(connection.url);
 			return preset ? [preset.id] : [];
 		}),
 	);
 	return connectionCatalog.filter((preset) => !installed.has(preset.id));
 }
+
+/** What asking a connection's server for its tools came to. */
+type ListingOutcome = ServerListing | "unavailable" | "sign_in_expired";
 
 function buildOfferedTools(
 	target: ConnectionTarget,
@@ -361,6 +384,7 @@ function buildOfferedTools(
 const nothingOffered: ConnectionToolSet = {
 	tools: {},
 	unavailable: [],
+	signInExpired: [],
 	instructions: {},
 	addable: [],
 	close: async () => undefined,

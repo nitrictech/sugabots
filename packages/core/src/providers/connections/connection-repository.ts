@@ -114,7 +114,7 @@ export interface Interface {
 	 * waiting on its sign-in offers nothing, and neither does one whose every
 	 * listed tool is off, so a turn does not reach its server at all.
 	 */
-	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<ConnectionTarget[]>;
+	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<PodTargets>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
 		workspaceId: string,
@@ -463,11 +463,15 @@ export const make = Effect.gen(function* () {
 						)
 						.orderBy(asc(connection.createdAt)),
 				).pipe(
-					Effect.map((rows) =>
-						rows
-							.filter((row) => isSignedIn(row, cipher) && !everyToolOff(row))
-							.map((row) => toTarget(row)),
-					),
+					Effect.map((rows) => {
+						const used = rows.filter((row) => !everyToolOff(row));
+						return {
+							targets: used.filter((row) => isSignedIn(row, cipher)).map(toTarget),
+							signInExpired: used
+								.filter((row) => signInExpired(row, cipher))
+								.map((row) => ({ handle: row.handle, url: row.url })),
+						};
+					}),
 				),
 			),
 
@@ -521,6 +525,16 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
+
+/** A pod's connections as a turn sees them. */
+export interface PodTargets {
+	targets: ConnectionTarget[];
+	/**
+	 * Connections that offer nothing until someone signs in again, by handle,
+	 * and by address so they still count as ones the pod has.
+	 */
+	signInExpired: Pick<ConnectionTarget, "handle" | "url">[];
+}
 
 /**
  * What a test found: the server's tools, absent for a connection whose tools
@@ -606,6 +620,14 @@ export function isSignedIn(
 /** Whether a GitHub connection's app is installed on an account. */
 export function gitHubInstalled(settings: GitHubConnectionSettings): boolean {
 	return settings.installationId !== null;
+}
+
+/** Whether the connection's tokens were refused with nobody there to sign in again, and nobody has since. */
+export function signInExpired(
+	row: Pick<ConnectionRow, "authKind" | "oauthEncrypted">,
+	cipher: Credentials.Interface,
+): boolean {
+	return row.authKind === "oauth" && unsealOauthRecord(row, cipher)?.signInRejectedAt !== undefined;
 }
 
 /** What the OAuth client has learnt and been issued for the connection, unsealed. */

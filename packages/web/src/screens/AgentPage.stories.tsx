@@ -1,5 +1,5 @@
 import type { Message, ThreadDetails } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -13,12 +13,14 @@ import {
 import {
 	appHandlers,
 	chatPath,
+	connectionHandlers,
 	StoryApp,
 	storyBots,
 	storyChannelFor,
 	storyChatDetails,
 	storyPodChatDetails,
 	storyPodChatFor,
+	storyPods,
 	storyUser,
 	storyWorkspace,
 } from "../story-app.tsx";
@@ -98,6 +100,141 @@ export const Conversation = meta.story({
 		// A shared pod's bot: the header leaves out the Personal pod's "Only you".
 		await expect(within(header).queryByText("Only you")).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
+	},
+});
+
+/** A pod connection whose sign-in the server refused during a turn. */
+function expiredConnection(n: number, name: string, url: string): TestConnection {
+	return {
+		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
+		workspaceId: revenue.workspaceId,
+		podId: revenue.id,
+		name,
+		handle: name.toLowerCase(),
+		url,
+		kind: "mcp",
+		auth: "oauth",
+		signedIn: false,
+		signInExpired: true,
+		secretHeader: null,
+		hasSecret: false,
+		appSettingsUrl: null,
+		status: "connected",
+		tools: [
+			{
+				name: "search",
+				description: "Search",
+				readOnly: true,
+				destructive: false,
+				access: "allow",
+			},
+		],
+		lastTestedAt: "2026-09-18T06:00:00.000Z",
+		lastTestError: null,
+		connectedBy: "Sam Rivera",
+		createdAt: "2026-09-01T00:00:00.000Z",
+	};
+}
+
+const expiredLinear = expiredConnection(1, "Linear", "https://mcp.linear.app/mcp");
+
+/**
+ * A connection whose sign-in expired: the composer says the bot can't use it,
+ * with a sign-in straight from there. Closing
+ * it puts it away.
+ */
+export const SignInExpired = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...connectionHandlers([expiredLinear]));
+	},
+	play: async ({ canvas }) => {
+		const said = await canvas.findByText("Growth Desk can't use Linear until you sign in again.");
+		await expect(said).toBeVisible();
+		const notice = said.closest("p")?.parentElement;
+		if (!notice) throw new Error("The notice is not a strip of its own");
+		await expect(within(notice).getByRole("button", { name: "Sign in to Linear" })).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Dismiss" }));
+		await expect(canvas.queryByText(/can't use Linear/)).toBeNull();
+	},
+});
+
+/** Several expired at once: counted rather than named, with the pod's connections a click away. */
+export const SignInsExpired = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...connectionHandlers([
+				expiredLinear,
+				expiredConnection(2, "Notion", "https://mcp.notion.com/mcp"),
+				expiredConnection(3, "Asana", "https://mcp.asana.com/sse"),
+			]),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("3 connections' sign-ins expired.")).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
+			"href",
+			`/${storyWorkspace.slug}/settings/pods/${revenue.slug}/connections`,
+		);
+	},
+});
+
+/** Replying while a sign-in is expired: the two strips stack, the reply's nearest the draft. */
+export const SignInExpiredWhileReplying = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...connectionHandlers([expiredLinear]));
+	},
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" });
+		const message = (await within(log).findByText(/Drafted both/)).closest("article");
+		if (!message) throw new Error("The bot's message is not a message row");
+		within(message).getByRole("button", { name: "Reply" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const notice = await canvas.findByText(/can't use Linear/);
+		const replying = await canvas.findByText(/Replying to/);
+		await expect(
+			notice.compareDocumentPosition(replying) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		// The reply is kept as the chat's draft, so it is let go of for the stories after this one.
+		await userEvent.click(canvas.getByRole("button", { name: /^Stop replying to / }));
+	},
+});
+
+/** Someone who can't manage the pod's connections is told who can fix it, with nothing to press. */
+export const SignInExpiredForSomeoneWhoCannotSignIn = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...connectionHandlers([expiredLinear]),
+			...appHandlers({
+				messages: { [growthDesk.id]: conversation },
+				pods: storyPods.map((pod) =>
+					pod.id === revenue.id
+						? { ...pod, permissions: { ...pod.permissions, manageConnections: false } }
+						: pod,
+				),
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				"Growth Desk can't use Linear until someone in the pod signs in again.",
+			),
+		).toBeVisible();
+		await expect(canvas.queryByRole("button", { name: "Sign in to Linear" })).toBeNull();
+	},
+});
+
+/** On a phone the strip says only what happened, so it keeps to one line beside its button. */
+export const SignInExpiredOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...connectionHandlers([expiredLinear]));
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("Linear's sign-in expired.")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Sign in to Linear" })).toHaveTextContent(
+			"Sign in",
+		);
 	},
 });
 

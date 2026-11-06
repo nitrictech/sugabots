@@ -98,6 +98,8 @@ export function ConnectionsSettings({
 
 /** What a connection's line says under its name: what it needs, or what its tools are set to. */
 function lineFor(connection: Connection): string {
+	if (connection.signInExpired)
+		return "Sign-in expired. Bots can't use it until someone signs in again";
 	if (!connection.signedIn) return "Not signed in yet";
 	if (connection.status === "error") return connection.lastTestError ?? "The last check failed";
 	return accessSummaryText(connection.toolCounts) ?? "No actions found yet";
@@ -117,7 +119,8 @@ function ConnectionRow({
 	const backToPod = useBackToHere("Connections");
 	const page = { ...connectionSettingsLink(pod, connection), state: backToPod };
 	const needsSignIn = !connection.signedIn;
-	const failing = connection.signedIn && connection.status === "error";
+	const failing =
+		connection.signInExpired || (connection.signedIn && connection.status === "error");
 	const pending = actions.update.isPending || actions.signIn.isPending;
 	const error = actions.update.error ?? actions.signIn.error;
 	// A failing secret or address is fixed on the connection's own page.
@@ -155,7 +158,13 @@ function ConnectionRow({
 			<span className="relative ml-auto flex shrink-0 items-center gap-2">
 				{canManage && (needsSignIn || failing) && (
 					<Button size="sm" variant="secondary" disabled={pending} onClick={reconnect}>
-						{needsSignIn ? "Sign in" : connection.auth === "oauth" ? "Reconnect" : "Fix"}
+						{connection.signInExpired
+							? "Sign in again"
+							: needsSignIn
+								? "Sign in"
+								: connection.auth === "oauth"
+									? "Reconnect"
+									: "Fix"}
 					</Button>
 				)}
 			</span>

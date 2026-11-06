@@ -138,6 +138,11 @@ export const connectionSchema = Schema.Struct({
 	 * for GitHub, whether its app is installed. Always true for `header`.
 	 */
 	signedIn: Schema.Boolean,
+	/**
+	 * For `oauth`, whether a turn found the sign-in refused, so it is not
+	 * signed in until someone signs in again. Always false for `header`.
+	 */
+	signInExpired: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
 	/** For GitHub, where the owner of the connection's app changes or deletes it; null otherwise. */

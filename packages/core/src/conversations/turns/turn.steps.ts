@@ -532,6 +532,7 @@ const streamReply = (
 				toolCatalog: toolCatalogNote({
 					catalog,
 					unavailable: connections.unavailable,
+					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
 					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/connections`,
