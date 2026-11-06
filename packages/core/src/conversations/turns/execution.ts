@@ -2,7 +2,7 @@ export * as TurnExecution from "./execution.ts";
 
 import type { AgentColor, Message, ThreadParticipant, ThreadType } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -12,7 +12,7 @@ import {
 	type Transaction,
 	transaction,
 } from "../../database/database.ts";
-import { type TurnReason, threadCompaction } from "../../database/schema.ts";
+import { routineExecution, type TurnReason, threadCompaction } from "../../database/schema.ts";
 import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -168,6 +168,19 @@ export const make = Effect.gen(function* () {
 						const startedFrom = loaded.origin ? messageFromRelations(loaded.origin) : undefined;
 						const messages = startedFrom ? [startedFrom, ...inThread] : inThread;
 						const trigger = messages.find(({ id }) => id === request.triggerMessageId);
+						// Loaded before the history is trimmed, so what they add counts towards its limit.
+						const routineInstructions = yield* query((db) => loadRoutineInstructions(db, messages));
+						const history = newestWithinLimit(
+							messages,
+							(message) =>
+								estimatedTokens(
+									messageTextWithPlacedParts(message) +
+										(message.routineResultOf
+											? (routineInstructions.get(message.routineResultOf.executionId) ?? "")
+											: ""),
+								),
+							historyLimitTokens(windowTokens),
+						);
 						return {
 							_tag: "Prepared",
 							run,
@@ -211,11 +224,8 @@ export const make = Effect.gen(function* () {
 								windowTokens,
 								compaction: loaded.compaction ?? undefined,
 								startedFrom,
-								messages: newestWithinLimit(
-									messages,
-									(message) => estimatedTokens(messageTextWithPlacedParts(message)),
-									historyLimitTokens(windowTokens),
-								),
+								messages: history,
+								routineInstructions,
 							},
 							...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
 						};
@@ -339,7 +349,47 @@ export interface TurnContext {
 	 * kept them word for word, as many as fit the agent's history limit.
 	 */
 	messages: Message[];
+	/**
+	 * What each routine run whose result is among `messages` was told to do,
+	 * by the run's id, so the agent can say why a result was posted. Each is
+	 * cut to `MAX_ROUTINE_INSTRUCTION_CHARACTERS`, ending in an ellipsis when cut.
+	 */
+	routineInstructions: ReadonlyMap<string, string>;
 }
+
+/**
+ * How much of a routine run's instructions a result in the history carries:
+ * enough to say why it was posted, while a thread of a routine's results
+ * repeats them for every run.
+ */
+const MAX_ROUTINE_INSTRUCTION_CHARACTERS = 1_000;
+
+/** The instructions of the routine runs whose results are among `messages`, by run id. */
+const loadRoutineInstructions = Effect.fn("TurnExecution.loadRoutineInstructions")(function* (
+	db: Executor,
+	messages: readonly Message[],
+) {
+	const runIds = messages.flatMap((message) =>
+		message.routineResultOf ? [message.routineResultOf.executionId] : [],
+	);
+	if (runIds.length === 0) return new Map<string, string>();
+	const runs = yield* db
+		.select({
+			id: routineExecution.id,
+			// One more than is kept, to tell a cut from an exact fit.
+			instructions: sql<string>`left(${routineExecution.instructions}, ${MAX_ROUTINE_INSTRUCTION_CHARACTERS + 1})`,
+		})
+		.from(routineExecution)
+		.where(inArray(routineExecution.id, runIds));
+	return new Map(
+		runs.map((run) => [
+			run.id,
+			run.instructions.length > MAX_ROUTINE_INSTRUCTION_CHARACTERS
+				? `${run.instructions.slice(0, MAX_ROUTINE_INSTRUCTION_CHARACTERS)}…`
+				: run.instructions,
+		]),
+	);
+});
 
 export interface TurnCompaction {
 	/** The Compaction agent's summary of the messages from `historyStartsAt` to `keptFrom`. */

@@ -83,6 +83,7 @@ export function modelPrompt(
 			context.messages.filter((message) => message.status === "complete"),
 			{ agentId: context.agent.id, usesSandbox: context.agent.usesSandbox },
 			resultFiles,
+			context.routineInstructions,
 		),
 	];
 	const lastInHistory = history.at(-1);
@@ -123,6 +124,7 @@ function withReactions(
 	messages: readonly Message[],
 	reader: Reader,
 	resultFiles: ReadonlyMap<string, string>,
+	routineInstructions: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
 	const reactions = messages
 		.flatMap((message) =>
@@ -158,7 +160,7 @@ function withReactions(
 	return [
 		...messages.flatMap((message) => [
 			...reactionsBefore(message.createdAt),
-			...promptMessagesFor(message, reader, resultFiles),
+			...promptMessagesFor(message, reader, resultFiles, routineInstructions),
 		]),
 		...reactionsBefore(),
 	];
@@ -184,6 +186,7 @@ function promptMessagesFor(
 	message: Message,
 	reader: Reader,
 	resultFiles: ReadonlyMap<string, string>,
+	routineInstructions: ReadonlyMap<string, string>,
 ): Models.PromptMessage[] {
 	// An agent's own files are in its share_file calls: listed again in its
 	// own words, they would teach it to write such lines instead.
@@ -199,6 +202,18 @@ function promptMessagesFor(
 		if (part.type === "artifact") return [describeArtifact(part)];
 		return [describeToolCall(part, resultFiles.get(part.id))];
 	});
+	// Without this, a result reads as a remark out of nowhere, and asked why it
+	// was said, the agent makes a reason up.
+	if (message.routineResultOf) {
+		records.push(
+			describeRoutineResult(
+				message,
+				message.routineResultOf,
+				reader.agentId,
+				routineInstructions.get(message.routineResultOf.executionId),
+			),
+		);
+	}
 	if (records.length === 0) return authored ? [authored] : [];
 
 	const eventLog: Models.PromptMessage = {
@@ -209,6 +224,17 @@ function promptMessagesFor(
 		].join("\n"),
 	};
 	return authored ? [authored, eventLog] : [eventLog];
+}
+
+/** Which routine posted `message` as its result, and what the run was told to do. */
+function describeRoutineResult(
+	message: Message,
+	run: NonNullable<Message["routineResultOf"]>,
+	readerAgentId: string,
+	instructions: string | undefined,
+): string {
+	const posted = `This message is the result of ${whose(message, readerAgentId)} routine "${run.routineName}", posted here when the routine ran.`;
+	return instructions ? `${posted} The run's instructions were:\n${instructions}` : posted;
 }
 
 /**
