@@ -181,6 +181,7 @@ const podRepositories = [
 				url: "https://github.com/acme",
 				auth: "header",
 				signedIn: true,
+				signInExpired: false,
 				secretHeader: null,
 				hasSecret: false,
 				appSettingsUrl:
