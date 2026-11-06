@@ -445,6 +445,26 @@ ${line}`,
 		});
 	});
 
+	it("says which routine posted a result and what the run was told, so the agent can say why", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) throw new Error("Context fixture has no agent's message");
+		const run = {
+			executionId: "0199a3a0-0000-7000-8000-0000000000f6",
+			threadId: "0199a3a0-0000-7000-8000-0000000000f7",
+			routineId: "0199a3a0-0000-7000-8000-0000000000f8",
+			routineName: "Say Hello",
+		};
+		input.messages[1] = { ...own, routineResultOf: run };
+		input.routineInstructions = new Map([[run.executionId, "Say hello"]]);
+
+		const history = modelPrompt(input, environment()).messages;
+
+		expect(history[1]).toEqual({ role: "assistant", content: own.content });
+		expect(history[2]?.content).toContain('routine "Say Hello"');
+		expect(history[2]?.content).toContain("Say hello");
+	});
+
 	it("records the artifacts a routine's result showed, so a later turn can find them", () => {
 		const input = context();
 		const own = input.messages[1];
@@ -525,6 +545,7 @@ function context(): TurnContext {
 		windowTokens: 256_000,
 		compaction: undefined,
 		startedFrom: undefined,
+		routineInstructions: new Map(),
 		podName: "Release",
 		podSlug: "release",
 		workspaceName: "Suga",

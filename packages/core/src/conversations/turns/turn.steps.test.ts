@@ -106,6 +106,7 @@ const prepared: PreparedTurn = {
 		windowTokens: 128_000,
 		compaction: undefined,
 		startedFrom: undefined,
+		routineInstructions: new Map(),
 		podName: "Release",
 		podSlug: "release",
 		workspaceName: "Suga",
