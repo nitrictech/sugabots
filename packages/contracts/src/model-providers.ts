@@ -325,6 +325,11 @@ export function effectiveCapabilities(
 	);
 }
 
+/** Switching off a model and moving the bots that run on it to another the workspace offers. */
+export const providerModelSwitchOffSchema = Schema.Struct({
+	moveBotsTo: modelIdSchema,
+});
+
 export const bulkProviderModelUpdateSchema = Schema.Struct({
 	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(
 		Schema.isMinLength(1),

@@ -1,3 +1,4 @@
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	effectiveCapabilities,
@@ -16,6 +17,7 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
+	Check,
 	Eye,
 	Grid2X2,
 	Image,
@@ -26,7 +28,7 @@ import {
 	Search,
 	Wrench,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useDeferredValue, useId, useRef, useState } from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -36,7 +38,7 @@ import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -62,6 +64,7 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
@@ -129,6 +132,60 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 				</span>
 			)}
 		</span>
+	);
+}
+
+/** Every bot in `bots` as its face, each named on hover or keyboard focus. */
+function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
+	return (
+		<LivelyGroup>
+			<ul
+				aria-label={label}
+				// Room around each face for its focus ring and its hop, and about three rows before it scrolls.
+				className="-m-1.5 flex max-h-28 list-none flex-wrap justify-center gap-1.5 overflow-y-auto p-1.5"
+			>
+				{bots.map((bot) => (
+					<li key={bot.id} className="flex">
+						<NamedBotFace bot={bot} />
+					</li>
+				))}
+			</ul>
+		</LivelyGroup>
+	);
+}
+
+/** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
+function NamedBotFace({ bot }: { bot: Agent }) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<Tooltip
+			label={bot.name}
+			side="top"
+			// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
+			onOpenChange={(open, details) => {
+				if (
+					open &&
+					details.reason === "trigger-focus" &&
+					!(details.event.target as Element).matches(":focus-visible")
+				) {
+					details.cancel();
+				}
+			}}
+		>
+			<span
+				role="img"
+				aria-label={bot.name}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring flex rounded-full"
+				onPointerEnter={() => face.current?.play("hop")}
+				onFocus={(event) =>
+					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
+				}
+			>
+				<TurnTakingAvatar bot={bot} size={28} faceRef={face} />
+			</span>
+		</Tooltip>
 	);
 }
 
@@ -704,6 +761,31 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 	);
 }
 
+/** A box to search a list of `count` models, for one too long to scan. */
+function ModelSearch({
+	value,
+	onChange,
+	count,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	count: number;
+}) {
+	return (
+		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+			<input
+				type="search"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={`Search ${count} models`}
+				aria-label="Search models"
+				className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
+			/>
+		</label>
+	);
+}
+
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
 function makerOf(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
@@ -717,9 +799,12 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
+	const botsKnown = useAgents().agents !== undefined;
 	const holdersOf = useModelHolders();
+	const offered = useModels().data?.models ?? [];
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
+	const [movingBotsOff, setMovingBotsOff] = useState<ProviderModel>();
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
@@ -750,17 +835,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-						<input
-							type="search"
-							value={search}
-							onChange={(event) => setSearch(event.target.value)}
-							placeholder={`Search ${provider.models.length} models`}
-							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-						/>
-					</label>
+					<ModelSearch value={search} onChange={setSearch} count={provider.models.length} />
 				</div>
 			)}
 			<ScrollingWhen large={large}>
@@ -779,6 +854,13 @@ function Models({ provider }: { provider: ModelProvider }) {
 							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
+					// Another provider offering the same model keeps its bots running.
+					const strandsBots =
+						bots.length > 0 &&
+						!offered.some(
+							(candidate) =>
+								candidate.modelId === model.modelId && candidate.providerId !== provider.id,
+						);
 					return (
 						<SettingsRow
 							key={model.id}
@@ -795,16 +877,26 @@ function Models({ provider }: { provider: ModelProvider }) {
 									{custom && <EditCapabilities provider={provider} model={model} />}
 									<Toggle
 										checked={model.enabled}
-										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
+										disabled={
+											!provider.active ||
+											actions.setModel.isPending ||
+											held !== undefined ||
+											// Until the bots are known, switching off could leave some on it unasked.
+											(model.enabled && !botsKnown)
+										}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
-										onChange={(enabled) =>
+										onChange={(enabled) => {
+											if (!enabled && strandsBots) {
+												setMovingBotsOff(model);
+												return;
+											}
 											actions.setModel.mutate({
 												providerId: provider.id,
 												modelId: model.id,
 												enabled,
-											})
-										}
+											});
+										}}
 									/>
 								</>
 							}
@@ -812,6 +904,19 @@ function Models({ provider }: { provider: ModelProvider }) {
 					);
 				})}
 			</ScrollingWhen>
+			<Dialog
+				open={movingBotsOff !== undefined}
+				onOpenChange={(open) => !open && setMovingBotsOff(undefined)}
+			>
+				{movingBotsOff && (
+					<MoveBotsDialog
+						provider={provider}
+						model={movingBotsOff}
+						bots={botsOn(movingBotsOff.modelId)}
+						done={() => setMovingBotsOff(undefined)}
+					/>
+				)}
+			</Dialog>
 			{custom &&
 				(adding ? (
 					<AddModelRow provider={provider} done={() => setAdding(false)} />
@@ -824,6 +929,121 @@ function Models({ provider }: { provider: ModelProvider }) {
 				</div>
 			)}
 		</SettingsGroup>
+	);
+}
+
+/**
+ * Switching off a model bots still run on: which of the other switched-on
+ * models they move to, starting on the one new bots use. They move and the
+ * model goes off together, so no bot is left on a model that is off.
+ */
+function MoveBotsDialog({
+	provider,
+	model,
+	bots,
+	done,
+}: {
+	provider: ModelProvider;
+	model: ProviderModel;
+	bots: readonly Agent[];
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.modelId !== model.modelId,
+	);
+	const [search, setSearch] = useState("");
+	const needle = useDeferredValue(search.trim().toLowerCase());
+	const [chosen, setChosen] = useState(() =>
+		candidates.some((candidate) => candidate.modelId === models?.defaultModel)
+			? models?.defaultModel
+			: candidates[0]?.modelId,
+	);
+	const shown = searchModels(candidates, needle);
+	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
+	const name = modelName(model);
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!chosen) return;
+		try {
+			await actions.switchOffModel.mutateAsync({
+				providerId: provider.id,
+				modelId: model.id,
+				moveBotsTo: chosen,
+			});
+		} catch {
+			return;
+		}
+		done();
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader title={`Switch off ${name}`} />
+			<DialogFormBody>
+				<DialogDescription>
+					{bots.length === 1 ? "This bot uses" : "These bots use"} {name}. Choose the model to move{" "}
+					{bots.length === 1 ? "it" : "them"} to.
+				</DialogDescription>
+				<NamedBotFaces bots={bots} label={`Bots on ${name}`} />
+				{candidates.length === 0 ? (
+					<Alert>
+						{name} is the only model switched on. Switch on another first, so the bots have one to
+						move to.
+					</Alert>
+				) : (
+					<>
+						{candidates.length > MODEL_SEARCH_THRESHOLD && (
+							<ModelSearch value={search} onChange={setSearch} count={candidates.length} />
+						)}
+						<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+							{shown.length === 0 && (
+								<SettingsGroup>
+									<SettingsRow label="No models match." />
+								</SettingsGroup>
+							)}
+							{providerNames.map((providerName) => (
+								<SettingsGroup key={providerName} label={providerName}>
+									{shown
+										.filter((candidate) => candidate.providerName === providerName)
+										.map((candidate) => {
+											const selected = candidate.modelId === chosen;
+											return (
+												<SettingsRow
+													key={candidate.modelId}
+													label={candidate.displayName ?? candidate.modelId}
+													render={<button type="button" aria-pressed={selected} />}
+													trailing={
+														selected && (
+															<Check
+																aria-hidden
+																size={16}
+																strokeWidth={2.6}
+																className="shrink-0 text-link"
+															/>
+														)
+													}
+													onClick={() => setChosen(candidate.modelId)}
+												/>
+											);
+										})}
+								</SettingsGroup>
+							))}
+						</div>
+					</>
+				)}
+				{actions.switchOffModel.error && (
+					<Alert>{failureMessage(actions.switchOffModel.error)}</Alert>
+				)}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={bots.length === 1 ? "Move bot and switch off" : "Move bots and switch off"}
+				actionDisabled={!chosen || actions.switchOffModel.isPending}
+				onCancel={done}
+			/>
+		</DialogForm>
 	);
 }
 

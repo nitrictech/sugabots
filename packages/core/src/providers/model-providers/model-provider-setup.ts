@@ -188,6 +188,23 @@ export interface Interface {
 		| ModelInUse,
 		CurrentActor.Service
 	>;
+	/**
+	 * Switches a model off and moves the bots on it to `moveBotsTo`, which the
+	 * workspace must still offer afterwards, returning how many moved. Bots stay
+	 * put while another provider still offers the same model.
+	 */
+	readonly switchOffModel: (
+		input: InProvider & { modelId: string; moveBotsTo: string },
+	) => Effect.Effect<
+		number,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ProviderModelsRequireCredential
+		| ProviderModelNotFound
+		| ModelProviderRepository.ModelNotEnabled
+		| ModelInUse,
+		CurrentActor.Service
+	>;
 	readonly removeModel: (
 		input: InProvider & { modelId: string },
 	) => Effect.Effect<
@@ -532,6 +549,32 @@ export const make = Effect.gen(function* () {
 					}
 					yield* adoptFirstModel(workspaceId);
 					return updated;
+				}),
+			),
+
+		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo }) =>
+			operation(
+				"switchOffModel",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					const provider = yield* requireConnectedProvider(workspaceId, providerId);
+					const switchingOff = provider.models.find((candidate) => candidate.id === modelId);
+					if (!switchingOff) {
+						return yield* new ProviderModelNotFound();
+					}
+					return yield* keepingHeldModelsOffered(
+						workspaceId,
+						Effect.gen(function* () {
+							yield* providers.updateModel(workspaceId, providerId, modelId, { enabled: false });
+							yield* providers.requireEnabled(workspaceId, moveBotsTo);
+							if (yield* providers.isEnabled(workspaceId, switchingOff.modelId)) return 0;
+							return yield* agents.moveCrewAgentsToModel(
+								workspaceId,
+								switchingOff.modelId,
+								moveBotsTo,
+							);
+						}),
+					);
 				}),
 			),
 
