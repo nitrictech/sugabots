@@ -44,6 +44,7 @@ import {
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
+import type { Channel, ThreadId } from "./rooms.ts";
 
 /**
  * The only writer of `thread`, `thread_participant` and `thread_read`,
@@ -65,13 +66,13 @@ export interface Interface {
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/**
-	 * The thread hanging off the message `originMessageId` in `parent`, a pod's
-	 * chat or a bot's channel, opened and announced when it has none: with the
-	 * bot `hostAgentId`, or between people when it is null, and `initiatorUserId`.
+	 * The thread hanging off the message `originMessageId` in the channel
+	 * `parent`, opened and announced when it has none: with the bot
+	 * `hostAgentId`, or between people when it is null, and `initiatorUserId`.
 	 * A message has one thread, so `opened` is false when it already had it.
 	 */
 	readonly openThread: (input: {
-		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">;
+		parent: Pick<Channel<schema.ThreadRow>, "id" | "workspaceId" | "podId">;
 		originMessageId: string;
 		hostAgentId: string | null;
 		title: string;
@@ -211,13 +212,13 @@ export interface Interface {
 		title: string;
 	}) => Effect.Effect<string>;
 	/**
-	 * Calls the thread `title`, unless it is a bot's channel, which goes by its
-	 * bot's name. True when the thread took the title.
+	 * Calls the thread `title`. Never a channel, which goes by the name people
+	 * or its bot gave it. True when the thread was still there to take it.
 	 */
-	readonly retitle: (threadId: string, title: string) => Effect.Effect<boolean>;
+	readonly retitle: (threadId: ThreadId, title: string) => Effect.Effect<boolean>;
 	/** Retitles the thread the system agent `systemAgentKey` works in under `servedThreadId`. */
 	readonly retitleSystemAgentThread: (input: {
-		servedThreadId: string;
+		servedThreadId: ThreadId;
 		systemAgentKey: SystemAgentKey;
 		title: string;
 	}) => Effect.Effect<void>;
@@ -997,7 +998,7 @@ export const make = Effect.gen(function* () {
 						db
 							.update(thread)
 							.set({ title, updatedAt: now })
-							.where(and(eq(thread.id, threadId), ne(thread.type, "bot_channel")))
+							.where(eq(thread.id, threadId))
 							.returning({ id: thread.id }),
 					),
 				).pipe(Effect.map((retitled) => retitled.length > 0)),

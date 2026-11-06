@@ -34,6 +34,13 @@ export const threadTypeSchema = Schema.Literals([
 
 export type ThreadType = typeof threadTypeSchema.Type;
 
+/** The types of room that are channels, which last and which threads are started from. */
+export const channelTypeSchema = Schema.Literals(["pod_chat", "bot_channel"]);
+
+export type ChannelType = typeof channelTypeSchema.Type;
+
+export const isChannelType = Schema.is(channelTypeSchema);
+
 /** The threads whose messages notify people: not a routine's feed, nor the threads bots work in. */
 export const NOTIFYING_THREAD_TYPES: ReadonlySet<ThreadType> = new Set([
 	"conversation",

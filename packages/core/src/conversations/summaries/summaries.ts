@@ -19,6 +19,7 @@ import {
 } from "../../workspaces/agents/system-agents.ts";
 import type { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { isThread, type ThreadId } from "../threads/rooms.ts";
 import {
 	loadSystemAgentScope,
 	loadTranscript,
@@ -30,7 +31,8 @@ import { admitSummary, type SummaryRequest } from "./summary.workflow.ts";
 /**
  * Thread summaries, written by the `summarise` system agent.
  *
- * After an agent completes a turn, a summary is requested for the thread. The
+ * After an agent completes a turn, a summary is requested for the thread, though
+ * a channel is never summarised. The
  * system agent reads what was said since the last summary and rewrites it, and on
  * the first pass also titles the thread. Its turns live in a child thread of
  * the one being summarised, so a person can read back what the system agent did
@@ -76,6 +78,10 @@ export const make = Effect.gen(function* () {
 						if (!scope) {
 							return skipped("The thread, the agent that triggered it, or its message is gone");
 						}
+						// A channel goes on and on, and keeps the name people gave it: only a
+						// thread, one piece of work, is summarised and titled from its summary.
+						const served = { id: scope.threadId, type: scope.threadType };
+						if (!isThread(served)) return skipped("Channels are not summarised");
 						const summariser = yield* query((db) =>
 							findRunnableSystemAgent(db, scope.workspaceId, SUMMARISE_SYSTEM_AGENT),
 						);
@@ -121,7 +127,7 @@ export const make = Effect.gen(function* () {
 							_tag: "Prepared",
 							request,
 							scribe: { threadId: systemAgentThreadId, agentId: summariser.id },
-							threadId: scope.threadId,
+							threadId: served.id,
 							workspaceId: scope.workspaceId,
 							podId: scope.podId,
 							sourceMessageId: request.sourceMessageId,
@@ -203,7 +209,7 @@ export interface PreparedSummary {
 	request: SummaryRequest;
 	/** The Scribe, and the thread its turns are recorded in. */
 	scribe: { threadId: string; agentId: string };
-	threadId: string;
+	threadId: ThreadId;
 	workspaceId: string;
 	podId: string;
 	/** The last message this summary will cover. */
