@@ -784,30 +784,41 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect((await viewAs(memberId).get(started.id))?.thread.title).toBe("Verify the release");
 	});
 
-	it("does not summarise a bot's channel", async () => {
-		const details = await createThread({
-			workspaceId,
+	it("does not summarise a channel the bot replies in", async () => {
+		const [host] = await onDatabase((db) =>
+			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
+		);
+		if (!host) throw new Error("The bot is gone");
+		const chats = chatsAs(memberId);
+		const botChannel = await chats.openBotChannel({
+			workspace: workspaceId,
 			podId,
 			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "What changed?",
 		});
-		const run = await runningTurn(details.thread.id);
-		const reply = await prepareRunnable(turns, run);
-		await turnRecords.complete(
-			replyTurnOf(reply),
-			{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 200_000, readKeptFrom: null },
-		);
-		await runOnPostgres(releaseTurn(run));
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		for (const channel of [botChannel, podChat]) {
+			await chats.post({
+				conversationId: channel.id,
+				messageId: crypto.randomUUID(),
+				content: `@${host.handle} what changed?`,
+			});
+			const run = await runningTurn(channel.id);
+			const reply = await prepareRunnable(turns, run);
+			await turnRecords.complete(
+				replyTurnOf(reply),
+				{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
+				{ contextCapacity: 200_000, readKeptFrom: null },
+			);
+			await runOnPostgres(releaseTurn(run));
 
-		expect(
-			await summaries.prepare({
-				threadId: details.thread.id,
-				agentId,
-				sourceMessageId: reply.responseMessage.id,
-			}),
-		).toMatchObject({ _tag: "Skipped" });
+			expect(
+				await summaries.prepare({
+					threadId: channel.id,
+					agentId,
+					sourceMessageId: reply.responseMessage.id,
+				}),
+			).toMatchObject({ _tag: "Skipped" });
+		}
 	});
 
 	it("records a summary the model could not write as the Scribe's failed turn", async () => {

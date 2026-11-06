@@ -20,8 +20,8 @@ import { crewOf } from "../threads/participants.ts";
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
  * applies it, and asks for the turns. People post in four types of thread:
  *
- * - A pod's chat: nobody. Its people talk to each other, and start a thread
- *   to ask a bot.
+ * - A pod's chat (`pod_chat`): the bots its message mentions, which reply
+ *   in the chat itself; otherwise nobody, as its people talk to each other.
  * - A bot's channel (`bot_channel`), or a conversation (`conversation`) with
  *   a bot or between people:
  *   1. Between people, or mentioning only people: nobody.
@@ -58,6 +58,14 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
 	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
+	if (input.threadType === "pod_chat") {
+		return mentionedAgents.length > 0
+			? {
+					kind: "turns",
+					agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
+				}
+			: NOBODY;
+	}
 	const { hostAgentId } = input;
 	if (hostAgentId === null || mentionsOnlyPeople) return NOBODY;
 	switch (input.threadType) {
