@@ -330,6 +330,18 @@ export const providerModelSwitchOffSchema = Schema.Struct({
 	moveBotsTo: modelIdSchema,
 });
 
+/** Moving the bots on one model to another, as the model stops being offered. */
+export const botMoveSchema = Schema.Struct({
+	from: modelIdSchema,
+	to: modelIdSchema,
+});
+export type BotMove = typeof botMoveSchema.Type;
+
+/** Switching off a provider and moving the bots on its models to models other providers offer. */
+export const providerSwitchOffSchema = Schema.Struct({
+	moveBots: Schema.Array(botMoveSchema).check(Schema.isMaxLength(MAX_PROVIDER_MODELS)),
+});
+
 export const bulkProviderModelUpdateSchema = Schema.Struct({
 	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(
 		Schema.isMinLength(1),

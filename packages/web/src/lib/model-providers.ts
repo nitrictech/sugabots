@@ -1,4 +1,5 @@
 import type {
+	BotMove,
 	ModelProviderUpdate,
 	NewModelProvider,
 	ProviderModelUpdate,
@@ -175,6 +176,22 @@ export function useProviderActions() {
 					client.api.modelProviders.switchOffModel({
 						params: { workspace: workspaceId, providerId, modelId },
 						payload: { moveBotsTo },
+					}),
+				);
+			},
+			onSuccess: () =>
+				Promise.all([
+					refresh(),
+					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+				]),
+		}),
+		switchOff: useMutation({
+			mutationFn: ({ providerId, moveBots }: { providerId: string; moveBots: BotMove[] }) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.switchOff({
+						params: { workspace: workspaceId, providerId },
+						payload: { moveBots },
 					}),
 				);
 			},

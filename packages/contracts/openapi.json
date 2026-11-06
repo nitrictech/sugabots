@@ -4201,6 +4201,138 @@
 				}
 			}
 		},
+		"/workspaces/{workspace}/model-providers/{providerId}/switch-off": {
+			"post": {
+				"tags": [
+					"modelProviders"
+				],
+				"operationId": "modelProviders.switchOff",
+				"parameters": [
+					{
+						"name": "workspace",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1
+						},
+						"required": true
+					},
+					{
+						"name": "providerId",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
+						},
+						"required": true
+					}
+				],
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"moved": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"required": [
+										"moved"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ForbiddenEncoded"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "NotFound",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NotFoundEncoded"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConflictEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				},
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProviderSwitchOff"
+							}
+						}
+					},
+					"required": true
+				}
+			}
+		},
 		"/workspaces/{workspace}/model-providers/{providerId}/test": {
 			"post": {
 				"tags": [
@@ -17366,6 +17498,28 @@
 				],
 				"additionalProperties": false
 			},
+			"BotMove": {
+				"type": "object",
+				"properties": {
+					"from": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 128,
+						"pattern": "^[\\w./:-]+$"
+					},
+					"to": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 128,
+						"pattern": "^[\\w./:-]+$"
+					}
+				},
+				"required": [
+					"from",
+					"to"
+				],
+				"additionalProperties": false
+			},
 			"BotUsage": {
 				"type": "object",
 				"properties": {
@@ -22021,6 +22175,22 @@
 					"connected",
 					"error"
 				]
+			},
+			"ProviderSwitchOff": {
+				"type": "object",
+				"properties": {
+					"moveBots": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/BotMove"
+						},
+						"maxItems": 2000
+					}
+				},
+				"required": [
+					"moveBots"
+				],
+				"additionalProperties": false
 			},
 			"ProviderTestResult": {
 				"type": "object",

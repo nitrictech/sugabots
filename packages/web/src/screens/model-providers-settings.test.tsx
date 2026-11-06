@@ -142,3 +142,46 @@ describe("switching off a model bots run on", () => {
 		);
 	});
 });
+
+describe("switching off a provider whose models bots run on", () => {
+	const [openai, anthropic] = modelProviders;
+	const [opus, sonnet] = MODELS;
+	if (!openai || !anthropic || !opus || !sonnet) throw new Error("fixture");
+
+	it("moves the bots to another provider's model as it switches the provider off", async () => {
+		const providers = client.api.modelProviders;
+		const offered = (providerId: string, modelId: string) => ({
+			providerId,
+			providerName: providerId === anthropic.id ? anthropic.name : openai.name,
+			providerPreset: null,
+			providerActive: true,
+			modelId,
+			displayName: null,
+			capabilities: ["tools" as const],
+		});
+		providers.listEnabledModels.mockReturnValue(
+			Effect.succeed({
+				models: [offered(anthropic.id, opus), offered(openai.id, sonnet)],
+				defaultModel: sonnet,
+			}),
+		);
+		providers.switchOff.mockReturnValue(Effect.succeed({ moved: 2 }));
+		mount(`/suga/settings/providers/${anthropic.id}`);
+
+		fireEvent.click(await screen.findByRole("switch", { name: `Use ${anthropic.name}` }));
+		const dialog = await screen.findByRole("dialog", { name: `Switch off ${anthropic.name}` });
+		expect(within(dialog).getByText("Issue Triager and Linear Handler")).toBeDefined();
+		expect(
+			within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` }),
+		).toBeDefined();
+		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
+
+		await waitFor(() =>
+			expect(providers.switchOff).toHaveBeenCalledWith({
+				params: { workspace: expect.any(String), providerId: anthropic.id },
+				payload: { moveBots: [{ from: opus, to: sonnet }] },
+			}),
+		);
+		expect(providers.update).not.toHaveBeenCalled();
+	});
+});
