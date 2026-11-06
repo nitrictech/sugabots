@@ -482,7 +482,7 @@ export const ReplyingTo = meta.story({
 	},
 	play: async ({ args, canvas, userEvent }) => {
 		await expect(canvas.getByText("Issue Triager")).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Cancel reply" }));
+		await userEvent.click(canvas.getByRole("button", { name: /^Stop replying to / }));
 		await expect(args.replyingTo?.onCancel).toHaveBeenCalledTimes(1);
 		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
 		await userEvent.keyboard("{Escape}");

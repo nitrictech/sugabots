@@ -43,6 +43,43 @@ export function useChatReplyDraft(
 	return [replyTo, setReplyTo];
 }
 
+/**
+ * The bots taken off the unsent draft in the same chat, of those its last
+ * message went to, kept beside it as `useChatDraft` keeps the draft. `after`
+ * is that last message: once another is sent, none is taken off.
+ */
+export function useTakenOffRecipients(
+	userId: string,
+	podId: string,
+	conversationId: string,
+): [TakenOffRecipients, Dispatch<SetStateAction<TakenOffRecipients>>] {
+	const key = `sugabots-draft-taken-off:${userId}:${podId}:${conversationId}`;
+	const [takenOff, setTakenOff] = useState(() => decodeTakenOff(read(key)));
+
+	useEffect(() => {
+		write(key, takenOff.botIds.length > 0 ? JSON.stringify(takenOff) : "");
+	}, [key, takenOff]);
+
+	return [takenOff, setTakenOff];
+}
+
+const takenOffRecipientsSchema = Schema.Struct({
+	after: Schema.optional(Schema.String),
+	botIds: Schema.Array(Schema.String),
+});
+
+export type TakenOffRecipients = typeof takenOffRecipientsSchema.Type;
+
+const decodeStoredTakenOff = Schema.decodeUnknownOption(
+	Schema.fromJsonString(takenOffRecipientsSchema),
+);
+
+function decodeTakenOff(stored: string): TakenOffRecipients {
+	return Option.getOrElse(stored ? decodeStoredTakenOff(stored) : Option.none(), () => ({
+		botIds: [],
+	}));
+}
+
 const decodeStoredReplyTo = Schema.decodeUnknownOption(Schema.fromJsonString(messageReplyToSchema));
 
 function decodeReplyTo(stored: string): MessageReplyTo | undefined {

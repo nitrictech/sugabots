@@ -612,7 +612,7 @@ export const ReplyToAMessage = meta.story({
 		await userEvent.keyboard("{Enter}");
 		const composer = canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` });
 		await expect(composer).toHaveFocus();
-		await expect(canvas.getByRole("button", { name: "Cancel reply" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: /^Stop replying to / })).toBeVisible();
 
 		await userEvent.keyboard("Only the Northwind one{Enter}");
 		// Look the quote up each time: the row shown while the message sends is
@@ -624,7 +624,7 @@ export const ReplyToAMessage = meta.story({
 				}),
 			).toBeVisible(),
 		);
-		await expect(canvas.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: /^Stop replying to / })).toBeNull();
 	},
 });
 
