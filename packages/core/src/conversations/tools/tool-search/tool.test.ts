@@ -70,5 +70,6 @@ describe("the turn's note on connection tools", () => {
 		);
 		expect(note).toContain("sign-ins have expired");
 		expect(note).toMatch(/signs in again[^\n]*: linear\./);
+		expect(note).toMatch(/linear\.[^\n]*\[Connections\]\(/);
 	});
 });

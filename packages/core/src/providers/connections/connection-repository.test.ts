@@ -158,7 +158,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 					toolAccess: { edit: "off" },
 				}),
 			],
-			signInExpired: ["notion"],
+			signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
 		});
 		expect(await shown(notion.id)).toMatchObject({ signedIn: false, signInExpired: true });
 	});

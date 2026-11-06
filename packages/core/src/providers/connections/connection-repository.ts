@@ -469,7 +469,7 @@ export const make = Effect.gen(function* () {
 							targets: used.filter((row) => isSignedIn(row, cipher)).map(toTarget),
 							signInExpired: used
 								.filter((row) => signInExpired(row, cipher))
-								.map((row) => row.handle),
+								.map((row) => ({ handle: row.handle, url: row.url })),
 						};
 					}),
 				),
@@ -529,8 +529,11 @@ export const layer = Layer.effect(Service, make);
 /** A pod's connections as a turn sees them. */
 export interface PodTargets {
 	targets: ConnectionTarget[];
-	/** The handles of connections that offer nothing until someone signs in again. */
-	signInExpired: string[];
+	/**
+	 * Connections that offer nothing until someone signs in again, by handle,
+	 * and by address so they still count as ones the pod has.
+	 */
+	signInExpired: Pick<ConnectionTarget, "handle" | "url">[];
 }
 
 /**

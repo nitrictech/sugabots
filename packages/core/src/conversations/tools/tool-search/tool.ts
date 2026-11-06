@@ -138,7 +138,7 @@ export function toolCatalogNote({
 			? `These connections aren't answering right now, so their tools can't be found or run: ${unavailable.join(", ")}. If the person asks for one, say so rather than that it can't be done.`
 			: undefined,
 		signInExpired.length > 0
-			? `These connections' sign-ins have expired, so their tools can't be found or run until someone in the pod signs in again from the connection's page in the pod's settings: ${signInExpired.join(", ")}. If the person asks for something one of them would do, or it would have helped, tell them which connection needs signing in again.`
+			? `These connections' sign-ins have expired, so their tools can't be found or run until someone in the pod signs in again from the pod's connections page: ${signInExpired.join(", ")}. If the person asks for something one of them would do, or it would have helped, tell them which connection needs signing in again, with the link [Connections](${connectionsPageUrl}).`
 			: undefined,
 	]
 		.filter(Boolean)

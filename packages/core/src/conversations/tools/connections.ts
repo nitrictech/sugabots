@@ -196,11 +196,13 @@ export function from({
 	return {
 		forPod: (workspaceId, podId, turn) =>
 			Effect.gen(function* () {
-				const { targets: reached, signInExpired } = yield* connections.targetsForPod(
+				const { targets: reached, signInExpired: expired } = yield* connections.targetsForPod(
 					workspaceId,
 					podId,
 				);
-				const addable = presetsAddableTo(reached);
+				// One waiting on a sign-in is still the pod's, so it isn't offered to be added again.
+				const addable = presetsAddableTo([...reached, ...expired]);
+				const signInExpired = expired.map((connection) => connection.handle);
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
@@ -339,11 +341,11 @@ export function from({
 	};
 }
 
-/** Catalog servers whose host does not match any of `reached`. */
-function presetsAddableTo(reached: readonly { url: string }[]): readonly ConnectionPreset[] {
+/** Catalog servers whose host does not match any of the pod's `connections`. */
+function presetsAddableTo(connections: readonly { url: string }[]): readonly ConnectionPreset[] {
 	const installed = new Set(
-		reached.flatMap((target) => {
-			const preset = connectionPresetFor(target.url);
+		connections.flatMap((connection) => {
+			const preset = connectionPresetFor(connection.url);
 			return preset ? [preset.id] : [];
 		}),
 	);

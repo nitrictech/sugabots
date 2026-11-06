@@ -218,7 +218,7 @@ describe("a turn's connection tools", () => {
 		}
 	});
 
-	it("names a connection whose sign-in was refused apart from one that will not answer", async () => {
+	it("names a connection whose sign-in was refused apart from one that will not answer, and does not offer it to be added", async () => {
 		const linear = target({
 			connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
 			handle: "linear",
@@ -230,7 +230,7 @@ describe("a turn's connection tools", () => {
 				targetsForPod: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
-						signInExpired: ["notion"],
+						signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
 					}),
 			},
 			httpClients: { for: () => fetch },
@@ -243,6 +243,8 @@ describe("a turn's connection tools", () => {
 		const set = await run(offered.forPod("w", "p", NO_TURN));
 		try {
 			expect(set.signInExpired).toEqual(["notion", "linear"]);
+			// Notion is still the pod's, so the model isn't told to add it.
+			expect(set.addable.map((preset) => preset.id)).not.toContain("notion");
 			expect(set.unavailable).toEqual(["locked"]);
 		} finally {
 			await set.close();
