@@ -2,7 +2,7 @@ import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import type { AgentParticipant, Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { useAgents, useModelName } from "@/lib/agents.ts";
+import { useAgents, useModelLabel } from "@/lib/agents.ts";
 import {
 	THREAD_NOT_STARTED,
 	useOpenBotChannel,
@@ -53,7 +53,7 @@ export function NewThread({
 	const [failed, setFailed] = useState(false);
 	const threadWith = chosen ?? (details ? firstBotNamed(draft, details.crew) : undefined);
 	// The model that answers: the chosen bot's, or the named one's, from the roster.
-	const threadWithModel = useModelName(
+	const threadWithModel = useModelLabel(
 		agents?.find((agent) => agent.id === threadWith?.id)?.model ?? null,
 	);
 	const title = agentHandle ? "New thread" : `New thread in ${pod.name}`;

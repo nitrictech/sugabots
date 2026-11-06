@@ -32,7 +32,7 @@ import {
 	useState,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { useAgents, useModelName } from "@/lib/agents.ts";
+import { useAgents, useModelLabel } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -237,7 +237,7 @@ export function ConversationChat({
 	const chatColumn = useRef<HTMLDivElement>(null);
 	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
 	const { agents } = useAgents();
-	const answeringModel = useModelName(
+	const answeringModel = useModelLabel(
 		(isPodChat ? agents?.find((one) => one.id === threadWith?.id)?.model : agent?.model) ?? null,
 	);
 	// The people here and this chat's own bot, not yourself; the pod's other bots are not

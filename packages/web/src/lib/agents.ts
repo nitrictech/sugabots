@@ -1,4 +1,4 @@
-import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
+import type { Agent, AgentUpdate, NewAgentInPod, Pod, ProviderPresetId } from "@sugabots/contracts";
 import {
 	queryOptions,
 	skipToken,
@@ -104,13 +104,26 @@ export function useModels(enabled = true) {
 	});
 }
 
+/** How a bot's model is shown: its name, and the preset of the provider it runs through. */
+export interface ModelLabel {
+	name: string;
+	providerPreset: ProviderPresetId | null;
+}
+
 /**
- * What to call a bot's model: its display name once the workspace's models
- * load, otherwise its id, which also stands for a model since switched off.
+ * How to show a bot's model: its display name and provider once the
+ * workspace's models load, otherwise its id and no provider, which also
+ * stands for a model since switched off.
  */
-export function useModelName(model: string | null): string | null {
+export function useModelLabel(model: string | null): ModelLabel | null {
 	const inUse = useModels(model !== null).data?.models.find(({ modelId }) => modelId === model);
-	return inUse?.displayName ?? model;
+	if (model === null) return null;
+	return { name: inUse?.displayName ?? model, providerPreset: inUse?.providerPreset ?? null };
+}
+
+/** What to call a bot's model, as `useModelLabel` names it. */
+export function useModelName(model: string | null): string | null {
+	return useModelLabel(model)?.name ?? null;
 }
 
 export function useCreateAgent(podId: string) {

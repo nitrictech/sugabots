@@ -7,9 +7,11 @@ import {
 	messageAuthorName,
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
+import { ProviderLogo } from "@sugabots/provider-logos";
 import { cn } from "cn";
 import { ArrowUp, AtSign, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import type { ModelLabel } from "@/lib/agents.ts";
 import {
 	type ComposerAttachment,
 	type ComposerAttachments,
@@ -68,7 +70,7 @@ export function ChatComposer({
 	/** What the empty box says, when that is not its name. */
 	placeholder?: string;
 	/** The model of the bot the message goes to, named beside Send while nothing holds the message back. */
-	model?: string;
+	model?: ModelLabel;
 	value: string;
 	onValueChange: (value: string) => void;
 	onSubmit: () => void | Promise<void>;
@@ -313,8 +315,15 @@ export function ChatComposer({
 					<span className="flex-1 max-md:hidden" />
 					{/* Beside Send: what holds the message back, else the model that answers, else how to send it. */}
 					{filesNote(attachments.items) === undefined && model ? (
-						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs max-md:hidden">
-							{model}
+						<span className="flex min-w-0 items-center gap-1.5 pr-2 text-subtle-foreground text-xs max-md:hidden">
+							{/* Muted so it does not draw the eye from Send. */}
+							{model.providerPreset && (
+								<ProviderLogo
+									preset={model.providerPreset}
+									className="size-3.5 opacity-60 grayscale"
+								/>
+							)}
+							<span className="truncate">{model.name}</span>
 						</span>
 					) : (
 						<span className="pr-2 text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
