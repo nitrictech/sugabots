@@ -51,7 +51,7 @@ export function searchHistoryTool({
 	run: RunEffect;
 }) {
 	return tool({
-		description: `Search the messages in this thread from before the summary of its earlier history, which you only have that summary of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
+		description: `Search the messages here from before the summary of its earlier history, which you only have that summary of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
 		inputSchema: Schema.Struct({
 			query: Schema.optional(
 				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
@@ -76,8 +76,7 @@ export function searchHistoryTool({
 			}
 			if (!keptFrom) {
 				return {
-					refused:
-						"You have this thread's whole history already; there is nothing older to search.",
+					refused: "You have the whole history here already; there is nothing older to search.",
 				};
 			}
 			const search: HistorySearch = {

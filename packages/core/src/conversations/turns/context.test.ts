@@ -38,7 +38,7 @@ describe("modelPrompt", () => {
 		const instruction = prompt.messages.at(-1);
 		expect(instruction?.role).toBe("user");
 		expect(instruction?.content).toContain(
-			"In the thread now: Sam (@sam, person), Host Agent (@host-agent, agent), Reviewer (@reviewer, agent).",
+			"In it now: Sam (@sam, person), Host Agent (@host-agent, agent), Reviewer (@reviewer, agent).",
 		);
 		expect(instruction?.content).toContain(
 			"It is your turn as the agent this thread was addressed to.",
@@ -86,6 +86,20 @@ describe("modelPrompt", () => {
 		expect(modelPrompt(fromChat, environment()).system).not.toContain(
 			"Another agent opened this thread",
 		);
+	});
+
+	it("tells the agent whether it is in a channel or a thread, and how to start a thread from a channel", () => {
+		const instruction = (type: TurnContext["thread"]["type"]) => {
+			const turn = context();
+			turn.thread.type = type;
+			return modelPrompt(turn, environment()).messages.at(-1)?.content ?? "";
+		};
+		expect(instruction("conversation")).toContain("[Turn] You are in a thread.");
+		for (const type of ["pod_chat", "bot_channel"] as const) {
+			expect(instruction(type)).toContain("It is a channel, not a thread");
+			expect(instruction(type)).toContain("call start_thread");
+			expect(instruction(type)).not.toContain("You are in a thread");
+		}
 	});
 
 	it("names the built-in tools on offer, and says nothing about them when there are none", () => {
@@ -491,6 +505,7 @@ function context(): TurnContext {
 			id: "0199a3a0-0000-7000-8000-000000000001",
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
+			type: "conversation",
 			parentThreadId: null,
 		},
 		agent: {
