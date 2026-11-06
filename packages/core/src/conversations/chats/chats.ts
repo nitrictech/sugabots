@@ -23,6 +23,7 @@ import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { isChannel } from "../threads/rooms.ts";
 import { Turns } from "../turns/turns.ts";
 import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
 import { threadTitleFrom } from "./thread-title.ts";
@@ -382,9 +383,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const parent = yield* visibility.conversation(input.conversationId);
-						if (parent.type !== "pod_chat" && parent.type !== "bot_channel") {
-							return yield* new ResourceHidden({ resource: "conversation" });
-						}
+						if (!isChannel(parent)) return yield* new ResourceHidden({ resource: "conversation" });
 						const hostAgentId =
 							parent.type === "bot_channel" ? parent.hostAgentId : input.hostAgentId;
 						if (hostAgentId) {
@@ -441,9 +440,7 @@ export const make = Effect.gen(function* () {
 							: [];
 						if (!origin) return yield* new ResourceHidden({ resource: "message" });
 						const parent = yield* visibility.conversation(origin.threadId);
-						if (parent.type !== "pod_chat" && parent.type !== "bot_channel") {
-							return yield* new ResourceHidden({ resource: "message" });
-						}
+						if (!isChannel(parent)) return yield* new ResourceHidden({ resource: "message" });
 						const { userId } = yield* CurrentActor.Service;
 						const started = yield* threads.openThread({
 							parent,

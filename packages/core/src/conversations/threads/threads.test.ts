@@ -313,22 +313,26 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		);
 		if (!otherRow) throw new Error("Could not create the third agent");
 
-		const details = await createThread({
+		const started = await startThreadWithBot({
 			workspaceId,
 			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Anything to summarise?",
 		});
-		const sourceMessageId = details.messages[0]?.id;
-		if (!sourceMessageId) throw new Error("The thread has no first message");
+		const sourceMessageId = crypto.randomUUID();
+		await chatsAs(memberId).post({
+			conversationId: started.id,
+			messageId: sourceMessageId,
+			content: "And this?",
+		});
 		const prepared = await summaries.prepare({
-			threadId: details.thread.id,
+			threadId: started.id,
 			agentId: otherRow.id,
 			sourceMessageId,
 		});
 
-		expect(prepared).toMatchObject({ _tag: "Prepared", threadId: details.thread.id });
+		expect(prepared).toMatchObject({ _tag: "Prepared", threadId: started.id });
 	});
 
 	it("refuses an agent's turn by name once its model has been cleared", async () => {
@@ -656,14 +660,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	});
 
 	it("queues and persists a fresh summary after a completed exchange", async () => {
-		const details = await createThread({
+		const started = await startThreadWithBot({
 			workspaceId,
 			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
 		});
-		const firstRun = await runningTurn(details.thread.id);
+		const firstRun = await runningTurn(started.id);
 		const preparedTurn = await prepareRunnable(turns, firstRun);
 		await turnRecords.complete(
 			replyTurnOf(preparedTurn),
@@ -676,7 +680,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		);
 		await runOnPostgres(releaseTurn(firstRun));
 		const firstSummary = await preparedSummary({
-			threadId: details.thread.id,
+			threadId: started.id,
 			agentId: preparedTurn.context.agent.id,
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
@@ -684,7 +688,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		// The summariser works in its own thread hanging off the one it summarises,
 		// so its turns never appear in the conversation people are having.
-		expect(firstSummary.scribe.threadId).not.toBe(details.thread.id);
+		expect(firstSummary.scribe.threadId).not.toBe(started.id);
 		const [systemAgentThread] = await onDatabase((db) =>
 			db
 				.select({ systemAgentKey: thread.systemAgentKey, parentThreadId: thread.parentThreadId })
@@ -693,13 +697,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		);
 		expect(systemAgentThread).toMatchObject({
 			systemAgentKey: "summarise",
-			parentThreadId: details.thread.id,
+			parentThreadId: started.id,
 		});
 
 		// And it stays out of the pod's thread list.
 		const listed = await viewAs(memberId).list(workspaceId);
 		expect(listed.some((row) => row.id === firstSummary.scribe.threadId)).toBe(false);
-		expect(listed.some((row) => row.id === details.thread.id)).toBe(true);
 		// Recorded as the Scribe's turn, measured at 1,000 tokens.
 		await runOnPostgres(
 			Context.get(conversations, Turns.Service).recordSystemTurn(
@@ -719,27 +722,24 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			),
 		);
 
-		const refreshed = await viewAs(memberId).get(details.thread.id);
-		// A bot's channel goes by its bot's name, whatever its summaries are titled.
-		expect(refreshed?.thread.title).toMatch(/^Release agent /);
-		// The thread holding the summaries is named after its parent, so it keeps
-		// the channel's name too.
+		const refreshed = await viewAs(memberId).get(started.id);
+		// The first summary titles the thread, and the thread holding the summaries
+		// is named after it.
+		expect(refreshed?.thread.title).toBe("Verify the release");
 		const [summariesThread] = await onDatabase((db) =>
 			db
 				.select({ title: thread.title })
 				.from(thread)
-				.where(
-					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
-				),
+				.where(and(eq(thread.parentThreadId, started.id), eq(thread.systemAgentKey, "summarise"))),
 		);
-		expect(summariesThread?.title).toMatch(/^Summaries of Release agent /);
-		expect((await viewAs(memberId).activity(details.thread.id))?.summary).toMatchObject({
+		expect(summariesThread?.title).toBe("Summaries of Verify the release");
+		expect((await viewAs(memberId).activity(started.id))?.summary).toMatchObject({
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
 		// The Scribe's own turn, measured at 1,000 tokens, is in its child thread, so
 		// the context is the crew reply's.
-		expect((await viewAs(memberId).activity(details.thread.id))?.context).toEqual({
+		expect((await viewAs(memberId).activity(started.id))?.context).toEqual({
 			usedTokens: 30,
 			measuredAt: expect.any(String),
 			// The window the reply was read with, as its turn recorded it.
@@ -748,13 +748,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			compactedAt: null,
 		});
 
-		if (!details.thread.conversationId) throw new Error("The thread is in no conversation");
 		await chatsAs(memberId).post({
-			conversationId: details.thread.conversationId,
+			conversationId: started.id,
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
-		const nextTurn = await prepareRunnable(turns, await runningTurn(details.thread.id));
+		const nextTurn = await prepareRunnable(turns, await runningTurn(started.id));
 		expect(nextTurn.context).not.toHaveProperty("summary");
 		expect(nextTurn.context.messages.map(({ content }) => content)).toEqual([
 			"Summarize this thread",
@@ -767,7 +766,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 		const nextSummary = await preparedSummary({
-			threadId: details.thread.id,
+			threadId: started.id,
 			agentId: nextTurn.context.agent.id,
 			sourceMessageId: nextTurn.responseMessage.id,
 		});
@@ -781,49 +780,45 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			],
 		});
 		await summaries.complete(nextSummary, { content: "Only approval remains." });
-		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toMatch(
-			/^Release agent /,
-		);
+		// Only the first summary titles the thread.
+		expect((await viewAs(memberId).get(started.id))?.thread.title).toBe("Verify the release");
 	});
 
-	it("summarises a thread from the message in the channel it was started from", async () => {
-		const started = await startThreadWithBot({
+	it("does not summarise a bot's channel", async () => {
+		const details = await createThread({
 			workspaceId,
 			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
-			message: "Check the release notes",
+			message: "What changed?",
 		});
-		const run = await runningTurn(started.id);
+		const run = await runningTurn(details.thread.id);
 		const reply = await prepareRunnable(turns, run);
 		await turnRecords.complete(
 			replyTurnOf(reply),
-			{ content: "They are ready.", collaborations: [], toolCalls: [] },
+			{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
 			{ contextCapacity: 200_000, readKeptFrom: null },
 		);
 		await runOnPostgres(releaseTurn(run));
 
-		const summary = await preparedSummary({
-			threadId: started.id,
-			agentId,
-			sourceMessageId: reply.responseMessage.id,
-		});
-
-		expect(summary.transcript.map(({ content }) => content)).toEqual([
-			"Check the release notes",
-			"They are ready.",
-		]);
+		expect(
+			await summaries.prepare({
+				threadId: details.thread.id,
+				agentId,
+				sourceMessageId: reply.responseMessage.id,
+			}),
+		).toMatchObject({ _tag: "Skipped" });
 	});
 
 	it("records a summary the model could not write as the Scribe's failed turn", async () => {
-		const details = await createThread({
+		const started = await startThreadWithBot({
 			workspaceId,
 			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
 		});
-		const preparedTurn = await prepareRunnable(turns, await runningTurn(details.thread.id));
+		const preparedTurn = await prepareRunnable(turns, await runningTurn(started.id));
 		await turnRecords.complete(
 			replyTurnOf(preparedTurn),
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
@@ -839,7 +834,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await runOnPostgres(
 			summarise(
 				{
-					threadId: details.thread.id,
+					threadId: started.id,
 					agentId,
 					sourceMessageId: preparedTurn.responseMessage.id,
 				},
@@ -852,9 +847,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.select({ status: turn.status, error: turn.error })
 				.from(turn)
 				.innerJoin(thread, eq(thread.id, turn.threadId))
-				.where(
-					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
-				),
+				.where(and(eq(thread.parentThreadId, started.id), eq(thread.systemAgentKey, "summarise"))),
 		);
 		expect(scribeTurns).toEqual([{ status: "failed", error: unreachable.userMessage }]);
 	});

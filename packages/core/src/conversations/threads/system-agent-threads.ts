@@ -1,4 +1,4 @@
-import { messageAuthorName } from "@sugabots/contracts";
+import { messageAuthorName, type ThreadType } from "@sugabots/contracts";
 import { and, asc, eq, gte, or } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
@@ -24,6 +24,7 @@ export interface SystemAgentScope {
 	threadId: string;
 	podId: string;
 	workspaceId: string;
+	threadType: ThreadType;
 	threadTitle: string;
 	initiatorUserId: string | null;
 	/** On a thread started from a message in a channel: that message, which stays in the channel. */
@@ -52,6 +53,7 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 			threadId: thread.id,
 			podId: thread.podId,
 			workspaceId: thread.workspaceId,
+			threadType: thread.type,
 			threadTitle: thread.title,
 			initiatorUserId: thread.initiatorUserId,
 			startingMessageId: thread.originMessageId,

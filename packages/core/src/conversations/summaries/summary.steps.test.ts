@@ -6,6 +6,7 @@ import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
+import type { ThreadId } from "../threads/rooms.ts";
 import { Turns } from "../turns/turns.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
@@ -30,7 +31,8 @@ const prepared: PreparedSummary = {
 		threadId: "0199a3a0-0000-7000-8000-000000000005",
 		agentId: "0199a3a0-0000-7000-8000-000000000008",
 	},
-	threadId: request.threadId,
+	// A thread, as `Summaries.prepare` would have found it.
+	threadId: request.threadId as ThreadId,
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
 	podId: "0199a3a0-0000-7000-8000-000000000007",
 	sourceMessageId: request.sourceMessageId,
