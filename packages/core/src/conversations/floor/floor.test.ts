@@ -22,6 +22,7 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 		],
 		agentParticipantIds: new Set([host]),
 		lastAgentSpeakerId: undefined,
+		repliedToAgentId: undefined,
 		...overrides,
 	};
 }
@@ -106,6 +107,25 @@ describe("a person's message", () => {
 			],
 		});
 		expect(decideFloor(input({ ...podChat, content: "Morning all" }))).toEqual({ kind: "nobody" });
+	});
+
+	it("goes to the bot a pod's chat message replies to, unless it mentions someone", () => {
+		const replyToScout = {
+			threadType: "pod_chat",
+			hostAgentId: null,
+			repliedToAgentId: scout,
+		} as const;
+		expect(decideFloor(input({ ...replyToScout, content: "And the routines?" }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: scout, reason: "reply" }],
+		});
+		expect(decideFloor(input({ ...replyToScout, content: "@reviewer can you check?" }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: reviewer, reason: "mention" }],
+		});
+		expect(decideFloor(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual({
+			kind: "nobody",
+		});
 	});
 
 	it("goes to nobody in a conversation between people", () => {

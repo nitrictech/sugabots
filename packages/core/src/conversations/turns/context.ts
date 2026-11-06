@@ -414,6 +414,8 @@ function whyYou(context: TurnContext): string {
 			return "Your creator chose to be interviewed and has opened this new conversation. Start the interview now with your opening. They have not sent a message yet. If they have since written, respond to that first. Do not mention this automatic kickoff.";
 		case "mention":
 			return "It is your turn because a person mentioned you.";
+		case "reply":
+			return "It is your turn because a person replied to your message.";
 		case "collaboration":
 			return "It is your turn because another agent asked you to collaborate.";
 		case "resume":
