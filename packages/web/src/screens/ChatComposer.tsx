@@ -66,6 +66,7 @@ export function ChatComposer({
 	addressed,
 	attachments,
 	needsText = false,
+	notice,
 }: {
 	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
 	label: string;
@@ -97,6 +98,8 @@ export function ChatComposer({
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
 	needsText?: boolean;
+	/** A strip over everything else in the box, of what the person should know before sending, such as a connection bots can't use. */
+	notice?: ReactNode;
 }) {
 	const id = useId();
 	const menuId = `${id}-suggestions`;
@@ -263,6 +266,7 @@ export function ChatComposer({
 				className="focus-ring-within flex cursor-text flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-3xl max-md:p-1"
 			>
 				<div className="flex flex-col max-md:w-full max-md:empty:hidden">
+					{notice}
 					{replyingTo && (
 						<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
 					)}

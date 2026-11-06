@@ -9,7 +9,7 @@ import type {
 import { routineTriggers, testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { storyModel } from "@/story-app.tsx";
@@ -151,7 +151,10 @@ const meta = preview.meta({
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
-				client.setQueryData(["connections", revenue.id], connections);
+				client.setQueryData(
+					["connections", revenue.id],
+					context.parameters.connections ?? connections,
+				);
 				client.setQueryData(["models", WORKSPACE], { models: [storyModel] });
 				client.setQueryData(
 					["workspaces"],
@@ -239,5 +242,26 @@ export const SystemAgentsNotSetUp = meta.story({
 	parameters: { scribeHasModel: false },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(/The system agents write these/)).toBeVisible();
+	},
+});
+
+/**
+ * A connection whose sign-in expired says so under its name, in place of its
+ * tool count, with a sign-in beside it for someone who manages the pod's.
+ */
+export const SignInExpired = meta.story({
+	parameters: {
+		connections: connections.map((connection) =>
+			connection.handle === "linear"
+				? { ...connection, signedIn: false, signInExpired: true }
+				: connection,
+		),
+	},
+	play: async ({ canvas }) => {
+		const tools = canvas.getByRole("heading", { name: "Tools" }).closest("section");
+		if (!tools) throw new Error("The details have no Tools section");
+		await expect(within(tools).getByText("Sign-in expired")).toBeVisible();
+		await expect(within(tools).getByRole("button", { name: "Sign in to Linear" })).toBeVisible();
+		await expect(within(tools).getAllByText("1 tool")).toHaveLength(2);
 	},
 });

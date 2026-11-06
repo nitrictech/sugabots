@@ -1,6 +1,7 @@
 import { useRender } from "@base-ui/react/use-render";
 import type {
 	Agent,
+	Connection,
 	FilePart,
 	Pod,
 	SessionUser,
@@ -14,7 +15,7 @@ import { Archive, ChevronDown, FileText, Hash, Pencil, RefreshCcw } from "lucide
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
-import { usableToolCount, useConnections } from "@/lib/connections.ts";
+import { usableToolCount, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
@@ -24,10 +25,12 @@ import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadActivity } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { WarningText } from "@/ui/warning-text.tsx";
 import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChannelActions, type ChannelToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
@@ -497,37 +500,74 @@ function Routines({
 	);
 }
 
-/** The apps the bot can reach, which are its pod's connections, with how many of their tools it may use, each opening the bot's settings. */
+/**
+ * The apps the bot can reach, which are its pod's connections, with how many
+ * of their tools it may use, each opening the bot's settings. One whose
+ * sign-in expired says so instead, with a sign-in for someone who may.
+ */
 export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(pod.id);
-	const list = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
+	const list =
+		connections.data?.filter(
+			(connection) => connection.signInExpired || usableToolCount(connection) > 0,
+		) ?? [];
 	if (list.length === 0) return null;
 	return (
 		<SidebarSection title="Tools">
 			<ul className="m-0 flex list-none flex-col p-0">
 				{list.map((connection) => (
 					<li key={connection.id}>
-						<Link
-							{...agentSettingsLink({ pod, agent })}
-							state={backToChat}
-							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
-						>
-							<ConnectionMark
-								presetId={connectionMarkFor(connection)}
-								name={connection.name}
-								size="md"
-							/>
-							<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
-								{connection.name}
-							</span>
-							<span className="shrink-0 text-subtle-foreground text-xs">
-								{countOf(usableToolCount(connection), "tool", "tools")}
-							</span>
-						</Link>
+						{connection.signInExpired ? (
+							<ExpiredTool pod={pod} connection={connection} />
+						) : (
+							<Link
+								{...agentSettingsLink({ pod, agent })}
+								state={backToChat}
+								className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
+							>
+								<ConnectionMark
+									presetId={connectionMarkFor(connection)}
+									name={connection.name}
+									size="md"
+								/>
+								<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
+									{connection.name}
+								</span>
+								<span className="shrink-0 text-subtle-foreground text-xs">
+									{countOf(usableToolCount(connection), "tool", "tools")}
+								</span>
+							</Link>
+						)}
 					</li>
 				))}
 			</ul>
 		</SidebarSection>
+	);
+}
+
+/** A connection whose sign-in expired: its name, why the bot can't use it, and a sign-in for someone who may. */
+function ExpiredTool({ pod, connection }: { pod: Pod; connection: Connection }) {
+	const actions = useConnectionActions(pod.id);
+	return (
+		<div className="-mx-1.5 flex items-center gap-2.5 px-1.5 py-1 max-md:gap-3">
+			<ConnectionMark presetId={connectionMarkFor(connection)} name={connection.name} size="md" />
+			<div className="flex min-w-0 flex-1 flex-col gap-1">
+				<span className="truncate text-foreground text-xs max-md:text-sm">{connection.name}</span>
+				<WarningText className="text-warning text-xs">Sign-in expired</WarningText>
+			</div>
+			{pod.permissions.manageConnections && (
+				<Button
+					variant="secondary"
+					size="sm"
+					className="shrink-0"
+					aria-label={`Sign in to ${connection.name}`}
+					disabled={actions.signIn.isPending}
+					onClick={() => actions.signIn.mutate({ connectionId: connection.id })}
+				>
+					Sign in
+				</Button>
+			)}
+		</div>
 	);
 }
