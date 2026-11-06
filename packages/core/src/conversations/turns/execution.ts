@@ -278,7 +278,7 @@ export interface TurnContext {
 		id: string;
 		workspaceId: string;
 		title: string;
-		type?: ThreadType;
+		type: ThreadType;
 		/** Set when another agent opened this thread by delegating to this one. */
 		parentThreadId: string | null;
 	};

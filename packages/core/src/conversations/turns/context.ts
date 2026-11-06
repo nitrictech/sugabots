@@ -9,8 +9,10 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../threads/message-text.ts";
+import { isChannel } from "../threads/rooms.ts";
 import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { ROUTINES_KEY, spokenTimeZone } from "../tools/routines/tool.ts";
+import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 
@@ -247,7 +249,7 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 			`- ${member.name} (@${member.handle})${member.description ? `: ${member.description}` : ""}`,
 	);
 	return [
-		`[Turn] In the thread now: ${participants}. ${whyYou(context)}`,
+		`[Turn] ${whereYouAre(context)} In it now: ${participants}. ${whyYou(context)}`,
 		`You can read the rest of this pod: its other threads, its bots' channels and its pod chats. Find them with ${LIST_THREADS_TOOL} and read them with ${READ_THREAD_TOOL}, rather than asking another agent what was said there or saying you can't see it.`,
 		context.crew.length > 0
 			? [
@@ -369,6 +371,16 @@ const BROWSE_NATURALLY = [
 	"- If a site blocks you or something isn't there, say so rather than working around it out of sight.",
 	"This is slower, and that's fine.",
 ].join("\n");
+
+/** Which room the turn is in, and what that means for who replies there. */
+function whereYouAre(context: TurnContext): string {
+	if (!isChannel(context.thread)) return "You are in a thread.";
+	const channel =
+		context.thread.type === "pod_chat"
+			? `You are in the pod's channel "${context.thread.title}", where its people talk to each other and to the bots they name.`
+			: "You are in your channel, where people come to talk to you.";
+	return `${channel} It is a channel, not a thread: replying here never starts a thread. When someone asks to take something to a thread, call ${START_THREAD_TOOL}.`;
+}
 
 function whyYou(context: TurnContext): string {
 	switch (context.reason) {
