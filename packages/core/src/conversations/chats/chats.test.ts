@@ -396,6 +396,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				id: expect.any(String),
 				title: "March refunds",
 				with: "Impersonal Agent",
+				withBotId: recipientAgentId,
 			});
 			const participants = await onDatabase((db) =>
 				db

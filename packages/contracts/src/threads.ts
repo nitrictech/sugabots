@@ -329,6 +329,21 @@ export const toolCallPartSchema = Schema.Struct({
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
 
+/** The tool a bot starts a thread with, for the person it is answering. */
+export const START_THREAD_TOOL = "start_thread";
+
+/** A thread a bot started with `start_thread`: what the tool returns, and what the chat links to. */
+export const botStartedThreadSchema = Schema.Struct({
+	id: uuidSchema,
+	title: Schema.String,
+	/** The bot it is with, by name, when that is another bot. */
+	with: Schema.optional(Schema.String),
+	/** That bot's id, which the chat finds it by. Absent from threads started before it was recorded. */
+	withBotId: Schema.optional(uuidSchema),
+});
+
+export type BotStartedThread = typeof botStartedThreadSchema.Type;
+
 /** A file attached to the message, served by the conversation it was sent in. */
 export const filePartSchema = Schema.Struct({
 	type: Schema.Literal("file"),

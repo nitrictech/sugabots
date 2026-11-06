@@ -1,5 +1,6 @@
 export * as BotThreads from "./bot-threads.ts";
 
+import type { BotStartedThread } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -69,7 +70,11 @@ export const make = Effect.gen(function* () {
 							brief: input.brief,
 						});
 						const otherBot = host.id === bot.agentId ? undefined : host.name;
-						return { id: started.id, title: started.title, ...(otherBot && { with: otherBot }) };
+						return {
+							id: started.id,
+							title: started.title,
+							...(otherBot && { with: otherBot, withBotId: host.id }),
+						};
 					}),
 				),
 			),
@@ -123,12 +128,7 @@ export interface NewThread {
 }
 
 /** The thread as the bot that started it is told of it. */
-export interface StartedThread {
-	id: string;
-	title: string;
-	/** The bot it is with, when that is another bot. */
-	with?: string;
-}
+export type StartedThread = BotStartedThread;
 
 /** The pod's crew bot with the handle `handle`, written with or without its `@`. */
 const crewNamed = (podId: string, handle: string) =>
