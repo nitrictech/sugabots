@@ -190,12 +190,13 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Switches a model off and moves the bots on it to `moveBotsTo`, which the
-	 * workspace must still offer afterwards, returning how many moved. Bots stay
-	 * put while another provider still offers the same model.
+	 * Switches a model off and moves the bots on it to `moveBotsTo`, returning
+	 * how many moved, and the default and the system agents to `newBotsTo` and
+	 * `summariesTo`, as {@link SettingMoves} says. Bots stay put while another
+	 * provider still offers the same model.
 	 */
 	readonly switchOffModel: (
-		input: InProvider & { modelId: string; moveBotsTo: string },
+		input: InProvider & { modelId: string; moveBotsTo?: string } & SettingMoves,
 	) => Effect.Effect<
 		number,
 		| AuthorizationDenied
@@ -211,7 +212,7 @@ export interface Interface {
 	 * `to`, as {@link Interface.switchOffModel} does for one model.
 	 */
 	readonly switchOff: (
-		input: InProvider & { moveBots: readonly BotMove[] },
+		input: InProvider & { moveBots: readonly BotMove[] } & SettingMoves,
 	) => Effect.Effect<
 		number,
 		| AuthorizationDenied
@@ -235,6 +236,17 @@ export interface Interface {
 		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
 		CurrentActor.Service
 	>;
+}
+
+/**
+ * Where the workspace's default and its system agents move as a switch-off
+ * stops offering the model they run on. Every model moved to must still be
+ * offered afterwards. One left out stays put, and the switch-off fails with
+ * `ModelInUse` if that leaves it on a model no longer offered.
+ */
+export interface SettingMoves {
+	newBotsTo?: string;
+	summariesTo?: string;
 }
 
 /** A workspace, by its id or its slug. */
@@ -286,17 +298,26 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Runs `switchOff`, then moves the crew agents on each `from` the workspace
 	 * no longer offers to its `to`, which it must, and returns how many moved.
-	 * A `from` still offered by another provider keeps its bots.
+	 * A `from` still offered by another provider keeps its bots. The default
+	 * and the system agents move as {@link SettingMoves} says.
 	 */
-	const movingStrandedBots = <E, R>(
+	const movingOffSwitchedOff = <E, R>(
 		workspaceId: string,
-		moves: readonly BotMove[],
+		{ moves, newBotsTo, summariesTo }: { moves: readonly BotMove[] } & SettingMoves,
 		switchOff: Effect.Effect<unknown, E, R>,
 	) =>
 		keepingHeldModelsOffered(
 			workspaceId,
 			Effect.gen(function* () {
 				yield* switchOff;
+				if (newBotsTo !== undefined) {
+					yield* providers.requireEnabled(workspaceId, newBotsTo);
+					yield* providers.setDefaultModel(workspaceId, newBotsTo);
+				}
+				if (summariesTo !== undefined) {
+					yield* providers.requireEnabled(workspaceId, summariesTo);
+					yield* agents.setAllSystemAgentModels(workspaceId, summariesTo);
+				}
 				const moved = yield* Effect.forEach(moves, ({ from, to }) =>
 					Effect.gen(function* () {
 						yield* providers.requireEnabled(workspaceId, to);
@@ -592,7 +613,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo }) =>
+		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo, newBotsTo, summariesTo }) =>
 			operation(
 				"switchOffModel",
 				Effect.gen(function* () {
@@ -602,22 +623,26 @@ export const make = Effect.gen(function* () {
 					if (!switchingOff) {
 						return yield* new ProviderModelNotFound();
 					}
-					return yield* movingStrandedBots(
+					return yield* movingOffSwitchedOff(
 						workspaceId,
-						[{ from: switchingOff.modelId, to: moveBotsTo }],
+						{
+							moves: moveBotsTo ? [{ from: switchingOff.modelId, to: moveBotsTo }] : [],
+							newBotsTo,
+							summariesTo,
+						},
 						providers.updateModel(workspaceId, providerId, modelId, { enabled: false }),
 					);
 				}),
 			),
 
-		switchOff: ({ workspace, providerId, moveBots }) =>
+		switchOff: ({ workspace, providerId, moveBots, newBotsTo, summariesTo }) =>
 			operation(
 				"switchOff",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					return yield* movingStrandedBots(
+					return yield* movingOffSwitchedOff(
 						workspaceId,
-						moveBots,
+						{ moves: moveBots, newBotsTo, summariesTo },
 						Effect.filterOrFail(
 							providers.update(workspaceId, providerId, { active: false }),
 							(updated) => updated !== undefined,
