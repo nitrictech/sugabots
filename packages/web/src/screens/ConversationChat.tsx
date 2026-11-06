@@ -1,6 +1,8 @@
 import {
 	type Agent,
 	type AgentParticipant,
+	type BotStartedThread,
+	botStartedThreadSchema,
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
@@ -12,12 +14,14 @@ import {
 	type Pod,
 	quotedPreview,
 	type SessionUser,
+	START_THREAD_TOOL,
 	type ThreadDetails,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
+import { Option, Schema } from "effect";
 import { Pause } from "lucide-react";
 import {
 	type CSSProperties,
@@ -675,18 +679,25 @@ export function ConversationChat({
 													: undefined
 											}
 											inRoutineThread={routineFeed}
-											threadLinesOf={(message) =>
-												startedThreads
-													.get(message.id)
-													?.map((thread) => (
-														<ThreadLine
-															key={thread.id}
-															item={thread}
-															startedBy={message.author}
-															onOpen={() => openPodThread(thread.threadId)}
-														/>
-													))
-											}
+											threadLinesOf={(message) => [
+												...(startedThreads.get(message.id) ?? []).map((thread) => (
+													<ThreadLine
+														key={thread.id}
+														item={thread}
+														startedBy={message.author}
+														onOpen={() => openPodThread(thread.threadId)}
+													/>
+												)),
+												...threadsStartedBy(message).map((started) => (
+													<BotStartedThreadLine
+														key={started.id}
+														started={started}
+														startedBy={message.author}
+														crew={details?.crew ?? []}
+														onOpen={() => openPodThread(started.id)}
+													/>
+												)),
+											]}
 											onJumpToMessage={jumpTo}
 											reacting={reacting}
 										/>
@@ -1156,6 +1167,52 @@ function ThreadLine({
 			onOpen={onOpen}
 		/>
 	);
+}
+
+/**
+ * A thread a bot started with `start_thread` in its reply. It hangs off no
+ * message, so it is shown from the call, under the reply that names it.
+ */
+function BotStartedThreadLine({
+	started,
+	startedBy,
+	crew,
+	onOpen,
+}: {
+	started: BotStartedThread;
+	startedBy: Message["author"];
+	crew: readonly ThreadParticipant[];
+	onOpen: () => void;
+}) {
+	const otherBot = started.withBotId && crew.find((member) => member.id === started.withBotId);
+	const faces = [
+		...(startedBy.kind === "routine_trigger" ? [] : [startedBy]),
+		...(otherBot ? [otherBot] : []),
+	];
+	return (
+		<SideThreadLine
+			faces={faces}
+			label={started.title}
+			description={`Open thread: ${started.title}`}
+			onOpen={onOpen}
+		/>
+	);
+}
+
+const decodeStartThreadOutput = Schema.decodeUnknownOption(
+	Schema.Struct({ thread: botStartedThreadSchema }),
+);
+
+/** The threads a bot's message started with `start_thread`, in the order it started them. */
+function threadsStartedBy(message: Message): BotStartedThread[] {
+	return message.parts.flatMap((part) => {
+		if (part.type !== "tool_call" || part.tool !== START_THREAD_TOOL) return [];
+		if (part.status !== "completed") return [];
+		return Option.match(decodeStartThreadOutput(part.output), {
+			onNone: () => [],
+			onSome: (output) => [output.thread],
+		});
+	});
 }
 
 type ChatThreadItem = Extract<ChatMessageItem, { kind: "thread" }>;

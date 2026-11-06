@@ -1,9 +1,10 @@
+import { START_THREAD_TOOL } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { BotThreads } from "../../chats/bot-threads.ts";
 
-export const START_THREAD_TOOL = "start_thread";
+export { START_THREAD_TOOL };
 
 const MAX_TITLE_CHARACTERS = 120;
 const MAX_BRIEF_CHARACTERS = 8_000;
