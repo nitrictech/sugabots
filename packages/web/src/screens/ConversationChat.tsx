@@ -202,6 +202,9 @@ export function ConversationChat({
 			? conversation.agent
 			: null;
 	const isPodChat = conversation.kind === "podChat";
+	// Where people talk among themselves, the bots they name reply; elsewhere the
+	// chat's own bot does, asking any other bot named for its help.
+	const namedBotsReply = isPodChat || conversation.kind === "peopleThread";
 	const host = agent
 		? details?.participants.find(
 				(participant): participant is AgentParticipant =>
@@ -236,11 +239,11 @@ export function ConversationChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	// In the pod's chat, the bots the person's last message went to stay
+	// Where named bots reply, the bots the person's last message went to stay
 	// addressed until they take them off: talking to a bot is a conversation,
 	// not a mention every time. Taking one off lasts until they send again.
-	const crew = isPodChat ? (details?.crew ?? []) : [];
-	const lastOwnMessage = isPodChat
+	const crew = namedBotsReply ? (details?.crew ?? []) : [];
+	const lastOwnMessage = namedBotsReply
 		? shownMessages.findLast(
 				(message) => message.author.kind === "person" && message.author.id === user.id,
 			)
@@ -275,20 +278,17 @@ export function ConversationChat({
 	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
 	const { agents } = useAgents();
 	const answeringModel = useModelName(
-		(isPodChat ? agents?.find((one) => one.id === answeringBots[0]?.id)?.model : agent?.model) ??
-			null,
+		(namedBotsReply
+			? agents?.find((one) => one.id === answeringBots[0]?.id)?.model
+			: agent?.model) ?? null,
 	);
-	// The people here and this chat's own bot, not yourself; the pod's other bots are not
-	// offered, except in the pod's chat, where naming one has it reply there.
+	// Everyone here and the pod's bots, not yourself. Naming a bot has it reply where
+	// people talk among themselves, and asks this chat's own bot to bring it in elsewhere.
 	const composerMentionable = useMemo(
 		() =>
 			details
 				? [
-						...mentionableIn(details).filter(
-							(candidate) =>
-								candidate.id !== user.id &&
-								(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
-						),
+						...mentionableIn(details).filter((candidate) => candidate.id !== user.id),
 						...groupMentionsBy(
 							{ kind: "person", id: user.id },
 							details.members,
@@ -296,7 +296,7 @@ export function ConversationChat({
 						),
 					]
 				: [],
-		[details, user.id, isPodChat, host?.id],
+		[details, user.id],
 	);
 
 	useLayoutEffect(() => {
@@ -566,13 +566,18 @@ export function ConversationChat({
 		),
 		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
 	};
-	const hint = isPodChat
+	const askedForHelp = draftMentions.filter(
+		(member) => member.kind === "agent" && member.id !== host?.id,
+	);
+	const hint = namedBotsReply
 		? answeringBots.length > 0
 			? `${BOT_LIST.format(answeringBots.map((bot) => bot.name))} will reply here.`
 			: "Mention a bot to have it reply here."
 		: botStaysOut
 			? `${host.name} won't reply.`
-			: undefined;
+			: host && askedForHelp.length > 0
+				? `${host.name} will ask ${BOT_LIST.format(askedForHelp.map((bot) => bot.name))} for help.`
+				: undefined;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
