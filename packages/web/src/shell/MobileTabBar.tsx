@@ -83,7 +83,6 @@ export function MobileTabBar({ className }: { className?: string }) {
 								count={waitingApprovals}
 								size="sm"
 								label={`${waitingApprovals} waiting on you`}
-								className="bg-chip-strong text-foreground"
 							/>
 						)
 					}
@@ -128,18 +127,16 @@ function TabLink({
 		props: {
 			"aria-current": current ? "page" : undefined,
 			className: cn(
-				"focus-ring relative flex h-12.5 flex-col items-center justify-center gap-0.75 rounded-3xl font-medium text-3xs transition-colors [&>svg]:size-6 [&>svg]:stroke-2",
+				"focus-ring relative flex h-12.5 flex-col items-center justify-center gap-0.75 rounded-3xl font-medium text-3xs transition-colors",
 				current ? "text-foreground" : "text-muted-foreground",
 			),
 			children: (
 				<>
-					{icon}
+					<span className="relative grid size-6 place-items-center [&>svg]:size-6 [&>svg]:stroke-2">
+						{icon}
+						{count && <span className="absolute -top-1.5 left-3.5">{count}</span>}
+					</span>
 					{label}
-					{count && (
-						<span className="absolute top-0.5 left-1/2 ml-1.5 rounded-full ring-2 ring-glass-ring">
-							{count}
-						</span>
-					)}
 				</>
 			),
 		},

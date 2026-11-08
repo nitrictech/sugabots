@@ -221,7 +221,6 @@ export function SidebarView({
 								count={waitingApprovals}
 								size="md"
 								label={`${waitingApprovals} waiting on you`}
-								className="bg-chip-strong text-muted-foreground"
 							/>
 						)
 					}

@@ -1,4 +1,5 @@
-import type { ArtifactSummary } from "@sugabots/contracts";
+import type { ActivityItem, ApprovalRequest, ArtifactSummary } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -6,6 +7,7 @@ import { engineering, growthDesk, personal, revenue } from "@/shell/story-fixtur
 import {
 	appHandlers,
 	StoryApp,
+	storyChannelFor,
 	storyChatActivity,
 	storyChatDetails,
 	storyConversationFor,
@@ -85,6 +87,77 @@ export const Inbox = meta.story({
 		);
 	},
 });
+
+/**
+ * Unread messages and waiting approvals counted on the Inbox and Approvals
+ * tabs, each at its icon's corner: one tab open beneath its count, one not,
+ * and a count of two digits.
+ */
+export const TabCounts = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+				HttpResponse.json({ items: Array.from({ length: 7 }, (_, index) => unreadMention(index)) }),
+			),
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
+				HttpResponse.json({
+					waiting: Array.from({ length: 12 }, (_, index) => waitingApproval(index)),
+					answered: [],
+				}),
+			),
+		);
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
+	play: async ({ canvas }) => {
+		const tabs = await canvas.findByRole("navigation", { name: "Tabs" }, { timeout: 10_000 });
+		await expect(await within(tabs).findByText("7 unread")).toBeInTheDocument();
+		await expect(await within(tabs).findByText("12 waiting on you")).toBeInTheDocument();
+	},
+});
+
+function unreadMention(index: number): ActivityItem {
+	return {
+		kind: "mention",
+		unread: true,
+		messageId: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
+		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
+		preview: "@ryan-eyes can you sign off the Acme quote before 5?",
+		at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
+		podId: revenue.id,
+		conversationId: storyChannelFor(growthDesk).id,
+	};
+}
+
+function waitingApproval(index: number): ApprovalRequest {
+	return {
+		call: {
+			type: "tool_call",
+			id: `0199a3a0-0000-7000-8000-0000000010${String(index).padStart(2, "0")}`,
+			tool: "stripe__send_quote",
+			input: { customer: "Acme Retail" },
+			output: null,
+			status: "awaiting_approval",
+			error: null,
+			mutating: true,
+			atOffset: 0,
+			startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+			finishedAt: null,
+			approval: { status: "pending", decidedByName: null, decidedAt: null },
+		},
+		agent: {
+			kind: "agent",
+			id: growthDesk.id,
+			name: growthDesk.name,
+			handle: growthDesk.handle,
+			color: growthDesk.color,
+			face: growthDesk.face,
+			shape: "circle",
+		},
+		podId: revenue.id,
+		threadId: storyChannelFor(growthDesk).id,
+		conversationId: storyChannelFor(growthDesk).id,
+	};
+}
 
 /** Approvals as a tab, with nothing waiting. */
 export const Approvals = meta.story({

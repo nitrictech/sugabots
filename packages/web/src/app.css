@@ -73,11 +73,10 @@
 	--border-dashed: light-dark(#d4d4d8, #3f3f46);
 	/*
 	 * The `glass` of a phone's floating controls, over whatever scrolls under
-	 * them. `glass-ring` cuts a count badge out of it.
+	 * them.
 	 */
 	--glass: light-dark(rgb(247 247 248 / 0.8), rgb(30 30 34 / 0.72));
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
-	--glass-ring: light-dark(#f1f1f3, #1e1e22);
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
 	/* A pod tile, and a slot in one with no bot in it. */
@@ -203,7 +202,6 @@
 	--color-scrim: var(--scrim);
 	--color-glass: var(--glass);
 	--color-glass-edge: var(--glass-edge);
-	--color-glass-ring: var(--glass-ring);
 	--color-foreground: var(--foreground);
 	--color-body-foreground: var(--body-foreground);
 	--color-muted-foreground: var(--muted-foreground);
