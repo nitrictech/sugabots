@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import mdx from "@mdx-js/rollup";
 import rehypeShiki from "@shikijs/rehype";
 import tailwindcss from "@tailwindcss/vite";
@@ -8,7 +9,8 @@ import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import type { ShikiTransformer } from "shiki";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, normalizePath, type Plugin } from "vite";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 import { markdownPath } from "./src/markdown.ts";
 import { NOT_FOUND_PAGE_PATH, NOT_FOUND_PRERENDER_HEADER } from "./src/not-found.ts";
 import { sitePagePaths } from "./src/site-pages.ts";
@@ -99,5 +101,22 @@ export default defineConfig({
 			},
 		}),
 		react(),
+		// The logo and icons belong to `@sugabots/avatars`. They are copied to the root as files,
+		// because search engines and favicon services fetch an icon by URL and skip one inlined
+		// into the page.
+		viteStaticCopy({
+			targets: [
+				{
+					src: avatarsAsset("sugabots-logo.svg"),
+					dest: ".",
+					rename: { stripBase: true, name: "favicon.svg" },
+				},
+				{ src: avatarsAsset("app-icons/*"), dest: ".", rename: { stripBase: true } },
+			],
+		}),
 	],
 });
+
+function avatarsAsset(exportPath: string): string {
+	return normalizePath(fileURLToPath(import.meta.resolve(`@sugabots/avatars/${exportPath}`)));
+}
