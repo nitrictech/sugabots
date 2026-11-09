@@ -382,7 +382,7 @@ export const SwitchOffProviderInUse = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("switch", { name: "Use OpenAI" }));
 		const dialog = await screen.findByRole("dialog", { name: "Switch off OpenAI" });
-		await expect(within(dialog).getByText("On-call")).toBeInTheDocument();
+		await expect(within(dialog).getByRole("img", { name: "On-call" })).toBeInTheDocument();
 		await expect(
 			within(dialog).getByRole("button", { name: "Move GPT-5 bots to: Claude Sonnet" }),
 		).toBeInTheDocument();

@@ -170,7 +170,9 @@ describe("switching off a provider whose models bots run on", () => {
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${anthropic.name}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${anthropic.name}` });
-		expect(within(dialog).getByText("Issue Triager and Linear Handler")).toBeDefined();
+		const faces = within(dialog).getByRole("list", { name: `Bots on ${opus}` });
+		expect(within(faces).getByRole("img", { name: "Issue Triager" })).toBeDefined();
+		expect(within(faces).getByRole("img", { name: "Linear Handler" })).toBeDefined();
 		expect(
 			within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` }),
 		).toBeDefined();

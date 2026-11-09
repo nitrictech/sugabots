@@ -153,26 +153,42 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 	);
 }
 
-/** The most faces that fit in one row of a dialog, on a phone too. */
-const FACES_IN_A_ROW = 8;
+/**
+ * How a row of faces is laid out: centred under a dialog's text, or small
+ * beside a dropdown in a settings row. `fit` is the most faces that fit in
+ * one row, on a phone too.
+ */
+const FACE_ROWS = {
+	dialog: { size: 28, fit: 8, className: "justify-center gap-1.5" },
+	row: { size: 20, fit: 4, className: "justify-start gap-1" },
+} as const;
 
 /**
  * The bots in `bots` as one row of faces, each named on hover or keyboard
  * focus. Past a row, the last place counts the others and names them on hover.
  */
-function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
-	const faced = bots.length > FACES_IN_A_ROW ? bots.slice(0, FACES_IN_A_ROW - 1) : bots;
+function NamedBotFaces({
+	bots,
+	label,
+	layout = "dialog",
+}: {
+	bots: readonly Agent[];
+	label: string;
+	layout?: keyof typeof FACE_ROWS;
+}) {
+	const { size, fit, className } = FACE_ROWS[layout];
+	const faced = bots.length > fit ? bots.slice(0, fit - 1) : bots;
 	const others = bots.slice(faced.length);
 	return (
 		<LivelyGroup>
 			<ul
 				aria-label={label}
 				// Room around each face for its focus ring and its hop.
-				className="-m-1.5 flex list-none items-center justify-center gap-1.5 p-1.5"
+				className={`-m-1.5 flex list-none items-center p-1.5 ${className}`}
 			>
 				{faced.map((bot) => (
 					<li key={bot.id} className="flex">
-						<NamedBotFace bot={bot} />
+						<NamedBotFace bot={bot} size={size} />
 					</li>
 				))}
 				{others.length > 0 && (
@@ -257,7 +273,7 @@ function nameOnKeyboardFocusOnly(
 }
 
 /** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
-function NamedBotFace({ bot }: { bot: Agent }) {
+function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
 	const face = useRef<LivelyFace>(null);
 	return (
 		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
@@ -272,7 +288,7 @@ function NamedBotFace({ bot }: { bot: Agent }) {
 					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
 				}
 			>
-				<TurnTakingAvatar bot={bot} size={28} faceRef={face} />
+				<TurnTakingAvatar bot={bot} size={size} faceRef={face} />
 			</span>
 		</Tooltip>
 	);
@@ -878,7 +894,9 @@ function MoveBotsOffProviderDialog({
 								<SettingsRow
 									key={model.id}
 									label={modelName(model)}
-									sub={<SomeNames bots={bots} />}
+									sub={
+										<NamedBotFaces bots={bots} label={`Bots on ${modelName(model)}`} layout="row" />
+									}
 									trailing={
 										<DropdownMenu>
 											<DropdownMenuTrigger
@@ -924,22 +942,6 @@ function MoveBotsOffProviderDialog({
 				onCancel={done}
 			/>
 		</DialogForm>
-	);
-}
-
-/** How many bots' names a row spells out before saying how many more there are. */
-const NAMED_BOTS = 3;
-
-/** The first few bots' names, then "and N others", naming the rest on hover: "Ada, Grace, Linus and 37 others". */
-function SomeNames({ bots }: { bots: readonly Agent[] }) {
-	const named = bots.length > NAMED_BOTS ? bots.slice(0, NAMED_BOTS) : bots;
-	const others = bots.slice(named.length);
-	const names = named.map((bot) => bot.name);
-	if (others.length === 0) return LIST.format(names);
-	return (
-		<>
-			{names.join(", ")} and <OtherBots bots={others} />
-		</>
 	);
 }
 
