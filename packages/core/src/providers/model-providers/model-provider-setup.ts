@@ -12,7 +12,9 @@ import type {
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import {
+	presetRequiresApiKey,
 	presetSignInService,
+	presetSignsIn,
 	providerLacksCredential,
 	providerPreset,
 	type SignInServiceId,
@@ -392,8 +394,10 @@ export const make = Effect.gen(function* () {
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
 					}
-					// A new key connects it once a test of it passes, just below.
-					if (changes.apiKey || (changes.active === true && !current.active)) {
+					// What connects one is its key, or for a server that takes none, its address.
+					const connects =
+						changes.apiKey || (changes.baseUrl !== undefined && takesNoCredential(current.preset));
+					if (connects) {
 						yield* providers.recordConnectedBy(workspaceId, providerId, actor.userId);
 					}
 					if (changes.apiKey) {
@@ -703,4 +707,9 @@ export class ProviderSignInAttemptInvalid
 	get userMessage() {
 		return userText`This sign-in has expired; start again`;
 	}
+}
+
+/** A provider bots reach with no key or sign-in, such as a model server on the local network. */
+function takesNoCredential(preset: ProviderPresetId | null): boolean {
+	return !presetSignsIn(preset) && !presetRequiresApiKey(preset);
 }

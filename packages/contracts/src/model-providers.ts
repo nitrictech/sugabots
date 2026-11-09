@@ -206,8 +206,9 @@ export const modelProviderSchema = Schema.Struct({
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	/**
-	 * The name of whoever last gave it a key, signed it in, or switched it on,
-	 * while it is connected and they still have an account.
+	 * The name of whoever last gave it a key, signed it in, or set the address of
+	 * one that takes neither, while it has what it needs and they still have an
+	 * account. Switching it off leaves this alone.
 	 */
 	connectedBy: Schema.NullOr(Schema.String),
 	models: Schema.mutable(Schema.Array(providerModelSchema)),

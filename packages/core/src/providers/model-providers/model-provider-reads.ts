@@ -148,8 +148,8 @@ function toProvider(
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
-		// Nobody connected one that is off, or on without the key or sign-in it needs.
-		connectedBy: row.active && !lacksCredential(row) ? connectedBy : null,
+		// Switching it off leaves it connected; taking its key or sign-in away does not.
+		connectedBy: lacksCredential(row) ? null : connectedBy,
 		models: models.map((model) => ({
 			id: model.id,
 			modelId: model.modelId,
