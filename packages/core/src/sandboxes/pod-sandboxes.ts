@@ -1,5 +1,6 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
+import { SANDBOX_DISK_WARNING_SHARE, sandboxDiskShare } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
@@ -12,6 +13,7 @@ import { reachOf } from "./allowed-hosts.ts";
 import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { type DiskUsage, measureDisk } from "./sandbox-disk.ts";
+import { clearFinishedThreadFolders } from "./sandbox-disk-clearing.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 import type { SandboxLeaseHolderKind } from "./sql.ts";
@@ -36,6 +38,11 @@ const IMAGE_RECHECK = Duration.minutes(10);
 const REGISTRY_TIMEOUT = Duration.seconds(5);
 /** How long after a sandbox fails to upgrade on its own before it is tried again. */
 const UPGRADE_RETRY = Duration.hours(1);
+/**
+ * Clearing a filling disk stops once the workspace is less than this share
+ * full, leaving room for the next turn's clones and installs.
+ */
+const CLEARED_BELOW_SHARE = 0.7;
 
 /**
  * The only writer of `sandbox` and `sandbox_lease`: each pod's one sandbox,
@@ -63,7 +70,12 @@ export interface Interface {
 	readonly renew: (holder: Holder) => Effect.Effect<void>;
 	/** Ends `holder`'s leases, starting the idle time of the sandboxes it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
-	/** Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. */
+	/**
+	 * Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. One
+	 * whose disk was last measured close to full first has its finished
+	 * threads' folders cleared, until its workspace is less than
+	 * {@link CLEARED_BELOW_SHARE} full.
+	 */
 	readonly pauseIdle: Effect.Effect<void>;
 	/**
 	 * Upgrades every sandbox nobody has used or watched for
@@ -438,7 +450,63 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
-	/** Pauses one idle sandbox, unless a turn took it since it was found idle. */
+	/** Records `usage` as the sandbox's disk now, unless the pod has moved to another sandbox since. */
+	const recordMeasurement = (row: SandboxRow, usage: DiskUsage) =>
+		Effect.gen(function* () {
+			const now = yield* DateTime.nowAsDate;
+			yield* query((db) =>
+				db
+					.update(sandboxTable)
+					.set({ diskUsage: usage, diskMeasuredAt: now })
+					.where(sameSandbox(row)),
+			);
+		});
+
+	/**
+	 * Clears finished threads' folders from an idle sandbox whose disk was
+	 * last measured close to full, then measures it again, since a paused
+	 * sandbox keeps its last measurement. It runs under the pod's lock, so a
+	 * turn arriving meanwhile waits rather than finding its folder half gone.
+	 * Whatever happens, the sandbox is paused after.
+	 */
+	const clearDiskIfFilling = (row: SandboxRow, at: Sandboxes.Provider) =>
+		Effect.gen(function* () {
+			if (!row.diskUsage || sandboxDiskShare(row.diskUsage) < SANDBOX_DISK_WARNING_SHARE) return;
+			const { sandbox } = yield* at.open(row.providerSandboxId);
+			const cleared = yield* clearFinishedThreadFolders(
+				sandbox,
+				row.workspaceId,
+				CLEARED_BELOW_SHARE,
+			);
+			if (cleared.length === 0) return;
+			yield* Effect.logInfo("Cleared finished threads' folders to free a sandbox's disk", {
+				cleared,
+			});
+			yield* recordMeasurement(row, yield* measureDisk(sandbox));
+		}).pipe(
+			Effect.catchTags({
+				// Pausing it finds the same, and deals with it.
+				SandboxMissing: () => Effect.void,
+				SandboxStopped: () => Effect.void,
+				SandboxUnavailable: (failure) =>
+					Effect.logWarning(
+						"Could not clear a sandbox's disk; trying again when next idle",
+						failure,
+					),
+				DiskUnmeasurable: (failure) =>
+					Effect.logWarning("A sandbox's disk could not be measured after clearing it", {
+						exitCode: failure.exitCode,
+						stderr: failure.stderr,
+					}),
+			}),
+			Effect.catchCause((cause) => Effect.logError("Clearing a sandbox's disk failed", cause)),
+			Effect.annotateLogs({ sandboxId: row.id }),
+		);
+
+	/**
+	 * Pauses one idle sandbox, unless a turn took it since it was found idle,
+	 * clearing space on its disk first if it is filling.
+	 */
 	const pauseIfStillIdle = (row: SandboxRow, idleSince: Date, now: Date) =>
 		oneAtATime(row.podId)(
 			Effect.gen(function* () {
@@ -458,22 +526,21 @@ export const make = Effect.gen(function* () {
 				if (!still) return;
 				const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
 				if (!configured) return;
-				yield* sandboxes
-					.forConnection(configured.connection)
-					.pause(row.providerSandboxId)
-					.pipe(
-						Effect.andThen(
-							query((db) =>
-								db.update(sandboxTable).set({ pausedAt: now }).where(eq(sandboxTable.id, row.id)),
-							),
+				const at = sandboxes.forConnection(configured.connection);
+				yield* clearDiskIfFilling(row, at);
+				yield* at.pause(row.providerSandboxId).pipe(
+					Effect.andThen(
+						query((db) =>
+							db.update(sandboxTable).set({ pausedAt: now }).where(eq(sandboxTable.id, row.id)),
 						),
-						Effect.catchTags({
-							// Gone at the provider: the next use makes a new one.
-							SandboxMissing: () => forget(row.podId),
-							SandboxUnavailable: (failure) =>
-								Effect.logWarning("Could not pause an idle sandbox; trying again later", failure),
-						}),
-					);
+					),
+					Effect.catchTags({
+						// Gone at the provider: the next use makes a new one.
+						SandboxMissing: () => forget(row.podId),
+						SandboxUnavailable: (failure) =>
+							Effect.logWarning("Could not pause an idle sandbox; trying again later", failure),
+					}),
+				);
 			}),
 		);
 
@@ -504,14 +571,7 @@ export const make = Effect.gen(function* () {
 				}),
 			);
 			if (!running) return;
-			const usage = yield* measureDisk(running);
-			const now = yield* DateTime.nowAsDate;
-			yield* query((db) =>
-				db
-					.update(sandboxTable)
-					.set({ diskUsage: usage, diskMeasuredAt: now })
-					.where(sameSandbox(row)),
-			);
+			yield* recordMeasurement(row, yield* measureDisk(running));
 		}).pipe(
 			Effect.catchTags({
 				SandboxMissing: () => Effect.void,

@@ -182,6 +182,9 @@ export interface Opened {
 /** Where agents work. It belongs to the agents' user. */
 export const WORKSPACE_DIRECTORY = "/workspace";
 
+/** Where each thread's folder is, named by the thread's id. */
+export const THREADS_DIRECTORY = `${WORKSPACE_DIRECTORY}/threads`;
+
 export interface Sandbox {
 	readonly id: SandboxId;
 	/**
