@@ -12,6 +12,7 @@ import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { formatListTimeInSentence } from "@/lib/list-time.ts";
 import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -220,7 +221,11 @@ function Invitations({
 						<PersonAvatar person={{ name: invitation.email, email: invitation.email }} size={32} />
 					}
 					label={invitation.email}
-					sub={resent.has(invitation.id) ? "Sent again" : expiryText(invitation.expiresAt)}
+					sub={
+						resent.has(invitation.id)
+							? "Sent again"
+							: `Sent ${formatListTimeInSentence(new Date(invitation.sentAt), new Date())} · ${expiryText(invitation.expiresAt)}`
+					}
 					trailing={
 						canManage && (
 							<span className="flex shrink-0 items-center gap-1">

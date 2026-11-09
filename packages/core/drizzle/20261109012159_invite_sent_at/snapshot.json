@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "8df9a2dc-3aea-4598-bf79-0015552f3c75",
+  "prevIds": [
+    "760e7a69-acfa-49ba-952a-7af92b9a3995"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "workspace_invite",
+        "sent_at"
+      ],
+      "writes": [
+        "s|col|public.workspace_invite.sent_at",
+        "n|col|public.workspace_invite.sent_at",
+        "e|col|public.workspace_invite.sent_at"
+      ],
+      "reads": [
+        "n|tbl|public.workspace_invite",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "workspace_invite",
+        "name": "sent_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

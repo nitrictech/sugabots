@@ -451,6 +451,7 @@ export const make = Effect.gen(function* () {
 								email: workspaceInvite.email,
 								role: workspaceInvite.role,
 								expiresAt: workspaceInvite.expiresAt,
+								sentAt: workspaceInvite.sentAt,
 							})
 							.from(workspaceInvite)
 							.where(
@@ -518,7 +519,12 @@ export const make = Effect.gen(function* () {
 							? yield* query((db) =>
 									db
 										.update(workspaceInvite)
-										.set({ role: input.invitation.role, expiresAt, inviterId })
+										.set({
+											role: input.invitation.role,
+											expiresAt,
+											sentAt: DateTime.toDate(now),
+											inviterId,
+										})
 										.where(eq(workspaceInvite.id, outstanding.id))
 										.returning(),
 								)
@@ -537,6 +543,7 @@ export const make = Effect.gen(function* () {
 													role: input.invitation.role,
 													inviterId,
 													expiresAt,
+													sentAt: DateTime.toDate(now),
 												})
 												.returning(),
 										),
@@ -844,6 +851,13 @@ function invitationView(row: {
 	email: string;
 	role: AssignableWorkspaceRole;
 	expiresAt: Date;
+	sentAt: Date;
 }): WorkspaceInvitation {
-	return { id: row.id, email: row.email, role: row.role, expiresAt: row.expiresAt.toISOString() };
+	return {
+		id: row.id,
+		email: row.email,
+		role: row.role,
+		expiresAt: row.expiresAt.toISOString(),
+		sentAt: row.sentAt.toISOString(),
+	};
 }
