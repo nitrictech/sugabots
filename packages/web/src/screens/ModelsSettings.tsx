@@ -172,17 +172,25 @@ function ProviderRow({
 	provider: ModelProvider;
 	render: React.ReactElement;
 }) {
+	const connected = providerIsConnected(provider);
 	return (
 		<SettingsRow
 			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 			label={provider.name}
-			sub={!provider.active ? "Turned off" : credentialLine(provider)}
-			trailing={
-				providerIsConnected(provider) && <SettingsStatusBadge>Connected</SettingsStatusBadge>
-			}
+			sub={connected ? credentialLine(provider) : "Not connected"}
+			trailing={connected && <ConnectionBadge active={provider.active} />}
 			chevron
 			render={render}
 		/>
+	);
+}
+
+/** Connected, or connected but switched off, so bots can't use it until it is switched on. */
+function ConnectionBadge({ active }: { active: boolean }) {
+	return active ? (
+		<SettingsStatusBadge>Connected</SettingsStatusBadge>
+	) : (
+		<SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>
 	);
 }
 

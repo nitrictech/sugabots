@@ -539,11 +539,31 @@ export function SettingsTestOutcome({ good, children }: { good: boolean; childre
 	);
 }
 
-/** A row's state as a small green pill with a dot, for something working: Connected. */
-export function SettingsStatusBadge({ children }: { children: ReactNode }) {
+/**
+ * A row's state as a small pill with a dot: green for something working
+ * (Connected), grey for something set up but switched off (Disabled).
+ */
+export function SettingsStatusBadge({
+	tone = "working",
+	children,
+}: {
+	tone?: "working" | "off";
+	children: ReactNode;
+}) {
 	return (
-		<span className="flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-success/12 px-2 font-medium text-success-text text-xs">
-			<span aria-hidden className="size-1.5 rounded-full bg-success" />
+		<span
+			className={cn(
+				"flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 font-medium text-xs",
+				tone === "working" ? "bg-success/12 text-success-text" : "bg-chip text-muted-foreground",
+			)}
+		>
+			<span
+				aria-hidden
+				className={cn(
+					"size-1.5 rounded-full",
+					tone === "working" ? "bg-success" : "bg-muted-foreground",
+				)}
+			/>
 			{children}
 		</span>
 	);

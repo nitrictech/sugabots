@@ -256,13 +256,14 @@ export const Overview = meta.story({
 	},
 });
 
-/** A provider switched off keeps its key, so it stays in the list, connected but turned off. */
+/** A provider switched off keeps its key, so it stays in the list, connected but Disabled. */
 export const SwitchedOff = meta.story({
 	parameters: { providers: [...providers, pausedDeepseek] },
 	play: async ({ canvas }) => {
 		const row = await canvas.findByRole("link", { name: /DeepSeek/ });
-		await expect(row).toHaveTextContent("Turned off");
-		await expect(row).toHaveTextContent("Connected");
+		await expect(row).toHaveTextContent("Disabled");
+		await expect(row).toHaveTextContent("API key set");
+		await expect(row).not.toHaveTextContent("Connected");
 	},
 });
 
