@@ -360,7 +360,7 @@ export const SwitchOffModelInUse = meta.story({
 
 /**
  * Switching off a provider whose model many bots run on names the first few
- * and counts the rest.
+ * and counts the others, naming them on hover.
  */
 export const SwitchOffProviderLongLists = meta.story({
 	parameters: { bots: crowdOnGpt5, providers: everyModelOn },
@@ -368,9 +368,8 @@ export const SwitchOffProviderLongLists = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("switch", { name: "Use OpenAI" }));
 		const dialog = await screen.findByRole("dialog", { name: "Switch off OpenAI" });
-		await expect(
-			within(dialog).getByText("Helper 1, Helper 2, Helper 3 and 37 more"),
-		).toBeInTheDocument();
+		await userEvent.hover(within(dialog).getByText("37 others"));
+		await expect(await screen.findByText("Helper 40")).toBeInTheDocument();
 	},
 });
 

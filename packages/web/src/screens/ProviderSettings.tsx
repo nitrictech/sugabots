@@ -878,7 +878,7 @@ function MoveBotsOffProviderDialog({
 								<SettingsRow
 									key={model.id}
 									label={modelName(model)}
-									sub={someNames(bots)}
+									sub={<SomeNames bots={bots} />}
 									trailing={
 										<DropdownMenu>
 											<DropdownMenuTrigger
@@ -930,11 +930,17 @@ function MoveBotsOffProviderDialog({
 /** How many bots' names a row spells out before saying how many more there are. */
 const NAMED_BOTS = 3;
 
-/** The first few bots' names, and how many more: "Ada, Grace, Linus and 37 more". */
-function someNames(bots: readonly Agent[]): string {
-	const names = bots.slice(0, NAMED_BOTS).map((bot) => bot.name);
-	const more = bots.length - names.length;
-	return more > 0 ? `${names.join(", ")} and ${more} more` : LIST.format(names);
+/** The first few bots' names, then "and N others", naming the rest on hover: "Ada, Grace, Linus and 37 others". */
+function SomeNames({ bots }: { bots: readonly Agent[] }) {
+	const named = bots.length > NAMED_BOTS ? bots.slice(0, NAMED_BOTS) : bots;
+	const others = bots.slice(named.length);
+	const names = named.map((bot) => bot.name);
+	if (others.length === 0) return LIST.format(names);
+	return (
+		<>
+			{names.join(", ")} and <OtherBots bots={others} />
+		</>
+	);
 }
 
 /** The models the provider offers agents: none while it is not connected. */
