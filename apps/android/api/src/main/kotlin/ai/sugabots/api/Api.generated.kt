@@ -269,6 +269,24 @@ data class AnsweredApproval(
 }
 
 @Serializable
+data class ApnsDevice(
+    @EncodeDefault val service: String = "apns",
+    val token: String,
+    val environment: ApnsEnvironment,
+)
+
+@Serializable(with = ApnsEnvironment.Serializer::class)
+enum class ApnsEnvironment(override val rawValue: String) : OpenEnum {
+    DEVELOPMENT("development"),
+    PRODUCTION("production"),
+
+    /** A value from a newer server than this app knows, which can't be sent. */
+    UNKNOWN("");
+
+    object Serializer : OpenEnumSerializer<ApnsEnvironment>("ai.sugabots.api.ApnsEnvironment", entries, UNKNOWN)
+}
+
+@Serializable
 data class ApprovalInbox(
     val waiting: List<ApprovalRequest>,
     val answered: List<AnsweredApproval>,
@@ -764,6 +782,12 @@ enum class CustomerThreadType(override val rawValue: String) : OpenEnum {
 @Serializable
 data class DefaultModelUpdate(
     val model: String,
+)
+
+@Serializable
+data class FcmDevice(
+    @EncodeDefault val service: String = "fcm",
+    val token: String,
 )
 
 @Serializable
@@ -1779,6 +1803,37 @@ data class ProviderTestResult(
     val reachable: Boolean,
     val latencyMs: Long,
     val error: String? = null,
+)
+
+@Serializable(with = PushDevice.Serializer::class)
+sealed interface PushDevice {
+    data class Apns(val value: ApnsDevice) : PushDevice
+
+    data class Fcm(val value: FcmDevice) : PushDevice
+
+    /** A kind from a newer server than this app knows, by its `service`, which can't be sent. */
+    data class Unknown(val tag: String) : PushDevice
+
+    object Serializer : JsonUnionSerializer<PushDevice>("ai.sugabots.api.PushDevice") {
+        override fun decode(element: JsonElement, json: Json): PushDevice =
+            when (val tag = tagOf(element, "service")) {
+                "apns" -> Apns(json.decodeFromJsonElement<ApnsDevice>(element))
+                "fcm" -> Fcm(json.decodeFromJsonElement<FcmDevice>(element))
+                else -> Unknown(tag)
+            }
+
+        override fun encode(value: PushDevice, json: Json): JsonElement =
+            when (value) {
+                is Apns -> json.encodeToJsonElement<ApnsDevice>(value.value)
+                is Fcm -> json.encodeToJsonElement<FcmDevice>(value.value)
+                is Unknown -> throw SerializationException("A kind this app doesn't know can't be sent.")
+            }
+    }
+}
+
+@Serializable
+data class PushRegistration(
+    val available: Boolean,
 )
 
 @Serializable
@@ -3799,6 +3854,14 @@ class NotificationsRoutes internal constructor(private val client: ApiCaller) {
 
     suspend fun reportPresence(clientId: String, conversationId: String? = null, sequence: Long) {
         client.callForData("PUT", "notifications/presence", body = client.jsonBody(Presence(clientId = clientId, conversationId = conversationId, sequence = sequence)))
+    }
+
+    suspend fun registerDevice(body: PushDevice): PushRegistration {
+        return client.call("PUT", "notifications/device", body = client.jsonBody(body))
+    }
+
+    suspend fun unregisterDevice() {
+        client.callForData("DELETE", "notifications/device")
     }
 }
 

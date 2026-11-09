@@ -9,15 +9,25 @@ export class CurrentUser extends Context.Service<CurrentUser, SessionUser>()(
 ) {}
 
 /**
+ * The session the request's credentials belong to, one signed-in browser or
+ * app, and how the request carried them: a browser's cookie, or the bearer
+ * token the apps sign in with.
+ */
+export class CurrentSession extends Context.Service<
+	CurrentSession,
+	{ readonly id: string; readonly credential: "cookie" | "bearer" }
+>()("sugabots/http/CurrentSession") {}
+
+/**
  * Refuses the request unless its credentials resolve to a session.
  *
  * Not required of the client: a browser's cookie travels on its own, and the
  * SDK adds a bearer token to every request rather than per endpoint.
  */
-export class Session extends HttpApiMiddleware.Service<Session, { provides: CurrentUser }>()(
-	"sugabots/http/Session",
-	{ error: Unauthorized },
-) {}
+export class Session extends HttpApiMiddleware.Service<
+	Session,
+	{ provides: CurrentUser | CurrentSession }
+>()("sugabots/http/Session", { error: Unauthorized }) {}
 
 /**
  * Answers a request that fails its endpoint's schemas with `BadRequest`, in

@@ -539,6 +539,47 @@ struct AnsweredApproval: Codable, Hashable, Sendable {
 	}
 }
 
+struct ApnsDevice: Codable, Hashable, Sendable {
+	var service: String = "apns"
+	var token: String
+	var environment: ApnsEnvironment
+}
+
+enum ApnsEnvironment: RawRepresentable, Codable, Hashable, Sendable, QueryValue {
+	case development
+	case production
+	/// A value from a newer server than this app knows.
+	case unknown(String)
+
+	/// Every value this app knows.
+	static let known: [Self] = [.development, .production]
+
+	init(rawValue: String) {
+		switch rawValue {
+		case "development": self = .development
+		case "production": self = .production
+		default: self = .unknown(rawValue)
+		}
+	}
+
+	var rawValue: String {
+		switch self {
+		case .development: "development"
+		case .production: "production"
+		case let .unknown(value): value
+		}
+	}
+
+	init(from decoder: any Decoder) throws {
+		self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+	}
+
+	func encode(to encoder: any Encoder) throws {
+		var container = encoder.singleValueContainer()
+		try container.encode(rawValue)
+	}
+}
+
 struct ApprovalInbox: Codable, Hashable, Sendable {
 	var waiting: [ApprovalRequest]
 	var answered: [AnsweredApproval]
@@ -1659,6 +1700,11 @@ enum CustomerThreadType: RawRepresentable, Codable, Hashable, Sendable, QueryVal
 
 struct DefaultModelUpdate: Codable, Hashable, Sendable {
 	var model: String
+}
+
+struct FcmDevice: Codable, Hashable, Sendable {
+	var service: String = "fcm"
+	var token: String
 }
 
 struct FilePart: Codable, Hashable, Sendable {
@@ -3358,6 +3404,35 @@ struct ProviderTestResult: Codable, Hashable, Sendable {
 	var reachable: Bool
 	var latencyMs: Int
 	var error: String?
+}
+
+enum PushDevice: Codable, Hashable, Sendable {
+	case apns(ApnsDevice)
+	case fcm(FcmDevice)
+	/// A kind from a newer server than this app knows, by its `service`.
+	case unknown(String)
+
+	init(from decoder: any Decoder) throws {
+		let tag = try decoder.container(keyedBy: AnyCodingKey.self).decode(String.self, forKey: AnyCodingKey("service"))
+		switch tag {
+		case "apns": self = .apns(try ApnsDevice(from: decoder))
+		case "fcm": self = .fcm(try FcmDevice(from: decoder))
+		default: self = .unknown(tag)
+		}
+	}
+
+	func encode(to encoder: any Encoder) throws {
+		switch self {
+		case let .apns(value): try value.encode(to: encoder)
+		case let .fcm(value): try value.encode(to: encoder)
+		case let .unknown(tag):
+			throw EncodingError.invalidValue(tag, .init(codingPath: encoder.codingPath, debugDescription: "A kind this app doesn't know can't be sent."))
+		}
+	}
+}
+
+struct PushRegistration: Codable, Hashable, Sendable {
+	var available: Bool
 }
 
 struct QuietHours: Codable, Hashable, Sendable {
@@ -6484,6 +6559,14 @@ extension APIClient {
 
 		func reportPresence(clientId: String, conversationId: String? = nil, sequence: Int) async throws {
 			_ = try await client.callForData("PUT", "notifications/presence", query: [], body: Presence(clientId: clientId, conversationId: conversationId, sequence: sequence))
+		}
+
+		func registerDevice(body: PushDevice) async throws -> PushRegistration {
+			return try await client.call("PUT", "notifications/device", query: [], body: body)
+		}
+
+		func unregisterDevice() async throws {
+			_ = try await client.callForData("DELETE", "notifications/device", query: [])
 		}
 	}
 }

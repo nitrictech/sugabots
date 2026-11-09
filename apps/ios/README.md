@@ -56,6 +56,13 @@ xcrun simctl keychain booted add-root-cert ~/.portless/ca.pem
 | `Sugabots/Design` | The web's colour tokens and type, Lucide icons, its controls as a phone draws them (`WebControls.swift`), bot faces, logos |
 | `Sugabots/Fonts` | Rubik (TTF) and JetBrains Mono (the web's own woff2), under the SIL Open Font License (`OFL-*.txt`) |
 
+Notifications are pushed through Apple's push service, so the server sends them only with Apple's push key for the app (the `APNS_*` settings in `.env.example`); otherwise a development server prints each push to its log, and a production one tells the app notifications aren't available. A build with another bundle identifier needs `APNS_TOPIC` set to it. A debug build registers its token for the sandbox and a TestFlight or App Store build for production (`PushNotifications.environment`), and the server sends each to its own. The simulator gets a real sandbox token on an Apple silicon Mac. To see a notification tap open its page without a server, drop a payload on it:
+
+```sh
+echo '{"aps":{"alert":{"title":"Ada mentioned you"}},"path":"/acme/approvals/<call id>"}' > push.json
+xcrun simctl push booted ai.sugabots.app push.json
+```
+
 Debug builds can sign in and open a page at launch, for screenshots: set `SUGABOTS_SERVER`, `SUGABOTS_EMAIL` and `SUGABOTS_PASSWORD`, and `SUGABOTS_OPEN` (see `App/DebugLaunch.swift` and the `DebugOpen` files), with `SIMCTL_CHILD_` before each when launching with `xcrun simctl launch`.
 
 These files are generated, each by its script in `scripts/`, from the web's packages and the API. `node apps/ios/scripts/generate.ts` from the repo root regenerates all of them, and the `ios` tests fail while any is out of date:

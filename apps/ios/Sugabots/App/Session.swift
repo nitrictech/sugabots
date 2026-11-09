@@ -32,6 +32,7 @@ final class Session {
 	}
 
 	func restore() async {
+		Task { await PendingSignOuts.retry() }
 		#if DEBUG
 		if await signInFromLaunchEnvironment() { return }
 		#endif
@@ -62,6 +63,8 @@ final class Session {
 		}
 		try await client.signIn(email: email, password: password)
 		UserDefaults.standard.set(server, forKey: Self.serverKey)
+		// Online again, so a sign-out that didn't get through may now.
+		Task { await PendingSignOuts.retry() }
 		await open(with: client)
 	}
 
@@ -88,6 +91,14 @@ final class Session {
 	func signOut() async {
 		if case let .signedIn(store) = state {
 			store.stop()
+			// First, in case signing out doesn't reach the server: a session left behind would keep notifying this phone.
+			do {
+				try await store.client.notifications.unregisterDevice()
+			} catch {
+				if (error as? APIFailure)?.isUnauthorized != true, let token = store.client.tokens.token {
+					PendingSignOuts.add(token: token, server: store.client.baseURL)
+				}
+			}
 			await store.client.signOut()
 		}
 		state = .signedOut

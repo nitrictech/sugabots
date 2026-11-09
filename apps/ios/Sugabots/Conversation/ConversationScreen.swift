@@ -11,7 +11,10 @@ struct ConversationScreen: View {
 	/// A message to open at, pointed out for a moment, as from the Inbox.
 	var focusMessageId: String?
 	@Environment(WorkspaceStore.self) private var store
+	@Environment(PushNotifications.self) private var push
+	@Environment(\.isOpenTab) private var isOpenTab
 	@State private var model: ConversationModel?
+	@State private var appeared = false
 
 	var body: some View {
 		ZStack {
@@ -27,7 +30,25 @@ struct ConversationScreen: View {
 			self.model = model
 			await model.start()
 		}
-		.onDisappear { model?.stop() }
+		.onAppear {
+			appeared = true
+			markOnScreen()
+		}
+		.onDisappear {
+			model?.stop()
+			appeared = false
+			markOnScreen()
+		}
+		.onChange(of: isOpenTab) { markOnScreen() }
+	}
+
+	/// Holds back notifications about this conversation while it is the page in front of the person.
+	private func markOnScreen() {
+		if appeared && isOpenTab {
+			push.conversationOnScreen = threadId
+		} else if push.conversationOnScreen == threadId {
+			push.conversationOnScreen = nil
+		}
 	}
 }
 

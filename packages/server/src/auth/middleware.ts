@@ -1,5 +1,6 @@
 import {
 	API_BASE_PATH,
+	CurrentSession,
 	CurrentUser,
 	Forbidden,
 	Session,
@@ -85,7 +86,13 @@ export const sessionLayer = Layer.effect(
 							Effect.succeed(HttpServerResponse.mergeCookies(response, holder.refreshedCookies)),
 						);
 					}
-					return yield* Effect.provideService(httpEffect, CurrentUser, holder.user);
+					return yield* httpEffect.pipe(
+						Effect.provideService(CurrentUser, holder.user),
+						Effect.provideService(CurrentSession, {
+							id: holder.sessionId,
+							credential: authorization === undefined ? "cookie" : "bearer",
+						}),
+					);
 				}),
 	),
 );

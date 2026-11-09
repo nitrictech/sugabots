@@ -15960,6 +15960,141 @@
 					"required": true
 				}
 			}
+		},
+		"/notifications/device": {
+			"put": {
+				"tags": [
+					"notifications"
+				],
+				"operationId": "notifications.registerDevice",
+				"parameters": [],
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "PushRegistration",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PushRegistration"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ForbiddenEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				},
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/PushDevice"
+							}
+						}
+					},
+					"required": true
+				}
+			},
+			"delete": {
+				"tags": [
+					"notifications"
+				],
+				"operationId": "notifications.unregisterDevice",
+				"parameters": [],
+				"security": [],
+				"responses": {
+					"204": {
+						"description": "<No Content>"
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
@@ -16734,6 +16869,37 @@
 					"answer"
 				],
 				"additionalProperties": false
+			},
+			"ApnsDevice": {
+				"type": "object",
+				"properties": {
+					"service": {
+						"type": "string",
+						"enum": [
+							"apns"
+						]
+					},
+					"token": {
+						"type": "string",
+						"pattern": "^[0-9a-f]{16,512}$"
+					},
+					"environment": {
+						"$ref": "#/components/schemas/ApnsEnvironment"
+					}
+				},
+				"required": [
+					"service",
+					"token",
+					"environment"
+				],
+				"additionalProperties": false
+			},
+			"ApnsEnvironment": {
+				"type": "string",
+				"enum": [
+					"development",
+					"production"
+				]
 			},
 			"ApprovalInbox": {
 				"type": "object",
@@ -18546,6 +18712,26 @@
 				},
 				"required": [
 					"model"
+				],
+				"additionalProperties": false
+			},
+			"FcmDevice": {
+				"type": "object",
+				"properties": {
+					"service": {
+						"type": "string",
+						"enum": [
+							"fcm"
+						]
+					},
+					"token": {
+						"type": "string",
+						"pattern": "^[A-Za-z0-9_:-]{16,4096}$"
+					}
+				},
+				"required": [
+					"service",
+					"token"
 				],
 				"additionalProperties": false
 			},
@@ -21747,6 +21933,28 @@
 				"required": [
 					"reachable",
 					"latencyMs"
+				],
+				"additionalProperties": false
+			},
+			"PushDevice": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/ApnsDevice"
+					},
+					{
+						"$ref": "#/components/schemas/FcmDevice"
+					}
+				]
+			},
+			"PushRegistration": {
+				"type": "object",
+				"properties": {
+					"available": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"available"
 				],
 				"additionalProperties": false
 			},

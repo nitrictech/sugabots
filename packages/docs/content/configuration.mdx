@@ -59,6 +59,19 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 | `EMAIL_RESEND_API_KEY`     | Required for `resend`  | A [Resend API key](https://resend.com/api-keys) with permission to send.                                                                                                                                              |
 | `EMAIL_TRANSACTIONAL_FROM` | Required in production | Sender of emails a user's own action triggers, such as verification and invitations, like `Sugabots <no-reply@example.com>`.                                                                                          |
 
+## Push notifications
+
+Notifications reach the phone apps while they are closed through each platform's push service: Apple's (APNs) for the iOS app. Each is on when its key is set. Only an installation holding a service's key for the app can push to it. Without one, a production server tells the app notifications aren't available, and any other server prints each push to its log instead.
+
+A phone with notifications on stays signed in for 60 days after the app last opened, where a browser's session lasts a week, so its notifications don't stop while the app goes unopened. Notifications never lengthen it past 90 days from signing in; after that it lasts as a browser's does, a week from when the app was last used. The server lengthens a session only for a token the push service took when the phone first registered it. A development server without the service's key takes any token, since it only prints the pushes.
+
+| Variable           | Default                     | Description                                                                         |
+| ------------------ | --------------------------- | ----------------------------------------------------------------------------------- |
+| `APNS_KEY_ID`      | None                        | The push key's ID, from the Apple developer account. Setting it turns on APNs.      |
+| `APNS_TEAM_ID`     | Required with `APNS_KEY_ID` | The developer account's team ID.                                                    |
+| `APNS_PRIVATE_KEY` | Required with `APNS_KEY_ID` | The `.p8` key's contents, with its line breaks or written as `\n`.                 |
+| `APNS_TOPIC`       | `ai.sugabots.app`           | The app's bundle identifier.                                                        |
+
 ## File storage
 
 | Variable                     | Default                   | Description                                                                                                                                                                                                                                                   |

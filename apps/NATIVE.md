@@ -91,3 +91,9 @@ The numbers and strings below live in [`native-constants.json`](native-constants
 ## Not a difference: threads under a bot
 
 A bot shows 6 of its open threads before the rest are offered, as the web does. The app reads the web's own value (`THREADS_SHOWN` in `@sugabots/contracts`), so it is listed here only because it once differed.
+
+## Notifications arrive while the app is closed, and it asks for them on signing in
+
+- **Value:** notifications are pushed through Apple to every phone the person turned them on for, and show while the app is closed. iOS asks to allow them the first time a workspace opens after signing in. Notifications about one conversation are grouped, not replaced. One about the conversation on screen doesn't show while the app is open on it. Tapping one opens what it is about under Inbox or Approvals, switching workspace first if it's in another.
+- **Why:** a phone app that only notifies while it is open notifies nobody, since iOS suspends it in the background. iOS asks only once, and a newly signed-in person expects that question, as Slack's app asks it. iOS groups notifications by conversation itself, where a browser would stack them.
+- **Replaces:** the web, which notifies only from an open tab, waits for the person to choose Turn on, and replaces one notification about a conversation with the next.

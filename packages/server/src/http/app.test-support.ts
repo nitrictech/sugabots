@@ -146,11 +146,15 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
 export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
 
+/** The session every signed-in test request belongs to. */
+const TEST_SESSION_ID = "0199a3a0-0000-7000-8000-0000000000f1";
+
 /** The `Authentication.identify` a test's resolver stands in for. */
 function identifyFromResolver(resolveUser: UserResolver) {
 	return (headers: Headers) =>
 		Effect.map(
 			Effect.promise(() => resolveUser(headers)),
-			(user) => (user ? { user, refreshedCookies: Cookies.empty } : undefined),
+			(user) =>
+				user ? { user, sessionId: TEST_SESSION_ID, refreshedCookies: Cookies.empty } : undefined,
 		);
 }

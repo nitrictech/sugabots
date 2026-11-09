@@ -2,11 +2,15 @@ import {
 	type Channel,
 	handleFromName,
 	type Message,
+	type NotificationContent,
 	type NotificationPreferences,
+	type PushDevice,
+	type PushService,
 	personChannel,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
+import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
@@ -20,6 +24,7 @@ import {
 	podMember,
 	routine,
 	routineExecution,
+	session,
 	thread,
 	threadParticipant,
 	toolCall,
@@ -34,6 +39,7 @@ import {
 	runOnPostgres,
 	type TestInfrastructure,
 } from "../database/testing.ts";
+import { Push } from "../push/push.ts";
 import { unimplemented } from "../testing.ts";
 import { Notifications } from "./notifications.ts";
 import { inQuietHours } from "./recipients.ts";
@@ -53,9 +59,25 @@ function preferences(chosen: Partial<NotificationPreferences>): NotificationPref
 /** What the service published on the bus, for every test in the file. */
 const published: { channel: Channel; event: StreamEvent }[] = [];
 
+/** What the service pushed to phones, for every test in the file. */
+const pushed: { device: PushDevice; notification: NotificationContent }[] = [];
+
+/** Phones Apple would say are gone, by token. */
+const goneTokens = new Set<string>();
+
+/** Tokens Apple would refuse as malformed, for another app, or for the other environment. */
+const refusedTokens = new Set<string>();
+
+/** Tokens Apple couldn't be asked about, as when it is unreachable. */
+const uncheckableTokens = new Set<string>();
+
+/** Push services this installation has no key for. */
+const unreachedServices = new Set<PushService>();
+
 /**
- * The service over the test database's own pool, publishing to `published`,
- * with `run` to call it and `close` to stop what it is still sending.
+ * The service over the test database's own pool, publishing to `published`
+ * and pushing to `pushed`, with `run` to call it and `close` to stop what it
+ * is still sending.
  */
 async function served() {
 	const scope = Scope.makeUnsafe();
@@ -64,8 +86,27 @@ async function served() {
 			published.push({ channel, event });
 		},
 	});
+	const refusal = (token: string) =>
+		goneTokens.has(token)
+			? Effect.fail(new Push.DeviceGone({ reason: "Unregistered" }))
+			: refusedTokens.has(token)
+				? Effect.fail(new Push.TokenRefused({ reason: "BadDeviceToken" }))
+				: undefined;
+	const push = Layer.succeed(Push.Service, {
+		reaches: (service) => !unreachedServices.has(service),
+		send: (device, notification) =>
+			refusal(device.token) ??
+			Effect.sync(() => {
+				pushed.push({ device, notification });
+			}),
+		check: (device) =>
+			refusal(device.token) ??
+			(uncheckableTokens.has(device.token)
+				? Effect.fail(new Push.DeliveryFailed({ service: device.service, cause: "unreachable" }))
+				: Effect.void),
+	});
 	const context = await runOnPostgres(
-		Layer.buildWithScope(Notifications.layer.pipe(Layer.provide(bus)), scope),
+		Layer.buildWithScope(Notifications.layerNoDeps.pipe(Layer.provide([bus, push])), scope),
 	);
 	return {
 		run: <A, E>(effect: Effect.Effect<A, E, Notifications.Service | TestInfrastructure>) =>
@@ -132,6 +173,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	beforeEach(async () => {
 		published.length = 0;
+		pushed.length = 0;
+		goneTokens.clear();
+		refusedTokens.clear();
+		uncheckableTokens.clear();
+		unreachedServices.clear();
 		const suffix = crypto.randomUUID().slice(0, 8);
 		const names = {
 			ada: `Ada ${suffix}`,
@@ -508,6 +554,211 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				event: expect.objectContaining({ type: "presence", ...looking }),
 			},
 		]);
+	});
+
+	/** A push token as the app writes it, different each time. */
+	const pushToken = () => crypto.randomUUID().replaceAll("-", "").repeat(2);
+	/** A session of `userId`'s, as signing in on a phone makes one `agoMs` before, lasting `lifetimeMs` more. */
+	const signedIn = async (userId: string, lifetimeMs = 60 * 60_000, agoMs = 0) => {
+		const [row] = await onDatabase((db) =>
+			db
+				.insert(session)
+				.values({
+					userId,
+					token: crypto.randomUUID(),
+					createdAt: new Date(Date.now() - agoMs),
+					expiresAt: new Date(Date.now() + lifetimeMs),
+				})
+				.returning(),
+		);
+		if (!row) throw new Error("Could not sign in");
+		return row.id;
+	};
+	const registerDevice = (
+		userId: string,
+		sessionId: string,
+		token: string,
+		device: PushDevice = { service: "apns", token, environment: "production" },
+	) =>
+		as(
+			userId,
+			Effect.flatMap(Notifications.Service, (service) => service.registerDevice(sessionId, device)),
+		);
+	const tokensOf = async (userId: string) =>
+		(await onDatabase((db) => db.select().from(session).where(eq(session.userId, userId))))
+			.flatMap((row) => (row.pushToken ? [row.pushToken] : []))
+			.sort();
+	const sendTestTo = (userId: string) =>
+		as(
+			userId,
+			Effect.flatMap(Notifications.Service, (service) => service.sendTest),
+		);
+
+	it("pushes what it sends a person's tabs to each phone they are signed in on", async () => {
+		const [phone, tablet] = [pushToken(), pushToken()];
+		await registerDevice(people.bob.id, await signedIn(people.bob.id), phone);
+		await registerDevice(people.bob.id, await signedIn(people.bob.id), tablet);
+		const chat = await podChat();
+
+		await emit(
+			personPosted(chat, people.ada, `@${handleFromName(people.bob.name)} is the quote ready?`),
+		);
+
+		const [notification] = await deliveredTo(people.bob.id);
+		await vi.waitFor(() => expect(pushed).toHaveLength(2));
+		expect(pushed).toEqual(
+			expect.arrayContaining([
+				{ device: expect.objectContaining({ token: phone }), notification },
+				{ device: expect.objectContaining({ token: tablet }), notification },
+			]),
+		);
+	});
+
+	it("keeps a phone's session for 60 days, where a browser's lasts a week", async () => {
+		const phone = await signedIn(people.ada.id, 7 * 24 * 60 * 60_000);
+		await registerDevice(people.ada.id, phone, pushToken());
+
+		expect(await daysLeftOn(phone)).toBeGreaterThan(59);
+	});
+
+	it("lengthens a phone's session no further than 90 days from signing in", async () => {
+		const phone = await signedIn(people.ada.id, 24 * 60 * 60_000, 85 * 24 * 60 * 60_000);
+		await registerDevice(people.ada.id, phone, pushToken());
+
+		expect(await daysLeftOn(phone)).toBeGreaterThan(4);
+		expect(await daysLeftOn(phone)).toBeLessThan(6);
+	});
+
+	it("lengthens the session without asking the push service again about the token it holds", async () => {
+		const [token, phone] = [pushToken(), await signedIn(people.ada.id)];
+		uncheckableTokens.add(token);
+		await registerDevice(people.ada.id, phone, token);
+		// Refused now: registering again succeeds only by not asking.
+		uncheckableTokens.delete(token);
+		refusedTokens.add(token);
+
+		expect(await registerDevice(people.ada.id, phone, token)).toEqual({ available: true });
+		expect(await daysLeftOn(phone)).toBeGreaterThan(59);
+	});
+
+	const daysLeftOn = async (sessionId: string) => {
+		const [row] = await onDatabase((db) =>
+			db.select().from(session).where(eq(session.id, sessionId)),
+		);
+		return ((row?.expiresAt.getTime() ?? 0) - Date.now()) / (24 * 60 * 60_000);
+	};
+
+	it("refuses a phone whose push service refuses its token, keeping nothing and not lengthening the session", async () => {
+		const [token, phone] = [pushToken(), await signedIn(people.ada.id, 7 * 24 * 60 * 60_000)];
+		refusedTokens.add(token);
+
+		const refused = await as(
+			people.ada.id,
+			Effect.flip(
+				Effect.flatMap(Notifications.Service, (service) =>
+					service.registerDevice(phone, { service: "apns", token, environment: "production" }),
+				),
+			),
+		);
+
+		expect(refused).toBeInstanceOf(Notifications.PushDeviceRefused);
+		expect(await tokensOf(people.ada.id)).toEqual([]);
+		expect(await daysLeftOn(phone)).toBeLessThan(8);
+	});
+
+	it("keeps nothing for a platform this server can't push to, and says so", async () => {
+		unreachedServices.add("fcm");
+		const token = `android-${pushToken()}`;
+
+		const registration = await registerDevice(people.ada.id, await signedIn(people.ada.id), token, {
+			service: "fcm",
+			token,
+		});
+
+		expect(registration).toEqual({ available: false });
+		expect(await tokensOf(people.ada.id)).toEqual([]);
+	});
+
+	it("keeps a phone whose token couldn't be checked, without lengthening its session", async () => {
+		const [token, phone] = [pushToken(), await signedIn(people.ada.id, 7 * 24 * 60 * 60_000)];
+		uncheckableTokens.add(token);
+
+		expect(await registerDevice(people.ada.id, phone, token)).toEqual({ available: true });
+		expect(await tokensOf(people.ada.id)).toEqual([token]);
+		expect(await daysLeftOn(phone)).toBeLessThan(8);
+	});
+
+	it("keeps a phone whose token is refused after it was taken, as that points at the server's settings", async () => {
+		const token = pushToken();
+		await registerDevice(people.ada.id, await signedIn(people.ada.id), token);
+		refusedTokens.add(token);
+
+		await sendTestTo(people.ada.id);
+
+		expect(await tokensOf(people.ada.id)).toEqual([token]);
+	});
+
+	it("stops pushing to a phone once its session ends, by signing out or expiring", async () => {
+		const [leaving, lapsing] = [await signedIn(people.ada.id), await signedIn(people.ada.id)];
+		await registerDevice(people.ada.id, leaving, pushToken());
+		await registerDevice(people.ada.id, lapsing, pushToken());
+		await onDatabase((db) => db.delete(session).where(eq(session.id, leaving)));
+		await onDatabase((db) =>
+			db
+				.update(session)
+				.set({ expiresAt: new Date(Date.now() - 60_000) })
+				.where(eq(session.id, lapsing)),
+		);
+
+		await sendTestTo(people.ada.id);
+
+		expect(pushed).toEqual([]);
+	});
+
+	it("forgets a phone Apple says is gone, and keeps the others", async () => {
+		const [gone, kept] = [pushToken(), pushToken()];
+		await registerDevice(people.ada.id, await signedIn(people.ada.id), gone);
+		await registerDevice(people.ada.id, await signedIn(people.ada.id), kept);
+		goneTokens.add(gone);
+
+		await sendTestTo(people.ada.id);
+
+		expect(pushed).toEqual([
+			{
+				device: expect.objectContaining({ token: kept }),
+				notification: expect.objectContaining({ tag: "test" }),
+			},
+		]);
+		expect(await tokensOf(people.ada.id)).toEqual([kept]);
+	});
+
+	it("moves a phone to whoever signs in on it last", async () => {
+		const token = pushToken();
+		await registerDevice(people.ada.id, await signedIn(people.ada.id), token);
+		await registerDevice(people.bob.id, await signedIn(people.bob.id), token);
+
+		await sendTestTo(people.ada.id);
+
+		expect(pushed).toEqual([]);
+		expect(await tokensOf(people.ada.id)).toEqual([]);
+		expect(await tokensOf(people.bob.id)).toEqual([token]);
+	});
+
+	it("lets a person turn off only their own session's phone", async () => {
+		const token = pushToken();
+		const bobs = await signedIn(people.bob.id);
+		await registerDevice(people.bob.id, bobs, token);
+		const unregister = (userId: string) =>
+			as(
+				userId,
+				Effect.flatMap(Notifications.Service, (service) => service.unregisterDevice(bobs)),
+			);
+
+		await unregister(people.ada.id);
+		expect(await tokensOf(people.bob.id)).toEqual([token]);
+
+		await unregister(people.bob.id);
+		expect(await tokensOf(people.bob.id)).toEqual([]);
 	});
 
 	it("lets a pod's level quiet its bots, and a bot's level win over it", async () => {

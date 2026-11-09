@@ -6,14 +6,16 @@ import {
 	notificationPreferencesSchema,
 	notificationSettingsSchema,
 	presenceSchema,
+	pushDeviceSchema,
+	pushRegistrationSchema,
 } from "../../notifications.ts";
 import { uuidSchema } from "../../uuid.ts";
-import { refused } from "../errors.ts";
+import { BadRequest, Forbidden, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * The signed-in person's notifications: what they are notified about, and
- * which conversation they are looking at.
+ * The signed-in person's notifications: what they are notified about, which
+ * conversation they are looking at, and the phone the session is signed in on.
  */
 const place = { kind: notificationPlaceKindSchema, id: uuidSchema };
 
@@ -41,6 +43,18 @@ export class NotificationsApi extends HttpApiGroup.make("notifications")
 		}),
 		HttpApiEndpoint.put("reportPresence", "/notifications/presence", {
 			payload: presenceSchema,
+			success: HttpApiSchema.Empty(204),
+		}),
+		/**
+		 * Only from the app, signed in with a bearer token: a browser's session
+		 * has no phone, and registering lengthens the session.
+		 */
+		HttpApiEndpoint.put("registerDevice", "/notifications/device", {
+			payload: pushDeviceSchema,
+			success: pushRegistrationSchema,
+			error: [Forbidden, BadRequest],
+		}),
+		HttpApiEndpoint.delete("unregisterDevice", "/notifications/device", {
 			success: HttpApiSchema.Empty(204),
 		}),
 	)

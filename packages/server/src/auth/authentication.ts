@@ -37,6 +37,7 @@ export interface Interface {
 /** The holder of a request's credentials. */
 export interface Identified {
 	readonly user: SessionUser;
+	readonly sessionId: string;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
 	 * session cache. They belong on the response, or the browser never gets them.
@@ -206,6 +207,7 @@ export const make = Effect.gen(function* () {
 									name: response.user.name,
 									image: response.user.image ?? null,
 								},
+								sessionId: response.session.id,
 								refreshedCookies: Cookies.fromSetCookie(responseHeaders.getSetCookie()),
 							}
 						: undefined,

@@ -2,8 +2,10 @@ import type {
 	AgentColor,
 	AgentFace,
 	AgentShape,
+	ApnsEnvironment,
 	AssignableWorkspaceRole,
 	PodColor,
+	PushService,
 	SystemAgentKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
@@ -79,12 +81,40 @@ export const session = pgTable(
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 		ipAddress: text("ip_address"),
 		userAgent: text("user_agent"),
+		/**
+		 * The phone this session is signed in on, to notify its person there
+		 * while the app is closed: the push service its platform uses, the
+		 * token that service gave the app's install, and for Apple, which of
+		 * its services the token belongs to. Signing out ends the session, and
+		 * with it the pushes.
+		 */
+		pushService: text("push_service").$type<PushService>(),
+		pushToken: text("push_token"),
+		pushEnvironment: text("push_environment").$type<ApnsEnvironment>(),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		uniqueIndex("session_token_idx").on(table.token),
 		index("session_user_id_idx").on(table.userId),
+		// A phone is signed in to one session at a time: the one that last registered it.
+		uniqueIndex("session_push_token_idx")
+			.on(table.pushToken)
+			.where(sql`${table.pushToken} is not null`),
+		check(
+			"session_push_device_whole",
+			sql`(${table.pushToken} is null) = (${table.pushService} is null)`,
+		),
+		check("session_push_service_valid", sql`${table.pushService} in ('apns', 'fcm')`),
+		// Only Apple has an environment, and every Apple token has one.
+		check(
+			"session_push_environment_for_apns",
+			sql`(${table.pushEnvironment} is not null) = (${table.pushService} is not distinct from 'apns')`,
+		),
+		check(
+			"session_push_environment_valid",
+			sql`${table.pushEnvironment} in ('development', 'production')`,
+		),
 	],
 );
 

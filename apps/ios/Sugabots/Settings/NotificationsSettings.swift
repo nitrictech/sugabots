@@ -141,17 +141,73 @@ struct NotificationsSettingsScreen: View {
 	}
 }
 
-/// This device's notifications. The web turns them on per browser; the app
-/// has no way to be notified yet, so it says so, as the web does where a
-/// browser can't show them.
+/// This phone's notifications, as the web's This browser: turned on here by
+/// itself, blocked when iOS's Settings say so, and a test to see them work.
+/// Unlike a browser's, they arrive while the app is closed.
 private struct ThisDevice: View {
+	@Environment(PushNotifications.self) private var push
+	@Environment(WorkspaceStore.self) private var store
+	@State private var pending = false
+	@State private var sent = false
+	@State private var failure: String?
+
 	var body: some View {
-		SettingsGroup(
-			label: "This device",
-			note: "The app can't show notifications yet. On an iPhone, add Sugabots to your Home Screen from Safari and turn them on there."
-		) {
-			SettingsRow.trailing(label: "Notifications", sub: "Each browser and device is turned on by itself, and notifies you while Sugabots is open in it.") {
-				SettingsValue(text: "Not available")
+		SettingsGroup(label: "This device", note: note) {
+			SettingsRow.trailing(label: "Notifications", sub: "Each browser and device is turned on by itself. This phone is notified even while the app is closed.") {
+				if push.availableOnServer == false {
+					SettingsValue(text: "Not available")
+				} else if push.permission == .denied {
+					SettingsValue(text: "Blocked")
+				} else {
+					WebToggle(label: "Notifications on this device", isOn: push.isOn) { on in change(on) }
+						.disabled(pending)
+				}
+			}
+			if push.isOn {
+				SettingsDivider()
+				SettingsRow.trailing(label: "Send a test notification") {
+					Button(sent ? "Sent" : "Send") { sendTest() }
+						.buttonStyle(WebButtonStyle(variant: .secondary, size: .small))
+						.disabled(pending)
+				}
+			}
+		}
+	}
+
+	private var note: String? {
+		if let failure { return failure }
+		if push.availableOnServer == false {
+			return "This server can't send notifications to the app."
+		}
+		if push.permission == .denied {
+			return "Notifications are blocked for Sugabots. Allow them in Settings, Notifications, Sugabots, then come back."
+		}
+		return nil
+	}
+
+	private func change(_ on: Bool) {
+		pending = true
+		failure = nil
+		Task {
+			defer { pending = false }
+			do {
+				if on { try await push.turnOn(with: store.client) } else { try await push.turnOff(with: store.client) }
+			} catch {
+				failure = error.localizedDescription
+			}
+		}
+	}
+
+	private func sendTest() {
+		pending = true
+		failure = nil
+		Task {
+			defer { pending = false }
+			do {
+				try await store.client.notifications.sendTest()
+				sent = true
+			} catch {
+				failure = error.localizedDescription
 			}
 		}
 	}

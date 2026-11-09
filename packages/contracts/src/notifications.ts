@@ -110,6 +110,53 @@ export type Presence = typeof presenceSchema.Type;
 /** How long a tab is taken to show a conversation after it last said so, which it says again well within. */
 export const PRESENCE_LIFETIME_MS = 90_000;
 
+/**
+ * Which of Apple's push services a token belongs to: a development build's
+ * tokens work only with the sandbox, a TestFlight or App Store build's only
+ * with production.
+ */
+export const apnsEnvironmentSchema = Schema.Literals(["development", "production"]);
+
+export type ApnsEnvironment = typeof apnsEnvironmentSchema.Type;
+
+/**
+ * An iPhone, by the token Apple's push service (APNs) gave the app's install,
+ * as the hexadecimal the app writes it in. Apple does not promise its length.
+ */
+export const apnsDeviceSchema = Schema.Struct({
+	service: Schema.Literal("apns"),
+	token: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16,512}$/)),
+	environment: apnsEnvironmentSchema,
+});
+
+/** An Android phone, by the registration token Firebase Cloud Messaging (FCM) gave the app's install. */
+export const fcmDeviceSchema = Schema.Struct({
+	service: Schema.Literal("fcm"),
+	token: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_:-]{16,4096}$/)),
+});
+
+/**
+ * The phone a session is signed in on, to notify its person there while the
+ * app is closed, through the push service its platform uses.
+ */
+export const pushDeviceSchema = Schema.Union([apnsDeviceSchema, fcmDeviceSchema]);
+
+export type ApnsDevice = typeof apnsDeviceSchema.Type;
+export type FcmDevice = typeof fcmDeviceSchema.Type;
+export type PushDevice = typeof pushDeviceSchema.Type;
+
+/** The push services a phone can be notified through. */
+export type PushService = PushDevice["service"];
+
+/**
+ * Whether the server can push to the phone's platform: it holds that push
+ * service's key for the app. When it can't, it keeps nothing, and the app
+ * says notifications aren't available on this server.
+ */
+export const pushRegistrationSchema = Schema.Struct({ available: Schema.Boolean });
+
+export type PushRegistration = typeof pushRegistrationSchema.Type;
+
 /** A notification as the browser shows it, sent to the person's open tabs. */
 export const notificationContentSchema = Schema.Struct({
 	title: Schema.String,

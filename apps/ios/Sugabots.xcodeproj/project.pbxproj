@@ -13,6 +13,7 @@
 		A5DDB8E948166C443689BFD3 /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD65F3FB1C73D3097D5544B /* TokenStore.swift */; };
 		D8749B7E5C9A8509CE4C62AB /* Route.swift in Sources */ = {isa = PBXBuildFile; fileRef = 061F596D31E4BA0BDA6983BF /* Route.swift */; };
 		3907702C4F24DFE8E7A521C2 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C7F9FE44C3DA1D8C9681E29 /* Session.swift */; };
+		A1B2C3D4E5F6071829304A52 /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6071829304A51 /* PushNotifications.swift */; };
 		3F6DC11E23AE431016EF4A25 /* SugabotsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771379D6666B436844B2CC97 /* SugabotsApp.swift */; };
 		32682ABBD9A64F8D119FA672 /* WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CCDEE968E91A607D2491E3E /* WorkspaceStore.swift */; };
 		494CCFCDCB452298E19C9BD5 /* ApprovalsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2C3910E54E2E86F393F731 /* ApprovalsScreen.swift */; };
@@ -132,6 +133,8 @@
 		5AD65F3FB1C73D3097D5544B /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
 		061F596D31E4BA0BDA6983BF /* Route.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Route.swift; sourceTree = "<group>"; };
 		8C7F9FE44C3DA1D8C9681E29 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6071829304A51 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6071829304A53 /* Sugabots.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Sugabots.entitlements; sourceTree = "<group>"; };
 		771379D6666B436844B2CC97 /* SugabotsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SugabotsApp.swift; sourceTree = "<group>"; };
 		9CCDEE968E91A607D2491E3E /* WorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStore.swift; sourceTree = "<group>"; };
 		FD2C3910E54E2E86F393F731 /* ApprovalsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalsScreen.swift; sourceTree = "<group>"; };
@@ -286,6 +289,7 @@
 				67217F514C5B00F432CEAA29 /* Fonts */,
 				860397D40B2B22547F4E9666 /* Home */,
 				6F69073C48BD4C561EB05E2D /* Info.plist */,
+				A1B2C3D4E5F6071829304A53 /* Sugabots.entitlements */,
 				DCE498C0536AFA6C6A77EB68 /* Assets.xcassets */,
 			);
 			path = Sugabots;
@@ -320,6 +324,7 @@
 				69AE950A36AC68EEBD4537BB /* WorkspaceStore+Routines.swift */,
 				061F596D31E4BA0BDA6983BF /* Route.swift */,
 				8C7F9FE44C3DA1D8C9681E29 /* Session.swift */,
+				A1B2C3D4E5F6071829304A51 /* PushNotifications.swift */,
 				771379D6666B436844B2CC97 /* SugabotsApp.swift */,
 				9CCDEE968E91A607D2491E3E /* WorkspaceStore.swift */,
 			);
@@ -672,6 +677,7 @@
 				A5DDB8E948166C443689BFD3 /* TokenStore.swift in Sources */,
 				D8749B7E5C9A8509CE4C62AB /* Route.swift in Sources */,
 				3907702C4F24DFE8E7A521C2 /* Session.swift in Sources */,
+				A1B2C3D4E5F6071829304A52 /* PushNotifications.swift in Sources */,
 				3F6DC11E23AE431016EF4A25 /* SugabotsApp.swift in Sources */,
 				32682ABBD9A64F8D119FA672 /* WorkspaceStore.swift in Sources */,
 				494CCFCDCB452298E19C9BD5 /* ApprovalsScreen.swift in Sources */,
@@ -746,6 +752,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sugabots/Sugabots.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -771,6 +778,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sugabots/Sugabots.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;

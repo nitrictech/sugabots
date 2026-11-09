@@ -1,0 +1,277 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b1958517-3e39-418a-ad8a-9f769dff06e0",
+  "prevIds": [
+    "3f69a137-b4d2-45bb-9479-d4df358cc1c4"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "session",
+        "push_service"
+      ],
+      "writes": [
+        "s|col|public.session.push_service",
+        "n|col|public.session.push_service",
+        "e|col|public.session.push_service"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "session",
+        "push_token"
+      ],
+      "writes": [
+        "s|col|public.session.push_token",
+        "n|col|public.session.push_token",
+        "e|col|public.session.push_token"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "session",
+        "push_environment"
+      ],
+      "writes": [
+        "s|col|public.session.push_environment",
+        "n|col|public.session.push_environment",
+        "e|col|public.session.push_environment"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "session",
+        "session_push_token_idx"
+      ],
+      "writes": [
+        "s|idx|public.session_push_token_idx",
+        "n|idx|public.session_push_token_idx",
+        "e|idx|public.session_push_token_idx",
+        "n|rel|public.session_push_token_idx"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public",
+        "n|col|public.session.push_token"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "session"
+      ],
+      "writes": [
+        "s|ck|public.session.session_push_device_whole",
+        "n|ck|public.session.session_push_device_whole",
+        "e|ck|public.session.session_push_device_whole",
+        "n|con|public.session.session_push_device_whole"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public",
+        "n|col|public.session.push_token",
+        "n|col|public.session.push_service"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "session"
+      ],
+      "writes": [
+        "s|ck|public.session.session_push_service_valid",
+        "n|ck|public.session.session_push_service_valid",
+        "e|ck|public.session.session_push_service_valid",
+        "n|con|public.session.session_push_service_valid"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public",
+        "n|col|public.session.push_service"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "session"
+      ],
+      "writes": [
+        "s|ck|public.session.session_push_environment_for_apns",
+        "n|ck|public.session.session_push_environment_for_apns",
+        "e|ck|public.session.session_push_environment_for_apns",
+        "n|con|public.session.session_push_environment_for_apns"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public",
+        "n|col|public.session.push_environment",
+        "n|col|public.session.push_service"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "session"
+      ],
+      "writes": [
+        "s|ck|public.session.session_push_environment_valid",
+        "n|ck|public.session.session_push_environment_valid",
+        "e|ck|public.session.session_push_environment_valid",
+        "n|con|public.session.session_push_environment_valid"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public",
+        "n|col|public.session.push_environment"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "push_service",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "push_token",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "push_environment",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "session_push_token_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "push_token",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"push_token\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "session_push_device_whole",
+        "value": "(\"push_token\" is null) = (\"push_service\" is null)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "session_push_service_valid",
+        "value": "\"push_service\" in ('apns', 'fcm')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "session_push_environment_for_apns",
+        "value": "(\"push_environment\" is not null) = (\"push_service\" is not distinct from 'apns')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "session",
+        "name": "session_push_environment_valid",
+        "value": "\"push_environment\" in ('development', 'production')",
+        "entityType": "checks"
+      }
+    }
+  ]
+}
