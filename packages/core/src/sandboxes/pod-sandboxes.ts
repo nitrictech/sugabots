@@ -479,8 +479,14 @@ export const make = Effect.gen(function* () {
 				CLEARED_BELOW_SHARE,
 			);
 			if (cleared.length === 0 && !stoppedAtTimeout) return;
+			const clearedByReason = Object.fromEntries(
+				Array.from(
+					Map.groupBy(cleared, ({ reason }) => reason),
+					([reason, folders]) => [reason, folders.length],
+				),
+			);
 			yield* Effect.logInfo("Cleared finished threads' folders to free a sandbox's disk", {
-				cleared,
+				cleared: clearedByReason,
 				stoppedAtTimeout,
 			});
 			yield* recordMeasurement(row, yield* measureDisk(sandbox));
