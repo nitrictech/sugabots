@@ -473,14 +473,15 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			if (!row.diskUsage || sandboxDiskShare(row.diskUsage) < SANDBOX_DISK_WARNING_SHARE) return;
 			const { sandbox } = yield* at.open(row.providerSandboxId);
-			const cleared = yield* clearFinishedThreadFolders(
+			const { cleared, stoppedAtTimeout } = yield* clearFinishedThreadFolders(
 				sandbox,
 				row.workspaceId,
 				CLEARED_BELOW_SHARE,
 			);
-			if (cleared.length === 0) return;
+			if (cleared.length === 0 && !stoppedAtTimeout) return;
 			yield* Effect.logInfo("Cleared finished threads' folders to free a sandbox's disk", {
 				cleared,
+				stoppedAtTimeout,
 			});
 			yield* recordMeasurement(row, yield* measureDisk(sandbox));
 		}).pipe(

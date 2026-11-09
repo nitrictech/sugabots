@@ -14,29 +14,48 @@ export interface ClearableFolder {
 	readonly reason: ClearingReason;
 }
 
+export interface Clearing {
+	readonly cleared: readonly ClearableFolder[];
+	/**
+	 * Whether it was stopped at its timeout, which loses everything it
+	 * printed: it may have cleared folders `cleared` doesn't list.
+	 */
+	readonly stoppedAtTimeout: boolean;
+}
+
+/**
+ * The most folders one clearing takes on. Its script is a single argument
+ * to bash, which Linux caps at 128 KiB, and each folder adds 55 bytes to
+ * it. Folders past these are cleared the next time.
+ */
+export const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
+
 /**
  * Frees the sandbox's disk by clearing the folders of threads nobody will
  * work in again, in {@link clearingOrder}, until its workspace's filesystem
  * is less than `belowShare` full. A cleared folder whose thread still exists
  * is left holding {@link CLEARED_NOTE_NAME}, for anyone who looks in it
- * again. Returns the folders it cleared.
+ * again.
  */
 export function clearFinishedThreadFolders(
 	sandbox: Sandboxes.Sandbox,
 	workspaceId: string,
 	belowShare: number,
-): Effect.Effect<readonly ClearableFolder[], Sandboxes.Unavailable, Database> {
+): Effect.Effect<Clearing, Sandboxes.Unavailable, Database> {
 	return Effect.gen(function* () {
-		const order = yield* clearingOrder(workspaceId, yield* threadFoldersIn(sandbox));
-		if (order.length === 0) return [];
+		const clearable = yield* clearingOrder(workspaceId, yield* threadFoldersIn(sandbox));
+		if (clearable.length === 0) return { cleared: [], stoppedAtTimeout: false };
+		const order = clearable.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
 		const clearedOn = DateTime.formatIsoDateUtc(yield* DateTime.now);
 		const clearing = yield* sandbox.exec(
 			clearingScript(order, belowShare, clearedOn),
 			CLEARING_OPTIONS,
 		);
-		// A clearing stopped at its timeout still reports the folders it got through.
 		const cleared = new Set(threadIdsIn(clearing.stdout.text));
-		return order.filter((folder) => cleared.has(folder.threadId));
+		return {
+			cleared: order.filter((folder) => cleared.has(folder.threadId)),
+			stoppedAtTimeout: clearing.exitCode === null,
+		};
 	});
 }
 

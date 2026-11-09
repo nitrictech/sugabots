@@ -16,6 +16,7 @@ import {
 	CLEARED_NOTE_NAME,
 	clearFinishedThreadFolders,
 	clearingOrder,
+	MAX_FOLDERS_CLEARED_AT_ONCE,
 } from "./sandbox-disk-clearing.ts";
 import { Sandboxes } from "./sandboxes.ts";
 
@@ -260,14 +261,17 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 					].join(" && "),
 				);
 
-				const cleared = await runOnPostgres(
+				const clearing = await runOnPostgres(
 					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
 				);
 
-				expect(cleared).toEqual([
-					{ threadId: deleted, reason: "thread_deleted" },
-					{ threadId: ended, reason: "routine_run_ended" },
-				]);
+				expect(clearing).toEqual({
+					cleared: [
+						{ threadId: deleted, reason: "thread_deleted" },
+						{ threadId: ended, reason: "routine_run_ended" },
+					],
+					stoppedAtTimeout: false,
+				});
 				expect(await threadFolders()).toEqual(
 					[
 						`./${clearedBefore}`,
@@ -292,12 +296,41 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 				const ended = await aRoutineRun("completed", at(60));
 				await run(`mkdir -p ${Sandboxes.THREADS_DIRECTORY}/${ended}/repo`);
 
-				const cleared = await runOnPostgres(
+				const clearing = await runOnPostgres(
 					clearFinishedThreadFolders(sandbox, workspaceId, NEVER_FULL),
 				);
 
-				expect(cleared).toEqual([]);
+				expect(clearing).toEqual({ cleared: [], stoppedAtTimeout: false });
 				expect(await threadFolders()).toContain(`./${ended}/repo`);
+			},
+			SLOW,
+		);
+
+		it(
+			"clears a backlog a batch at a time, leaving the rest for the next clearing",
+			async () => {
+				const deleted = Array.from({ length: MAX_FOLDERS_CLEARED_AT_ONCE + 1 }, () =>
+					crypto.randomUUID(),
+				);
+				await run(
+					[
+						`rm -rf ${Sandboxes.THREADS_DIRECTORY}`,
+						`mkdir -p ${Sandboxes.THREADS_DIRECTORY}`,
+						`cd ${Sandboxes.THREADS_DIRECTORY}`,
+						`mkdir ${deleted.join(" ")}`,
+					].join(" && "),
+				);
+
+				const first = await runOnPostgres(
+					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
+				);
+				const second = await runOnPostgres(
+					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
+				);
+
+				expect(first.cleared).toHaveLength(MAX_FOLDERS_CLEARED_AT_ONCE);
+				expect(second.cleared).toHaveLength(1);
+				expect(await threadFolders()).toEqual([]);
 			},
 			SLOW,
 		);
