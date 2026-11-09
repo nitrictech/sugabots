@@ -26,7 +26,7 @@ export function useAgents(): {
 	agents: readonly Agent[] | undefined;
 	isPending: boolean;
 	error: unknown;
-	refetch: () => Promise<unknown>;
+	refetch: () => Promise<{ data?: readonly Agent[] }>;
 } {
 	const workspace = useWorkspace();
 	const query = useQuery(agentsQuery(workspace.workspace?.id));

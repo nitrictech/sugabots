@@ -1,4 +1,12 @@
-import type { ModelProvider, ProviderModel, SystemAgent } from "@sugabots/contracts";
+import {
+	type Agent,
+	agentColors,
+	agentFaces,
+	agentShapes,
+	type ModelProvider,
+	type ProviderModel,
+	type SystemAgent,
+} from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
@@ -165,9 +173,11 @@ const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key
 
 function Preview({
 	providers,
+	bots,
 	children,
 }: {
 	providers: readonly ModelProvider[];
+	bots: readonly Agent[];
 	children: ReactNode;
 }) {
 	const [queryClient] = useState(() => {
@@ -223,7 +233,11 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	decorators: [
 		(Story, context) => (
-			<Preview key={context.id} providers={context.parameters.providers ?? providers}>
+			<Preview
+				key={context.id}
+				providers={context.parameters.providers ?? providers}
+				bots={context.parameters.bots ?? bots}
+			>
 				<Story />
 			</Preview>
 		),
@@ -274,6 +288,73 @@ export const Provider = meta.story({
 				.getAllByRole("switch", { name: /^Bots can use / })
 				.map((toggle) => toggle.getAttribute("aria-checked")),
 		).toEqual(["true", "true", "false"]);
+	},
+});
+
+/** Forty bots on GPT-5, and every OpenRouter model switched on. */
+const crowdOnGpt5: Agent[] = Array.from({ length: 40 }, (_, index) => ({
+	...oncall,
+	id: `0199a3a0-0000-7000-8000-000000000${String(500 + index)}`,
+	name: `Helper ${index + 1}`,
+	handle: `helper-${index + 1}`,
+	color: agentColors[index % agentColors.length] as Agent["color"],
+	face: agentFaces[index % agentFaces.length] as Agent["face"],
+	shape: agentShapes[index % agentShapes.length] as Agent["shape"],
+	model: "gpt-5",
+}));
+const everyModelOn = providers.map((one) =>
+	one === openrouter
+		? { ...one, models: one.models.map((model) => ({ ...model, enabled: true })) }
+		: one,
+);
+
+/**
+ * Switching off a model many bots run on, with many models to move them to:
+ * one row of faces counts the others and names them on hover, and a search
+ * narrows the models.
+ */
+export const SwitchOffModelLongLists = meta.story({
+	parameters: { bots: crowdOnGpt5, providers: everyModelOn },
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
+		const faces = within(dialog).getByRole("list", { name: "Bots on GPT-5" });
+		await expect(within(faces).getAllByRole("img")).toHaveLength(7);
+		await userEvent.hover(within(faces).getByText("33 others"));
+		await expect(await screen.findByText("Helper 40")).toBeInTheDocument();
+		const search = within(dialog).getByRole("searchbox", { name: "Search models" });
+		await userEvent.type(search, "deepseek");
+		await expect(
+			within(dialog).getByRole("button", { name: "deepseek model 2" }),
+		).toBeInTheDocument();
+		await expect(within(dialog).queryByRole("button", { name: "Claude Haiku" })).toBeNull();
+		await userEvent.clear(search);
+		await userEvent.type(search, "no such model");
+		await expect(within(dialog).getByText("No models match.")).toBeInTheDocument();
+	},
+});
+
+/**
+ * Switching off a model a bot still runs on asks which model the bot moves
+ * to, starting on the one new bots use.
+ */
+export const SwitchOffModelInUse = meta.story({
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
+		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
+		await expect(
+			within(dialog).getByText("This bot uses GPT-5. Choose the model to move it to."),
+		).toBeInTheDocument();
+		await userEvent.hover(within(dialog).getByRole("img", { name: "On-call" }));
+		await expect(await screen.findByText("On-call")).toBeVisible();
+		await expect(
+			within(dialog).getByRole("button", { name: "Claude Sonnet", pressed: true }),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move bot and switch off" }),
+		).toBeEnabled();
 	},
 });
 

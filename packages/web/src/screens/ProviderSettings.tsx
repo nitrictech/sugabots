@@ -1,3 +1,4 @@
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	effectiveCapabilities,
@@ -16,6 +17,7 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
+	Check,
 	Eye,
 	Grid2X2,
 	Image,
@@ -26,7 +28,16 @@ import {
 	Search,
 	Wrench,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
+import {
+	type ComponentProps,
+	type FormEvent,
+	type ReactNode,
+	useDeferredValue,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -36,7 +47,7 @@ import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -62,6 +73,7 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
@@ -129,6 +141,131 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 				</span>
 			)}
 		</span>
+	);
+}
+
+/** The most faces that fit in one row of a dialog, on a phone too. */
+const FACES_IN_A_ROW = 8;
+
+/**
+ * The bots in `bots` as one row of faces, each named on hover or keyboard
+ * focus. Past a row, the last place counts the others and names them on hover.
+ */
+function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
+	const faced = bots.length > FACES_IN_A_ROW ? bots.slice(0, FACES_IN_A_ROW - 1) : bots;
+	const others = bots.slice(faced.length);
+	return (
+		<LivelyGroup>
+			<ul
+				aria-label={label}
+				// Room around each face for its focus ring and its hop.
+				className="-m-1.5 flex list-none items-center justify-center gap-1.5 p-1.5"
+			>
+				{faced.map((bot) => (
+					<li key={bot.id} className="flex">
+						<NamedBotFace bot={bot} />
+					</li>
+				))}
+				{others.length > 0 && (
+					<li className="ml-1 text-muted-foreground text-xs">
+						and <OtherBots bots={others} />
+					</li>
+				)}
+			</ul>
+		</LivelyGroup>
+	);
+}
+
+/** "N others", naming them on hover or keyboard focus. */
+function OtherBots({ bots }: { bots: readonly Agent[] }) {
+	return (
+		<Tooltip
+			label={<OtherBotsList bots={bots} />}
+			side="top"
+			onOpenChange={nameOnKeyboardFocusOnly}
+		>
+			<span
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its names show only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring cursor-default rounded-sm text-foreground underline decoration-dotted underline-offset-2"
+			>
+				{bots.length} {bots.length === 1 ? "other" : "others"}
+				<span className="sr-only">: {LIST.format(bots.map((bot) => bot.name))}</span>
+			</span>
+		</Tooltip>
+	);
+}
+
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+/**
+ * Each bot by its face and name. Past about a dozen it scrolls, fading out at
+ * the bottom while there are more below, as the scrollbar shows only while
+ * scrolling.
+ */
+function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
+	const list = useRef<HTMLUListElement>(null);
+	const [moreBelow, setMoreBelow] = useState(false);
+	const checkMoreBelow = () => {
+		const element = list.current;
+		if (!element) return;
+		// A pixel of slack, as zoomed pages scroll in fractions of one.
+		setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1);
+	};
+	useLayoutEffect(checkMoreBelow, []);
+	return (
+		<ul
+			ref={list}
+			aria-label="Other bots"
+			// It takes focus so the keyboard can scroll it.
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
+			tabIndex={0}
+			onScroll={checkMoreBelow}
+			className={`focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5 ${moreBelow ? "mask-b-from-75%" : ""}`}
+		>
+			{bots.map((bot) => (
+				<li key={bot.id} className="flex items-center gap-1.5">
+					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<span className="truncate">{bot.name}</span>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/** A dialog opened by pointer focuses its first trigger; only keyboard focus should open its tooltip. */
+function nameOnKeyboardFocusOnly(
+	open: boolean,
+	details: Parameters<NonNullable<ComponentProps<typeof Tooltip>["onOpenChange"]>>[1],
+) {
+	if (
+		open &&
+		details.reason === "trigger-focus" &&
+		!(details.event.target as Element).matches(":focus-visible")
+	) {
+		details.cancel();
+	}
+}
+
+/** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
+function NamedBotFace({ bot }: { bot: Agent }) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
+			<span
+				role="img"
+				aria-label={bot.name}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring flex rounded-full"
+				onPointerEnter={() => face.current?.play("hop")}
+				onFocus={(event) =>
+					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
+				}
+			>
+				<TurnTakingAvatar bot={bot} size={28} faceRef={face} />
+			</span>
+		</Tooltip>
 	);
 }
 
@@ -704,6 +841,31 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 	);
 }
 
+/** A box to search a list of `count` models, for one too long to scan. */
+function ModelSearch({
+	value,
+	onChange,
+	count,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	count: number;
+}) {
+	return (
+		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+			<input
+				type="search"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={`Search ${count} models`}
+				aria-label="Search models"
+				className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
+			/>
+		</label>
+	);
+}
+
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
 function makerOf(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
@@ -717,9 +879,16 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
+	const agents = useAgents();
+	const models = useModels();
+	// Until both are known, switching a model off could leave bots on it unasked,
+	// or offer them nowhere to move.
+	const usageKnown = agents.agents !== undefined && models.data !== undefined;
 	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
+	const [checkingUsage, setCheckingUsage] = useState(false);
+	const [movingBotsOff, setMovingBotsOff] = useState<ProviderModel>();
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
@@ -731,6 +900,26 @@ function Models({ provider }: { provider: ModelProvider }) {
 	);
 	const error = actions.setModel.error ?? actions.fetchModels.error;
 	const custom = provider.preset === null;
+
+	/**
+	 * Switches the model off, or asks where its bots go first. Decided on fresh
+	 * bots, and the models they could move to fetched with them, as the cached
+	 * ones may predate another tab's changes.
+	 */
+	async function switchOff(model: ProviderModel) {
+		setCheckingUsage(true);
+		const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]).finally(() =>
+			setCheckingUsage(false),
+		);
+		const hasBots = (latestAgents.data ?? []).some(
+			(agent) => agent.systemAgentKey === null && agent.model === model.modelId,
+		);
+		if (hasBots) {
+			setMovingBotsOff(model);
+			return;
+		}
+		actions.setModel.mutate({ providerId: provider.id, modelId: model.id, enabled: false });
+	}
 
 	return (
 		<SettingsGroup
@@ -750,17 +939,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-						<input
-							type="search"
-							value={search}
-							onChange={(event) => setSearch(event.target.value)}
-							placeholder={`Search ${provider.models.length} models`}
-							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-						/>
-					</label>
+					<ModelSearch value={search} onChange={setSearch} count={provider.models.length} />
 				</div>
 			)}
 			<ScrollingWhen large={large}>
@@ -795,15 +974,23 @@ function Models({ provider }: { provider: ModelProvider }) {
 									{custom && <EditCapabilities provider={provider} model={model} />}
 									<Toggle
 										checked={model.enabled}
-										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
+										disabled={
+											!provider.active ||
+											actions.setModel.isPending ||
+											checkingUsage ||
+											held !== undefined ||
+											(model.enabled && !usageKnown)
+										}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
 										onChange={(enabled) =>
-											actions.setModel.mutate({
-												providerId: provider.id,
-												modelId: model.id,
-												enabled,
-											})
+											enabled
+												? actions.setModel.mutate({
+														providerId: provider.id,
+														modelId: model.id,
+														enabled,
+													})
+												: switchOff(model)
 										}
 									/>
 								</>
@@ -812,6 +999,19 @@ function Models({ provider }: { provider: ModelProvider }) {
 					);
 				})}
 			</ScrollingWhen>
+			<Dialog
+				open={movingBotsOff !== undefined}
+				onOpenChange={(open) => !open && setMovingBotsOff(undefined)}
+			>
+				{movingBotsOff && (
+					<MoveBotsDialog
+						provider={provider}
+						model={movingBotsOff}
+						bots={botsOn(movingBotsOff.modelId)}
+						done={() => setMovingBotsOff(undefined)}
+					/>
+				)}
+			</Dialog>
 			{custom &&
 				(adding ? (
 					<AddModelRow provider={provider} done={() => setAdding(false)} />
@@ -824,6 +1024,125 @@ function Models({ provider }: { provider: ModelProvider }) {
 				</div>
 			)}
 		</SettingsGroup>
+	);
+}
+
+/**
+ * Switching off a model bots still run on: which of the other switched-on
+ * models they move to, starting on the one new bots use. They move and the
+ * model goes off together, so no bot is left on a model that is off.
+ */
+function MoveBotsDialog({
+	provider,
+	model,
+	bots,
+	done,
+}: {
+	provider: ModelProvider;
+	model: ProviderModel;
+	bots: readonly Agent[];
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.modelId !== model.modelId,
+	);
+	const [search, setSearch] = useState("");
+	const needle = useDeferredValue(search.trim().toLowerCase());
+	const [picked, setPicked] = useState<string>();
+	const offeredHere = (modelId: string | null | undefined) =>
+		candidates.some((candidate) => candidate.modelId === modelId);
+	// Follows the models as they load or change, until someone picks one.
+	const chosen = offeredHere(picked)
+		? picked
+		: offeredHere(models?.defaultModel)
+			? models?.defaultModel
+			: candidates[0]?.modelId;
+	const shown = searchModels(candidates, needle);
+	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
+	const name = modelName(model);
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!chosen) return;
+		try {
+			await actions.switchOffModel.mutateAsync({
+				providerId: provider.id,
+				modelId: model.id,
+				moveBotsTo: chosen,
+			});
+		} catch {
+			return;
+		}
+		done();
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader title={`Switch off ${name}`} />
+			<DialogFormBody>
+				<DialogDescription>
+					{bots.length === 1 ? "This bot uses" : "These bots use"} {name}. Choose the model to move{" "}
+					{bots.length === 1 ? "it" : "them"} to.
+				</DialogDescription>
+				<NamedBotFaces bots={bots} label={`Bots on ${name}`} />
+				{candidates.length === 0 ? (
+					<Alert>
+						{name} is the only model switched on. Switch on another first, so the bots have one to
+						move to.
+					</Alert>
+				) : (
+					<>
+						{candidates.length > MODEL_SEARCH_THRESHOLD && (
+							<ModelSearch value={search} onChange={setSearch} count={candidates.length} />
+						)}
+						<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+							{shown.length === 0 && (
+								<SettingsGroup>
+									<SettingsRow label="No models match." />
+								</SettingsGroup>
+							)}
+							{providerNames.map((providerName) => (
+								<SettingsGroup key={providerName} label={providerName}>
+									{shown
+										.filter((candidate) => candidate.providerName === providerName)
+										.map((candidate) => {
+											const selected = candidate.modelId === chosen;
+											return (
+												<SettingsRow
+													key={candidate.modelId}
+													label={candidate.displayName ?? candidate.modelId}
+													render={<button type="button" aria-pressed={selected} />}
+													trailing={
+														selected && (
+															<Check
+																aria-hidden
+																size={16}
+																strokeWidth={2.6}
+																className="shrink-0 text-link"
+															/>
+														)
+													}
+													onClick={() => setPicked(candidate.modelId)}
+												/>
+											);
+										})}
+								</SettingsGroup>
+							))}
+						</div>
+					</>
+				)}
+				{actions.switchOffModel.error && (
+					<Alert>{failureMessage(actions.switchOffModel.error)}</Alert>
+				)}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={bots.length === 1 ? "Move bot and switch off" : "Move bots and switch off"}
+				actionDisabled={!chosen || actions.switchOffModel.isPending}
+				onCancel={done}
+			/>
+		</DialogForm>
 	);
 }
 
