@@ -200,8 +200,6 @@ export const workspaceInvite = pgTable(
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-		/** When the invitation was last emailed: when it was created, or last sent again. */
-		sentAt: stamp("sent_at"),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
