@@ -1430,6 +1430,58 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
+	it("keeps a bot out of its channel for a message to a pod member, but not for a handle that is nobody's", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "@chat-member can you look at this?",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "Please raise this with @Backlog Manager, high priority.",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "default" }) }),
+		]);
+	});
+
+	it("keeps a bot out of its channel for a message to someone who left the pod but is still in the channel", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const [former] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Former member", email: `former-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!former) throw new Error("Could not create the former member");
+		await onDatabase((db) =>
+			db.insert(threadParticipant).values({ threadId: channel.id, userId: former.id }),
+		);
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "@former-member are you still around?",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
+	});
+
 	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {
 		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
 		await onDatabase((db) =>

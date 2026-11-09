@@ -187,6 +187,23 @@ export function mentionsEveryone(content: string): boolean {
 	return mentionedHandles(content).some(isGroupMentionHandle);
 }
 
+/**
+ * Whether a message's mentioned `handles` address only people: at least one
+ * is a person's or `@here`/`@channel`, and none is a bot's. A handle that is
+ * nobody's, as when a name is written out rather than picked, is only text
+ * and counts for neither. A bot replying wherever it is not named keeps out
+ * of such a message, as it is meant for the people.
+ */
+export function mentionsOnlyPeople(
+	handles: readonly string[],
+	known: { botHandles: ReadonlySet<string>; peopleHandles: ReadonlySet<string> },
+): boolean {
+	const mentionsPeople = handles.some(
+		(handle) => isGroupMentionHandle(handle) || known.peopleHandles.has(handle),
+	);
+	return mentionsPeople && !handles.some((handle) => known.botHandles.has(handle));
+}
+
 /** `content` without its mentions, the text around them kept as it is. */
 export function withoutMentions(content: string): string {
 	return splitAroundMentions(content)

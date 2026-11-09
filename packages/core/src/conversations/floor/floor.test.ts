@@ -20,6 +20,7 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 			{ id: reviewer, handle: "reviewer" },
 			{ id: scout, handle: "scout" },
 		],
+		peopleHandles: new Set(["sam"]),
 		agentParticipantIds: new Set([host]),
 		lastAgentSpeakerId: undefined,
 		repliedToAgentId: undefined,
@@ -69,6 +70,28 @@ describe("a person's message", () => {
 
 	it("goes to nobody in a conversation when only people are mentioned", () => {
 		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
+	});
+
+	it.each(["conversation", "bot_channel", "routine_feed"] as const)(
+		"goes to the bot in a %s when it mentions a handle that is nobody's",
+		(threadType) => {
+			expect(decideFloor(input({ threadType, content: "Raise it with @Backlog Manager" }))).toEqual(
+				{ kind: "turns", agents: [{ agentId: host, reason: "default" }] },
+			);
+		},
+	);
+
+	it("goes to the bot a pod's chat message replies to, though it mentions a handle that is nobody's", () => {
+		expect(
+			decideFloor(
+				input({
+					threadType: "pod_chat",
+					hostAgentId: null,
+					repliedToAgentId: scout,
+					content: "And @Backlog Manager too?",
+				}),
+			),
+		).toEqual({ kind: "turns", agents: [{ agentId: scout, reason: "reply" }] });
 	});
 
 	it("goes to the conversation's bot when it is mentioned", () => {
