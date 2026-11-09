@@ -442,6 +442,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			backOnWide
 			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
 			title={provider.name}
+			description={provider.connectedBy && `Connected by ${provider.connectedBy}`}
 		>
 			<SettingsGroup
 				note={

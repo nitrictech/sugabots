@@ -191,6 +191,7 @@ const anthropic = {
 	enabledModelCount: 0,
 	lastTestedAt: null,
 	lastTestError: null,
+	connectedBy: null,
 	models: [
 		["claude-3-5-haiku-20241022", "Claude 3.5 Haiku"],
 		["claude-opus-4", "Claude Opus 4.1"],

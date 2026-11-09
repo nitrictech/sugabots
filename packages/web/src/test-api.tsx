@@ -183,6 +183,7 @@ export const modelProviders: ModelProvider[] = [
 		enabledModelCount: 1,
 		lastTestedAt: "2026-09-11T00:00:00.000Z",
 		lastTestError: null,
+		connectedBy: null,
 		models: [
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d1",
@@ -212,6 +213,7 @@ export const modelProviders: ModelProvider[] = [
 		enabledModelCount: 1,
 		lastTestedAt: "2026-09-11T00:00:00.000Z",
 		lastTestError: null,
+		connectedBy: null,
 		models: [
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d2",

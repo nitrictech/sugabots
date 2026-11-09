@@ -1,4 +1,4 @@
-import type { NewModelProvider } from "@sugabots/contracts";
+import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -149,7 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			if (!openai) throw new Error("fixture");
 			expect(openai).toMatchObject({ active: false, hasApiKey: false });
 			if (key === "replacement") {
-				await repository.update(workspaceId, openai.id, { apiKey: "old-key" });
+				await repository.update(workspaceId, openai.id, { apiKey: "old-key" }, userId);
 				await switchOn(openai.id);
 			}
 			let activeDuringCheck: boolean | undefined;
@@ -194,8 +194,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it.each([{ baseUrl: "https://other.example/v1" }, { apiKey: null }])(
 		"does not enable a disabled provider for an unrelated update: %j",
 		async (input) => {
-			await repository.update(workspaceId, providerId, { active: false });
-			await repository.update(workspaceId, providerId, input);
+			await repository.update(workspaceId, providerId, { active: false }, userId);
+			await repository.update(workspaceId, providerId, input, userId);
 
 			expect(await view(providerId)).toMatchObject({ active: false });
 		},
@@ -255,6 +255,84 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(saved).toMatchObject({ active: true });
 	});
 
+	it("names who connected a provider until its key is taken away, whether it is on or off", async () => {
+		const openai = (await list(workspaceId)).find(({ preset }) => preset === "openai");
+		if (!openai) throw new Error("fixture");
+		expect(openai.connectedBy).toBeNull();
+		const setup = await setupWith(() => Response.json({ data: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: openai.id, changes });
+
+		await change({ apiKey: "secret" });
+		expect(await view(openai.id)).toMatchObject({ active: true, connectedBy: "Ada" });
+
+		await change({ active: false });
+		expect(await view(openai.id)).toMatchObject({ active: false, connectedBy: "Ada" });
+
+		await change({ apiKey: null });
+		expect(await view(openai.id)).toMatchObject({ connectedBy: null });
+	});
+
+	it("names who switched on a local provider, which takes no key, until it is switched off", async () => {
+		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+		if (!ollama) throw new Error("fixture");
+		expect(ollama.connectedBy).toBeNull();
+		const setup = await setupWith(() => Response.json({ models: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: ollama.id, changes });
+
+		await change({ active: true });
+		expect(await view(ollama.id)).toMatchObject({ connectedBy: "Ada" });
+
+		await change({ active: false });
+		expect(await view(ollama.id)).toMatchObject({ connectedBy: null });
+	});
+
+	it("keeps a local provider given a key connected while it is switched off, as one that needs a key", async () => {
+		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+		if (!ollama) throw new Error("fixture");
+		const setup = await setupWith(() => Response.json({ models: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: ollama.id, changes });
+
+		await change({ apiKey: "local-key" });
+		await change({ active: false });
+
+		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: "Ada" });
+	});
+
+	it("names who next switches on a local provider whose key was taken away, not who gave the key", async () => {
+		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+		if (!ollama) throw new Error("fixture");
+		const [bob] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
+				.returning(),
+		);
+		if (!bob) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: bob.id, role: "admin" }),
+		);
+		const respond = () => Response.json({ models: [] });
+		await (await setupWith(respond)).update({
+			workspace: workspaceId,
+			providerId: ollama.id,
+			changes: { apiKey: "local-key" },
+		});
+
+		const asBob = await setupWith(respond, { as: bob.id });
+		const change = (changes: ModelProviderUpdate) =>
+			asBob.update({ workspace: workspaceId, providerId: ollama.id, changes });
+
+		// Taking the key away switches it off, even asked to switch it on.
+		await change({ apiKey: null, active: true });
+		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: null });
+
+		await change({ active: true });
+		expect(await view(ollama.id)).toMatchObject({ active: true, connectedBy: "Bob" });
+	});
+
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		try {
@@ -262,7 +340,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await switchOn(providerId);
 			const setup = await setupWith(async () => {
 				vi.setSystemTime(new Date("2030-01-01T00:00:01Z"));
-				await repository.update(workspaceId, providerId, { active: false });
+				await repository.update(workspaceId, providerId, { active: false }, userId);
 				return Response.json({ data: [] });
 			});
 
@@ -275,7 +353,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("does not reactivate a manually disabled provider when refreshing models", async () => {
-		await repository.update(workspaceId, providerId, { active: false });
+		await repository.update(workspaceId, providerId, { active: false }, userId);
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		await setup.fetchModels({ workspace: workspaceId, providerId });

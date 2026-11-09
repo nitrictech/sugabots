@@ -7,12 +7,7 @@ import type {
 	ProviderModelUpdate,
 	ProviderPresetId,
 } from "@sugabots/contracts";
-import {
-	presetRequiresApiKey,
-	presetSignsIn,
-	providerPreset,
-	seededPresets,
-} from "@sugabots/contracts";
+import { providerLacksCredential, providerPreset, seededPresets } from "@sugabots/contracts";
 import { DisplayName, type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
@@ -49,21 +44,27 @@ export interface Interface {
 		workspaceId: string,
 		input: { createdById: string; provider: NewModelProvider },
 	) => Effect.Effect<ModelProviderRow, ModelProviderNameConflict>;
+	/**
+	 * Applies `changes` made by `changedById`, who becomes who connected it when
+	 * the change connects it: a new key, or switching on one that holds no key or
+	 * sign-in.
+	 */
 	readonly update: (
 		workspaceId: string,
 		providerId: string,
 		changes: ModelProviderUpdate,
+		changedById: string,
 	) => Effect.Effect<ModelProviderRow | undefined>;
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Signs a subscription provider in with `tokens`, or out with null. Like a new
-	 * key, it leaves the provider inactive and untested until it is tried.
+	 * Signs a subscription provider in, recording who did, or out with null. Like
+	 * a new key, it leaves the provider inactive and untested until it is tried.
 	 */
 	readonly saveOAuthTokens: (
 		workspaceId: string,
 		providerId: string,
-		tokens: OAuthTokens | null,
+		signIn: { tokens: OAuthTokens; signedInById: string } | null,
 	) => Effect.Effect<void>;
 	/**
 	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
@@ -278,7 +279,12 @@ export const make = Effect.gen(function* () {
 						(db) =>
 							db
 								.insert(modelProvider)
-								.values({ workspaceId, createdById, ...providerValues(provider, cipher) })
+								.values({
+									workspaceId,
+									createdById,
+									connectedById: createdById,
+									...providerValues(provider, cipher),
+								})
 								.returning(),
 						(failure) => (isUniqueViolation(failure) ? new ModelProviderNameConflict() : undefined),
 					);
@@ -292,7 +298,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (workspaceId, providerId, changes) =>
+		update: (workspaceId, providerId, changes, changedById) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
@@ -304,6 +310,7 @@ export const make = Effect.gen(function* () {
 					const values = {
 						// A new key is on only once a test of it has succeeded.
 						active: changes.apiKey !== undefined ? false : changes.active,
+						connectedById: connectedByAfter(changes, changedById),
 						baseUrl: changes.baseUrl,
 						apiFormat: changes.apiFormat,
 						apiKeyEncrypted: storedApiKey(changes.apiKey, cipher),
@@ -348,7 +355,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
-		saveOAuthTokens: (workspaceId, providerId, tokens) =>
+		saveOAuthTokens: (workspaceId, providerId, signIn) =>
 			operation(
 				"saveOAuthTokens",
 				query((db) =>
@@ -356,7 +363,8 @@ export const make = Effect.gen(function* () {
 						.update(modelProvider)
 						.set({
 							active: false,
-							oauthTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
+							oauthTokensEncrypted: signIn ? cipher.encrypt(JSON.stringify(signIn.tokens)) : null,
+							connectedById: signIn?.signedInById,
 							lastTestedAt: null,
 							lastTestError: null,
 						})
@@ -747,18 +755,34 @@ function providerValues(input: NewModelProvider, cipher: Credentials.Interface) 
 	};
 }
 
+/**
+ * What an update by `changedById` writes to `connected_by_id`. A new key is
+ * theirs. Switching on connects only one that holds no key or sign-in, and was
+ * off; one already connected keeps whoever connected it. Any change to the key
+ * switches the provider off, so switching on as the key is taken away connects
+ * nothing.
+ */
+function connectedByAfter(changes: ModelProviderUpdate, changedById: string) {
+	if (changes.apiKey) return changedById;
+	if (changes.active !== true) return undefined;
+	return sql<string>`case when ${modelProvider.active} or ${modelProvider.apiKeyEncrypted} is not null or ${modelProvider.oauthTokensEncrypted} is not null then ${modelProvider.connectedById} else ${changedById}::uuid end`;
+}
+
 /** What an update writes to the key column: absent leaves it, null clears it. */
 function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: Credentials.Interface) {
 	if (apiKey === undefined) return undefined;
 	return apiKey === null ? null : cipher.encrypt(apiKey);
 }
 
-/** A provider that cannot be used yet: it wants a key, or a sign-in, it has not had. */
-export function lacksCredential(
+/** `providerLacksCredential` for a stored row, which holds the key and sign-in rather than says whether it has them. */
+function lacksCredential(
 	row: Pick<ModelProviderRow, "preset" | "apiKeyEncrypted" | "oauthTokensEncrypted">,
 ): boolean {
-	if (presetSignsIn(row.preset)) return row.oauthTokensEncrypted === null;
-	return presetRequiresApiKey(row.preset) && row.apiKeyEncrypted === null;
+	return providerLacksCredential({
+		preset: row.preset,
+		hasApiKey: row.apiKeyEncrypted !== null,
+		signedIn: row.oauthTokensEncrypted !== null,
+	});
 }
 
 function openOAuthTokens(sealed: string, cipher: Credentials.Interface): OAuthTokens {

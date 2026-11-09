@@ -206,6 +206,8 @@ export const modelProviderSchema = Schema.Struct({
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
+	/** The name of whoever connected it, while it is connected and they still have an account. */
+	connectedBy: Schema.NullOr(Schema.String),
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 
