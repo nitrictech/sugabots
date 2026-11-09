@@ -84,11 +84,16 @@ export function ModelsSettings() {
 		const provider = byPreset.get(presetId);
 		return provider && providerIsConnected(provider) ? provider : undefined;
 	};
-	// What is connected leads, the popular ones in their order and then the rest; what could be follows.
+	// Working ones lead, then failed, disabled and not connected, each the popular ones in
+	// their order and then the rest; the popular ones that could be connected follow.
 	const connected = [
 		...POPULAR_PRESETS.flatMap((presetId) => connectedPopular(presetId) ?? []),
 		...others,
-	];
+	].toSorted(
+		(a, b) =>
+			CONNECTION_STATE_ORDER.indexOf(connectionState(a)) -
+			CONNECTION_STATE_ORDER.indexOf(connectionState(b)),
+	);
 	// Nothing until the list arrives: a popular provider would read Not connected whether it is or not.
 	const toConnect = providers.data
 		? POPULAR_PRESETS.filter((presetId) => !connectedPopular(presetId))
@@ -172,13 +177,13 @@ function ProviderRow({
 	provider: ModelProvider;
 	render: React.ReactElement;
 }) {
-	const connected = providerIsConnected(provider);
+	const state = connectionState(provider);
 	return (
 		<SettingsRow
 			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 			label={provider.name}
-			sub={connected ? credentialLine(provider) : "Not connected"}
-			trailing={connected && <ConnectionBadge provider={provider} />}
+			sub={state === "not_connected" ? "Not connected" : credentialLine(provider)}
+			trailing={<ConnectionBadge state={state} preset={provider.preset} />}
 			chevron
 			render={render}
 		/>
@@ -186,19 +191,41 @@ function ProviderRow({
 }
 
 /**
- * A connected provider's state: its last test failed, such as a key that was
- * rejected; switched off, so bots can't use it until it is switched on; or working.
+ * Where a provider stands, in the order the list shows them: working; connected
+ * but its last test failed, such as a key that was rejected; connected but
+ * switched off, so bots can't use it until it is switched on; or not connected.
  */
-function ConnectionBadge({ provider }: { provider: ModelProvider }) {
-	if (provider.status === "error") {
-		return (
-			<SettingsStatusBadge tone="failed">
-				{presetSignsIn(provider.preset) ? "Sign-in failed" : "Connection failed"}
-			</SettingsStatusBadge>
-		);
+const CONNECTION_STATE_ORDER = ["connected", "failed", "disabled", "not_connected"] as const;
+type ConnectionState = (typeof CONNECTION_STATE_ORDER)[number];
+
+function connectionState(provider: ModelProvider): ConnectionState {
+	if (!providerIsConnected(provider)) return "not_connected";
+	if (provider.status === "error") return "failed";
+	if (!provider.active) return "disabled";
+	return "connected";
+}
+
+function ConnectionBadge({
+	state,
+	preset,
+}: {
+	state: ConnectionState;
+	preset: ModelProvider["preset"];
+}) {
+	switch (state) {
+		case "connected":
+			return <SettingsStatusBadge>Connected</SettingsStatusBadge>;
+		case "failed":
+			return (
+				<SettingsStatusBadge tone="failed">
+					{presetSignsIn(preset) ? "Sign-in failed" : "Connection failed"}
+				</SettingsStatusBadge>
+			);
+		case "disabled":
+			return <SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>;
+		case "not_connected":
+			return null;
 	}
-	if (!provider.active) return <SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>;
-	return <SettingsStatusBadge>Connected</SettingsStatusBadge>;
 }
 
 /**

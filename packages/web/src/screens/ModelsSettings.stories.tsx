@@ -274,6 +274,22 @@ export const SwitchedOff = meta.story({
 	},
 });
 
+/** Working providers lead, then a failed one, then a switched-off one, whatever their usual order. */
+export const SortedByState = meta.story({
+	parameters: {
+		providers: [{ ...openrouter, active: false }, anthropic, openai, ollama, rejectedGroq, chatgpt],
+	},
+	play: async ({ canvas }) => {
+		await canvas.findByRole("link", { name: /OpenRouter/ });
+		const order = canvas
+			.getAllByRole("link")
+			.map((link) => link.textContent ?? "")
+			.filter((text) => /Connected|Connection failed|Disabled/.test(text))
+			.map((text) => text.match(/^(OpenRouter|Anthropic|OpenAI|Ollama|Groq)/)?.[0]);
+		await expect(order).toEqual(["Anthropic", "OpenAI", "Ollama", "Groq", "OpenRouter"]);
+	},
+});
+
 /** A key that failed its test reads Connection failed, not Disabled: it wants a new key, not switching on. */
 export const ConnectionFailed = meta.story({
 	parameters: { providers: [...providers, rejectedGroq] },
