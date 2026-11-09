@@ -25,20 +25,26 @@ export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
 
 /**
- * The size of an E2B workspace's sandboxes unless it sets another: room to
- * install a repository's dependencies and run its checks. E2B's own default,
- * 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
+ * Room to install a repository's dependencies and run its checks. E2B's own
+ * default, 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
  */
 export const SANDBOX_E2B_DEFAULT_SIZE = { cpuCount: 2, memoryGiB: 4 } as const;
 
 /**
- * Bounds for an E2B sandbox's size. The account's plan sets the real limit,
- * which E2B enforces when the template is built.
+ * The OpenSandbox SDK's own default. Docker refuses more vCPUs than its host
+ * has, and Kubernetes reserves the whole size on a node, so a larger default
+ * would stop sandboxes starting on small hosts.
  */
-export const sandboxE2bCpuCountSchema = Schema.Int.check(
+export const SANDBOX_OPENSANDBOX_DEFAULT_SIZE = { cpuCount: 1, memoryGiB: 2 } as const;
+
+/**
+ * Bounds for a sandbox's size. The real limit is the E2B account's plan, or
+ * what OpenSandbox's hosts have room for.
+ */
+export const sandboxCpuCountSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
-export const sandboxE2bMemoryGiBSchema = Schema.Int.check(
+export const sandboxMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
 
@@ -55,6 +61,8 @@ export interface SandboxProviderPreset {
 	/** What sandboxes are made from: an image for OpenSandbox, a template for E2B. */
 	imageLabel: string;
 	defaultImage: string;
+	/** The size of its sandboxes unless the workspace sets another. */
+	defaultSize: { readonly cpuCount: number; readonly memoryGiB: number };
 	/** What it is good for, in the line under its name where one is chosen. */
 	description: string;
 }
@@ -67,6 +75,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		baseUrl: "http://localhost:8090",
 		imageLabel: "Image",
 		defaultImage: SANDBOX_IMAGE,
+		defaultSize: SANDBOX_OPENSANDBOX_DEFAULT_SIZE,
 		description: "Runs on your own Docker or Kubernetes",
 	},
 	{
@@ -75,6 +84,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		hosting: "remote",
 		imageLabel: "Template",
 		defaultImage: SANDBOX_E2B_TEMPLATE,
+		defaultSize: SANDBOX_E2B_DEFAULT_SIZE,
 		description: "Hosted microVMs, or E2B Embed on your own server",
 	},
 ];
@@ -126,6 +136,9 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			preset: Schema.Literal("opensandbox"),
 			serverUrl: Schema.optional(providerUrlSchema),
 			image: Schema.optional(image),
+			/** The most each sandbox may use. */
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
@@ -136,8 +149,8 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			sandboxUrl: Schema.optional(providerUrlSchema),
 			template: Schema.optional(nameSchema),
 			/** What the template is built with, so every sandbox made from it has. */
-			cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
-			memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),

@@ -1,5 +1,4 @@
 import {
-	SANDBOX_E2B_DEFAULT_SIZE,
 	SANDBOX_NETWORK_MODE_DEFAULT,
 	type SandboxNetworkMode,
 	type SandboxProvider,
@@ -7,9 +6,9 @@ import {
 	type SandboxProviderSettings,
 	type SandboxProviderTestResult,
 	type SandboxProviderUpdate,
+	sandboxCpuCountSchema,
 	sandboxDiskShare,
-	sandboxE2bCpuCountSchema,
-	sandboxE2bMemoryGiBSchema,
+	sandboxMemoryGiBSchema,
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
 } from "@sugabots/contracts";
@@ -416,38 +415,38 @@ function ProviderSettings({
 							onConfigure({ settings: { ...settings, sandboxUrl: sandboxUrl || undefined } })
 						}
 					/>
-					<TextEntryRow
-						label="vCPUs"
-						saved={settings.cpuCount?.toString()}
-						placeholder={String(SANDBOX_E2B_DEFAULT_SIZE.cpuCount)}
-						disabled={pending}
-						clearable
-						onSave={(typed) => {
-							const cpuCount = wholeNumber(typed);
-							if (typed && !Schema.is(sandboxE2bCpuCountSchema)(cpuCount)) {
-								onInvalid("Enter a whole number of vCPUs, from 1 to 64.");
-								return Promise.resolve();
-							}
-							return onConfigure({ settings: { ...settings, cpuCount } });
-						}}
-					/>
-					<TextEntryRow
-						label="Memory"
-						saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
-						placeholder={`${SANDBOX_E2B_DEFAULT_SIZE.memoryGiB} GiB`}
-						disabled={pending}
-						clearable
-						onSave={(typed) => {
-							const memoryGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
-							if (typed && !Schema.is(sandboxE2bMemoryGiBSchema)(memoryGiB)) {
-								onInvalid("Enter a whole number of GiB, from 1 to 64.");
-								return Promise.resolve();
-							}
-							return onConfigure({ settings: { ...settings, memoryGiB } });
-						}}
-					/>
 				</>
 			)}
+			<TextEntryRow
+				label="vCPUs"
+				saved={settings.cpuCount?.toString()}
+				placeholder={String(preset.defaultSize.cpuCount)}
+				disabled={pending}
+				clearable
+				onSave={(typed) => {
+					const cpuCount = wholeNumber(typed);
+					if (typed && !Schema.is(sandboxCpuCountSchema)(cpuCount)) {
+						onInvalid("Enter a whole number of vCPUs, from 1 to 64.");
+						return Promise.resolve();
+					}
+					return onConfigure({ settings: { ...settings, cpuCount } });
+				}}
+			/>
+			<TextEntryRow
+				label="Memory"
+				saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
+				placeholder={`${preset.defaultSize.memoryGiB} GiB`}
+				disabled={pending}
+				clearable
+				onSave={(typed) => {
+					const memoryGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
+					if (typed && !Schema.is(sandboxMemoryGiBSchema)(memoryGiB)) {
+						onInvalid("Enter a whole number of GiB, from 1 to 64.");
+						return Promise.resolve();
+					}
+					return onConfigure({ settings: { ...settings, memoryGiB } });
+				}}
+			/>
 			{chosen === "e2b" && provider && hasKey && <TemplateRow providerId={provider.id} />}
 			{provider && hasKey && (
 				<SettingsRow
@@ -555,7 +554,7 @@ function networkSummary(settings: SandboxProviderSettings): string {
 
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
-		? "The server's own API key, from its configuration. Leave the image empty to use the default."
+		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a pod's computer is reset; on Kubernetes, one too big for any node never starts."
 		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's computer is reset.";
 }
 

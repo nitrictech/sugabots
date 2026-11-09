@@ -1,4 +1,4 @@
-import { SANDBOX_E2B_DEFAULT_SIZE } from "@sugabots/contracts";
+import { SANDBOX_E2B_DEFAULT_SIZE, SANDBOX_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Ids } from "../ids/ids.ts";
@@ -24,6 +24,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					apiKey: Redacted.make(env.OPENSANDBOX_API_KEY),
 					// Debian with Python, for a web server to reach.
 					image: "python:3.13-slim",
+					size: SANDBOX_OPENSANDBOX_DEFAULT_SIZE,
 					networkMode: "allowlist",
 				}
 			: undefined,
