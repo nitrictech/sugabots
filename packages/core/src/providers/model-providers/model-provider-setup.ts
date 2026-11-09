@@ -566,8 +566,8 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						Effect.gen(function* () {
 							yield* providers.updateModel(workspaceId, providerId, modelId, { enabled: false });
-							yield* providers.requireEnabled(workspaceId, moveBotsTo);
 							if (yield* providers.isEnabled(workspaceId, switchingOff.modelId)) return 0;
+							yield* providers.requireEnabled(workspaceId, moveBotsTo);
 							return yield* agents.moveCrewAgentsToModel(
 								workspaceId,
 								switchingOff.modelId,
