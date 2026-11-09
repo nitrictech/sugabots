@@ -799,11 +799,14 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
-	const botsKnown = useAgents().agents !== undefined;
+	const agents = useAgents();
+	const offered = useModels();
+	// Until both are known, switching a model off could leave bots on it unasked.
+	const usageKnown = agents.agents !== undefined && offered.data !== undefined;
 	const holdersOf = useModelHolders();
-	const offered = useModels().data?.models ?? [];
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
+	const [checkingUsage, setCheckingUsage] = useState(false);
 	const [movingBotsOff, setMovingBotsOff] = useState<ProviderModel>();
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
@@ -816,6 +819,31 @@ function Models({ provider }: { provider: ModelProvider }) {
 	);
 	const error = actions.setModel.error ?? actions.fetchModels.error;
 	const custom = provider.preset === null;
+
+	/**
+	 * Switches the model off, or asks where its bots go when that would leave
+	 * them on a model no provider offers. Decided on fresh bots and models, as
+	 * the cached ones may predate another tab's changes.
+	 */
+	async function switchOff(model: ProviderModel) {
+		setCheckingUsage(true);
+		const [latestAgents, latestOffered] = await Promise.all([
+			agents.refetch(),
+			offered.refetch(),
+		]).finally(() => setCheckingUsage(false));
+		const strandsBots =
+			(latestAgents.data ?? []).some(
+				(agent) => agent.systemAgentKey === null && agent.model === model.modelId,
+			) &&
+			!(latestOffered.data?.models ?? []).some(
+				(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
+			);
+		if (strandsBots) {
+			setMovingBotsOff(model);
+			return;
+		}
+		actions.setModel.mutate({ providerId: provider.id, modelId: model.id, enabled: false });
+	}
 
 	return (
 		<SettingsGroup
@@ -854,13 +882,6 @@ function Models({ provider }: { provider: ModelProvider }) {
 							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
-					// Another provider offering the same model keeps its bots running.
-					const strandsBots =
-						bots.length > 0 &&
-						!offered.some(
-							(candidate) =>
-								candidate.modelId === model.modelId && candidate.providerId !== provider.id,
-						);
 					return (
 						<SettingsRow
 							key={model.id}
@@ -880,23 +901,21 @@ function Models({ provider }: { provider: ModelProvider }) {
 										disabled={
 											!provider.active ||
 											actions.setModel.isPending ||
+											checkingUsage ||
 											held !== undefined ||
-											// Until the bots are known, switching off could leave some on it unasked.
-											(model.enabled && !botsKnown)
+											(model.enabled && !usageKnown)
 										}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
-										onChange={(enabled) => {
-											if (!enabled && strandsBots) {
-												setMovingBotsOff(model);
-												return;
-											}
-											actions.setModel.mutate({
-												providerId: provider.id,
-												modelId: model.id,
-												enabled,
-											});
-										}}
+										onChange={(enabled) =>
+											enabled
+												? actions.setModel.mutate({
+														providerId: provider.id,
+														modelId: model.id,
+														enabled,
+													})
+												: switchOff(model)
+										}
 									/>
 								</>
 							}
@@ -955,11 +974,15 @@ function MoveBotsDialog({
 	);
 	const [search, setSearch] = useState("");
 	const needle = useDeferredValue(search.trim().toLowerCase());
-	const [chosen, setChosen] = useState(() =>
-		candidates.some((candidate) => candidate.modelId === models?.defaultModel)
+	const [picked, setPicked] = useState<string>();
+	const offeredHere = (modelId: string | null | undefined) =>
+		candidates.some((candidate) => candidate.modelId === modelId);
+	// Follows the models as they load or change, until someone picks one.
+	const chosen = offeredHere(picked)
+		? picked
+		: offeredHere(models?.defaultModel)
 			? models?.defaultModel
-			: candidates[0]?.modelId,
-	);
+			: candidates[0]?.modelId;
 	const shown = searchModels(candidates, needle);
 	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
 	const name = modelName(model);
@@ -1025,7 +1048,7 @@ function MoveBotsDialog({
 															/>
 														)
 													}
-													onClick={() => setChosen(candidate.modelId)}
+													onClick={() => setPicked(candidate.modelId)}
 												/>
 											);
 										})}
