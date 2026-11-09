@@ -7,6 +7,7 @@ import {
 	type ProviderPresetId,
 	presetSignInService,
 	presetSignsIn,
+	providerIsUsable,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
 	providerPreset,
@@ -70,15 +71,6 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
  * disconnecting it. A switched-off model is still listed, in its place, so
  * turning one on or off never moves the list under your pointer.
  */
-
-/**
- * Whether bots can reach a provider: switched on, and holding the key or
- * sign-in it needs. Anthropic, OpenAI and Ollama exist in every workspace from the
- * start, so for them this, not existing, is what "added" means.
- */
-export function isConnected(provider: ModelProvider): boolean {
-	return provider.active && !providerLacksCredential(provider);
-}
 
 /**
  * A provider's tile: its official logo for a preset, and its first letter for
@@ -538,7 +530,7 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 
 /** The models the provider offers agents: none while it is not connected. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
-	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
+	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
 
 /** The key, masked once saved; Replace swaps it for a new one. */

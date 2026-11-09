@@ -54,7 +54,7 @@ export interface Interface {
 		providerId: string,
 		changes: ModelProviderUpdate,
 	) => Effect.Effect<ModelProviderRow | undefined>;
-	/** Records who connected it: who gave it a key, signed it in, or set the address of one that takes neither. */
+	/** Records who connected it: who gave it its key, signed it in, or switched on one that takes neither. */
 	readonly recordConnectedBy: (
 		workspaceId: string,
 		providerId: string,

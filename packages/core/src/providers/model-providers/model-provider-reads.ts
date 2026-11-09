@@ -1,5 +1,5 @@
 import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
-import { presetSignsIn, seededPresets } from "@sugabots/contracts";
+import { presetSignsIn, providerIsConnected, seededPresets } from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
@@ -125,6 +125,14 @@ function toProvider(
 	connectedBy: string | null,
 	models: ProviderModelRow[],
 ): ModelProvider {
+	const hasApiKey = row.apiKeyEncrypted !== null;
+	const signedIn = row.oauthTokensEncrypted !== null;
+	const connected = providerIsConnected({
+		preset: row.preset,
+		hasApiKey,
+		signedIn,
+		active: row.active,
+	});
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
@@ -141,15 +149,14 @@ function toProvider(
 						lastTestedAt: row.lastTestedAt,
 						lastTestError: row.lastTestError,
 					}),
-		hasApiKey: row.apiKeyEncrypted !== null,
-		signedIn: row.oauthTokensEncrypted !== null,
+		hasApiKey,
+		signedIn,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
 		modelCount: models.length,
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
-		// Switching it off leaves it connected; taking its key or sign-in away does not.
-		connectedBy: lacksCredential(row) ? null : connectedBy,
+		connectedBy: connected ? connectedBy : null,
 		models: models.map((model) => ({
 			id: model.id,
 			modelId: model.modelId,

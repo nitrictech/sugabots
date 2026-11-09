@@ -5,7 +5,8 @@ import {
 	type ProviderPresetId,
 	presetSignsIn,
 	providerCatalog,
-	providerLacksCredential,
+	providerIsConnected,
+	providerIsUsable,
 	providerPreset,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -48,13 +49,7 @@ import {
 	SettingsStatusBadge,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import {
-	API_FORMATS,
-	BackToModels,
-	isConnected,
-	modelName,
-	ProviderTile,
-} from "./ProviderSettings.tsx";
+import { API_FORMATS, BackToModels, modelName, ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * The providers most people connect, listed whether or not they are, each
@@ -83,20 +78,20 @@ export function ModelsSettings() {
 	const others = all.filter(
 		(provider) =>
 			(provider.preset === null || !POPULAR_PRESETS.includes(provider.preset)) &&
-			(isConnected(provider) || provider.preset === null),
+			(providerIsConnected(provider) || provider.preset === null),
 	);
-	const popularWithCredential = (presetId: ProviderPresetId) => {
+	const connectedPopular = (presetId: ProviderPresetId) => {
 		const provider = byPreset.get(presetId);
-		return provider && !providerLacksCredential(provider) ? provider : undefined;
+		return provider && providerIsConnected(provider) ? provider : undefined;
 	};
 	// What is connected leads, the popular ones in their order and then the rest; what could be follows.
 	const connected = [
-		...POPULAR_PRESETS.flatMap((presetId) => popularWithCredential(presetId) ?? []),
+		...POPULAR_PRESETS.flatMap((presetId) => connectedPopular(presetId) ?? []),
 		...others,
 	];
 	// Nothing until the list arrives: a popular provider would read Not connected whether it is or not.
 	const toConnect = providers.data
-		? POPULAR_PRESETS.filter((presetId) => !popularWithCredential(presetId))
+		? POPULAR_PRESETS.filter((presetId) => !connectedPopular(presetId))
 		: [];
 	const providerLink = (provider: ModelProvider) => (
 		<Link
@@ -182,7 +177,9 @@ function ProviderRow({
 			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 			label={provider.name}
 			sub={!provider.active ? "Turned off" : credentialLine(provider)}
-			trailing={provider.active && <SettingsStatusBadge>Connected</SettingsStatusBadge>}
+			trailing={
+				providerIsConnected(provider) && <SettingsStatusBadge>Connected</SettingsStatusBadge>
+			}
 			chevron
 			render={render}
 		/>
@@ -203,7 +200,7 @@ function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] })
 	return (
 		<DefaultRow
 			label="Default for new bots"
-			description="Any model from a connected provider"
+			description="Any model from a provider that is on"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
 		/>
@@ -328,7 +325,7 @@ function ModelChoicePage({
 	const providers = useModelProviders();
 	const [error, setError] = useState<unknown>();
 	const groups = (providers.data ?? [])
-		.filter((provider) => isConnected(provider))
+		.filter((provider) => providerIsUsable(provider))
 		.map((provider) => ({
 			provider,
 			models: provider.models.filter(
@@ -427,7 +424,7 @@ function AddProviderSteps({
 	// enough to leave it out: it has to have listed models.
 	const available = providerCatalog.filter((preset) => {
 		const existing = byPreset.get(preset.id);
-		return !existing || !isConnected(existing) || existing.modelCount === 0;
+		return !existing || !providerIsConnected(existing) || existing.modelCount === 0;
 	});
 
 	if (choice === "custom") {

@@ -3,6 +3,7 @@ import { modelIdSchema } from "./agents.ts";
 import {
 	presetRequiresApiKey,
 	presetSignsIn,
+	presetTakesNoCredential,
 	providerCatalog,
 	providerPresetIdSchema,
 } from "./provider-catalog.ts";
@@ -205,11 +206,7 @@ export const modelProviderSchema = Schema.Struct({
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/**
-	 * The name of whoever last gave it a key, signed it in, or set the address of
-	 * one that takes neither, while it has what it needs and they still have an
-	 * account. Switching it off leaves this alone.
-	 */
+	/** The name of whoever connected it, while it is connected and they still have an account. */
 	connectedBy: Schema.NullOr(Schema.String),
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
@@ -222,6 +219,25 @@ export function providerLacksCredential(
 ): boolean {
 	if (presetSignsIn(provider.preset)) return !provider.signedIn;
 	return presetRequiresApiKey(provider.preset) && !provider.hasApiKey;
+}
+
+/**
+ * Whether the provider has what bots need to reach it: its key or sign-in, or,
+ * for one that takes neither, being switched on. Switching off one that takes a
+ * key only pauses it; it stays connected until Disconnect takes the key away.
+ */
+export function providerIsConnected(
+	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+): boolean {
+	if (presetTakesNoCredential(provider.preset)) return provider.active;
+	return !providerLacksCredential(provider);
+}
+
+/** Whether bots can use the provider's models now: it is connected and switched on. */
+export function providerIsUsable(
+	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+): boolean {
+	return provider.active && providerIsConnected(provider);
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 	type Pod,
 	type ProviderModel,
 	presetSignInService,
+	providerIsUsable,
 	providerLacksCredential,
 	providerPreset,
 	slugify,
@@ -46,7 +47,7 @@ import {
 	useUpdateWorkspace,
 	useWorkspace,
 } from "@/lib/workspace.ts";
-import { isConnected, modelName } from "@/screens/ProviderSettings.tsx";
+import { modelName } from "@/screens/ProviderSettings.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -396,8 +397,8 @@ function ConnectProviderStep({
 }) {
 	const listModels = useListFirstProviderModels();
 	const [adding, setAdding] = useState(false);
-	const connected = providers.filter(
-		(provider) => isConnected(provider) && provider.modelCount > 0,
+	const usable = providers.filter(
+		(provider) => providerIsUsable(provider) && provider.modelCount > 0,
 	);
 
 	return (
@@ -406,9 +407,9 @@ function ConnectProviderStep({
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
 			</StepHeading>
-			{connected.length > 0 && (
+			{usable.length > 0 && (
 				<SettingsGroup label="Connected" headingLevel={2}>
-					{connected.map((provider) => (
+					{usable.map((provider) => (
 						<SettingsRow
 							key={provider.id}
 							icon={<ProviderTile name={provider.name} preset={provider.preset} />}

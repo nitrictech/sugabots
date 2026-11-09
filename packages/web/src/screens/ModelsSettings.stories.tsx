@@ -142,6 +142,17 @@ const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	status: "signed_out",
 	hasApiKey: false,
 });
+/** Connected with a key, then switched off: paused, so still connected. */
+const pausedDeepseek = provider(
+	7,
+	"deepseek",
+	"DeepSeek",
+	[model("deepseek-chat", "DeepSeek Chat", true)],
+	{
+		active: false,
+		connectedBy: "Tim Holm",
+	},
+);
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -242,6 +253,27 @@ export const Overview = meta.story({
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
 		await expect(canvas.getAllByRole("button", { name: "Connect" }).length).toBeGreaterThan(0);
 		await expect(canvas.getByRole("button", { name: /^Add a provider/ })).toBeInTheDocument();
+	},
+});
+
+/** A provider switched off keeps its key, so it stays in the list, connected but turned off. */
+export const SwitchedOff = meta.story({
+	parameters: { providers: [...providers, pausedDeepseek] },
+	play: async ({ canvas }) => {
+		const row = await canvas.findByRole("link", { name: /DeepSeek/ });
+		await expect(row).toHaveTextContent("Turned off");
+		await expect(row).toHaveTextContent("Connected");
+	},
+});
+
+/** Switched off, it still names who connected it, until Disconnect takes the key away. */
+export const SwitchedOffProvider = meta.story({
+	parameters: { providers: [...providers, pausedDeepseek] },
+	render: () => <ProviderSettings providerId={pausedDeepseek.id} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "DeepSeek" })).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Use DeepSeek" })).not.toBeChecked();
+		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
 	},
 });
 

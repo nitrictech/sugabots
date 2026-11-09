@@ -266,19 +266,19 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await view(openai.id)).toMatchObject({ connectedBy: null });
 	});
 
-	it("names who set the address of a local provider, which takes no key", async () => {
+	it("names who switched on a local provider, which takes no key, until it is switched off", async () => {
 		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
 		if (!ollama) throw new Error("fixture");
 		expect(ollama.connectedBy).toBeNull();
 		const setup = await setupWith(() => Response.json({ models: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: ollama.id, changes });
 
-		await setup.update({
-			workspace: workspaceId,
-			providerId: ollama.id,
-			changes: { baseUrl: "http://models.example:11434" },
-		});
-
+		await change({ active: true });
 		expect(await view(ollama.id)).toMatchObject({ connectedBy: "Ada" });
+
+		await change({ active: false });
+		expect(await view(ollama.id)).toMatchObject({ connectedBy: null });
 	});
 
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
