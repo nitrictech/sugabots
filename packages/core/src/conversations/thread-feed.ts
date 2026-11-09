@@ -113,6 +113,16 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationOpened: (opened) => [
 			collaborationUpdated(opened),
 			listedThreadChanged(opened.workspaceId, opened.podId, opened.collaboration.threadId),
+			...(opened.collaboratorChannelId
+				? [
+						conversationThreadChanged(
+							opened.workspaceId,
+							opened.podId,
+							opened.collaboratorChannelId,
+							opened.collaboration.threadId,
+						),
+					]
+				: []),
 		],
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
@@ -130,13 +140,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		],
 		ThreadOpened: ({ workspaceId, podId, parentThreadId, threadId }) => [
 			listedThreadChanged(workspaceId, podId, threadId),
-			{
-				channel: workspaceChannel(workspaceId),
-				event: PodAudience.forPod(
-					podId,
-					streamEvent("conversation.thread_changed", { conversationId: parentThreadId, threadId }),
-				),
-			},
+			conversationThreadChanged(workspaceId, podId, parentThreadId, threadId),
 		],
 		BriefedThreadStarted: ({ workspaceId, podId, threadId }) => [
 			listedThreadChanged(workspaceId, podId, threadId),
@@ -150,12 +154,12 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		ThreadCompacted: ({ workspaceId, podId, threadId }) =>
 			threadChanged(workspaceId, podId, threadId),
 		RoutineExecutionAccepted: ({ workspaceId, podId, conversationId, threadId }) => [
-			routineThreadChanged(workspaceId, podId, conversationId, threadId),
+			conversationThreadChanged(workspaceId, podId, conversationId, threadId),
 		],
 		RoutineWorkCancelled: ({ workspaceId, podId, threadIds }) =>
 			threadIds.flatMap((threadId) => threadChanged(workspaceId, podId, threadId)),
 		RoutineExecutionSettled: ({ workspaceId, podId, conversationId, threadId }) => [
-			routineThreadChanged(workspaceId, podId, conversationId, threadId),
+			conversationThreadChanged(workspaceId, podId, conversationId, threadId),
 		],
 	});
 }
@@ -184,7 +188,8 @@ function listedThreadChanged(workspaceId: string, podId: string, threadId: strin
 	};
 }
 
-function routineThreadChanged(
+/** Tells the conversation `conversationId`'s watchers that it now shows, or shows differently, the thread `threadId`. */
+function conversationThreadChanged(
 	workspaceId: string,
 	podId: string,
 	conversationId: string,

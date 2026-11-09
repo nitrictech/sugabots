@@ -17976,6 +17976,55 @@
 							"kind": {
 								"type": "string",
 								"enum": [
+									"collaboration"
+								]
+							},
+							"id": {
+								"type": "string",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+								"format": "uuid"
+							},
+							"threadId": {
+								"type": "string",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+								"format": "uuid"
+							},
+							"title": {
+								"type": "string"
+							},
+							"initiator": {
+								"$ref": "#/components/schemas/AgentParticipant"
+							},
+							"state": {
+								"type": "string",
+								"enum": [
+									"running",
+									"done",
+									"failed"
+								]
+							},
+							"createdAt": {
+								"type": "string",
+								"format": "date-time"
+							}
+						},
+						"required": [
+							"kind",
+							"id",
+							"threadId",
+							"title",
+							"initiator",
+							"state",
+							"createdAt"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
 									"routine_paused"
 								]
 							},

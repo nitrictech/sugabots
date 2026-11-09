@@ -6,6 +6,8 @@ import type {
 import { Clock, GitBranch, type LucideProps, RefreshCw, Webhook } from "lucide-react";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
+import { formatFullTimestamp } from "./ThreadConversation.tsx";
 
 export type ChatThreadType = ChatHistoryEntry["type"];
 
@@ -26,7 +28,7 @@ export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivitySt
 
 /**
  * A quiet row for something that happened in the chat around the bot's
- * messages: a collaboration, or a routine run. It
+ * messages: a collaboration another bot asked it into, or a routine run. It
  * lines up with the messages, its mark where their faces are, and the whole of
  * it opens the thread.
  */
@@ -36,6 +38,8 @@ export function ChatActivityRow(
 				type: "collaboration";
 				initiator: AgentParticipant;
 				recipient: AgentParticipant;
+				/** What the bot was asked, after the line, quieter. */
+				title?: string;
 		  }
 		| { type: "routine"; routineName: string; triggerKind: RoutineExecutionTriggerKind }
 	),
@@ -43,13 +47,14 @@ export function ChatActivityRow(
 	const { state, at, onOpen } = props;
 	const text =
 		props.type === "collaboration"
-			? collaborationText(props.initiator.name, props.recipient.name, state)
+			? helpedText(props.recipient.name, props.initiator.name, state)
 			: routineText(props.routineName, state);
+	const detail = props.type === "collaboration" ? props.title : undefined;
 	return (
 		<button
 			type="button"
 			onClick={onOpen}
-			aria-label={`Open ${threadTypeLabel[props.type]}: ${text}`}
+			aria-label={`Open ${threadTypeLabel[props.type]}: ${[text, detail].filter(Boolean).join(", ")}`}
 			className="focus-ring group/activity flex w-full min-w-0 items-center gap-3.5 px-5 py-1.5 text-left"
 		>
 			<span aria-hidden className="grid w-9 shrink-0 place-items-center text-muted-foreground">
@@ -82,6 +87,12 @@ export function ChatActivityRow(
 			<span className="min-w-0 truncate font-medium text-xs text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
 				{text}
 			</span>
+			{detail && (
+				// Given only the room the line leaves, so the line, which says who is doing what, is cut short last.
+				<span className="min-w-0 max-w-max grow basis-0 truncate text-xs text-subtle-foreground">
+					{detail}
+				</span>
+			)}
 			{state === "running" ? (
 				<span aria-hidden className="typing-dots typing-dots-small shrink-0 text-muted-foreground">
 					<i />
@@ -90,9 +101,11 @@ export function ChatActivityRow(
 				</span>
 			) : (
 				at && (
-					<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
-						{formatClockTime(new Date(at))}
-					</time>
+					<Tooltip label={formatFullTimestamp(at)} side="top">
+						<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
+							{formatClockTime(new Date(at))}
+						</time>
+					</Tooltip>
 				)
 			)}
 		</button>
@@ -123,6 +136,20 @@ export function collaborationText(host: string, other: string, state: ActivitySt
 			return `${host} collaborated with ${other}`;
 		case "failed":
 			return `Collaboration with ${other} failed`;
+	}
+}
+
+/** A collaboration as the bot that was asked tells it: that it is helping, or helped, the bot that asked. */
+function helpedText(helper: string, asker: string, state: ActivityState): string {
+	switch (state) {
+		case "running":
+			return `${helper} is helping ${asker}`;
+		case "waiting_on_you":
+			return `${helper} is waiting on your approval`;
+		case "done":
+			return `${helper} helped ${asker}`;
+		case "failed":
+			return `Collaboration with ${asker} failed`;
 	}
 }
 

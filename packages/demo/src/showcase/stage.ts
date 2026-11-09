@@ -684,6 +684,19 @@ const collaborate = <E, R>(
 				if (!row) return yield* Effect.die(new Error("The collaboration wasn't written"));
 				reply.parts.push({ type: "collaboration", collaborationId: row.id });
 				yield* saveParts(reply);
+				const [collaboratorChannel] = yield* query((db) =>
+					db
+						.select({ id: thread.id })
+						.from(thread)
+						.where(
+							and(
+								eq(thread.type, "bot_channel"),
+								eq(thread.podId, reply.thread.podId),
+								eq(thread.hostAgentId, collaborator.id),
+							),
+						)
+						.limit(1),
+				);
 				yield* emit([
 					ConversationEvent.CollaborationOpened({
 						parentThreadId: reply.thread.id,
@@ -692,6 +705,7 @@ const collaborate = <E, R>(
 						workspaceId: reply.thread.workspaceId,
 						podId: reply.thread.podId,
 						collaboratorAgentId: collaborator.id,
+						collaboratorChannelId: collaboratorChannel?.id ?? null,
 						briefMessageId: briefRow.id,
 					}),
 				]);

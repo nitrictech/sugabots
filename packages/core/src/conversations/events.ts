@@ -138,6 +138,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly podId: string;
 		readonly collaboratorAgentId: string;
+		/** The collaborator's channel in the pod, which lists the collaboration, or null while it has none. */
+		readonly collaboratorChannelId: string | null;
 		/** The brief, the first message in the collaboration's thread. */
 		readonly briefMessageId: string;
 	};

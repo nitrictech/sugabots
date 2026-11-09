@@ -405,6 +405,19 @@ export const chatMessageItemSchema = Schema.Union([
 		report: Schema.NullOr(Schema.String),
 		createdAt: isoTimestampSchema,
 	}),
+	/** In a bot's channel: another bot asking it for help, which links to the collaboration's thread. */
+	Schema.Struct({
+		kind: Schema.Literal("collaboration"),
+		id: uuidSchema,
+		threadId: uuidSchema,
+		/** What it was asked: the first line of the brief. */
+		title: Schema.String,
+		/** The bot that asked. */
+		initiator: agentParticipantSchema,
+		/** How the asked bot's work in the thread stands. */
+		state: Schema.Literals(["running", "done", "failed"]),
+		createdAt: isoTimestampSchema,
+	}),
 	/** In a routine's thread: the routine, by its id, paused itself after failing twice in a row. */
 	Schema.Struct({
 		kind: Schema.Literal("routine_paused"),

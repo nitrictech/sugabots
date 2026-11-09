@@ -49,7 +49,7 @@ const routine = (state: ActivityState, triggerKind: RoutineExecutionTriggerKind 
 	/>
 );
 
-/** CollaborationRunning is the host bot still talking to the other; it says nothing else meanwhile. */
+/** CollaborationRunning is the asked bot still helping the bot that asked it. */
 export const CollaborationRunning = meta.story({ render: () => collaboration("running") });
 
 /** CollaborationWaitingOnYou is a collaboration stopped on an approval. */
@@ -64,9 +64,35 @@ export const CollaborationDone = meta.story({
 	render: () => collaboration("done", opened),
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(
-			canvas.getByRole("button", { name: /Growth Desk collaborated with Linear Handler/ }),
+			canvas.getByRole("button", { name: /Linear Handler helped Growth Desk/ }),
 		);
 		await expect(opened).toHaveBeenCalled();
+	},
+});
+
+/**
+ * CollaborationWithWhatWasAsked follows the line with what the bot was asked,
+ * cut short when it runs past the chat's width.
+ */
+export const CollaborationWithWhatWasAsked = meta.story({
+	render: () => (
+		<div className="w-xl max-w-full">
+			<ChatActivityRow
+				type="collaboration"
+				initiator={growthDesk}
+				recipient={linearHandler}
+				title="Check which of last week's signups came through the partner referral links"
+				state="running"
+				onOpen={fn()}
+			/>
+		</div>
+	),
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByRole("button", {
+				name: /Linear Handler is helping Growth Desk, Check which of last week's signups/,
+			}),
+		).toBeInTheDocument();
 	},
 });
 
