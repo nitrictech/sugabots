@@ -748,6 +748,45 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				).toEqual(["second", "third"]);
 			});
 
+			it("moves the bots on a provider's models to another provider's as it switches off", async () => {
+				const { setup } = await withBotsOnFirst();
+				const other = await create({
+					name: "Elsewhere",
+					baseUrl: "https://elsewhere.example/v1",
+					apiFormat: "openai",
+					apiKey: "secret",
+					customHeaders: [],
+				});
+				await repository.addModels(workspaceId, other.id, [
+					{
+						modelId: "elsewhere",
+						displayName: null,
+						capabilities: [],
+						contextLength: null,
+						source: "manual",
+					},
+				]);
+				await switchOn(other.id);
+				const [elsewhere] = (await view(other.id))?.models ?? [];
+				await setup.setModelsEnabled({
+					workspace: workspaceId,
+					providerId: other.id,
+					modelIds: [elsewhere?.id ?? ""],
+					enabled: true,
+				});
+				await setup.setDefaultModel({ workspace: workspaceId, model: "elsewhere" });
+
+				const moved = await setup.switchOff({
+					workspace: workspaceId,
+					providerId,
+					moveBots: [{ from: "first", to: "elsewhere" }],
+				});
+
+				expect(moved).toBe(2);
+				expect(await crewModels()).toEqual(["elsewhere", "elsewhere"]);
+				expect(await view(providerId)).toMatchObject({ active: false });
+			});
+
 			it("changes nothing when the model to move to is the one switching off", async () => {
 				const { ids, setup } = await withBotsOnFirst();
 

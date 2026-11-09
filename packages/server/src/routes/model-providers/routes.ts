@@ -41,6 +41,13 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 			.handle("remove", ({ params }) =>
 				providers.remove(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
+			.handle("switchOff", ({ params, payload }) =>
+				providers.switchOff({ ...params, moveBots: payload.moveBots }).pipe(
+					asSessionUser,
+					asHttpError(providerErrors),
+					Effect.map((moved) => ({ moved })),
+				),
+			)
 			.handle("test", ({ params }) =>
 				providers.test(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)

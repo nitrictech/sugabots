@@ -1,6 +1,7 @@
 export * as ModelProviderSetup from "./model-provider-setup.ts";
 
 import type {
+	BotMove,
 	ModelProvider,
 	ModelProviderUpdate,
 	NewModelProvider,
@@ -204,6 +205,20 @@ export interface Interface {
 		| ModelInUse,
 		CurrentActor.Service
 	>;
+	/**
+	 * Switches a provider off and moves the bots on each `from` model to its
+	 * `to`, as {@link Interface.switchOffModel} does for one model.
+	 */
+	readonly switchOff: (
+		input: InProvider & { moveBots: readonly BotMove[] },
+	) => Effect.Effect<
+		number,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ModelProviderRepository.ModelNotEnabled
+		| ModelInUse,
+		CurrentActor.Service
+	>;
 	readonly removeModel: (
 		input: InProvider & { modelId: string },
 	) => Effect.Effect<
@@ -265,6 +280,31 @@ export const make = Effect.gen(function* () {
 				(provider) =>
 					new ProviderModelsRequireCredential({ missing: missingCredential(provider.preset) }),
 			),
+		);
+
+	/**
+	 * Runs `switchOff`, then moves the crew agents on each `from` the workspace
+	 * no longer offers to its `to`, which it must, and returns how many moved.
+	 * A `from` the workspace still offers was named in error, and keeps its bots.
+	 */
+	const movingStrandedBots = <E, R>(
+		workspaceId: string,
+		moves: readonly BotMove[],
+		switchOff: Effect.Effect<unknown, E, R>,
+	) =>
+		keepingHeldModelsOffered(
+			workspaceId,
+			Effect.gen(function* () {
+				yield* switchOff;
+				const moved = yield* Effect.forEach(moves, ({ from, to }) =>
+					Effect.gen(function* () {
+						if (yield* providers.isEnabled(workspaceId, from)) return 0;
+						yield* providers.requireEnabled(workspaceId, to);
+						return yield* agents.moveCrewAgentsToModel(workspaceId, from, to);
+					}),
+				);
+				return moved.reduce((total, count) => total + count, 0);
+			}),
 		);
 
 	/** The provider's sign-in, and a client that reaches its service. */
@@ -561,17 +601,27 @@ export const make = Effect.gen(function* () {
 					if (!switchingOff) {
 						return yield* new ProviderModelNotFound();
 					}
-					return yield* keepingHeldModelsOffered(
+					return yield* movingStrandedBots(
 						workspaceId,
-						Effect.gen(function* () {
-							yield* providers.updateModel(workspaceId, providerId, modelId, { enabled: false });
-							yield* providers.requireEnabled(workspaceId, moveBotsTo);
-							return yield* agents.moveCrewAgentsToModel(
-								workspaceId,
-								switchingOff.modelId,
-								moveBotsTo,
-							);
-						}),
+						[{ from: switchingOff.modelId, to: moveBotsTo }],
+						providers.updateModel(workspaceId, providerId, modelId, { enabled: false }),
+					);
+				}),
+			),
+
+		switchOff: ({ workspace, providerId, moveBots }) =>
+			operation(
+				"switchOff",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					return yield* movingStrandedBots(
+						workspaceId,
+						moveBots,
+						Effect.filterOrFail(
+							providers.update(workspaceId, providerId, { active: false }),
+							(updated) => updated !== undefined,
+							() => new ModelProviderNotFound(),
+						),
 					);
 				}),
 			),
