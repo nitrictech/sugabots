@@ -1,5 +1,4 @@
 import rubikUrl from "@fontsource-variable/rubik/files/rubik-latin-wght-normal.woff2?url";
-import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
 import { type ComponentProps, type ReactNode, useEffect } from "react";
@@ -23,7 +22,9 @@ const assetLinks: ComponentProps<"link">[] = [
 		type: "font/woff2",
 		crossOrigin: "anonymous",
 	},
-	{ rel: "icon", type: "image/svg+xml", href: logoUrl },
+	{ rel: "icon", href: "/favicon.ico", sizes: "48x48" },
+	{ rel: "icon", href: "/favicon.svg", sizes: "any", type: "image/svg+xml" },
+	{ rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
 ];
 
 export const Route = createRootRoute({
