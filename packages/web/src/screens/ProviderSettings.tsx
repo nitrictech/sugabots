@@ -28,7 +28,15 @@ import {
 	Search,
 	Wrench,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useRef, useState } from "react";
+import {
+	type ComponentProps,
+	type FormEvent,
+	type ReactNode,
+	useDeferredValue,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -135,43 +143,94 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 	);
 }
 
-/** Every bot in `bots` as its face, each named on hover or keyboard focus. */
+/** The most faces that fit in one row of a dialog, on a phone too. */
+const FACES_IN_A_ROW = 8;
+
+/**
+ * The bots in `bots` as one row of faces, each named on hover or keyboard
+ * focus. Past a row, the last place counts the others and names them on hover.
+ */
 function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string }) {
+	const faced = bots.length > FACES_IN_A_ROW ? bots.slice(0, FACES_IN_A_ROW - 1) : bots;
+	const others = bots.slice(faced.length);
 	return (
 		<LivelyGroup>
 			<ul
 				aria-label={label}
-				// Room around each face for its focus ring and its hop, and about three rows before it scrolls.
-				className="-m-1.5 flex max-h-28 list-none flex-wrap justify-center gap-1.5 overflow-y-auto p-1.5"
+				// Room around each face for its focus ring and its hop.
+				className="-m-1.5 flex list-none items-center justify-center gap-1.5 p-1.5"
 			>
-				{bots.map((bot) => (
+				{faced.map((bot) => (
 					<li key={bot.id} className="flex">
 						<NamedBotFace bot={bot} />
 					</li>
 				))}
+				{others.length > 0 && (
+					<li className="ml-1 text-muted-foreground text-xs">
+						and <OtherBots bots={others} />
+					</li>
+				)}
 			</ul>
 		</LivelyGroup>
 	);
+}
+
+/** "N others", naming them on hover or keyboard focus. */
+function OtherBots({ bots }: { bots: readonly Agent[] }) {
+	return (
+		<Tooltip
+			label={
+				<ul
+					aria-label="Other bots"
+					// Scrolls past about a dozen bots, so it takes focus to scroll from the keyboard.
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
+					tabIndex={0}
+					className="focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5"
+				>
+					{bots.map((bot) => (
+						<li key={bot.id} className="flex items-center gap-1.5">
+							<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+							<span className="truncate">{bot.name}</span>
+						</li>
+					))}
+				</ul>
+			}
+			side="top"
+			onOpenChange={nameOnKeyboardFocusOnly}
+		>
+			<span
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its names show only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring cursor-default rounded-sm text-foreground underline decoration-dotted underline-offset-2"
+			>
+				{bots.length} {bots.length === 1 ? "other" : "others"}
+				<span className="sr-only">: {LIST.format(bots.map((bot) => bot.name))}</span>
+			</span>
+		</Tooltip>
+	);
+}
+
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+/** A dialog opened by pointer focuses its first trigger; only keyboard focus should open its tooltip. */
+function nameOnKeyboardFocusOnly(
+	open: boolean,
+	details: Parameters<NonNullable<ComponentProps<typeof Tooltip>["onOpenChange"]>>[1],
+) {
+	if (
+		open &&
+		details.reason === "trigger-focus" &&
+		!(details.event.target as Element).matches(":focus-visible")
+	) {
+		details.cancel();
+	}
 }
 
 /** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
 function NamedBotFace({ bot }: { bot: Agent }) {
 	const face = useRef<LivelyFace>(null);
 	return (
-		<Tooltip
-			label={bot.name}
-			side="top"
-			// A dialog opened by pointer focuses its first face; only keyboard focus should name it.
-			onOpenChange={(open, details) => {
-				if (
-					open &&
-					details.reason === "trigger-focus" &&
-					!(details.event.target as Element).matches(":focus-visible")
-				) {
-					details.cancel();
-				}
-			}}
-		>
+		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
 			<span
 				role="img"
 				aria-label={bot.name}

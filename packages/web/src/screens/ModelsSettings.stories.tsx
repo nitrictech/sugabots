@@ -310,7 +310,8 @@ const everyModelOn = providers.map((one) =>
 
 /**
  * Switching off a model many bots run on, with many models to move them to:
- * the faces scroll after a few rows, and a search narrows the models.
+ * one row of faces counts the others and names them on hover, and a search
+ * narrows the models.
  */
 export const SwitchOffModelLongLists = meta.story({
 	parameters: { bots: crowdOnGpt5, providers: everyModelOn },
@@ -319,8 +320,9 @@ export const SwitchOffModelLongLists = meta.story({
 		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
 		const dialog = await screen.findByRole("dialog", { name: "Switch off GPT-5" });
 		const faces = within(dialog).getByRole("list", { name: "Bots on GPT-5" });
-		await expect(within(faces).getAllByRole("img")).toHaveLength(40);
-		await expect(faces.scrollHeight).toBeGreaterThan(faces.clientHeight);
+		await expect(within(faces).getAllByRole("img")).toHaveLength(7);
+		await userEvent.hover(within(faces).getByText("33 others"));
+		await expect(await screen.findByText("Helper 40")).toBeInTheDocument();
 		const search = within(dialog).getByRole("searchbox", { name: "Search models" });
 		await userEvent.type(search, "deepseek");
 		await expect(
