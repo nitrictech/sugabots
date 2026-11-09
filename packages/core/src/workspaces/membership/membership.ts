@@ -845,5 +845,13 @@ function invitationView(row: {
 	role: AssignableWorkspaceRole;
 	expiresAt: Date;
 }): WorkspaceInvitation {
-	return { id: row.id, email: row.email, role: row.role, expiresAt: row.expiresAt.toISOString() };
+	// Every send sets the expiry one lifetime ahead, so the last send is one lifetime before it.
+	const sentAt = DateTime.subtractDuration(DateTime.makeUnsafe(row.expiresAt), INVITATION_LIFETIME);
+	return {
+		id: row.id,
+		email: row.email,
+		role: row.role,
+		expiresAt: row.expiresAt.toISOString(),
+		sentAt: DateTime.formatIso(sentAt),
+	};
 }

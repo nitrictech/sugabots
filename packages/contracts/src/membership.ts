@@ -76,6 +76,8 @@ export const workspaceInvitationSchema = Schema.Struct({
 	email: emailSchema,
 	role: assignableWorkspaceRoleSchema,
 	expiresAt: isoTimestampSchema,
+	/** When the invitation was last emailed: when it was created, or last sent again. */
+	sentAt: isoTimestampSchema,
 });
 export type WorkspaceInvitation = typeof workspaceInvitationSchema.Type;
 
