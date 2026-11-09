@@ -138,7 +138,7 @@ export const Managing = meta.story({
 		await expect(canvas.getByRole("link", { name: /Ryan Eyes/ })).toHaveTextContent("(you)");
 		// People and invitations are two requests, so the invitation is awaited.
 		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
-		await expect(canvas.getByText(/^Sent .* · Expires within a day$/)).toBeInTheDocument();
+		await expect(canvas.getByText(/^Sent .+, expires in \d+ hours$/)).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Resend" })).toBeInTheDocument();
 	},
 });

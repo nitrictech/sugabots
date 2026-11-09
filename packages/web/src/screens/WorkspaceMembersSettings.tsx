@@ -12,7 +12,7 @@ import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatListTimeInSentence } from "@/lib/list-time.ts";
+import { formatClockTime } from "@/lib/list-time.ts";
 import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -221,11 +221,7 @@ function Invitations({
 						<PersonAvatar person={{ name: invitation.email, email: invitation.email }} size={32} />
 					}
 					label={invitation.email}
-					sub={
-						resent.has(invitation.id)
-							? "Sent again"
-							: `Sent ${formatListTimeInSentence(new Date(invitation.sentAt), new Date())} · ${expiryText(invitation.expiresAt)}`
-					}
+					sub={resent.has(invitation.id) ? "Sent again" : invitationTimes(invitation, new Date())}
 					trailing={
 						canManage && (
 							<span className="flex shrink-0 items-center gap-1">
@@ -268,15 +264,41 @@ function Invitations({
 	);
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
-/** Whole days left, so a link with a day and a half to go says one day rather than two. */
-function expiryText(expiresAt: string): string {
-	const left = new Date(expiresAt).getTime() - Date.now();
-	if (left <= 0) return "Expired";
-	const days = Math.floor(left / DAY_MS);
-	if (days === 0) return "Expires within a day";
-	return days === 1 ? "Expires in 1 day" : `Expires in ${days} days`;
+/** When the invitation went out and how long it has left, as one sentence: "Sent yesterday, expires in 8 hours". */
+function invitationTimes(invitation: { sentAt: string; expiresAt: string }, now: Date): string {
+	const sent = sentText(new Date(invitation.sentAt), now);
+	return `${sent}, ${expiryText(new Date(invitation.expiresAt).getTime() - now.getTime())}`;
+}
+
+const WEEK_DAYS = 7;
+
+/** "Sent at 9:06 PM" today, "Sent yesterday", "Sent on Sunday" within the week, then "Sent on 2 Oct". */
+function sentText(sentAt: Date, now: Date): string {
+	const daysAgo = Math.round((startOfDay(now) - startOfDay(sentAt)) / DAY_MS);
+	if (daysAgo <= 0) return `Sent at ${formatClockTime(sentAt)}`;
+	if (daysAgo === 1) return "Sent yesterday";
+	if (daysAgo < WEEK_DAYS)
+		return `Sent on ${sentAt.toLocaleDateString(undefined, { weekday: "long" })}`;
+	return `Sent on ${sentAt.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}
+
+function startOfDay(date: Date): number {
+	return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/** Hours on its last day, then whole days, so a link with a day and a half to go says one day rather than two. */
+function expiryText(leftMs: number): string {
+	if (leftMs <= 0) return "expired";
+	if (leftMs < HOUR_MS) return "expires in under an hour";
+	if (leftMs < DAY_MS) {
+		const hours = Math.floor(leftMs / HOUR_MS);
+		return hours === 1 ? "expires in 1 hour" : `expires in ${hours} hours`;
+	}
+	const days = Math.floor(leftMs / DAY_MS);
+	return days === 1 ? "expires in 1 day" : `expires in ${days} days`;
 }
 
 function MemberPage({
