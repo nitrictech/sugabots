@@ -846,12 +846,12 @@ function invitationView(row: {
 	expiresAt: Date;
 }): WorkspaceInvitation {
 	// Every send sets the expiry one lifetime ahead, so the last send is one lifetime before it.
-	const sentAt = new Date(row.expiresAt.getTime() - Duration.toMillis(INVITATION_LIFETIME));
+	const sentAt = DateTime.subtractDuration(DateTime.makeUnsafe(row.expiresAt), INVITATION_LIFETIME);
 	return {
 		id: row.id,
 		email: row.email,
 		role: row.role,
 		expiresAt: row.expiresAt.toISOString(),
-		sentAt: sentAt.toISOString(),
+		sentAt: DateTime.formatIso(sentAt),
 	};
 }
