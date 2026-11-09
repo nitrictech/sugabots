@@ -13,7 +13,6 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import {
-	CLEARED_NOTE_NAME,
 	clearFinishedThreadFolders,
 	clearingOrder,
 	MAX_FOLDERS_CLEARED_AT_ONCE,
@@ -245,19 +244,18 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 				.filter(Boolean);
 
 		it(
-			"clears finished threads' folders, leaving a note where the thread still exists",
+			"removes finished threads' folders, and leaves open threads' alone",
 			async () => {
 				const deleted = crypto.randomUUID();
 				const ended = await aRoutineRun("completed", at(60));
 				const open = await aConversation(false, at(60));
-				const clearedBefore = await aConversation(true, at(60));
 				await run(
 					[
+						`rm -rf ${Sandboxes.THREADS_DIRECTORY}`,
 						`mkdir -p ${Sandboxes.THREADS_DIRECTORY}`,
 						`cd ${Sandboxes.THREADS_DIRECTORY}`,
-						`mkdir -p ${deleted}/repo ${ended}/repo ${open}/repo ${clearedBefore}`,
+						`mkdir -p ${deleted}/repo ${ended}/repo ${open}/repo`,
 						`touch ${deleted}/repo/a ${ended}/repo/a ${open}/repo/a`,
-						`echo cleared > ${clearedBefore}/${CLEARED_NOTE_NAME}`,
 					].join(" && "),
 				);
 
@@ -272,20 +270,7 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 					],
 					stoppedAtTimeout: false,
 				});
-				expect(await threadFolders()).toEqual(
-					[
-						`./${clearedBefore}`,
-						`./${clearedBefore}/${CLEARED_NOTE_NAME}`,
-						`./${ended}`,
-						`./${ended}/${CLEARED_NOTE_NAME}`,
-						`./${open}`,
-						`./${open}/repo`,
-						`./${open}/repo/a`,
-					].toSorted(),
-				);
-				expect(
-					await run(`cat ${Sandboxes.THREADS_DIRECTORY}/${ended}/${CLEARED_NOTE_NAME}`),
-				).toContain("to free space on the sandbox's disk");
+				expect(await threadFolders()).toEqual([`./${open}`, `./${open}/repo`, `./${open}/repo/a`]);
 			},
 			SLOW,
 		);

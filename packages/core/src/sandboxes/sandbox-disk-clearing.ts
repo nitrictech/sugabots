@@ -1,7 +1,7 @@
 import type { RoutineExecutionState } from "@sugabots/contracts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { DateTime, Effect } from "effect";
+import { Effect } from "effect";
 import { type Database, query } from "../database/database.ts";
 import { ACTIVE_TURN_STATUSES, routineExecution, thread, turn } from "../database/schema.ts";
 import { Sandboxes } from "./sandboxes.ts";
@@ -25,17 +25,15 @@ export interface Clearing {
 
 /**
  * The most folders one clearing takes on. Its script is a single argument
- * to bash, which Linux caps at 128 KiB, and each folder adds 55 bytes to
+ * to bash, which Linux caps at 128 KiB, and each folder adds 50 bytes to
  * it. Folders past these are cleared the next time.
  */
 export const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
 
 /**
- * Frees the sandbox's disk by clearing the folders of threads nobody will
+ * Frees the sandbox's disk by removing the folders of threads nobody will
  * work in again, in {@link clearingOrder}, until its workspace's filesystem
- * is less than `belowShare` full. A cleared folder whose thread still exists
- * is left holding {@link CLEARED_NOTE_NAME}, for anyone who looks in it
- * again.
+ * is less than `belowShare` full.
  */
 export function clearFinishedThreadFolders(
 	sandbox: Sandboxes.Sandbox,
@@ -46,11 +44,7 @@ export function clearFinishedThreadFolders(
 		const clearable = yield* clearingOrder(workspaceId, yield* threadFoldersIn(sandbox));
 		if (clearable.length === 0) return { cleared: [], stoppedAtTimeout: false };
 		const order = clearable.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
-		const clearedOn = DateTime.formatIsoDateUtc(yield* DateTime.now);
-		const clearing = yield* sandbox.exec(
-			clearingScript(order, belowShare, clearedOn),
-			CLEARING_OPTIONS,
-		);
+		const clearing = yield* sandbox.exec(clearingScript(order, belowShare), CLEARING_OPTIONS);
 		const cleared = new Set(threadIdsIn(clearing.stdout.text));
 		return {
 			cleared: order.filter((folder) => cleared.has(folder.threadId)),
@@ -112,9 +106,6 @@ export function clearingOrder(
 	});
 }
 
-/** The file a cleared folder is left holding, whose thread still exists. */
-export const CLEARED_NOTE_NAME = "FOLDER-CLEARED.md";
-
 const ENDED_RUN_STATES: ReadonlySet<RoutineExecutionState> = new Set([
 	"completed",
 	"failed",
@@ -134,20 +125,13 @@ const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * The threads with folders in the sandbox, less those already cleared to
- * nothing but {@link CLEARED_NOTE_NAME}. A name that isn't a thread's id is
- * no thread's, and is left alone.
+ * The threads with folders in the sandbox. A name that isn't a thread's id
+ * is no thread's, and is left alone.
  */
 function threadFoldersIn(sandbox: Sandboxes.Sandbox) {
 	return Effect.map(
 		sandbox.exec(
-			[
-				"shopt -s nullglob",
-				`for folder in ${Sandboxes.THREADS_DIRECTORY}/*/; do`,
-				`  folder=\${folder%/}`,
-				`  [ "$(ls -A -- "$folder")" = ${CLEARED_NOTE_NAME} ] || printf '%s\\n' "\${folder##*/}"`,
-				"done",
-			].join("\n"),
+			`find ${Sandboxes.THREADS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' 2>/dev/null; exit 0`,
 			LISTING_OPTIONS,
 		),
 		(listing) => threadIdsIn(listing.stdout.text),
@@ -159,29 +143,15 @@ function threadIdsIn(output: string) {
 }
 
 /**
- * Clears `folders` in order, checking before each whether the workspace's
+ * Removes `folders` in order, checking before each whether the workspace's
  * filesystem is still at least `belowShare` full, and prints the id of each
- * thread whose folder it cleared. If `df` fails, it clears nothing more.
+ * thread whose folder it removed. If `df` fails, it removes nothing more.
  */
-function clearingScript(
-	folders: readonly ClearableFolder[],
-	belowShare: number,
-	clearedOn: string,
-) {
-	const note = `This folder was cleared on ${clearedOn} to free space on the sandbox's disk, which every agent in the pod shares, because its thread had finished. Clone or make again anything you need from it.`;
+function clearingScript(folders: readonly ClearableFolder[], belowShare: number) {
 	return [
 		`full() { df -B1 --output=used,avail ${Sandboxes.WORKSPACE_DIRECTORY} | awk -v share=${belowShare} 'NR == 2 { full = $1 >= ($1 + $2) * share } END { exit !full }'; }`,
-		// $1: the thread's id. $2: "note" to leave the note in its place.
-		"clear_folder() {",
-		"  full || exit 0",
-		`  local folder=${Sandboxes.THREADS_DIRECTORY}/$1`,
-		`  rm -rf -- "$folder" || return 0`,
-		`  if [ "$2" = note ]; then mkdir -p -- "$folder" && printf '%s\\n' ${Sandboxes.shellQuoted(note)} > "$folder/${CLEARED_NOTE_NAME}"; fi`,
-		`  printf '%s\\n' "$1"`,
-		"}",
-		...folders.map(
-			({ threadId, reason }) =>
-				`clear_folder ${threadId}${reason === "thread_deleted" ? "" : " note"}`,
-		),
+		// $1: the thread's id.
+		`clear_folder() { full || exit 0; rm -rf -- "${Sandboxes.THREADS_DIRECTORY}/$1" && printf '%s\\n' "$1"; }`,
+		...folders.map(({ threadId }) => `clear_folder ${threadId}`),
 	].join("\n");
 }
