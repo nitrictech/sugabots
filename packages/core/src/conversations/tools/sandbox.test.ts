@@ -13,10 +13,12 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { Egress } from "../../providers/network/egress.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxCredentials } from "../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
+import { unimplemented } from "../../testing.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SandboxTools } from "./sandbox.ts";
 
@@ -42,6 +44,8 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 			Effect.all([SandboxTools.Service, PodSandboxes.Service]).pipe(
 				Effect.provide(Layer.merge(SandboxTools.layer, PodSandboxes.layer)),
 				Effect.provide(SandboxCredentials.none),
+				// Registries are asked what an image's tag names, as in production.
+				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -87,8 +91,9 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 					settings: {
 						preset: "opensandbox",
 						serverUrl: env.OPENSANDBOX_URL,
-						// The default image, for its browser: `bun run build:sandbox` first.
-						image: "ghcr.io/nitrictech/sugabots-sandbox:latest",
+						// The local build of the default image, for its browser:
+						// `bun run build:sandbox` first.
+						image: "sugabots-sandbox:dev",
 						networkMode: "allowlist",
 					},
 					enabled: true,

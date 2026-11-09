@@ -13,6 +13,8 @@ import {
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
+import { Egress } from "../providers/network/egress.ts";
+import { unimplemented } from "../testing.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
@@ -43,6 +45,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 	// What the pod's sandbox is signed in with, and how often it was asked.
 	let signedIn: SandboxCredentials.SignedIn = SandboxCredentials.NOT_SIGNED_IN;
 	let signIns = 0;
+	let registryAnswers = true;
 	let providers: SandboxProviderRepository.Interface;
 	let direct: Sandboxes.Provider;
 	let thePod: PodSandboxes.Pod;
@@ -53,7 +56,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		[podSandboxes, providers] = await runOnPostgres(
 			Effect.all([PodSandboxes.Service, SandboxProviderRepository.Service]).pipe(
 				Effect.provide(Layer.merge(PodSandboxes.layer, SandboxProviderRepository.layer)),
-				Effect.provide(
+				Effect.provide([
 					Layer.succeed(SandboxCredentials.Service, {
 						forPod: () =>
 							Effect.sync(() => {
@@ -61,7 +64,18 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 								return signedIn;
 							}),
 					}),
-				),
+					// Docker Hub is asked what the images' tags name, as in production,
+					// unless a test makes it unreachable, as a private registry is.
+					unimplemented(Egress.Service, {
+						providers: {
+							for: () =>
+								((...request: Parameters<typeof fetch>) =>
+									registryAnswers
+										? fetch(...request)
+										: Promise.reject(new Error("registry unreachable"))) as typeof fetch,
+						},
+					}),
+				]),
 			),
 		);
 		direct = await Effect.runPromise(
@@ -453,6 +467,101 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		SLOW,
 	);
 
+	/** Changes the provider's image, as a workspace admin would, or as a release moves its tag. */
+	const changeImage = async (image: string) =>
+		runOnPostgres(
+			providers.update(thePod.workspaceId, (await enabledProvider()).id, {
+				settings: { preset: "opensandbox", serverUrl: connection.baseUrl, image },
+			}),
+		);
+	const recorded = async () =>
+		(
+			await onDatabase((db) =>
+				db
+					.select({ providerSandboxId: sandbox.providerSandboxId, image: sandbox.image })
+					.from(sandbox)
+					.where(eq(sandbox.podId, thePod.podId)),
+			)
+		)[0];
+
+	it(
+		"makes the sandbox from the digest its image's tag names, not what the host last pulled",
+		async () => {
+			await open();
+
+			expect((await recorded())?.image).toMatch(/^debian@sha256:[0-9a-f]{64}$/);
+		},
+		SLOW,
+	);
+
+	it(
+		"upgrades a sandbox nobody has used for a while to the provider's image, keeping its work, and leaves it paused",
+		async () => {
+			const first = await open();
+			await writeWork(first.sandbox);
+			await runOnPostgres(podSandboxes.release(HOLDER));
+			await changeImage("python:3.13-slim");
+			await idleForAnHour();
+
+			await runOnPostgres(podSandboxes.upgradeIdle);
+
+			const after = await recorded();
+			expect(after?.image).toMatch(/^python@sha256:/);
+			expect(after?.providerSandboxId).not.toBe(first.sandbox.id);
+			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect(await missing(first.sandbox.id)).toBe(true);
+			const reopened = await open();
+			expect(reopened.arrival).toBe("rebooted");
+			expect(await readWork(reopened.sandbox)).toMatch(/kept[\s\S]*ignored/);
+		},
+		SLOW,
+	);
+
+	it(
+		"leaves a sandbox on its image while a turn uses it",
+		async () => {
+			const first = await open();
+			await changeImage("python:3.13-slim");
+			await idleForAnHour();
+
+			await runOnPostgres(podSandboxes.upgradeIdle);
+
+			expect((await recorded())?.providerSandboxId).toBe(first.sandbox.id);
+		},
+		SLOW,
+	);
+
+	it(
+		"when the registry won't say what a tag names, keeps a sandbox on it and upgrades only to another image",
+		async () => {
+			// Named in full, they are the same images to Docker, but new to the
+			// service, which remembers what registries said of the short names.
+			const debian = "docker.io/library/debian:bookworm-slim";
+			const python = "docker.io/library/python:3.13-slim";
+			registryAnswers = false;
+			try {
+				await changeImage(debian);
+				const first = await open();
+				await runOnPostgres(podSandboxes.release(HOLDER));
+				await idleForAnHour();
+
+				await runOnPostgres(podSandboxes.upgradeIdle);
+				const status = await runOnPostgres(podSandboxes.status(thePod, await enabledProvider()));
+				const onItsTag = await recorded();
+				await changeImage(python);
+				await idleForAnHour();
+				await runOnPostgres(podSandboxes.upgradeIdle);
+
+				expect(onItsTag).toEqual({ providerSandboxId: first.sandbox.id, image: debian });
+				expect(status.kind === "present" && status.upgradeAvailable).toBe(false);
+				expect((await recorded())?.image).toBe(python);
+			} finally {
+				registryAnswers = true;
+			}
+		},
+		SLOW,
+	);
+
 	it(
 		"reports the pod's sandbox, and when the provider would make it from another image",
 		async () => {
@@ -473,7 +582,8 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 			);
 			const later = await runOnPostgres(podSandboxes.status(thePod, await enabledProvider()));
 
-			expect(now).toMatchObject({ kind: "present", state: "running", image: IMAGE, turnsUsing: 1 });
+			expect(now).toMatchObject({ kind: "present", state: "running", turnsUsing: 1 });
+			expect(now.kind === "present" && now.image).toMatch(/^debian@sha256:/);
 			expect(now.kind === "present" && now.upgradeAvailable).toBe(false);
 			expect(later.kind === "present" && later.upgradeAvailable).toBe(true);
 		},

@@ -10,6 +10,7 @@ import {
 	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised } from "../database/testing.ts";
+import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { PodSandboxSetup } from "./pod-sandbox-setup.ts";
@@ -26,7 +27,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes' disks, against Postgr
 	beforeAll(async () => {
 		setupAs = await servedOnPostgresAs(
 			PodSandboxSetup.Service,
-			PodSandboxSetup.layer.pipe(Layer.provide(unimplemented(SandboxCredentials.Service, {}))),
+			PodSandboxSetup.layer.pipe(
+				Layer.provide([
+					unimplemented(SandboxCredentials.Service, {}),
+					unimplemented(Egress.Service, {}),
+				]),
+			),
 		);
 	});
 
