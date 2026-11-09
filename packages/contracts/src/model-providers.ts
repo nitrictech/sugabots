@@ -205,6 +205,8 @@ export const modelProviderSchema = Schema.Struct({
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
+	/** When it was added: for one every workspace starts with, when the workspace was made. */
+	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 

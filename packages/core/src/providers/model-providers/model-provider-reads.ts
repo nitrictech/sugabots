@@ -138,6 +138,7 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
+		createdAt: row.createdAt.toISOString(),
 		models: models.map((model) => ({
 			id: model.id,
 			modelId: model.modelId,

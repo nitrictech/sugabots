@@ -19347,6 +19347,10 @@
 							}
 						]
 					},
+					"createdAt": {
+						"type": "string",
+						"format": "date-time"
+					},
 					"models": {
 						"type": "array",
 						"items": {
@@ -19370,6 +19374,7 @@
 					"enabledModelCount",
 					"lastTestedAt",
 					"lastTestError",
+					"createdAt",
 					"models"
 				],
 				"additionalProperties": false
