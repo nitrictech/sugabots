@@ -19347,11 +19347,10 @@
 							}
 						]
 					},
-					"connectedAt": {
+					"connectedBy": {
 						"anyOf": [
 							{
-								"type": "string",
-								"format": "date-time"
+								"type": "string"
 							},
 							{
 								"type": "null"
@@ -19381,7 +19380,7 @@
 					"enabledModelCount",
 					"lastTestedAt",
 					"lastTestError",
-					"connectedAt",
+					"connectedBy",
 					"models"
 				],
 				"additionalProperties": false

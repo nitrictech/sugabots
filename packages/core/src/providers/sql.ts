@@ -52,11 +52,8 @@ export const modelProvider = pgTable(
 		oauthTokensEncrypted: text("oauth_tokens_encrypted"),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
-		/**
-		 * When it was last switched on; null while off. Switching off, or a new key
-		 * or sign-in, which switches it off until a test passes, clears it.
-		 */
-		connectedAt: timestamp("connected_at", { withTimezone: true }),
+		/** Who last gave it a key, signed it in, or switched it on. */
+		connectedById: uuid("connected_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),

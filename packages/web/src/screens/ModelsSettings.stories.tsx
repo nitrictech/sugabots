@@ -73,7 +73,7 @@ function provider(
 		enabledModelCount: models.filter((one) => one.enabled).length,
 		lastTestedAt: null,
 		lastTestError: null,
-		connectedAt: null,
+		connectedBy: null,
 		models,
 		...over,
 	};
@@ -119,7 +119,7 @@ const openrouter = provider(
 			["tools", ...(index % 2 === 0 ? (["vision"] as const) : [])],
 		);
 	}),
-	{ connectedAt: "2026-10-02T00:00:00.000Z" },
+	{ connectedBy: "Tim Holm" },
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -284,7 +284,7 @@ export const LargeCatalog = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
-		await expect(canvas.getByText(/^Connected /)).toBeInTheDocument();
+		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
 		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);

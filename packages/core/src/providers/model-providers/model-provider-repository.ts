@@ -54,6 +54,12 @@ export interface Interface {
 		providerId: string,
 		changes: ModelProviderUpdate,
 	) => Effect.Effect<ModelProviderRow | undefined>;
+	/** Records who connected it: who gave it a key, signed it in, or switched it on. */
+	readonly recordConnectedBy: (
+		workspaceId: string,
+		providerId: string,
+		userId: string,
+	) => Effect.Effect<void>;
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
@@ -278,7 +284,12 @@ export const make = Effect.gen(function* () {
 						(db) =>
 							db
 								.insert(modelProvider)
-								.values({ workspaceId, createdById, ...providerValues(provider, cipher) })
+								.values({
+									workspaceId,
+									createdById,
+									connectedById: createdById,
+									...providerValues(provider, cipher),
+								})
 								.returning(),
 						(failure) => (isUniqueViolation(failure) ? new ModelProviderNameConflict() : undefined),
 					);
@@ -296,17 +307,14 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const now = yield* DateTime.nowAsDate;
 					const configurationChanged =
 						changes.baseUrl !== undefined ||
 						changes.apiFormat !== undefined ||
 						changes.apiKey !== undefined ||
 						changes.customHeaders !== undefined;
-					// A new key is on only once a test of it has succeeded.
-					const active = changes.apiKey !== undefined ? false : changes.active;
 					const values = {
-						active,
-						connectedAt: connectedAtAfter(active, now),
+						// A new key is on only once a test of it has succeeded.
+						active: changes.apiKey !== undefined ? false : changes.active,
 						baseUrl: changes.baseUrl,
 						apiFormat: changes.apiFormat,
 						apiKeyEncrypted: storedApiKey(changes.apiKey, cipher),
@@ -329,6 +337,19 @@ export const make = Effect.gen(function* () {
 						: yield* query((db) => db.select().from(modelProvider).where(inProvider));
 					return row;
 				}),
+			),
+
+		recordConnectedBy: (workspaceId, providerId, userId) =>
+			operation(
+				"recordConnectedBy",
+				query((db) =>
+					db
+						.update(modelProvider)
+						.set({ connectedById: userId })
+						.where(
+							and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
+						),
+				),
 			),
 
 		remove: (workspaceId, providerId) =>
@@ -359,7 +380,6 @@ export const make = Effect.gen(function* () {
 						.update(modelProvider)
 						.set({
 							active: false,
-							connectedAt: null,
 							oauthTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
 							lastTestedAt: null,
 							lastTestError: null,
@@ -411,16 +431,14 @@ export const make = Effect.gen(function* () {
 				"recordTest",
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
-					const active =
-						"activateOnSuccess" in outcome && outcome.activateOnSuccess ? true : undefined;
 					yield* query((db) =>
 						db
 							.update(modelProvider)
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
-								active,
-								connectedAt: connectedAtAfter(active, now),
+								active:
+									"activateOnSuccess" in outcome && outcome.activateOnSuccess ? true : undefined,
 							})
 							.where(
 								and(
@@ -751,17 +769,6 @@ function providerValues(input: NewModelProvider, cipher: Credentials.Interface) 
 			value: cipher.encrypt(value),
 		})),
 	};
-}
-
-/**
- * What a write that sets `active` does to `connected_at`: switching on stamps
- * `now` unless it was on already, switching off clears it, and leaving `active`
- * alone leaves it.
- */
-function connectedAtAfter(active: boolean | undefined, now: Date) {
-	if (active === undefined) return undefined;
-	if (!active) return null;
-	return sql<Date>`case when ${modelProvider.active} then ${modelProvider.connectedAt} else ${now}::timestamptz end`;
 }
 
 /** What an update writes to the key column: absent leaves it, null clears it. */

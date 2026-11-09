@@ -30,7 +30,6 @@ import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } fro
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatListTimeInSentence } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
@@ -249,10 +248,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			backOnWide
 			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
 			title={provider.name}
-			description={
-				provider.connectedAt &&
-				`Connected ${formatListTimeInSentence(new Date(provider.connectedAt), new Date())}`
-			}
+			description={provider.connectedBy && `Connected by ${provider.connectedBy}`}
 		>
 			<SettingsGroup
 				note={

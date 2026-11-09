@@ -205,8 +205,11 @@ export const modelProviderSchema = Schema.Struct({
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/** When bots could last start using it: when it was switched on with the key or sign-in it needs. Null while they can't. */
-	connectedAt: Schema.NullOr(isoTimestampSchema),
+	/**
+	 * The name of whoever last gave it a key, signed it in, or switched it on,
+	 * while it is connected and they still have an account.
+	 */
+	connectedBy: Schema.NullOr(Schema.String),
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 

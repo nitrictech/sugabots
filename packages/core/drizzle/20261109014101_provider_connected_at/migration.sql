@@ -1,1 +1,0 @@
-ALTER TABLE "model_provider" ADD COLUMN "connected_at" timestamp with time zone;

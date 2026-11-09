@@ -1,4 +1,4 @@
-import type { NewModelProvider } from "@sugabots/contracts";
+import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -248,59 +248,22 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(saved).toMatchObject({ active: true });
 	});
 
-	it("records when a provider was connected, until it is switched off or given a new key", async () => {
-		vi.useFakeTimers({ toFake: ["Date"] });
-		try {
-			const at = (time: string) => vi.setSystemTime(new Date(time));
-			const connectedAt = async (id: string) => (await view(id))?.connectedAt;
-			const passing = await setupWith(() => Response.json({ data: [] }));
+	it("names who connected a provider while it is connected", async () => {
+		const openai = (await list(workspaceId)).find(({ preset }) => preset === "openai");
+		if (!openai) throw new Error("fixture");
+		expect(openai.connectedBy).toBeNull();
+		const setup = await setupWith(() => Response.json({ data: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: openai.id, changes });
 
-			at("2030-01-01T00:00:00Z");
-			const created = await passing.create({
-				workspace: workspaceId,
-				provider: {
-					name: "Connected gateway",
-					baseUrl: "https://connected.example/v1",
-					apiFormat: "openai",
-					apiKey: "first-key",
-					customHeaders: [],
-				},
-			});
-			expect(await connectedAt(created.id)).toBe("2030-01-01T00:00:00.000Z");
+		await change({ apiKey: "secret" });
+		expect(await view(openai.id)).toMatchObject({ active: true, connectedBy: "Ada" });
 
-			at("2030-01-02T00:00:00Z");
-			await passing.update({
-				workspace: workspaceId,
-				providerId: created.id,
-				changes: { active: true },
-			});
-			expect(await connectedAt(created.id)).toBe("2030-01-01T00:00:00.000Z");
+		await change({ active: false });
+		expect(await view(openai.id)).toMatchObject({ connectedBy: null });
 
-			await passing.update({
-				workspace: workspaceId,
-				providerId: created.id,
-				changes: { active: false },
-			});
-			expect(await connectedAt(created.id)).toBeNull();
-
-			at("2030-01-03T00:00:00Z");
-			await passing.update({
-				workspace: workspaceId,
-				providerId: created.id,
-				changes: { active: true },
-			});
-			expect(await connectedAt(created.id)).toBe("2030-01-03T00:00:00.000Z");
-
-			const rejecting = await setupWith(() => new Response(null, { status: 401 }));
-			await rejecting.update({
-				workspace: workspaceId,
-				providerId: created.id,
-				changes: { apiKey: "rejected-key" },
-			});
-			expect(await connectedAt(created.id)).toBeNull();
-		} finally {
-			vi.useRealTimers();
-		}
+		await change({ active: true });
+		expect(await view(openai.id)).toMatchObject({ connectedBy: "Ada" });
 	});
 
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {

@@ -309,9 +309,15 @@ export const make = Effect.gen(function* () {
 			activateOnSuccess,
 		}).pipe(Effect.catchIf(isDiscoveryFailure, () => Effect.void));
 
-	const saveSignIn = (workspaceId: string, providerId: string, tokens: OAuthTokens) =>
+	const saveSignIn = (
+		workspaceId: string,
+		providerId: string,
+		tokens: OAuthTokens,
+		signedInById: string,
+	) =>
 		Effect.gen(function* () {
 			yield* providers.saveOAuthTokens(workspaceId, providerId, tokens);
+			yield* providers.recordConnectedBy(workspaceId, providerId, signedInById);
 			yield* discoverModelsQuietly(workspaceId, providerId, true);
 			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
@@ -365,7 +371,10 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const workspaceId = yield* managed(workspace);
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.providers.manage",
+					);
 					const current = yield* requireProvider(workspaceId, providerId);
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
@@ -382,6 +391,10 @@ export const make = Effect.gen(function* () {
 					const updated = yield* takesAway ? keepingHeldModelsOffered(workspaceId, write) : write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
+					}
+					// A new key connects it once a test of it passes, just below.
+					if (changes.apiKey || (changes.active === true && !current.active)) {
+						yield* providers.recordConnectedBy(workspaceId, providerId, actor.userId);
 					}
 					if (changes.apiKey) {
 						yield* discoverModelsQuietly(workspaceId, providerId, changes.active !== false);
@@ -443,14 +456,17 @@ export const make = Effect.gen(function* () {
 			operation(
 				"completeSignIn",
 				Effect.gen(function* () {
-					const workspaceId = yield* managed(workspace);
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.providers.manage",
+					);
 					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
 					const attempt = yield* openSignInAttempt(sealed, workspaceId, providerId);
 					const tokens = yield* signIn.redeemDeviceCode(http, attempt);
 					if (!tokens) return { status: "pending" as const };
 					return {
 						status: "signed_in" as const,
-						provider: yield* saveSignIn(workspaceId, providerId, tokens),
+						provider: yield* saveSignIn(workspaceId, providerId, tokens, actor.userId),
 					};
 				}),
 			),

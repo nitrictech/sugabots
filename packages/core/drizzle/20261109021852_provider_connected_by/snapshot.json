@@ -1,0 +1,90 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "72e100ea-2a95-4531-a52a-a70286539b15",
+  "prevIds": [
+    "760e7a69-acfa-49ba-952a-7af92b9a3995"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "model_provider",
+        "connected_by_id"
+      ],
+      "writes": [
+        "s|col|public.model_provider.connected_by_id",
+        "n|col|public.model_provider.connected_by_id",
+        "e|col|public.model_provider.connected_by_id"
+      ],
+      "reads": [
+        "n|tbl|public.model_provider",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "model_provider"
+      ],
+      "writes": [
+        "s|fk|public.model_provider.model_provider_connected_by_id_user_id_fkey",
+        "n|fk|public.model_provider.model_provider_connected_by_id_user_id_fkey",
+        "e|fk|public.model_provider.model_provider_connected_by_id_user_id_fkey",
+        "n|con|public.model_provider.model_provider_connected_by_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.model_provider",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.model_provider.connected_by_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_provider",
+        "name": "connected_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_provider",
+        "name": "model_provider_connected_by_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "connected_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    }
+  ]
+}
