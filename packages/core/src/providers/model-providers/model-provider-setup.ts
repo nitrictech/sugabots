@@ -190,8 +190,7 @@ export interface Interface {
 	>;
 	/**
 	 * Switches a model off and moves the bots on it to `moveBotsTo`, which the
-	 * workspace must still offer afterwards, returning how many moved. Bots stay
-	 * put while another provider still offers the same model.
+	 * workspace must still offer afterwards, returning how many moved.
 	 */
 	readonly switchOffModel: (
 		input: InProvider & { modelId: string; moveBotsTo: string },
@@ -566,7 +565,6 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						Effect.gen(function* () {
 							yield* providers.updateModel(workspaceId, providerId, modelId, { enabled: false });
-							if (yield* providers.isEnabled(workspaceId, switchingOff.modelId)) return 0;
 							yield* providers.requireEnabled(workspaceId, moveBotsTo);
 							return yield* agents.moveCrewAgentsToModel(
 								workspaceId,

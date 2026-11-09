@@ -880,9 +880,10 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
 	const agents = useAgents();
-	const offered = useModels();
-	// Until both are known, switching a model off could leave bots on it unasked.
-	const usageKnown = agents.agents !== undefined && offered.data !== undefined;
+	const models = useModels();
+	// Until both are known, switching a model off could leave bots on it unasked,
+	// or offer them nowhere to move.
+	const usageKnown = agents.agents !== undefined && models.data !== undefined;
 	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
@@ -901,24 +902,19 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const custom = provider.preset === null;
 
 	/**
-	 * Switches the model off, or asks where its bots go when that would leave
-	 * them on a model no provider offers. Decided on fresh bots and models, as
-	 * the cached ones may predate another tab's changes.
+	 * Switches the model off, or asks where its bots go first. Decided on fresh
+	 * bots, and the models they could move to fetched with them, as the cached
+	 * ones may predate another tab's changes.
 	 */
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
-		const [latestAgents, latestOffered] = await Promise.all([
-			agents.refetch(),
-			offered.refetch(),
-		]).finally(() => setCheckingUsage(false));
-		const strandsBots =
-			(latestAgents.data ?? []).some(
-				(agent) => agent.systemAgentKey === null && agent.model === model.modelId,
-			) &&
-			!(latestOffered.data?.models ?? []).some(
-				(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
-			);
-		if (strandsBots) {
+		const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]).finally(() =>
+			setCheckingUsage(false),
+		);
+		const hasBots = (latestAgents.data ?? []).some(
+			(agent) => agent.systemAgentKey === null && agent.model === model.modelId,
+		);
+		if (hasBots) {
 			setMovingBotsOff(model);
 			return;
 		}
