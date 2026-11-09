@@ -12,6 +12,7 @@ import {
 	providerModelCapabilityCatalog,
 	providerPreset,
 	seededPresets,
+	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
@@ -356,10 +357,25 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
 	const cannotTurnOff = provider.active && heldOn !== undefined;
-	const stranded = useStrandedModels(provider);
-	// Until the bots are known, switching off could leave some on its models unasked.
-	const botsKnown = useAgents().agents !== undefined;
+	const usage = useModelUsage();
+	const stranded = strandedModelsOf(provider, usage.current);
+	const [checkingUsage, setCheckingUsage] = useState(false);
 	const [movingBotsTo, setMovingBotsTo] = useState<"switch off" | "disconnect">();
+
+	/** Whether switching the provider off would leave bots behind, on fresh usage. */
+	async function strandsBots() {
+		setCheckingUsage(true);
+		const latest = await usage.latest().finally(() => setCheckingUsage(false));
+		return strandedModelsOf(provider, latest).length > 0;
+	}
+
+	async function switchOff() {
+		if (await strandsBots()) {
+			setMovingBotsTo("switch off");
+			return;
+		}
+		actions.update.mutate({ providerId: provider.id, json: { active: false } });
+	}
 
 	async function disconnectProvider() {
 		if (!seeded) {
@@ -423,16 +439,18 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 						<Toggle
 							checked={provider.active}
 							disabled={
-								cannotTurnOff || actions.update.isPending || (provider.active && !botsKnown)
+								cannotTurnOff ||
+								actions.update.isPending ||
+								checkingUsage ||
+								// Until usage is known, switching off could leave bots on its models unasked.
+								(provider.active && !usage.known)
 							}
 							label={`Use ${provider.name}`}
-							onChange={(active) => {
-								if (!active && stranded.length > 0) {
-									setMovingBotsTo("switch off");
-									return;
-								}
-								actions.update.mutate({ providerId: provider.id, json: { active } });
-							}}
+							onChange={(active) =>
+								active
+									? actions.update.mutate({ providerId: provider.id, json: { active } })
+									: switchOff()
+							}
 						/>
 					}
 				/>
@@ -443,11 +461,15 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				label={`Disconnect ${provider.name}`}
 				description="Bots using these models move to the ones you pick."
 				action="Disconnect"
-				onClick={() =>
-					stranded.length > 0 ? setMovingBotsTo("disconnect") : setDisconnecting(true)
+				onClick={async () =>
+					(await strandsBots()) ? setMovingBotsTo("disconnect") : setDisconnecting(true)
 				}
 				disabledReason={
-					held ? heldReason(held, "one of its models") : botsKnown ? undefined : "Loading bots…"
+					held
+						? heldReason(held, "one of its models")
+						: !usage.known || checkingUsage
+							? "Loading bots…"
+							: undefined
 				}
 			/>
 			<Dialog
@@ -722,19 +744,47 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 	};
 }
 
+type OfferedModel = WorkspaceModelsResponse["models"][number];
+
+/** The bots and offered models that decide whether switching something off leaves bots behind. */
+interface ModelUsage {
+	agents: readonly Agent[];
+	offered: readonly OfferedModel[];
+}
+
+/**
+ * The workspace's model usage: `known` once it has loaded, and `latest` to
+ * refetch it before acting, as the cached usage may predate another tab's
+ * changes.
+ */
+function useModelUsage() {
+	const agents = useAgents();
+	const models = useModels();
+	const current: ModelUsage = { agents: agents.agents ?? [], offered: models.data?.models ?? [] };
+	return {
+		current,
+		known: agents.agents !== undefined && models.data !== undefined,
+		latest: async (): Promise<ModelUsage> => {
+			const [latestAgents, latestModels] = await Promise.all([agents.refetch(), models.refetch()]);
+			return { agents: latestAgents.data ?? [], offered: latestModels.data?.models ?? [] };
+		},
+	};
+}
+
 /**
  * The crew bots a model would leave on a model that is off if this provider
  * stopped offering it: none while another provider offers the same model.
  */
-function useStrandedBotsOf(provider: ModelProvider): (model: ProviderModel) => Agent[] {
-	const botsOn = useBotsByModel();
-	const offered = useModels().data?.models ?? [];
-	return (model) =>
-		offered.some(
-			(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
-		)
-			? []
-			: botsOn(model.modelId);
+function strandedBotsOf(
+	provider: ModelProvider,
+	model: ProviderModel,
+	{ agents, offered }: ModelUsage,
+): Agent[] {
+	const offeredElsewhere = offered.some(
+		(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
+	);
+	if (offeredElsewhere) return [];
+	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === model.modelId);
 }
 
 interface StrandedModel {
@@ -743,10 +793,9 @@ interface StrandedModel {
 }
 
 /** The provider's offered models that bots would be left on if it went off. */
-function useStrandedModels(provider: ModelProvider): StrandedModel[] {
-	const strandedBotsOf = useStrandedBotsOf(provider);
+function strandedModelsOf(provider: ModelProvider, usage: ModelUsage): StrandedModel[] {
 	return offeredModelsOf(provider).flatMap((model) => {
-		const bots = strandedBotsOf(model);
+		const bots = strandedBotsOf(provider, model, usage);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
 }
@@ -1095,11 +1144,7 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
-	const agents = useAgents();
-	const models = useModels();
-	// Until both are known, switching a model off could leave bots on it unasked,
-	// or offer them nowhere to move.
-	const usageKnown = agents.agents !== undefined && models.data !== undefined;
+	const usage = useModelUsage();
 	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
@@ -1124,13 +1169,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 	 */
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
-		const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]).finally(() =>
-			setCheckingUsage(false),
-		);
-		const hasBots = (latestAgents.data ?? []).some(
-			(agent) => agent.systemAgentKey === null && agent.model === model.modelId,
-		);
-		if (hasBots) {
+		const latest = await usage.latest().finally(() => setCheckingUsage(false));
+		if (strandedBotsOf(provider, model, latest).length > 0) {
 			setMovingBotsOff(model);
 			return;
 		}
@@ -1195,7 +1235,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 											actions.setModel.isPending ||
 											checkingUsage ||
 											held !== undefined ||
-											(model.enabled && !usageKnown)
+											// Until usage is known, switching off could leave bots on it unasked.
+											(model.enabled && !usage.known)
 										}
 										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
