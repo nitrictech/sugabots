@@ -374,6 +374,24 @@ export const SwitchOffProviderLongLists = meta.story({
 });
 
 /**
+ * Disconnecting a provider whose models bots still run on asks where they
+ * move, and says what disconnecting does, as the plain confirmation would.
+ */
+export const DisconnectProviderInUse = meta.story({
+	render: () => <ProviderSettings providerId={openai.id} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Disconnect OpenAI" }));
+		const dialog = await screen.findByRole("dialog", { name: "Disconnect OpenAI" });
+		await expect(
+			within(dialog).getByText(/Its key is removed and bots can no longer use its models/),
+		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move bots and disconnect" }),
+		).toBeEnabled();
+	},
+});
+
+/**
  * Switching off a provider whose models bots still run on asks, for each of
  * those models, which model at another provider its bots move to.
  */

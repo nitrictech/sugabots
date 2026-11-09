@@ -377,20 +377,28 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
 	const cannotTurnOff = provider.active && heldOn !== undefined;
 	const usage = useModelUsage();
-	const stranded = strandedModelsOf(provider, usage.agents);
 	const [checkingUsage, setCheckingUsage] = useState(false);
-	const [movingBotsTo, setMovingBotsTo] = useState<"switch off" | "disconnect">();
+	// Kept as they were when the dialog opened: once the bots move, the provider
+	// goes off and would strand none, emptying the dialog while it disconnects.
+	const [movingBots, setMovingBots] = useState<{
+		action: "switch off" | "disconnect";
+		stranded: StrandedModel[];
+	}>();
+	const disconnectWarning = seeded
+		? `${signsIn ? "It is signed out" : "Its key is removed"} and bots can no longer use its models. You can connect it again at any time.`
+		: "Bots can no longer use its models. Adding it again means entering its details again.";
 
-	/** Whether switching the provider off would leave bots behind, on fresh usage. */
-	async function strandsBots() {
+	/** The models switching the provider off would leave bots on, from fresh usage. */
+	async function latestStranded() {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		return strandedModelsOf(provider, latest).length > 0;
+		return strandedModelsOf(provider, latest);
 	}
 
 	async function switchOff() {
-		if (await strandsBots()) {
-			setMovingBotsTo("switch off");
+		const stranded = await latestStranded();
+		if (stranded.length > 0) {
+			setMovingBots({ action: "switch off", stranded });
 			return;
 		}
 		actions.update.mutate({ providerId: provider.id, json: { active: false } });
@@ -480,9 +488,11 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				label={`Disconnect ${provider.name}`}
 				description="Bots using these models move to the ones you pick."
 				action="Disconnect"
-				onClick={async () =>
-					(await strandsBots()) ? setMovingBotsTo("disconnect") : setDisconnecting(true)
-				}
+				onClick={async () => {
+					const stranded = await latestStranded();
+					if (stranded.length > 0) setMovingBots({ action: "disconnect", stranded });
+					else setDisconnecting(true);
+				}}
 				disabledReason={
 					held
 						? heldReason(held, "one of its models")
@@ -492,22 +502,23 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				}
 			/>
 			<Dialog
-				open={movingBotsTo !== undefined}
-				onOpenChange={(open) => !open && setMovingBotsTo(undefined)}
+				open={movingBots !== undefined}
+				onOpenChange={(open) => !open && setMovingBots(undefined)}
 			>
-				{movingBotsTo && (
+				{movingBots && (
 					<MoveBotsOffProviderDialog
 						provider={provider}
-						stranded={stranded}
-						then={movingBotsTo}
+						stranded={movingBots.stranded}
+						then={movingBots.action}
+						warning={movingBots.action === "disconnect" ? disconnectWarning : undefined}
 						onMoved={async () => {
-							if (movingBotsTo === "disconnect") {
+							if (movingBots.action === "disconnect") {
 								await disconnectProvider();
 								leaveDisconnected();
 							}
-							setMovingBotsTo(undefined);
+							setMovingBots(undefined);
 						}}
-						done={() => setMovingBotsTo(undefined)}
+						done={() => setMovingBots(undefined)}
 					/>
 				)}
 			</Dialog>
@@ -515,11 +526,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				open={disconnecting}
 				onOpenChange={setDisconnecting}
 				title={`Disconnect ${provider.name}?`}
-				description={
-					seeded
-						? `${signsIn ? "It is signed out" : "Its key is removed"} and bots can no longer use its models. You can connect it again at any time.`
-						: "Bots can no longer use its models. Adding it again means entering its details again."
-				}
+				description={disconnectWarning}
 				confirmLabel="Disconnect"
 				pending={disconnectPending}
 				error={disconnectError ? failureMessage(disconnectError) : undefined}
@@ -804,12 +811,15 @@ function MoveBotsOffProviderDialog({
 	provider,
 	stranded,
 	then,
+	warning,
 	onMoved,
 	done,
 }: {
 	provider: ModelProvider;
 	stranded: readonly StrandedModel[];
 	then: "switch off" | "disconnect";
+	/** What else happens, said as the plain confirmation would. */
+	warning?: string;
 	/** After the bots have moved and the provider is off. */
 	onMoved: () => Promise<void>;
 	done: () => void;
@@ -823,8 +833,13 @@ function MoveBotsOffProviderDialog({
 		? models?.defaultModel
 		: candidates[0]?.modelId;
 	const [chosen, setChosen] = useState<Record<string, string>>({});
+	// Follows the models as they change, so a pick switched off since falls back.
+	const destinationOf = (modelId: string) => {
+		const picked = chosen[modelId];
+		return candidates.some((candidate) => candidate.modelId === picked) ? picked : firstChoice;
+	};
 	const moveBots = stranded.flatMap(({ model }) => {
-		const to = chosen[model.modelId] ?? firstChoice;
+		const to = destinationOf(model.modelId);
 		return to ? [{ from: model.modelId, to }] : [];
 	});
 	const [error, setError] = useState<unknown>();
@@ -858,6 +873,7 @@ function MoveBotsOffProviderDialog({
 					{botCount} {botCount === 1 ? "bot uses" : "bots use"} {provider.name}'s models. Choose the
 					model each moves to.
 				</DialogDescription>
+				{warning && <DialogDescription>{warning}</DialogDescription>}
 				{candidates.length === 0 ? (
 					<Alert>
 						Switch on a model at another provider first, so the bots have one to move to.
@@ -865,7 +881,7 @@ function MoveBotsOffProviderDialog({
 				) : (
 					<SettingsGroup>
 						{stranded.map(({ model, bots }) => {
-							const to = chosen[model.modelId] ?? firstChoice;
+							const to = destinationOf(model.modelId);
 							const toName =
 								candidates.find((candidate) => candidate.modelId === to)?.displayName ?? to;
 							return (
