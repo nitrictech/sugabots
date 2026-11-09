@@ -87,9 +87,13 @@ desktop() {
 	# keyboard or mouse input, and agents drive the browser through
 	# Playwright, not the X server. -SendPrimary=0: viewers get what's
 	# copied, not every selection, which would replace the person's clipboard.
+	# -FrameRate 30: half the default's frames, which over a long link settle
+	# sooner than more frames would; it costs a keystroke about 8 ms.
+	# -CompareFB 1: never sends a region redrawn with the pixels it had.
 	Xvnc "$DISPLAY" -geometry 1280x960 -depth 24 -ac -s 0 -nolisten tcp \
 		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
-		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared -SendPrimary=0 >>"$log" 2>&1 &
+		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared -SendPrimary=0 \
+		-FrameRate 30 -CompareFB 1 >>"$log" 2>&1 &
 	echo $! >"$pids"
 	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
 	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &
@@ -295,11 +299,12 @@ browser() {
 	# Maximized, so it stops at the dock. The profile is
 	# found through XDG_CONFIG_HOME rather than --user-data-dir, which would
 	# put its path in the windows' names, and the dock would no longer know
-	# them as the Browser's.
+	# them as the Browser's. Without smooth scrolling, a scroll is one jump
+	# rather than an animation whose every frame goes to viewers.
 	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
 		--class=sugabots-browser --load-extension="$HOME/.local/share/sugabots-desktop/chromium-theme" \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
-		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
+		--disable-smooth-scrolling --no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
 	echo $! >"$pids"
 	for _ in $(seq 100); do
 		curl -sf -o /dev/null "http://127.0.0.1:$devtools/json/version" && break

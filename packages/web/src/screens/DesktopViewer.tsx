@@ -283,6 +283,8 @@ type Standing = "connecting" | "connected" | "ended" | "idle";
  */
 const IDLE_TIMEOUT_MINUTES = 5;
 const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
+/** noVNC's JPEG quality, 0 to 9, which the desktop encodes changing regions at. */
+const DESKTOP_JPEG_QUALITY = 4;
 const INPUT_EVENTS = ["pointerdown", "pointermove", "wheel", "keydown"] as const;
 
 /**
@@ -423,6 +425,9 @@ export function DesktopScreen({
 			viewer = opened;
 			connected.current = opened;
 			opened.scaleViewport = true;
+			// Below noVNC's default of 6: over a long link, smaller JPEG updates
+			// settle a scroll about a quarter sooner, for a little softness.
+			opened.qualityLevel = DESKTOP_JPEG_QUALITY;
 			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => setStanding("connected"));
