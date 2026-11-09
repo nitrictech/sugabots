@@ -5,7 +5,9 @@ import {
 	type ProviderPresetId,
 	presetSignsIn,
 	providerCatalog,
-	providerLacksCredential,
+	providerIsConnected,
+	providerIsReady,
+	providerIsUsable,
 	providerPreset,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -49,13 +51,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
-import {
-	API_FORMATS,
-	BackToModels,
-	isConnected,
-	modelName,
-	ProviderTile,
-} from "./ProviderSettings.tsx";
+import { API_FORMATS, BackToModels, modelName, ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * The providers most people connect, listed whether or not they are, each
@@ -84,20 +80,25 @@ export function ModelsSettings() {
 	const others = all.filter(
 		(provider) =>
 			(provider.preset === null || !POPULAR_PRESETS.includes(provider.preset)) &&
-			(isConnected(provider) || provider.preset === null),
+			(providerIsConnected(provider) || provider.preset === null),
 	);
-	const popularWithCredential = (presetId: ProviderPresetId) => {
+	const connectedPopular = (presetId: ProviderPresetId) => {
 		const provider = byPreset.get(presetId);
-		return provider && !providerLacksCredential(provider) ? provider : undefined;
+		return provider && providerIsConnected(provider) ? provider : undefined;
 	};
-	// What is connected leads, the popular ones in their order and then the rest; what could be follows.
+	// Working ones lead, then failed, disabled and not connected, each the popular ones in
+	// their order and then the rest; the popular ones that could be connected follow.
 	const connected = [
-		...POPULAR_PRESETS.flatMap((presetId) => popularWithCredential(presetId) ?? []),
+		...POPULAR_PRESETS.flatMap((presetId) => connectedPopular(presetId) ?? []),
 		...others,
-	];
+	].toSorted(
+		(a, b) =>
+			CONNECTION_STATE_ORDER.indexOf(connectionState(a)) -
+			CONNECTION_STATE_ORDER.indexOf(connectionState(b)),
+	);
 	// Nothing until the list arrives: a popular provider would read Not connected whether it is or not.
 	const toConnect = providers.data
-		? POPULAR_PRESETS.filter((presetId) => !popularWithCredential(presetId))
+		? POPULAR_PRESETS.filter((presetId) => !connectedPopular(presetId))
 		: [];
 	const providerLink = (provider: ModelProvider) => (
 		<Link
@@ -178,19 +179,67 @@ function ProviderRow({
 	provider: ModelProvider;
 	render: React.ReactElement;
 }) {
+	const state = connectionState(provider);
 	return (
 		<SettingsRow
 			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 			label={provider.name}
-			sub={!provider.active ? "Turned off" : credentialLine(provider)}
-			trailing={provider.active && <SettingsStatusBadge>Connected</SettingsStatusBadge>}
+			sub={subLine(state, provider)}
+			trailing={<ConnectionBadge state={state} preset={provider.preset} />}
 			chevron
 			render={render}
 		/>
 	);
 }
 
-/** What a connected provider is connected with, under its name. */
+/**
+ * Where a provider stands, in the order the list shows them: working; connected
+ * but its last test failed, such as a key that was rejected; connected but
+ * switched off, so bots can't use it until it is switched on; or not connected.
+ */
+const CONNECTION_STATE_ORDER = ["connected", "failed", "disabled", "not_connected"] as const;
+type ConnectionState = (typeof CONNECTION_STATE_ORDER)[number];
+
+function connectionState(provider: ModelProvider): ConnectionState {
+	if (!providerIsConnected(provider)) return "not_connected";
+	if (provider.status === "error") return "failed";
+	if (!provider.active) return "disabled";
+	return "connected";
+}
+
+function ConnectionBadge({
+	state,
+	preset,
+}: {
+	state: ConnectionState;
+	preset: ModelProvider["preset"];
+}) {
+	switch (state) {
+		case "connected":
+			return <SettingsStatusBadge>Connected</SettingsStatusBadge>;
+		case "failed":
+			return (
+				<SettingsStatusBadge tone="failed">
+					{presetSignsIn(preset) ? "Sign-in failed" : "Connection failed"}
+				</SettingsStatusBadge>
+			);
+		case "disabled":
+			return <SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>;
+		case "not_connected":
+			return null;
+	}
+}
+
+/** Under a provider's name: what it is connected with, or what it needs. */
+function subLine(state: ConnectionState, provider: ModelProvider): string {
+	if (state === "not_connected") return "Not connected";
+	if (state === "failed") {
+		return presetSignsIn(provider.preset) ? "Sign in again to use it" : "Enter a new key to use it";
+	}
+	return credentialLine(provider);
+}
+
+/** What a connected provider is connected with. */
 function credentialLine(provider: ModelProvider): string {
 	if (presetSignsIn(provider.preset)) return "Signed in";
 	if (provider.hasApiKey) return "API key set";
@@ -204,7 +253,7 @@ function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] })
 	return (
 		<DefaultRow
 			label="Default for new bots"
-			description="Any model from a connected provider"
+			description="Any model from a provider that is on"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
 		/>
@@ -329,7 +378,7 @@ function ModelChoicePage({
 	const providers = useModelProviders();
 	const [error, setError] = useState<unknown>();
 	const choices = (providers.data ?? [])
-		.filter(isConnected)
+		.filter(providerIsUsable)
 		.flatMap((provider) =>
 			provider.models
 				.filter((model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"))
@@ -407,7 +456,7 @@ function AddProviderSteps({
 	// enough to leave it out: it has to have listed models.
 	const available = providerCatalog.filter((preset) => {
 		const existing = byPreset.get(preset.id);
-		return !existing || !isConnected(existing) || existing.modelCount === 0;
+		return !existing || !providerIsReady(existing);
 	});
 
 	if (choice === "custom") {

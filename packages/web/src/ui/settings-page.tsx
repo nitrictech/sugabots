@@ -539,15 +539,36 @@ export function SettingsTestOutcome({ good, children }: { good: boolean; childre
 	);
 }
 
-/** A row's state as a small green pill with a dot, for something working: Connected. */
-export function SettingsStatusBadge({ children }: { children: ReactNode }) {
+/**
+ * A row's state as a small pill with a dot: green for something working
+ * (Connected), grey for something set up but switched off (Disabled), red for
+ * something whose last check failed (Connection failed).
+ */
+export function SettingsStatusBadge({
+	tone = "working",
+	children,
+}: {
+	tone?: "working" | "off" | "failed";
+	children: ReactNode;
+}) {
 	return (
-		<span className="flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-success/12 px-2 font-medium text-success-text text-xs">
-			<span aria-hidden className="size-1.5 rounded-full bg-success" />
+		<span
+			className={cn(
+				"flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 font-medium text-xs",
+				STATUS_BADGE_TONES[tone].pill,
+			)}
+		>
+			<span aria-hidden className={cn("size-1.5 rounded-full", STATUS_BADGE_TONES[tone].dot)} />
 			{children}
 		</span>
 	);
 }
+
+const STATUS_BADGE_TONES = {
+	working: { pill: "bg-success/12 text-success-text", dot: "bg-success" },
+	off: { pill: "bg-chip text-muted-foreground", dot: "bg-muted-foreground" },
+	failed: { pill: "bg-destructive/12 text-destructive-text", dot: "bg-destructive" },
+} as const;
 
 /** A 28px square that stands for what a row is about: an app's letters, an icon. */
 export function SettingsRowIcon({

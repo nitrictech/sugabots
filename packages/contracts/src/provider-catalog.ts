@@ -303,6 +303,11 @@ export const seededPresets: readonly ProviderPresetId[] = [
 	"ollama",
 ];
 
+/** A provider bots reach with no key or sign-in, such as a model server on your own machine. */
+export function presetTakesNoCredential(preset: ProviderPresetId | null): boolean {
+	return !presetSignsIn(preset) && !presetRequiresApiKey(preset);
+}
+
 /** A provider made from no preset is a custom endpoint, and those want a key. */
 export function presetRequiresApiKey(preset: ProviderPresetId | null): boolean {
 	return preset === null ? true : providerPreset(preset).credential === "api-key";

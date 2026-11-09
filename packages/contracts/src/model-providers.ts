@@ -3,6 +3,7 @@ import { modelIdSchema } from "./agents.ts";
 import {
 	presetRequiresApiKey,
 	presetSignsIn,
+	presetTakesNoCredential,
 	providerCatalog,
 	providerPresetIdSchema,
 } from "./provider-catalog.ts";
@@ -216,6 +217,38 @@ export function providerLacksCredential(
 ): boolean {
 	if (presetSignsIn(provider.preset)) return !provider.signedIn;
 	return presetRequiresApiKey(provider.preset) && !provider.hasApiKey;
+}
+
+/**
+ * Whether the provider is connected: it holds a key or sign-in, or, holding
+ * neither and needing neither, is switched on. Switching off one that holds a
+ * key or sign-in only pauses it; it stays connected until Disconnect takes it away.
+ */
+export function providerIsConnected(
+	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+): boolean {
+	if (provider.hasApiKey || provider.signedIn) return !providerLacksCredential(provider);
+	return presetTakesNoCredential(provider.preset) && provider.active;
+}
+
+/** Whether bots can use the provider's models now: it is connected and switched on. */
+export function providerIsUsable(
+	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+): boolean {
+	return provider.active && providerIsConnected(provider);
+}
+
+/**
+ * Connected, working, and with models to choose from, so there is nothing left
+ * to set up; one whose last test failed still wants a new key or sign-in.
+ */
+export function providerIsReady(
+	provider: Pick<
+		ModelProvider,
+		"preset" | "hasApiKey" | "signedIn" | "active" | "status" | "modelCount"
+	>,
+): boolean {
+	return providerIsConnected(provider) && provider.status !== "error" && provider.modelCount > 0;
 }
 
 /**
