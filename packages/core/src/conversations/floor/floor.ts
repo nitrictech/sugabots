@@ -1,4 +1,9 @@
-import { mentionedHandles, type ThreadType } from "@sugabots/contracts";
+import {
+	handleFromName,
+	mentionedHandles,
+	mentionsOnlyPeople,
+	type ThreadType,
+} from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
@@ -6,9 +11,11 @@ import type { Executor, QueryFailure } from "../../database/database.ts";
 import {
 	agent,
 	message,
+	podMember,
 	type TurnReason,
 	thread,
 	threadParticipant,
+	user,
 } from "../../database/schema.ts";
 import { crewOf } from "../threads/participants.ts";
 
@@ -39,6 +46,9 @@ const repliedTo = alias(message, "replied_to");
  *   1. Mentioning only people: nobody.
  *   2. Mentioning bots by handle: those bots, and nobody else.
  *   3. Otherwise the bot that spoke last, else the routine's own.
+ *
+ * Only people's handles and `@here`/`@channel` count as mentioning people
+ * (see `mentionsOnlyPeople`).
  */
 
 export interface FloorInput {
@@ -49,6 +59,8 @@ export interface FloorInput {
 	hostAgentId: string | null;
 	/** Crew placed in the pod, addressable by handle. */
 	crew: ReadonlyArray<{ id: string; handle: string }>;
+	/** Handles of the people who may be mentioned here: the thread's people and the pod's members. */
+	peopleHandles: ReadonlySet<string>;
 	/** Agents already in the thread. */
 	agentParticipantIds: ReadonlySet<string>;
 	/** The agent that completed the last message before this one, if an agent did. */
@@ -66,7 +78,10 @@ const NOBODY: FloorDecision = { kind: "nobody" };
 export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
 	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
-	const mentionsOnlyPeople = mentioned.length > 0 && mentionedAgents.length === 0;
+	const forPeopleOnly = mentionsOnlyPeople(mentioned, {
+		botHandles: new Set(input.crew.map((member) => member.handle)),
+		peopleHandles: input.peopleHandles,
+	});
 	if (
 		input.threadType === "pod_chat" ||
 		(input.threadType === "conversation" && input.hostAgentId === null)
@@ -78,12 +93,12 @@ export function decideFloor(input: FloorInput): FloorDecision {
 			};
 		}
 		const repliedTo = input.crew.find((member) => member.id === input.repliedToAgentId);
-		return repliedTo && !mentionsOnlyPeople
+		return repliedTo && !forPeopleOnly
 			? { kind: "turns", agents: [{ agentId: repliedTo.id, reason: "reply" }] }
 			: NOBODY;
 	}
 	const { hostAgentId } = input;
-	if (hostAgentId === null || mentionsOnlyPeople) return NOBODY;
+	if (hostAgentId === null || forPeopleOnly) return NOBODY;
 	switch (input.threadType) {
 		case "conversation":
 		case "bot_channel": {
@@ -123,14 +138,15 @@ export interface FloorMessage {
  * `crew` is the pod's whole crew rather than the thread's participants: a
  * person may mention an agent who has not joined the thread yet, and reading
  * the mention against who is already in it would leave every first mention
- * unrecognised.
+ * unrecognised. People are read the same way: the pod's members, and anyone
+ * in the thread who no longer is one.
  */
 export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
 ): Effect.fn.Return<Omit<FloorInput, "content">, QueryFailure> {
-	// One round trip: the crew, the participants and the last speaker ride
-	// along as JSON beside the thread.
+	// One round trip: the crew, the people, the participants and the last
+	// speaker ride along as JSON beside the thread.
 	const [scope] = yield* db
 		.select({
 			hostAgentId: thread.hostAgentId,
@@ -139,6 +155,17 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 				select coalesce(json_agg(json_build_object('id', ${agent.id}, 'handle', ${agent.handle})), '[]'::json)
 				from ${agent}
 				where ${crewOf(thread.podId)}
+			)`,
+			// Not only the pod's members: people who left the pod stay in its
+			// threads, and can still be mentioned there.
+			peopleNames: sql<string[]>`(
+				select coalesce(json_agg(${user.name}), '[]'::json)
+				from ${user}
+				where ${user.id} in (
+					select ${podMember.userId} from ${podMember} where ${podMember.podId} = ${thread.podId}
+					union
+					select ${threadParticipant.userId} from ${threadParticipant} where ${threadParticipant.threadId} = ${thread.id}
+				)
 			)`,
 			participantAgentIds: sql<string[]>`(
 				select coalesce(json_agg(${threadParticipant.agentId}) filter (where ${threadParticipant.agentId} is not null), '[]'::json)
@@ -170,6 +197,7 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		threadType: scope.threadType,
 		hostAgentId: scope.hostAgentId,
 		crew: scope.crew,
+		peopleHandles: new Set(scope.peopleNames.map(handleFromName)),
 		agentParticipantIds: new Set(scope.participantAgentIds),
 		lastAgentSpeakerId: scope.lastAgentSpeakerId ?? undefined,
 		repliedToAgentId: scope.repliedToAgentId ?? undefined,

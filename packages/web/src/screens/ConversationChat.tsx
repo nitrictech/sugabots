@@ -11,6 +11,7 @@ import {
 	type Message,
 	mentionedHandles,
 	mentionPattern,
+	mentionsOnlyPeople,
 	messageAuthorName,
 	type PersonParticipant,
 	type Pod,
@@ -551,8 +552,10 @@ export function ConversationChat({
 	const draftMentions = mentionable.filter((member) => draftHandles.includes(member.handle));
 	const botStaysOut =
 		host !== undefined &&
-		draftHandles.length > 0 &&
-		!draftMentions.some((member) => member.kind === "agent");
+		mentionsOnlyPeople(draftHandles, {
+			botHandles: handlesOf(mentionable, "agent"),
+			peopleHandles: handlesOf(mentionable, "person"),
+		});
 	const composerLabel =
 		botStaysOut && draftMentions.length > 0
 			? `Message ${listNames(draftMentions.map((person) => person.name))}`
@@ -1440,6 +1443,14 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 /** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
 function startsRoutineRun(item: ChatMessageItem): boolean {
 	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
+}
+
+/** The handles of those in `participants` who are bots (`"agent"`) or people (`"person"`). */
+function handlesOf(
+	participants: readonly ThreadParticipant[],
+	kind: ThreadParticipant["kind"],
+): Set<string> {
+	return new Set(participants.filter((one) => one.kind === kind).map((one) => one.handle));
 }
 
 /** The bots among `crew` that `message` went to: those it names, and the one it replied to. */
