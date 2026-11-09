@@ -1076,13 +1076,14 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 				.map((entry) => {
 					const Icon = capabilityIcons[entry.key];
 					return (
-						<Icon
-							key={entry.key}
-							role="img"
-							aria-label={entry.name}
-							className="size-3.25 shrink-0"
-							strokeWidth={2}
-						/>
+						<Tooltip key={entry.key} label={entry.name}>
+							<Icon
+								role="img"
+								aria-label={entry.name}
+								className="size-3.25 shrink-0"
+								strokeWidth={2}
+							/>
+						</Tooltip>
 					);
 				})}
 		</>
