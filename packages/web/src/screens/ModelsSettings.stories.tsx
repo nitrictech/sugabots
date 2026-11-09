@@ -153,6 +153,13 @@ const pausedDeepseek = provider(
 		connectedBy: "Tim Holm",
 	},
 );
+/** A new key whose test failed: it holds the key, but stays off until a key passes. */
+const rejectedGroq = provider(8, "groq", "Groq", [], {
+	active: false,
+	status: "error",
+	lastTestError: "The provider rejected the API key",
+	connectedBy: "Tim Holm",
+});
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -264,6 +271,16 @@ export const SwitchedOff = meta.story({
 		await expect(row).toHaveTextContent("Disabled");
 		await expect(row).toHaveTextContent("API key set");
 		await expect(row).not.toHaveTextContent("Connected");
+	},
+});
+
+/** A key that failed its test reads Connection failed, not Disabled: it wants a new key, not switching on. */
+export const ConnectionFailed = meta.story({
+	parameters: { providers: [...providers, rejectedGroq] },
+	play: async ({ canvas }) => {
+		const row = await canvas.findByRole("link", { name: /Groq/ });
+		await expect(row).toHaveTextContent("Connection failed");
+		await expect(row).not.toHaveTextContent("Disabled");
 	},
 });
 

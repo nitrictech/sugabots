@@ -1,5 +1,10 @@
 import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
-import { presetSignsIn, providerIsConnected, seededPresets } from "@sugabots/contracts";
+import {
+	presetSignsIn,
+	providerIsConnected,
+	providerLacksCredential,
+	seededPresets,
+} from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
@@ -11,7 +16,7 @@ import {
 	user,
 } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { defaultModelOf, lacksCredential, offeredIn } from "./model-provider-repository.ts";
+import { defaultModelOf, offeredIn } from "./model-provider-repository.ts";
 
 /**
  * Every model provider in the workspace, each with its models: the defaults
@@ -145,7 +150,7 @@ function toProvider(
 			presetSignsIn(row.preset) && row.oauthTokensEncrypted === null
 				? "signed_out"
 				: configurationStatus({
-						missingKey: lacksCredential(row),
+						missingKey: providerLacksCredential({ preset: row.preset, hasApiKey, signedIn }),
 						lastTestedAt: row.lastTestedAt,
 						lastTestError: row.lastTestError,
 					}),

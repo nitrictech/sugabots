@@ -142,7 +142,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			if (!openai) throw new Error("fixture");
 			expect(openai).toMatchObject({ active: false, hasApiKey: false });
 			if (key === "replacement") {
-				await repository.update(workspaceId, openai.id, { apiKey: "old-key" });
+				await repository.update(workspaceId, openai.id, { apiKey: "old-key" }, userId);
 				await switchOn(openai.id);
 			}
 			let activeDuringCheck: boolean | undefined;
@@ -187,8 +187,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it.each([{ baseUrl: "https://other.example/v1" }, { apiKey: null }])(
 		"does not enable a disabled provider for an unrelated update: %j",
 		async (input) => {
-			await repository.update(workspaceId, providerId, { active: false });
-			await repository.update(workspaceId, providerId, input);
+			await repository.update(workspaceId, providerId, { active: false }, userId);
+			await repository.update(workspaceId, providerId, input, userId);
 
 			expect(await view(providerId)).toMatchObject({ active: false });
 		},
@@ -281,6 +281,19 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await view(ollama.id)).toMatchObject({ connectedBy: null });
 	});
 
+	it("keeps a local provider given a key connected while it is switched off, as one that needs a key", async () => {
+		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+		if (!ollama) throw new Error("fixture");
+		const setup = await setupWith(() => Response.json({ models: [] }));
+		const change = (changes: ModelProviderUpdate) =>
+			setup.update({ workspace: workspaceId, providerId: ollama.id, changes });
+
+		await change({ apiKey: "local-key" });
+		await change({ active: false });
+
+		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: "Ada" });
+	});
+
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		try {
@@ -288,7 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await switchOn(providerId);
 			const setup = await setupWith(async () => {
 				vi.setSystemTime(new Date("2030-01-01T00:00:01Z"));
-				await repository.update(workspaceId, providerId, { active: false });
+				await repository.update(workspaceId, providerId, { active: false }, userId);
 				return Response.json({ data: [] });
 			});
 
@@ -301,7 +314,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("does not reactivate a manually disabled provider when refreshing models", async () => {
-		await repository.update(workspaceId, providerId, { active: false });
+		await repository.update(workspaceId, providerId, { active: false }, userId);
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		await setup.fetchModels({ workspace: workspaceId, providerId });

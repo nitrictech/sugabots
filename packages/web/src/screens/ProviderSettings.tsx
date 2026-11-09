@@ -528,7 +528,7 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 	};
 }
 
-/** The models the provider offers agents: none while it is not connected. */
+/** The models the provider offers agents: none unless it is usable, connected and switched on. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }

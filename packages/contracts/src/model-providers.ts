@@ -222,15 +222,15 @@ export function providerLacksCredential(
 }
 
 /**
- * Whether the provider has what bots need to reach it: its key or sign-in, or,
- * for one that takes neither, being switched on. Switching off one that takes a
- * key only pauses it; it stays connected until Disconnect takes the key away.
+ * Whether the provider is connected: it holds a key or sign-in, or, holding
+ * neither and needing neither, is switched on. Switching off one that holds a
+ * key or sign-in only pauses it; it stays connected until Disconnect takes it away.
  */
 export function providerIsConnected(
 	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
 ): boolean {
-	if (presetTakesNoCredential(provider.preset)) return provider.active;
-	return !providerLacksCredential(provider);
+	if (provider.hasApiKey || provider.signedIn) return !providerLacksCredential(provider);
+	return presetTakesNoCredential(provider.preset) && provider.active;
 }
 
 /** Whether bots can use the provider's models now: it is connected and switched on. */

@@ -168,10 +168,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 		it("spends a lapsing refresh token once, however many turns start together", async () => {
 			await store.saveOAuthTokens(workspaceId, providerId, {
-				access: "lapsing-token",
-				refresh: "refresh-0",
-				expiresAt: Date.now() + 60_000,
-				accountId: "account-1",
+				tokens: {
+					access: "lapsing-token",
+					refresh: "refresh-0",
+					expiresAt: Date.now() + 60_000,
+					accountId: "account-1",
+				},
+				signedInById: userId,
 			});
 			const endpoint = await storedEndpoint();
 
@@ -185,10 +188,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 		it("leaves a token with time to run alone", async () => {
 			await store.saveOAuthTokens(workspaceId, providerId, {
-				access: "fresh-token",
-				refresh: "refresh-0",
-				expiresAt: Date.now() + 60 * 60_000,
-				accountId: "account-1",
+				tokens: {
+					access: "fresh-token",
+					refresh: "refresh-0",
+					expiresAt: Date.now() + 60 * 60_000,
+					accountId: "account-1",
+				},
+				signedInById: userId,
 			});
 
 			const ready = await withAccess(await storedEndpoint());
@@ -264,10 +270,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 		it("keeps the refresh token when a refresh does not replace it", async () => {
 			await store.saveOAuthTokens(workspaceId, providerId, {
-				access: "lapsing-token",
-				refresh: "xai-refresh-0",
-				expiresAt: Date.now() + 60_000,
-				accountId: null,
+				tokens: {
+					access: "lapsing-token",
+					refresh: "xai-refresh-0",
+					expiresAt: Date.now() + 60_000,
+					accountId: null,
+				},
+				signedInById: userId,
 			});
 
 			const ready = await withAccess(await storedEndpoint());

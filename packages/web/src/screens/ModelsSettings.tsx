@@ -178,20 +178,35 @@ function ProviderRow({
 			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 			label={provider.name}
 			sub={connected ? credentialLine(provider) : "Not connected"}
-			trailing={connected && <ConnectionBadge active={provider.active} />}
+			trailing={connected && <ConnectionBadge provider={provider} />}
 			chevron
 			render={render}
 		/>
 	);
 }
 
-/** Connected, or connected but switched off, so bots can't use it until it is switched on. */
-function ConnectionBadge({ active }: { active: boolean }) {
-	return active ? (
-		<SettingsStatusBadge>Connected</SettingsStatusBadge>
-	) : (
-		<SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>
-	);
+/**
+ * A connected provider's state: its last test failed, such as a key that was
+ * rejected; switched off, so bots can't use it until it is switched on; or working.
+ */
+function ConnectionBadge({ provider }: { provider: ModelProvider }) {
+	if (provider.status === "error") {
+		return (
+			<SettingsStatusBadge tone="failed">
+				{presetSignsIn(provider.preset) ? "Sign-in failed" : "Connection failed"}
+			</SettingsStatusBadge>
+		);
+	}
+	if (!provider.active) return <SettingsStatusBadge tone="off">Disabled</SettingsStatusBadge>;
+	return <SettingsStatusBadge>Connected</SettingsStatusBadge>;
+}
+
+/**
+ * Connected, working, and with models to choose from, so there is nothing left
+ * to set up; one whose last test failed still wants a new key or sign-in.
+ */
+export function providerIsReady(provider: ModelProvider): boolean {
+	return providerIsConnected(provider) && provider.status !== "error" && provider.modelCount > 0;
 }
 
 /** What a connected provider is connected with, under its name. */
@@ -432,7 +447,7 @@ function AddProviderSteps({
 	// enough to leave it out: it has to have listed models.
 	const available = providerCatalog.filter((preset) => {
 		const existing = byPreset.get(preset.id);
-		return !existing || !providerIsConnected(existing) || existing.modelCount === 0;
+		return !existing || !providerIsReady(existing);
 	});
 
 	if (choice === "custom") {

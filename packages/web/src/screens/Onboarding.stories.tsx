@@ -191,6 +191,7 @@ const anthropic = {
 	enabledModelCount: 0,
 	lastTestedAt: null,
 	lastTestError: null,
+	connectedBy: null,
 	models: [
 		["claude-3-5-haiku-20241022", "Claude 3.5 Haiku"],
 		["claude-opus-4", "Claude Opus 4.1"],
@@ -236,6 +237,36 @@ export const ChooseModel = meta.story({
 		await expect(canvas.getByRole("button", { name: "Continue" })).toBeEnabled();
 	},
 });
+
+/** Coming back to a provider that was connected and then switched off: picking it switches it back on. */
+export const ChooseDisabledProvider = meta.story({
+	render: (args) => (
+		<Preview stage="no-model" providers={[{ ...anthropic, active: false }]}>
+			<div className="h-screen">
+				<Onboarding {...args} />
+			</div>
+		</Preview>
+	),
+	beforeEach: ({ msw }) => {
+		const root = `${API}/workspaces/:workspace/model-providers`;
+		msw.use(
+			http.get(`${root}/models`, () => HttpResponse.json({ models: [], defaultModel: null })),
+			http.patch(`${root}/:providerId`, async ({ request }) => {
+				switchedOn = ((await request.json()) as { active?: boolean }).active === true;
+				return HttpResponse.json({ ...anthropic, active: true });
+			}),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		switchedOn = false;
+		await userEvent.click(await canvas.findByRole("button", { name: /^Anthropic/ }));
+		await expect(
+			await canvas.findByRole("heading", { name: "Choose a model" }),
+		).toBeInTheDocument();
+		await expect(switchedOn).toBe(true);
+	},
+});
+let switchedOn = false;
 
 /** The first bot: its face as it is chosen, and a name. */
 export const FirstBot = meta.story({

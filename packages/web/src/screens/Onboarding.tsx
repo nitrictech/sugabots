@@ -10,7 +10,6 @@ import {
 	type Pod,
 	type ProviderModel,
 	presetSignInService,
-	providerIsUsable,
 	providerLacksCredential,
 	providerPreset,
 	slugify,
@@ -31,7 +30,7 @@ import {
 } from "react";
 import { useAgents, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useModelProviders } from "@/lib/model-providers.ts";
+import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import {
 	useChooseFirstModel,
 	useCompleteOnboarding,
@@ -55,7 +54,7 @@ import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
-import { AddProviderDialog } from "./ModelsSettings.tsx";
+import { AddProviderDialog, providerIsReady } from "./ModelsSettings.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
@@ -396,10 +395,18 @@ function ConnectProviderStep({
 	onConnected: (providerId: string) => void;
 }) {
 	const listModels = useListFirstProviderModels();
+	const { update } = useProviderActions();
 	const [adding, setAdding] = useState(false);
-	const usable = providers.filter(
-		(provider) => providerIsUsable(provider) && provider.modelCount > 0,
-	);
+	const ready = providers.filter(providerIsReady);
+
+	/** Continues with one already connected, switching it back on if it was switched off. */
+	async function continueWith(provider: ModelProvider) {
+		if (update.isPending) return;
+		if (!provider.active) {
+			await update.mutateAsync({ providerId: provider.id, json: { active: true } });
+		}
+		onConnected(provider.id);
+	}
 
 	return (
 		<div className="flex flex-col gap-5.5">
@@ -407,20 +414,21 @@ function ConnectProviderStep({
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
 			</StepHeading>
-			{usable.length > 0 && (
+			{ready.length > 0 && (
 				<SettingsGroup label="Connected" headingLevel={2}>
-					{usable.map((provider) => (
+					{ready.map((provider) => (
 						<SettingsRow
 							key={provider.id}
 							icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 							label={provider.name}
 							sub={`${provider.modelCount} models`}
 							chevron
-							onClick={() => onConnected(provider.id)}
+							onClick={() => continueWith(provider).catch(() => {})}
 						/>
 					))}
 				</SettingsGroup>
 			)}
+			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			<Button size="lg" className="w-full" onClick={() => setAdding(true)}>
 				Choose a provider
 			</Button>

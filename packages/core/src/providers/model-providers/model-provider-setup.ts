@@ -13,7 +13,6 @@ import type {
 } from "@sugabots/contracts";
 import {
 	presetSignInService,
-	presetTakesNoCredential,
 	providerLacksCredential,
 	providerPreset,
 	type SignInServiceId,
@@ -317,8 +316,7 @@ export const make = Effect.gen(function* () {
 		signedInById: string,
 	) =>
 		Effect.gen(function* () {
-			yield* providers.saveOAuthTokens(workspaceId, providerId, tokens);
-			yield* providers.recordConnectedBy(workspaceId, providerId, signedInById);
+			yield* providers.saveOAuthTokens(workspaceId, providerId, { tokens, signedInById });
 			yield* discoverModelsQuietly(workspaceId, providerId, true);
 			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
@@ -385,21 +383,13 @@ export const make = Effect.gen(function* () {
 							missing: missingCredential(current.preset),
 						});
 					}
-					const write = providers.update(workspaceId, providerId, changes);
+					const write = providers.update(workspaceId, providerId, changes, actor.userId);
 					// Switching it off and taking its key away both stop it answering. A
 					// new key does only until it is tried, just below.
 					const takesAway = changes.active === false || changes.apiKey === null;
 					const updated = yield* takesAway ? keepingHeldModelsOffered(workspaceId, write) : write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
-					}
-					// A key connects one once a test of it passes, just below; one that takes no
-					// key is connected by switching it on.
-					const connects =
-						changes.apiKey ||
-						(changes.active === true && !current.active && presetTakesNoCredential(current.preset));
-					if (connects) {
-						yield* providers.recordConnectedBy(workspaceId, providerId, actor.userId);
 					}
 					if (changes.apiKey) {
 						yield* discoverModelsQuietly(workspaceId, providerId, changes.active !== false);

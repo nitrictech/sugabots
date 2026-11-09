@@ -49,27 +49,27 @@ export interface Interface {
 		workspaceId: string,
 		input: { createdById: string; provider: NewModelProvider },
 	) => Effect.Effect<ModelProviderRow, ModelProviderNameConflict>;
+	/**
+	 * Applies `changes` made by `changedById`, who becomes who connected it when
+	 * the change connects it: a new key, or switching on one that holds no key or
+	 * sign-in.
+	 */
 	readonly update: (
 		workspaceId: string,
 		providerId: string,
 		changes: ModelProviderUpdate,
+		changedById: string,
 	) => Effect.Effect<ModelProviderRow | undefined>;
-	/** Records who connected it: who gave it its key, signed it in, or switched on one that takes neither. */
-	readonly recordConnectedBy: (
-		workspaceId: string,
-		providerId: string,
-		userId: string,
-	) => Effect.Effect<void>;
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Signs a subscription provider in with `tokens`, or out with null. Like a new
-	 * key, it leaves the provider inactive and untested until it is tried.
+	 * Signs a subscription provider in, recording who did, or out with null. Like
+	 * a new key, it leaves the provider inactive and untested until it is tried.
 	 */
 	readonly saveOAuthTokens: (
 		workspaceId: string,
 		providerId: string,
-		tokens: OAuthTokens | null,
+		signIn: { tokens: OAuthTokens; signedInById: string } | null,
 	) => Effect.Effect<void>;
 	/**
 	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
@@ -303,7 +303,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (workspaceId, providerId, changes) =>
+		update: (workspaceId, providerId, changes, changedById) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
@@ -315,6 +315,7 @@ export const make = Effect.gen(function* () {
 					const values = {
 						// A new key is on only once a test of it has succeeded.
 						active: changes.apiKey !== undefined ? false : changes.active,
+						connectedById: connectedByAfter(changes, changedById),
 						baseUrl: changes.baseUrl,
 						apiFormat: changes.apiFormat,
 						apiKeyEncrypted: storedApiKey(changes.apiKey, cipher),
@@ -339,19 +340,6 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		recordConnectedBy: (workspaceId, providerId, userId) =>
-			operation(
-				"recordConnectedBy",
-				query((db) =>
-					db
-						.update(modelProvider)
-						.set({ connectedById: userId })
-						.where(
-							and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
-						),
-				),
-			),
-
 		remove: (workspaceId, providerId) =>
 			operation(
 				"remove",
@@ -372,7 +360,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
-		saveOAuthTokens: (workspaceId, providerId, tokens) =>
+		saveOAuthTokens: (workspaceId, providerId, signIn) =>
 			operation(
 				"saveOAuthTokens",
 				query((db) =>
@@ -380,7 +368,8 @@ export const make = Effect.gen(function* () {
 						.update(modelProvider)
 						.set({
 							active: false,
-							oauthTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
+							oauthTokensEncrypted: signIn ? cipher.encrypt(JSON.stringify(signIn.tokens)) : null,
+							connectedById: signIn?.signedInById,
 							lastTestedAt: null,
 							lastTestError: null,
 						})
@@ -769,6 +758,17 @@ function providerValues(input: NewModelProvider, cipher: Credentials.Interface) 
 			value: cipher.encrypt(value),
 		})),
 	};
+}
+
+/**
+ * What an update by `changedById` writes to `connected_by_id`. A new key is
+ * theirs. Switching on connects only one that holds no key or sign-in, and was
+ * off; one already connected keeps whoever connected it.
+ */
+function connectedByAfter(changes: ModelProviderUpdate, changedById: string) {
+	if (changes.apiKey) return changedById;
+	if (changes.active !== true) return undefined;
+	return sql<string>`case when ${modelProvider.active} or ${modelProvider.apiKeyEncrypted} is not null or ${modelProvider.oauthTokensEncrypted} is not null then ${modelProvider.connectedById} else ${changedById}::uuid end`;
 }
 
 /** What an update writes to the key column: absent leaves it, null clears it. */
