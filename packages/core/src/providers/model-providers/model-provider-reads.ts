@@ -138,7 +138,8 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
-		createdAt: row.createdAt.toISOString(),
+		// Switched on without the key or sign-in it needs is not connected.
+		connectedAt: lacksCredential(row) ? null : (row.connectedAt?.toISOString() ?? null),
 		models: models.map((model) => ({
 			id: model.id,
 			modelId: model.modelId,

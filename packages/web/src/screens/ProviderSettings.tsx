@@ -249,9 +249,9 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			backOnWide
 			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
 			title={provider.name}
-			// One every workspace starts with arrived with the workspace rather than being added.
 			description={
-				!seeded && `Added ${formatListTimeInSentence(new Date(provider.createdAt), new Date())}`
+				provider.connectedAt &&
+				`Connected ${formatListTimeInSentence(new Date(provider.connectedAt), new Date())}`
 			}
 		>
 			<SettingsGroup

@@ -205,8 +205,8 @@ export const modelProviderSchema = Schema.Struct({
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/** When it was added: for one every workspace starts with, when the workspace was made. */
-	createdAt: isoTimestampSchema,
+	/** When bots could last start using it: when it was switched on with the key or sign-in it needs. Null while they can't. */
+	connectedAt: Schema.NullOr(isoTimestampSchema),
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 

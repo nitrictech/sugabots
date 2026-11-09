@@ -19347,9 +19347,16 @@
 							}
 						]
 					},
-					"createdAt": {
-						"type": "string",
-						"format": "date-time"
+					"connectedAt": {
+						"anyOf": [
+							{
+								"type": "string",
+								"format": "date-time"
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"models": {
 						"type": "array",
@@ -19374,7 +19381,7 @@
 					"enabledModelCount",
 					"lastTestedAt",
 					"lastTestError",
-					"createdAt",
+					"connectedAt",
 					"models"
 				],
 				"additionalProperties": false

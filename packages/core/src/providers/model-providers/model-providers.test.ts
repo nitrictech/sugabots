@@ -248,6 +248,61 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(saved).toMatchObject({ active: true });
 	});
 
+	it("records when a provider was connected, until it is switched off or given a new key", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const at = (time: string) => vi.setSystemTime(new Date(time));
+			const connectedAt = async (id: string) => (await view(id))?.connectedAt;
+			const passing = await setupWith(() => Response.json({ data: [] }));
+
+			at("2030-01-01T00:00:00Z");
+			const created = await passing.create({
+				workspace: workspaceId,
+				provider: {
+					name: "Connected gateway",
+					baseUrl: "https://connected.example/v1",
+					apiFormat: "openai",
+					apiKey: "first-key",
+					customHeaders: [],
+				},
+			});
+			expect(await connectedAt(created.id)).toBe("2030-01-01T00:00:00.000Z");
+
+			at("2030-01-02T00:00:00Z");
+			await passing.update({
+				workspace: workspaceId,
+				providerId: created.id,
+				changes: { active: true },
+			});
+			expect(await connectedAt(created.id)).toBe("2030-01-01T00:00:00.000Z");
+
+			await passing.update({
+				workspace: workspaceId,
+				providerId: created.id,
+				changes: { active: false },
+			});
+			expect(await connectedAt(created.id)).toBeNull();
+
+			at("2030-01-03T00:00:00Z");
+			await passing.update({
+				workspace: workspaceId,
+				providerId: created.id,
+				changes: { active: true },
+			});
+			expect(await connectedAt(created.id)).toBe("2030-01-03T00:00:00.000Z");
+
+			const rejecting = await setupWith(() => new Response(null, { status: 401 }));
+			await rejecting.update({
+				workspace: workspaceId,
+				providerId: created.id,
+				changes: { apiKey: "rejected-key" },
+			});
+			expect(await connectedAt(created.id)).toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		try {

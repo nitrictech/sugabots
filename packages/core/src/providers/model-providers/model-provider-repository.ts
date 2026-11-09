@@ -296,14 +296,17 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const now = yield* DateTime.nowAsDate;
 					const configurationChanged =
 						changes.baseUrl !== undefined ||
 						changes.apiFormat !== undefined ||
 						changes.apiKey !== undefined ||
 						changes.customHeaders !== undefined;
+					// A new key is on only once a test of it has succeeded.
+					const active = changes.apiKey !== undefined ? false : changes.active;
 					const values = {
-						// A new key is on only once a test of it has succeeded.
-						active: changes.apiKey !== undefined ? false : changes.active,
+						active,
+						connectedAt: connectedAtAfter(active, now),
 						baseUrl: changes.baseUrl,
 						apiFormat: changes.apiFormat,
 						apiKeyEncrypted: storedApiKey(changes.apiKey, cipher),
@@ -356,6 +359,7 @@ export const make = Effect.gen(function* () {
 						.update(modelProvider)
 						.set({
 							active: false,
+							connectedAt: null,
 							oauthTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
 							lastTestedAt: null,
 							lastTestError: null,
@@ -407,14 +411,16 @@ export const make = Effect.gen(function* () {
 				"recordTest",
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
+					const active =
+						"activateOnSuccess" in outcome && outcome.activateOnSuccess ? true : undefined;
 					yield* query((db) =>
 						db
 							.update(modelProvider)
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
-								active:
-									"activateOnSuccess" in outcome && outcome.activateOnSuccess ? true : undefined,
+								active,
+								connectedAt: connectedAtAfter(active, now),
 							})
 							.where(
 								and(
@@ -745,6 +751,17 @@ function providerValues(input: NewModelProvider, cipher: Credentials.Interface) 
 			value: cipher.encrypt(value),
 		})),
 	};
+}
+
+/**
+ * What a write that sets `active` does to `connected_at`: switching on stamps
+ * `now` unless it was on already, switching off clears it, and leaving `active`
+ * alone leaves it.
+ */
+function connectedAtAfter(active: boolean | undefined, now: Date) {
+	if (active === undefined) return undefined;
+	if (!active) return null;
+	return sql<Date>`case when ${modelProvider.active} then ${modelProvider.connectedAt} else ${now}::timestamptz end`;
 }
 
 /** What an update writes to the key column: absent leaves it, null clears it. */
