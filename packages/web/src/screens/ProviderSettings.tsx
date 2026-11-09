@@ -12,7 +12,6 @@ import {
 	providerModelCapabilityCatalog,
 	providerPreset,
 	seededPresets,
-	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
@@ -297,8 +296,12 @@ function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
 /** The crew bots on each model id, which is what a bot's `model` names. */
 export function useBotsByModel(): (modelId: string) => Agent[] {
 	const { agents } = useAgents();
-	return (modelId) =>
-		agents?.filter((agent) => agent.systemAgentKey === null && agent.model === modelId) ?? [];
+	return (modelId) => crewBotsOn(agents ?? [], modelId);
+}
+
+/** The crew bots among `agents` on `modelId`. */
+function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
+	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === modelId);
 }
 
 /**
@@ -374,7 +377,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
 	const cannotTurnOff = provider.active && heldOn !== undefined;
 	const usage = useModelUsage();
-	const stranded = strandedModelsOf(provider, usage.current);
+	const stranded = strandedModelsOf(provider, usage.agents);
 	const [checkingUsage, setCheckingUsage] = useState(false);
 	const [movingBotsTo, setMovingBotsTo] = useState<"switch off" | "disconnect">();
 
@@ -760,47 +763,22 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 	};
 }
 
-type OfferedModel = WorkspaceModelsResponse["models"][number];
-
-/** The bots and offered models that decide whether switching something off leaves bots behind. */
-interface ModelUsage {
-	agents: readonly Agent[];
-	offered: readonly OfferedModel[];
-}
-
 /**
- * The workspace's model usage: `known` once it has loaded, and `latest` to
- * refetch it before acting, as the cached usage may predate another tab's
- * changes.
+ * The workspace's bots: `known` once they and the models they could move to
+ * have loaded, and `latest` to refetch both before acting, as the cached ones
+ * may predate another tab's changes.
  */
 function useModelUsage() {
 	const agents = useAgents();
 	const models = useModels();
-	const current: ModelUsage = { agents: agents.agents ?? [], offered: models.data?.models ?? [] };
 	return {
-		current,
+		agents: agents.agents ?? [],
 		known: agents.agents !== undefined && models.data !== undefined,
-		latest: async (): Promise<ModelUsage> => {
-			const [latestAgents, latestModels] = await Promise.all([agents.refetch(), models.refetch()]);
-			return { agents: latestAgents.data ?? [], offered: latestModels.data?.models ?? [] };
+		latest: async (): Promise<readonly Agent[]> => {
+			const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]);
+			return latestAgents.data ?? [];
 		},
 	};
-}
-
-/**
- * The crew bots a model would leave on a model that is off if this provider
- * stopped offering it: none while another provider offers the same model.
- */
-function strandedBotsOf(
-	provider: ModelProvider,
-	model: ProviderModel,
-	{ agents, offered }: ModelUsage,
-): Agent[] {
-	const offeredElsewhere = offered.some(
-		(candidate) => candidate.modelId === model.modelId && candidate.providerId !== provider.id,
-	);
-	if (offeredElsewhere) return [];
-	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === model.modelId);
 }
 
 interface StrandedModel {
@@ -809,9 +787,9 @@ interface StrandedModel {
 }
 
 /** The provider's offered models that bots would be left on if it went off. */
-function strandedModelsOf(provider: ModelProvider, usage: ModelUsage): StrandedModel[] {
+function strandedModelsOf(provider: ModelProvider, agents: readonly Agent[]): StrandedModel[] {
 	return offeredModelsOf(provider).flatMap((model) => {
-		const bots = strandedBotsOf(provider, model, usage);
+		const bots = crewBotsOn(agents, model.modelId);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
 }
@@ -1178,7 +1156,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		if (strandedBotsOf(provider, model, latest).length > 0) {
+		if (crewBotsOn(latest, model.modelId).length > 0) {
 			setMovingBotsOff(model);
 			return;
 		}
