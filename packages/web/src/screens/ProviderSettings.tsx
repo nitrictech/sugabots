@@ -34,6 +34,7 @@ import {
 	type ReactNode,
 	useDeferredValue,
 	useId,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
@@ -179,22 +180,7 @@ function NamedBotFaces({ bots, label }: { bots: readonly Agent[]; label: string 
 function OtherBots({ bots }: { bots: readonly Agent[] }) {
 	return (
 		<Tooltip
-			label={
-				<ul
-					aria-label="Other bots"
-					// Scrolls past about a dozen bots, so it takes focus to scroll from the keyboard.
-					// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
-					tabIndex={0}
-					className="focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5"
-				>
-					{bots.map((bot) => (
-						<li key={bot.id} className="flex items-center gap-1.5">
-							<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
-							<span className="truncate">{bot.name}</span>
-						</li>
-					))}
-				</ul>
-			}
+			label={<OtherBotsList bots={bots} />}
 			side="top"
 			onOpenChange={nameOnKeyboardFocusOnly}
 		>
@@ -211,6 +197,41 @@ function OtherBots({ bots }: { bots: readonly Agent[] }) {
 }
 
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+/**
+ * Each bot by its face and name. Past about a dozen it scrolls, fading out at
+ * the bottom while there are more below, as the scrollbar shows only while
+ * scrolling.
+ */
+function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
+	const list = useRef<HTMLUListElement>(null);
+	const [moreBelow, setMoreBelow] = useState(false);
+	const checkMoreBelow = () => {
+		const element = list.current;
+		if (!element) return;
+		// A pixel of slack, as zoomed pages scroll in fractions of one.
+		setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1);
+	};
+	useLayoutEffect(checkMoreBelow, []);
+	return (
+		<ul
+			ref={list}
+			aria-label="Other bots"
+			// It takes focus so the keyboard can scroll it.
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
+			tabIndex={0}
+			onScroll={checkMoreBelow}
+			className={`focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5 ${moreBelow ? "mask-b-from-75%" : ""}`}
+		>
+			{bots.map((bot) => (
+				<li key={bot.id} className="flex items-center gap-1.5">
+					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<span className="truncate">{bot.name}</span>
+				</li>
+			))}
+		</ul>
+	);
+}
 
 /** A dialog opened by pointer focuses its first trigger; only keyboard focus should open its tooltip. */
 function nameOnKeyboardFocusOnly(
