@@ -796,15 +796,22 @@ function suggestedModel(
 		: candidates[0]?.modelId;
 }
 
-/** Where each of `held` moves: what was chosen for it, else `fallback`. */
+/**
+ * Where each of `held` moves: what was chosen for it while `candidates` still
+ * offers it, else `fallback`. Each moves only as it is chosen, never with the
+ * bots, so the default changes only when someone means it to.
+ */
 function settingMovesFor(
 	held: ModelHolders | undefined,
 	chosen: SettingMoves,
+	candidates: readonly OfferedModel[],
 	fallback: string | undefined,
 ): SettingMoves {
+	const stillOffered = (modelId: string | undefined) =>
+		candidates.some((candidate) => candidate.modelId === modelId) ? modelId : fallback;
 	return {
-		newBotsTo: held?.newBots ? (chosen.newBotsTo ?? fallback) : undefined,
-		summariesTo: held?.systemBots ? (chosen.summariesTo ?? fallback) : undefined,
+		newBotsTo: held?.newBots ? stillOffered(chosen.newBotsTo) : undefined,
+		summariesTo: held?.systemBots ? stillOffered(chosen.summariesTo) : undefined,
 	};
 }
 
@@ -956,7 +963,7 @@ function MoveBotsOffProviderDialog({
 		return candidates.some((candidate) => candidate.modelId === picked) ? picked : firstChoice;
 	};
 	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
-	const settingMoves = settingMovesFor(held, chosenSettings, firstChoice);
+	const settingMoves = settingMovesFor(held, chosenSettings, candidates, firstChoice);
 	const moveBots = stranded.flatMap(({ model }) => {
 		const to = destinationOf(model.modelId);
 		return to ? [{ from: model.modelId, to }] : [];
@@ -1417,12 +1424,11 @@ function MoveBotsDialog({
 	const [search, setSearch] = useState("");
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const [picked, setPicked] = useState<string>();
+	const suggested = suggestedModel(candidates, models?.defaultModel);
 	// Follows the models as they load or change, until someone picks one.
-	const chosen = candidates.some((candidate) => candidate.modelId === picked)
-		? picked
-		: suggestedModel(candidates, models?.defaultModel);
+	const chosen = candidates.some((candidate) => candidate.modelId === picked) ? picked : suggested;
 	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
-	const settingMoves = settingMovesFor(held, chosenSettings, chosen);
+	const settingMoves = settingMovesFor(held, chosenSettings, candidates, suggested);
 	const shown = searchModels(candidates, needle);
 	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
 	const name = modelName(model);

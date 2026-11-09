@@ -337,7 +337,8 @@ export const SwitchOffModelLongLists = meta.story({
 
 /**
  * Switching off the model new bots start on asks where they move as well as
- * the bots on it, starting both on the same model.
+ * the bots on it. Both start on the same model, but picking one for the bots
+ * leaves new bots where they were, so the default moves only when chosen.
  */
 export const SwitchOffDefaultModel = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
@@ -351,6 +352,10 @@ export const SwitchOffDefaultModel = meta.story({
 				"These bots use Claude Sonnet, and so do new bots. Choose the model to move them to.",
 			),
 		).toBeInTheDocument();
+		await expect(
+			within(dialog).getByRole("button", { name: "Move new bots to: Claude Haiku" }),
+		).toBeInTheDocument();
+		await userEvent.click(within(dialog).getByRole("button", { name: "GPT-5" }));
 		await expect(
 			within(dialog).getByRole("button", { name: "Move new bots to: Claude Haiku" }),
 		).toBeInTheDocument();
