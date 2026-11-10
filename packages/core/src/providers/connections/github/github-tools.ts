@@ -27,6 +27,18 @@ export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [
 		destructive: false,
 	},
 	{
+		name: "create_stack",
+		description: "Stack a chain of pull requests, so merging one merges those below it.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
+		name: "add_to_stack",
+		description: "Put pull requests on top of a stack.",
+		readOnly: false,
+		destructive: false,
+	},
+	{
 		name: "comment_on_pull_request",
 		description: "Comment on a pull request.",
 		readOnly: false,

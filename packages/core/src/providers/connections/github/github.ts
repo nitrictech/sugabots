@@ -357,6 +357,48 @@ export const setPullRequestDraft = (
 	);
 };
 
+const Stack = Schema.Struct({
+	number: Schema.Int,
+	base: Schema.Struct({ ref: Schema.String }),
+	pull_requests: Schema.Array(
+		Schema.Struct({ number: Schema.Int, head: Schema.Struct({ ref: Schema.String }) }),
+	),
+});
+
+const stackOf = (stack: typeof Stack.Type) => ({
+	stack: stack.number,
+	base: stack.base.ref,
+	pullRequests: stack.pull_requests.map((pull) => ({ number: pull.number, branch: pull.head.ref })),
+});
+
+/**
+ * Stacks `pullRequests`, given bottom to top, each based on the branch of
+ * the one before it, so merging one merges those below it too.
+ */
+export const createStack = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; pullRequests: readonly number[] },
+) =>
+	call(http, "POST", `/repos/${request.repository}/stacks`, {
+		bearer: token,
+		body: { pull_requests: request.pullRequests },
+	}).pipe(Effect.flatMap(decoded(Stack)), Effect.map(stackOf));
+
+/**
+ * Puts `pullRequests`, given bottom to top, on top of stack `stack`; the
+ * first must be based on the branch of the stack's top one.
+ */
+export const addToStack = (
+	http: EgressHttpClient,
+	token: string,
+	request: { repository: string; stack: number; pullRequests: readonly number[] },
+) =>
+	call(http, "POST", `/repos/${request.repository}/stacks/${request.stack}/add`, {
+		bearer: token,
+		body: { pull_requests: request.pullRequests },
+	}).pipe(Effect.flatMap(decoded(Stack)), Effect.map(stackOf));
+
 const Comment = Schema.Struct({ id: Schema.Int, html_url: Schema.String });
 const madeComment = (made: typeof Comment.Type) => ({ commentId: made.id, url: made.html_url });
 
