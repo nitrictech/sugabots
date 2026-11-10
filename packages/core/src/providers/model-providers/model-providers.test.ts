@@ -805,6 +805,61 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			});
 		});
 
+		describe("switching off the model new bots and summaries use", () => {
+			/** `first` and `second` on, with `first` the default and every system agent's. */
+			const withSettingsOnFirst = async () => {
+				await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+				const ids = await offerable("first", "second");
+				const setup = await answering();
+				for (const modelId of ["first", "second"]) {
+					await setup.setModelsEnabled({
+						workspace: workspaceId,
+						providerId,
+						modelIds: [ids[modelId] ?? ""],
+						enabled: true,
+					});
+				}
+				return { ids, setup };
+			};
+
+			it("moves them to the chosen models as it switches the model off", async () => {
+				const { ids, setup } = await withSettingsOnFirst();
+
+				await setup.switchOffModel({
+					workspace: workspaceId,
+					providerId,
+					modelId: ids.first ?? "",
+					newBotsTo: "second",
+					summariesTo: "second",
+				});
+
+				expect(await setup.listEnabledModels({ workspace: workspaceId })).toEqual({
+					models: [expect.objectContaining({ modelId: "second" })],
+					defaultModel: "second",
+				});
+				expect(await systemAgentModels()).toEqual(["second", "second"]);
+			});
+
+			it("refuses, changing nothing, when one is left on the model", async () => {
+				const { ids, setup } = await withSettingsOnFirst();
+
+				await expect(
+					setup.switchOffModel({
+						workspace: workspaceId,
+						providerId,
+						modelId: ids.first ?? "",
+						newBotsTo: "second",
+					}),
+				).rejects.toMatchObject({
+					_tag: "ModelInUse",
+					holders: { workspaceDefault: false, systemAgents: ["Compaction", "Scribe"] },
+				});
+				expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
+					defaultModel: "first",
+				});
+			});
+		});
+
 		it("refuses a default the workspace does not offer", async () => {
 			await offerable("first");
 			const setup = await answering();
