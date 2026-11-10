@@ -219,12 +219,14 @@ const PullRequest = Schema.Struct({
 	base: Schema.Struct({ ref: Schema.String }),
 	// GitHub's schema leaves each of the stack's numbers optional.
 	stack: Schema.optional(
-		Schema.Struct({
-			number: Schema.optional(Schema.Int),
-			position: Schema.optional(Schema.Int),
-			size: Schema.optional(Schema.Int),
-			base: Schema.Struct({ ref: Schema.String }),
-		}),
+		Schema.NullOr(
+			Schema.Struct({
+				number: Schema.optional(Schema.Int),
+				position: Schema.optional(Schema.Int),
+				size: Schema.optional(Schema.Int),
+				base: Schema.Struct({ ref: Schema.String }),
+			}),
+		),
 	),
 });
 

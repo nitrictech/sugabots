@@ -102,7 +102,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 		}),
 		create_stack: tool({
 			description:
-				"Stack a chain of pull requests, each opened with its base set to the branch of the one below it, so GitHub shows them as one stack and merging one merges those below it. To put more on a stack that exists, use add_to_stack.",
+				"Stack a chain of pull requests, so GitHub shows them as one stack and merging one merges those below it. Each must already have its base set to the branch of the one below it, with open_pull_request or update_pull_request. To put more on a stack that exists, use add_to_stack.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				pullRequests: stackedPullRequestsSchema.annotate({
@@ -119,10 +119,13 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 		}),
 		add_to_stack: tool({
 			description:
-				"Put pull requests on top of a stack, the first opened with its base set to the branch of the stack's top one. A pull request's stack, if it's in one, is in get_pull_request.",
+				"Put pull requests on top of a stack. The first must already have its base set to the branch of the stack's top one, and each other to the branch of the one below it.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
-				stack: positiveIntegerSchema.annotate({ description: "The stack's number" }),
+				stack: positiveIntegerSchema.annotate({
+					description:
+						"The stack's number, not a pull request's: from create_stack, or the stack in get_pull_request",
+				}),
 				pullRequests: stackedPullRequestsSchema.annotate({
 					description: "The new pull requests' numbers, from the lowest to the new top",
 				}),
