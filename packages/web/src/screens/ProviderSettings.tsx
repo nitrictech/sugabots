@@ -19,7 +19,6 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
-	Check,
 	ChevronDown,
 	Eye,
 	Grid2X2,
@@ -85,6 +84,7 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
+import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
@@ -1430,7 +1430,6 @@ function MoveBotsDialog({
 	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
 	const settingMoves = settingMovesFor(held, chosenSettings, candidates, suggested);
 	const shown = searchModels(candidates, needle);
-	const providerNames = [...new Set(shown.map((candidate) => candidate.providerName))];
 	const name = modelName(model);
 	const hasBots = bots.length > 0;
 
@@ -1476,38 +1475,12 @@ function MoveBotsDialog({
 						)}
 						{hasBots && (
 							<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
-								{shown.length === 0 && (
-									<SettingsGroup>
-										<SettingsRow label="No models match." />
-									</SettingsGroup>
-								)}
-								{providerNames.map((providerName) => (
-									<SettingsGroup key={providerName} label={providerName}>
-										{shown
-											.filter((candidate) => candidate.providerName === providerName)
-											.map((candidate) => {
-												const selected = candidate.modelId === chosen;
-												return (
-													<SettingsRow
-														key={candidate.modelId}
-														label={candidate.displayName ?? candidate.modelId}
-														render={<button type="button" aria-pressed={selected} />}
-														trailing={
-															selected && (
-																<Check
-																	aria-hidden
-																	size={16}
-																	strokeWidth={2.6}
-																	className="shrink-0 text-link"
-																/>
-															)
-														}
-														onClick={() => setPicked(candidate.modelId)}
-													/>
-												);
-											})}
-									</SettingsGroup>
-								))}
+								<ModelChoiceList
+									models={shown}
+									chosen={chosen}
+									onChoose={setPicked}
+									empty="No models match."
+								/>
 							</div>
 						)}
 						{held && (

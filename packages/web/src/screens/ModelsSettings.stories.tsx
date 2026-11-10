@@ -593,7 +593,9 @@ export const NewBots = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Default for new bots" }),
 		).toBeInTheDocument();
-		await expect(canvas.queryByRole("button", { name: "Claude Sonnet" })).toBeNull();
+		await expect(
+			canvas.getByRole("button", { name: "Claude Sonnet", pressed: true }),
+		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},
 });

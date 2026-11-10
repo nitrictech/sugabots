@@ -1,10 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { Check } from "lucide-react";
 import { useModels } from "@/lib/agents.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Note } from "@/ui/note.tsx";
-import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
+import { SettingsGroup } from "@/ui/settings-page.tsx";
+import { ModelChoiceList, ModelChoiceRow } from "./ModelChoiceList.tsx";
 
 /**
  * Which model a bot thinks with, from the models the workspace has switched
@@ -26,43 +26,22 @@ export function AgentModelPicker({
 }) {
 	const { data, isPending } = useModels();
 	const offered = data?.models ?? [];
-	const providers = [...new Set(offered.map((candidate) => candidate.providerName))];
 	// A model chosen before it was switched off is still the one in use, so it is shown on its own.
 	const stranded = model !== null && !offered.some((candidate) => candidate.modelId === model);
-
-	const row = (modelId: string, label: string) => {
-		const chosen = modelId === model;
-		return (
-			<SettingsRow
-				key={modelId}
-				label={label}
-				trailing={
-					chosen && <Check aria-hidden size={16} strokeWidth={2.6} className="shrink-0 text-link" />
-				}
-				onClick={canChoose && !chosen ? () => onChoose(modelId) : undefined}
-			/>
-		);
-	};
 
 	return (
 		<>
 			{stranded && (
 				<SettingsGroup label="In use" note="This model is no longer switched on for the workspace.">
-					{row(model, model)}
+					<ModelChoiceRow label={model} chosen />
 				</SettingsGroup>
 			)}
-			{!isPending && offered.length === 0 && (
-				<SettingsGroup>
-					<SettingsRow label="No models are switched on yet." />
-				</SettingsGroup>
-			)}
-			{providers.map((provider) => (
-				<SettingsGroup key={provider} label={provider}>
-					{offered
-						.filter((candidate) => candidate.providerName === provider)
-						.map((candidate) => row(candidate.modelId, candidate.displayName ?? candidate.modelId))}
-				</SettingsGroup>
-			))}
+			<ModelChoiceList
+				models={offered}
+				chosen={model}
+				onChoose={canChoose ? onChoose : undefined}
+				empty={isPending ? undefined : "No models are switched on yet."}
+			/>
 			{!isPending && <MoreModelsCallout agentName={agentName} />}
 		</>
 	);

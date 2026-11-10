@@ -199,8 +199,10 @@ export const ModelPage = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: /^Model/ }));
 		await expect(await canvas.findByRole("heading", { name: "OpenAI" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
-		// The model in use is checked, with nothing to press.
-		await expect(canvas.queryByRole("button", { name: "Claude Sonnet" })).toBeNull();
+		// The model in use is checked and pressed.
+		await expect(
+			canvas.getByRole("button", { name: "Claude Sonnet", pressed: true }),
+		).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("main")).getByRole("link", { name: "Models" }),
 		).toHaveAttribute("href", "/nitric/settings/providers");

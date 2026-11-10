@@ -10,7 +10,7 @@ import {
 	signInServiceNames,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Check, Code } from "lucide-react";
+import { Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useModels } from "@/lib/agents.ts";
 import {
@@ -48,6 +48,7 @@ import {
 	SettingsStatusBadge,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import {
 	API_FORMATS,
 	BackToModels,
@@ -327,15 +328,13 @@ function ModelChoicePage({
 }) {
 	const providers = useModelProviders();
 	const [error, setError] = useState<unknown>();
-	const groups = (providers.data ?? [])
-		.filter((provider) => isConnected(provider))
-		.map((provider) => ({
-			provider,
-			models: provider.models.filter(
-				(model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"),
-			),
-		}))
-		.filter((group) => group.models.length > 0);
+	const choices = (providers.data ?? [])
+		.filter(isConnected)
+		.flatMap((provider) =>
+			provider.models
+				.filter((model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"))
+				.map((model) => ({ ...model, providerId: provider.id, providerName: provider.name })),
+		);
 
 	async function chooseModel(modelId: string) {
 		setError(undefined);
@@ -349,31 +348,12 @@ function ModelChoicePage({
 	return (
 		<SettingsPage back={<BackToModels />} backOnWide title={title} description={description}>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
-			{groups.length === 0 && !providers.isPending && (
-				<SettingsGroup>
-					<SettingsRow label="No models are switched on yet." />
-				</SettingsGroup>
-			)}
-			{groups.map(({ provider, models }) => (
-				<SettingsGroup key={provider.id} label={provider.name}>
-					{models.map((model) => {
-						const chosen = model.modelId === current;
-						return (
-							<SettingsRow
-								key={model.id}
-								label={modelName(model)}
-								trailing={
-									chosen && (
-										<Check aria-hidden size={16} strokeWidth={2.6} className="shrink-0 text-link" />
-									)
-								}
-								onClick={pending || chosen ? undefined : () => void chooseModel(model.modelId)}
-								className={chosen ? "cursor-default" : undefined}
-							/>
-						);
-					})}
-				</SettingsGroup>
-			))}
+			<ModelChoiceList
+				models={choices}
+				chosen={current}
+				onChoose={pending ? undefined : (modelId) => void chooseModel(modelId)}
+				empty={providers.isPending ? undefined : "No models are switched on yet."}
+			/>
 			<p className="-mt-5 m-0 px-0.5 text-subtle-foreground text-xs">
 				Only models that are switched on appear here.
 			</p>
