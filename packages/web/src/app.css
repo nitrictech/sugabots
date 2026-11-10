@@ -559,14 +559,14 @@
 	}
 }
 
-/* A link in a bot's message wears the bot's accent, so it reads as a link against the words around it. */
+/* A link in a message is underlined, in its bot's accent where one is set, so it reads as a link against the words around it. */
 .message-markdown a {
 	color: var(--bot-mono, currentColor);
 	text-decoration: underline;
 	text-underline-offset: 2px;
 }
 
-/* An ID or a number inline in a bot's message, on the bot's own tint so it stands off the words around it. */
+/* An ID or a number inline in a message, on the chip colour, or its bot's tint where one is set, so it stands off the words around it. */
 .message-markdown :not(pre) > code {
 	padding: 1px 5px;
 	border-radius: 4px;
@@ -575,7 +575,7 @@
 	font: 500 13px var(--font-mono);
 }
 
-/* A block of code in a bot's message. Streamdown wraps the block in a themed card; the fill is set to --rail so the surface sinks below the bubble like Claude.ai's code pane, and --border-strong on the edge carries the separation when the background difference alone is subtle. */
+/* A block of code in a message. Streamdown wraps the block in a themed card; the fill is set to --rail so the surface sinks below the bubble like Claude.ai's code pane, and --border-strong on the edge carries the separation when the background difference alone is subtle. */
 .message-markdown [data-streamdown="code-block"] {
 	--code-line-height: calc(13px * 1.5);
 	background: var(--rail);

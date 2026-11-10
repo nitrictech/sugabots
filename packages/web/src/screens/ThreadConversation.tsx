@@ -28,9 +28,9 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
-import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
-import { groupMentionsBy, textWithMentions } from "./mentions.tsx";
+import { groupMentionsBy } from "./mentions.tsx";
 import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
@@ -447,6 +447,7 @@ function MessageRow({
 	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
 	const files = message.parts.filter((part): part is FilePart => part.type === "file");
 	const segments = segmentsOf(message);
+	const mentionable = [...participants, ...groupMentionsBy(author, members, threadType)];
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
@@ -558,6 +559,13 @@ function MessageRow({
 						);
 					}
 					if (!segment.text) return null;
+					const markdown = (
+						<MessageMarkdown
+							text={segment.text}
+							mentionable={mentionable}
+							writer={writerOf(author)}
+						/>
+					);
 					return (
 						<div
 							key={segment.key}
@@ -568,19 +576,10 @@ function MessageRow({
 									className="reply-grow"
 									style={{ ["--reveal-duration" as string]: `${revealDurationMs(segment.text)}ms` }}
 								>
-									<div>
-										<MessageMarkdown text={segment.text} mentionable={participants} />
-									</div>
+									<div>{markdown}</div>
 								</div>
-							) : agent ? (
-								<MessageMarkdown text={segment.text} mentionable={participants} />
 							) : (
-								<p className="m-0 whitespace-pre-wrap">
-									{textWithMentions(segment.text, [
-										...participants,
-										...groupMentionsBy(author, members, threadType),
-									])}
-								</p>
+								markdown
 							)}
 						</div>
 					);

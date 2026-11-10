@@ -16,15 +16,17 @@ import type { PhrasingContent, Root } from "mdast";
 import { type ComponentProps, createContext, type ReactNode, useContext, useState } from "react";
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
-import { visit } from "unist-util-visit";
+import { SKIP, visit } from "unist-util-visit";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { MentionCard } from "./MentionCard.tsx";
 
 /*
- * `@handle` in a message, drawn as a chip for whoever it names. Plain text
- * and markdown text nodes are both split with the parser the API routes by, so
- * a mention inside a list item or a bold run is still a mention while one
- * inside a code span, its own node type, is left alone.
+ * `@handle` in a message, drawn as a chip for whoever it names. Markdown text
+ * nodes are split with the parser the API routes by, so a mention inside a
+ * list item or a bold run is still a mention while one inside a code span,
+ * its own node type, is left alone, as is one in a link's address. The API
+ * reads the raw text, code and addresses included, so a mention in either
+ * still reaches whoever it names without a chip.
  */
 
 /**
@@ -158,23 +160,6 @@ export function MentionChip({
 	);
 }
 
-/** Plain text with its mentions marked, for a bubble that is not markdown. */
-export function textWithMentions(
-	content: string,
-	mentionable: readonly MentionTarget[],
-): ReactNode[] {
-	return splitAroundMentions(content).map((part, index) => {
-		if (index % 2 === 0) return part;
-		const target = targetWithHandle(mentionable, part);
-		return target ? (
-			// biome-ignore lint/suspicious/noArrayIndexKey: a part's position in the text is its identity.
-			<SentMention key={index} target={target} />
-		) : (
-			`@${part}`
-		);
-	});
-}
-
 /** A mention in a sent message: its chip, a button that opens its card. */
 function SentMention({ target }: { target: MentionTarget }) {
 	const [open, setOpen] = useState(false);
@@ -195,14 +180,20 @@ export const MENTION_TAG = "mention";
  * Everyone a mention in the markdown below could name. It arrives through
  * context rather than the renderer's props because Streamdown redraws only when
  * its text changes: someone who becomes mentionable after a reply is drawn is
- * still marked in it. Never `@here` or `@channel`: markdown is what bots,
- * routines and artifacts write, and only a person's notifies anyone.
+ * still marked in it. `@here` and `@channel` are among them only in a
+ * person's message, the one kind that notifies anyone; see `groupMentionsBy`.
  */
-export const MentionableContext = createContext<ThreadParticipant[]>([]);
+export const MentionableContext = createContext<readonly MentionTarget[]>([]);
 
-/** Wraps each mention in a `<mention>` carrying its handle, for `MarkdownMention` to draw. */
+/**
+ * Wraps each mention in a `<mention>` carrying its handle, for `MarkdownMention`
+ * to draw. Not in a link, whose address can hold an `@`, as in
+ * `medium.com/@ana`: a chip there would be a button inside the link.
+ */
 export const remarkMentions: Plugin<[], Root> = () => (tree) => {
-	visit(tree, "text", (node, index, parent) => {
+	visit(tree, (node, index, parent) => {
+		if (node.type === "link" || node.type === "linkReference") return SKIP;
+		if (node.type !== "text") return;
 		const parts = splitAroundMentions(node.value);
 		if (!parent || index === undefined || parts.length === 1) return;
 		const replacements = parts.map(

@@ -395,7 +395,7 @@ function Summary({
 						folds && !open && "line-clamp-3",
 					)}
 				>
-					<MessageMarkdown text={text} mentionable={[]} />
+					<MessageMarkdown text={text} mentionable={[]} writer="bot" />
 				</div>
 			) : (
 				<p className="m-0 text-muted-foreground text-xs leading-normal">

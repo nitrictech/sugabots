@@ -969,7 +969,8 @@ export const TypingWithTheBot = meta.story({
  * A mention names someone in their own colours: a bot on its tint, a person on
  * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
  * Linear Handler has not joined; it is named from the pod's crew. A handle in
- * code, one that names nobody, and an email address stay plain text.
+ * code and one that names nobody stay plain text, and an email address is a
+ * link rather than a mention.
  */
 export const Mentions = meta.story({
 	tags: ["ai-generated"],
@@ -1000,7 +1001,8 @@ export const Mentions = meta.story({
 		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
 		// Mentions add to Streamdown's markdown rather than replacing it.
 		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
-		await expect(canvas.getByText(/jay@example\.com and @nobody\./)).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "jay@example.com" })).toBeInTheDocument();
+		await expect(canvas.getByText(/and @nobody\./)).toBeInTheDocument();
 	},
 });
 
@@ -1036,6 +1038,144 @@ export const Links = meta.story({
 		);
 		await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	},
+});
+
+/**
+ * A reply a model left a `**` open in is closed for it, but nothing it wrote
+ * is lost: a `<` that isn't the start of HTML stays, words after it included.
+ */
+export const UnclosedMarkupInAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000510",
+				host,
+				"The parser returns a List<String for each row, so **check the empty ones",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText(/List<String for each row/, { selector: "p" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByText("check the empty ones", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+	},
+});
+
+/**
+ * A person's message is markdown too, as a bot's is, but keeps each line they
+ * typed, and a single `~` is only a tilde. HTML in it is shown as the text it
+ * is, and an image as a link to it, so it doesn't load for everyone who reads.
+ */
+export const PeoplesMarkdown = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000511",
+				person,
+				[
+					"**Deploy checklist** for `checkout-api`:",
+					"- bump the version",
+					"- ~~skip~~ run the migrations",
+					"",
+					"Then restart it with",
+					"```sh",
+					"bun run deploy --service checkout-api",
+					"```",
+					"Thanks!",
+					"Ping me after",
+					"<b>not bold</b>",
+					"",
+					"Back in ~5 min, ~10 at most. ![The deploy dashboard](https://example.com/deploys.png) [**![Status page](https://example.com/badge.png)**](https://status.example.com)",
+				].join("\n"),
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Deploy checklist", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText("checkout-api", { selector: "code" })).toBeInTheDocument();
+		await expect(canvas.getByText("skip", { selector: "del" })).toBeInTheDocument();
+		await expect(canvas.getByRole("group", { name: "Code block" })).toHaveTextContent(
+			"bun run deploy --service checkout-api",
+		);
+		// Two lines typed one under the other stay two lines.
+		const closing = canvas.getByText(/^Thanks!/);
+		await expect(closing.querySelectorAll("br")).toHaveLength(2);
+		await expect(closing).toHaveTextContent("<b>not bold</b>");
+		await expect(canvas.getAllByRole("deletion")).toHaveLength(1);
+		await expect(canvas.getByRole("link", { name: "The deploy dashboard" })).toHaveAttribute(
+			"href",
+			"https://example.com/deploys.png",
+		);
+		await expect(canvas.queryByRole("img", { name: "The deploy dashboard" })).toBeNull();
+		// An image inside a link is only its words there, not a second link.
+		const status = canvas.getByRole("link", { name: "Status page" });
+		await expect(status).toHaveAttribute("href", "https://status.example.com");
+		await expect(within(status).queryByRole("link")).toBeNull();
+	},
+});
+
+/**
+ * A link in a person's message that shows its address, as a bare URL does,
+ * opens without asking, accented letters and all. One whose text says
+ * something else asks first, showing where it really goes, as every link off
+ * the app in a bot's reply does. An `@` in an address is not a mention. Only
+ * web and email links are links: a relative one, or one that would open an
+ * app, is shown as written.
+ */
+export const PeoplesLinks = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000512",
+				person,
+				"The notes are at https://example.com/café-notes and the setup is in [the docs](https://example.com/setup). Mine are at https://medium.com/@sam-rivera/notes. Old ones are [in Routines](/routines) and <vscode://file/notes.md>.",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		// Keeps the test's own tab where it is; `defaultPrevented` still says whether the link asked first.
+		const asked: boolean[] = [];
+		function stayHere(event: MouseEvent) {
+			asked.push(event.defaultPrevented);
+			event.preventDefault();
+		}
+		window.addEventListener("click", stayHere);
+		try {
+			const bare = canvas.getByRole("link", { name: "https://example.com/café-notes" });
+			await expect(bare).toHaveAttribute("href", "https://example.com/caf%C3%A9-notes");
+			await userEvent.click(bare);
+			await expect(asked).toEqual([false]);
+			await expect(screen.queryByRole("dialog")).toBeNull();
+
+			await userEvent.click(canvas.getByRole("link", { name: "the docs" }));
+			const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+			await expect(within(warning).getByText("https://example.com/setup")).toBeVisible();
+			await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+			const withHandle = canvas.getByRole("link", { name: "https://medium.com/@sam-rivera/notes" });
+			await expect(within(withHandle).queryByRole("button")).toBeNull();
+
+			await expect(canvas.queryByRole("link", { name: "in Routines" })).toBeNull();
+			await expect(canvas.queryByRole("link", { name: "vscode://file/notes.md" })).toBeNull();
+			await expect(
+				canvas.getByText(/\[in Routines\]\(\/routines\) and <vscode:\/\/file\/notes\.md>/),
+			).toBeInTheDocument();
+		} finally {
+			window.removeEventListener("click", stayHere);
+		}
 	},
 });
 
