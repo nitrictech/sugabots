@@ -43,7 +43,7 @@ export function measureDisk(
 		// Run as the agents' user, du skips what it may not read, such as
 		// root's files in /tmp; everything under the workspace is theirs.
 		const sized = yield* sandbox.exec(
-			`shopt -s nullglob; du -sxB1 -- ${Sandboxes.WORKSPACE_DIRECTORY}/agents/* ${THREADS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
+			`shopt -s nullglob; du -sxB1 -- ${Sandboxes.WORKSPACE_DIRECTORY}/agents/* ${Sandboxes.THREADS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
 			FOLDERS_OPTIONS,
 		);
 		const timedOut = sized.exitCode === null;
@@ -55,7 +55,6 @@ export function measureDisk(
 	});
 }
 
-const THREADS_DIRECTORY = `${Sandboxes.WORKSPACE_DIRECTORY}/threads`;
 const TEMPORARY_DIRECTORY = "/tmp";
 const WRITTEN_DIRECTORIES = ["/", Sandboxes.WORKSPACE_DIRECTORY, TEMPORARY_DIRECTORY];
 
@@ -97,7 +96,7 @@ function foldersOf(listing: string): SandboxDiskFolder[] {
 			const [size = "", path = ""] = line.split("\t");
 			const bytes = Number(size);
 			if (size === "" || !Number.isSafeInteger(bytes)) return [];
-			if (path === THREADS_DIRECTORY) return [{ kind: "threads", bytes }];
+			if (path === Sandboxes.THREADS_DIRECTORY) return [{ kind: "threads", bytes }];
 			if (path === TEMPORARY_DIRECTORY) return [{ kind: "temporary", bytes }];
 			const agentId = AGENT_HOME.exec(path)?.[1];
 			return agentId ? [{ kind: "home", agentId, bytes }] : [];
