@@ -1924,7 +1924,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(secondPage?.nextCursor).toBeNull();
 	});
 
-	it("shows an agent collaboration in the asking chat only", async () => {
+	it("shows an agent collaboration in the asking chat and in the asked bot's channel", async () => {
 		const initiatorChat = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
@@ -2014,9 +2014,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			kind: "message",
 			message: { parts: [{ type: "collaboration", threadId: child.id }] },
 		});
-		// The asked bot's own threads are about other things.
-		expect(inbound?.items).toEqual([]);
-		expect((await view.history(recipientChat.id))?.items).toEqual([]);
+		expect(inbound?.items).toEqual([
+			expect.objectContaining({
+				kind: "collaboration",
+				id: collaborationId,
+				threadId: child.id,
+				title: "Compare the launch plans",
+				initiator: expect.objectContaining({ kind: "agent", id: agentId }),
+			}),
+		]);
 	});
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {

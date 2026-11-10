@@ -90,6 +90,9 @@ export function ChatThreadPanel({
 		(participant): participant is AgentParticipant =>
 			participant.kind === "agent" && participant.id !== mine?.id,
 	);
+	// Opened from the chat of the bot that was asked, whose conversation it is not in.
+	const askedOfChatBot =
+		details?.thread.type === "collaboration" && details.thread.hostAgentId === chatAgentId;
 
 	useEffect(() => {
 		if (threadId) heading.current?.focus();
@@ -127,7 +130,9 @@ export function ChatThreadPanel({
 	) : !details ||
 		!host ||
 		!type ||
-		(details.thread.conversationId !== conversationId && entry?.threadId !== threadId) ? (
+		(details.thread.conversationId !== conversationId &&
+			entry?.threadId !== threadId &&
+			!askedOfChatBot) ? (
 		<EmptyState title="Could not load this thread">
 			{frame.kind === "sidebar"
 				? "Try closing this panel and opening it again."
@@ -193,7 +198,9 @@ export function ChatThreadPanel({
 			</div>
 			{frame.kind === "sidebar" && type === "collaboration" && mine && (
 				<p className="m-0 shrink-0 border-border border-t px-4.5 py-3 text-xs text-subtle-foreground leading-normal">
-					Bots talk here on their own. To weigh in, message {mine.name} in the main chat.
+					Bots talk here on their own.
+					{/* A message to the asked bot in its own chat starts other work, which never reaches this. */}
+					{!askedOfChatBot && ` To weigh in, message ${mine.name} in the main chat.`}
 				</p>
 			)}
 		</>

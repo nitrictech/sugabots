@@ -270,7 +270,9 @@ describe("the thread feed", () => {
 		]);
 	});
 
-	it("shows an opened collaboration in the asking reply, and lists its thread", () => {
+	it("shows an opened collaboration in the asking reply and the asked bot's channel, and lists its thread", () => {
+		const channelId = crypto.randomUUID();
+
 		expect(
 			sent(
 				ConversationEvent.CollaborationOpened({
@@ -280,6 +282,7 @@ describe("the thread feed", () => {
 					workspaceId,
 					podId,
 					collaboratorAgentId: "a1",
+					collaboratorChannelId: channelId,
 					briefMessageId: "m2",
 				}),
 			),
@@ -297,6 +300,14 @@ describe("the thread feed", () => {
 				channel: workspaceChannel(workspaceId),
 				event: expect.objectContaining({
 					type: "thread.changed",
+					threadId: collaboration.threadId,
+				}),
+			},
+			{
+				channel: workspaceChannel(workspaceId),
+				event: expect.objectContaining({
+					type: "conversation.thread_changed",
+					conversationId: channelId,
 					threadId: collaboration.threadId,
 				}),
 			},

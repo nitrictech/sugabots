@@ -1166,9 +1166,10 @@ function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
 
 /**
  * A page of the conversation: its messages with their authors and parts, the
- * threads started from them, and its routine runs, each newest first and one
- * more than the page. Nothing when `reachesPod` does not reach
- * the conversation's pod.
+ * threads started from them, its routine runs, and on a bot's channel the
+ * collaborations other bots asked of its bot, each newest first and one more
+ * than the page. Nothing when `reachesPod` does not reach the conversation's
+ * pod.
  */
 const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	db: Executor,
@@ -1183,7 +1184,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 			type: { in: [...CONVERSATION_TYPES] },
 			RAW: (row) => reachesPod(row.podId),
 		},
-		columns: { id: true },
+		columns: { id: true, type: true, podId: true, hostAgentId: true },
 		with: {
 			messages: {
 				limit: limit + 1,
@@ -1246,8 +1247,94 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 		paused?.at && (!before || paused.at < before.at)
 			? { routineId: paused.routineId, at: paused.at }
 			: null;
-	return { ...conversation, routineExecutions, pausedAfterFailures };
+	const channelBot = channelBotOf(conversation);
+	const askedOfBot = channelBot ? yield* collaborationsAskedOf(db, channelBot, limit, before) : [];
+	return { ...conversation, routineExecutions, pausedAfterFailures, askedOfBot };
 });
+
+/** On a bot's channel: its bot, and the pod the channel is in. */
+function channelBotOf(
+	conversation: Pick<schema.ThreadRow, "type" | "podId" | "hostAgentId">,
+): ChannelBot | undefined {
+	if (conversation.type !== "bot_channel" || !conversation.hostAgentId) return undefined;
+	return { agentId: conversation.hostAgentId, podId: conversation.podId };
+}
+
+interface ChannelBot {
+	agentId: string;
+	podId: string;
+}
+
+/**
+ * The collaborations other bots asked of the channel's bot in its pod, each
+ * with the bot that asked and how its bot's work in the thread stands,
+ * newest first and one more than the page.
+ */
+const collaborationsAskedOf = Effect.fn("ChatView.collaborationsAskedOf")(function* (
+	db: Executor,
+	bot: ChannelBot,
+	limit: number,
+	before: CursorPoint | undefined,
+) {
+	const asked = alias(thread, "asked_thread");
+	const askingMessage = alias(message, "asking_message");
+	const initiator = alias(agent, "initiator");
+	return yield* db
+		.select({
+			id: collaboration.id,
+			threadId: collaboration.childThreadId,
+			title: asked.title,
+			createdAt: collaboration.createdAt,
+			busy: Turns.busyIn(collaboration.childThreadId),
+			latestTurnStatus: latestTurnStatusIn(collaboration.childThreadId),
+			initiator: {
+				id: initiator.id,
+				name: initiator.name,
+				handle: initiator.handle,
+				color: initiator.color,
+				face: initiator.face,
+				shape: initiator.shape,
+			},
+		})
+		.from(collaboration)
+		.innerJoin(asked, eq(asked.id, collaboration.childThreadId))
+		.innerJoin(askingMessage, eq(askingMessage.id, collaboration.parentMessageId))
+		.innerJoin(initiator, eq(initiator.id, askingMessage.authorAgentId))
+		.where(
+			and(
+				eq(collaboration.collaboratorAgentId, bot.agentId),
+				eq(asked.podId, bot.podId),
+				before && earlierThan(collaboration.createdAt, collaboration.id, before),
+			),
+		)
+		.orderBy(desc(collaboration.createdAt), desc(collaboration.id))
+		.limit(limit + 1);
+});
+
+/** The status of the newest turn in `threadId`, or null when it has none. */
+function latestTurnStatusIn(threadId: SQLWrapper): SQL<schema.TurnRow["status"] | null> {
+	return sql<schema.TurnRow["status"] | null>`(
+		select ${turn.status} from ${turn}
+		where ${turn.threadId} = ${threadId}
+		order by ${turn.startedAt} desc, ${turn.id} desc
+		limit 1
+	)`;
+}
+
+/**
+ * How the asked bot's work on a collaboration stands. A turn that has not
+ * ended, such as one waiting on an approval, is work still going, whether or
+ * not its thread is busy.
+ */
+function collaborationState(asked: {
+	busy: boolean;
+	latestTurnStatus: schema.TurnRow["status"] | null;
+}): "running" | "done" | "failed" {
+	const { busy, latestTurnStatus } = asked;
+	if (busy || latestTurnStatus === "running" || latestTurnStatus === "waiting") return "running";
+	if (latestTurnStatus === "failed" || latestTurnStatus === "cancelled") return "failed";
+	return "done";
+}
 
 type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
 
@@ -1264,7 +1351,7 @@ function pausedCandidate(routineId: string, at: Date) {
 	};
 }
 
-/** The three sources merged newest first, cut to the page, and put back in reading order. */
+/** The sources merged newest first, cut to the page, and put back in reading order. */
 function toMainPage(row: MainPage, limit: number) {
 	const posted = new Set(row.messages.flatMap((stored) => stored.routineExecutionId ?? []));
 	const candidates = [
@@ -1290,6 +1377,19 @@ function toMainPage(row: MainPage, limit: number) {
 				lastReplyAt: opened.lastReplyAt?.toISOString() ?? null,
 				working: opened.working,
 				createdAt: opened.createdAt.toISOString(),
+			}),
+		})),
+		...row.askedOfBot.map((asked) => ({
+			id: asked.id,
+			createdAt: asked.createdAt,
+			item: (): ChatMessageItem => ({
+				kind: "collaboration",
+				id: asked.id,
+				threadId: asked.threadId,
+				title: asked.title,
+				initiator: { kind: "agent", ...asked.initiator },
+				state: collaborationState(asked),
+				createdAt: asked.createdAt.toISOString(),
 			}),
 		})),
 		// A run that posted its result is shown by the post, which opens the run.
@@ -1348,12 +1448,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 		},
 		extras: {
 			running: (row) => Turns.busyIn(sql`${row.id}`),
-			latestTurnStatus: (row) => sql<schema.TurnRow["status"] | null>`(
-				select ${turn.status} from ${turn}
-				where ${turn.threadId} = ${row.id}
-				order by ${turn.startedAt} desc, ${turn.id} desc
-				limit 1
-			)`,
+			latestTurnStatus: (row) => latestTurnStatusIn(row.id),
 		},
 		with: {
 			participants: {

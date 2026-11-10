@@ -758,7 +758,12 @@ export function ConversationChat({
 											mentionable={mentionable}
 										/>
 									) : (
-										<ActivityLine item={group.item} entries={entries} onOpenThread={openThread} />
+										<ActivityLine
+											item={group.item}
+											host={host}
+											entries={entries}
+											onOpenThread={openThread}
+										/>
 									)}
 								</Fragment>
 							))}
@@ -941,29 +946,48 @@ function sendFailureMessage(failure: unknown): string {
 	return "Message not sent. Your draft is still here.";
 }
 
-type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "thread" | "routine_paused" }>;
+type ChatActivityItem = Extract<
+	ChatMessageItem,
+	{ kind: "routine" | "collaboration" | "thread" | "routine_paused" }
+>;
 
-/** A routine run as a row among the messages. */
+/** A routine run, or another bot asking the chat's bot for help, as a row among the messages. */
 function ActivityLine({
 	item,
+	host,
 	entries,
 	onOpenThread,
 }: {
-	item: ChatActivityItem;
-	/** The threads opened beside the chat, where how its run stands is read. */
+	item: Extract<ChatMessageItem, { kind: "routine" | "collaboration" }>;
+	/** The chat's bot, which a collaboration in its chat asked for help. */
+	host: AgentParticipant | undefined;
+	/** The threads opened beside the chat, where how a run stands is read. */
 	entries: readonly ChatHistoryEntry[];
 	onOpenThread: (threadId: string) => void;
 }) {
-	if (item.kind !== "routine") return null;
-	const state = activityStateOf(entries.find((entry) => entry.threadId === item.threadId));
+	const onOpen = () => onOpenThread(item.threadId);
+	if (item.kind === "routine") {
+		return (
+			<ChatActivityRow
+				type="routine"
+				routineName={item.routineName}
+				triggerKind={item.triggerKind}
+				state={activityStateOf(entries.find((entry) => entry.threadId === item.threadId))}
+				at={item.createdAt}
+				onOpen={onOpen}
+			/>
+		);
+	}
+	if (!host) return null;
 	return (
 		<ChatActivityRow
-			type="routine"
-			routineName={item.routineName}
-			triggerKind={item.triggerKind}
-			state={state}
+			type="collaboration"
+			initiator={item.initiator}
+			recipient={host}
+			title={item.title}
+			state={item.state}
 			at={item.createdAt}
-			onOpen={() => onOpenThread(item.threadId)}
+			onOpen={onOpen}
 		/>
 	);
 }
