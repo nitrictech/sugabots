@@ -217,7 +217,24 @@ const PullRequest = Schema.Struct({
 	labels: Schema.Array(Schema.Struct({ name: Schema.String })),
 	head: Schema.Struct({ ref: Schema.String, sha: Schema.String }),
 	base: Schema.Struct({ ref: Schema.String }),
+	// GitHub's schema leaves each of the stack's numbers optional.
+	stack: Schema.optional(
+		Schema.NullOr(
+			Schema.Struct({
+				number: Schema.optional(Schema.Int),
+				position: Schema.optional(Schema.Int),
+				size: Schema.optional(Schema.Int),
+				base: Schema.Struct({ ref: Schema.String }),
+			}),
+		),
+	),
 });
+
+/** The stack a pull request is in, with its place from the bottom, or null when it isn't in one. */
+const stackOf = ({ stack }: typeof PullRequest.Type) =>
+	stack
+		? { number: stack.number, position: stack.position, size: stack.size, base: stack.base.ref }
+		: null;
 
 export const listPullRequests = (
 	http: EgressHttpClient,
@@ -246,6 +263,7 @@ export const listPullRequests = (
 					labels: pull.labels.map((label) => label.name),
 					branch: pull.head.ref,
 					base: pull.base.ref,
+					stack: stackOf(pull),
 					url: pull.html_url,
 				})),
 				page,
@@ -306,6 +324,7 @@ export const getPullRequest = (
 			branch: pull.head.ref,
 			headCommit: pull.head.sha,
 			base: pull.base.ref,
+			stack: stackOf(pull),
 			url: pull.html_url,
 			reviews: reviews.items.map((review) => ({
 				reviewId: review.id,

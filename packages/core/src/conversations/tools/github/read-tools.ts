@@ -72,7 +72,7 @@ export function readTools({ connected, repositorySchema, onRepository }: ToolCon
 		}),
 		get_pull_request: tool({
 			description:
-				"Read a pull request: its description, branches, reviews, comments, and comments on its code.",
+				"Read a pull request: its description, branches, stack, reviews, comments, and comments on its code.",
 			inputSchema: numberedSchema(repositorySchema, pullRequestNumberSchema),
 			execute: async ({ repository, number }) =>
 				onRepository(repository, (path) =>

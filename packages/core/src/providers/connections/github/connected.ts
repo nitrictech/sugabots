@@ -173,6 +173,20 @@ export class Connected {
 		});
 	}
 
+	/** Stacks pull requests, anyone's, given bottom to top. */
+	createStack(request: { repository: string; pullRequests: readonly number[] }) {
+		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
+			GitHub.createStack(this.http, token, request),
+		);
+	}
+
+	/** Puts pull requests, anyone's, given bottom to top, on top of stack `stack`. */
+	addToStack(request: { repository: string; stack: number; pullRequests: readonly number[] }) {
+		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
+			GitHub.addToStack(this.http, token, request),
+		);
+	}
+
 	/** Comments on pull request `number`, anyone's. */
 	commentOnPullRequest(request: { repository: string; number: number; body: string }) {
 		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
