@@ -22,6 +22,7 @@ import {
 	useParams,
 	useRouter,
 } from "@tanstack/react-router";
+import { MessageSquareOff } from "lucide-react";
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
@@ -30,6 +31,7 @@ import {
 	prefetchConversation,
 	useChatList,
 	useConversationPlace,
+	useDirectMessage,
 	useOpenBotChannel,
 	useOpenPodChat,
 	useOpenRoutineFeed,
@@ -67,9 +69,10 @@ import type { Staged } from "@/screens/ConversationChat.tsx";
 import type { RoutinesView } from "@/screens/RoutinesStage.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
+import { DirectMessagesOverview } from "@/shell/DirectMessages.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
-import { MobileHome } from "@/shell/MobileHome.tsx";
+import { MobileDirectMessages, MobileHome } from "@/shell/MobileHome.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
@@ -82,6 +85,11 @@ const ConversationPage = lazyNamed(
 	"ConversationPage",
 );
 const NewThread = lazyNamed(() => import("@/screens/NewThread.tsx"), "NewThread");
+// Lazy as the conversation is: it shows the one there already is with the people chosen.
+const NewDirectMessagePage = lazyNamed(
+	() => import("@/shell/NewDirectMessage.tsx"),
+	"NewDirectMessagePage",
+);
 const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
@@ -168,6 +176,9 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
  *   /$workspace/activity     what is new across the workspace: mentions, unread messages, routine runs and collaborations
  *   /$workspace/activity/$pod/$conversation   the conversation, run or collaboration of the one chosen, beside them
+ *   /$workspace/dm           your direct messages with other people
+ *   /$workspace/dm/new       starting one, with one person or a group
+ *   /$workspace/dm/$conversation   one of them, by its id, `?message=` jumped to
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
@@ -1011,6 +1022,93 @@ const activityChatRoute = createRoute({
 	},
 });
 
+/**
+ * Your direct messages with other people. The address names no pod, as a
+ * direct message between people is in none. On a phone the list is the page
+ * until one is open.
+ */
+const directMessagesRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/dm",
+	component: DirectMessagesRoute,
+});
+
+function DirectMessagesRoute() {
+	const matchRoute = useMatchRoute();
+	const atList = Boolean(matchRoute({ to: directMessagesRoute.fullPath }));
+	return (
+		<>
+			{atList && <MobileDirectMessages className="md:hidden" />}
+			<Panes className={atList ? "max-md:hidden" : undefined}>
+				<Outlet />
+			</Panes>
+		</>
+	);
+}
+
+/** Beside the sidebar while none is open: a way to start one. */
+const directMessagesIndexRoute = createRoute({
+	getParentRoute: () => directMessagesRoute,
+	path: "/",
+	component: DirectMessagesOverview,
+});
+
+/** Starting a direct message: whom to, and the first message. */
+const newDirectMessageRoute = createRoute({
+	getParentRoute: () => directMessagesRoute,
+	path: "/new",
+	component: () => <NewDirectMessagePage />,
+});
+
+interface DirectMessageSearch extends ConversationSearch {
+	/** A message to jump to, such as the one a notification is about. */
+	message?: string;
+}
+
+const directMessageRoute = createRoute({
+	getParentRoute: () => directMessagesRoute,
+	path: "/$conversation",
+	validateSearch: (search: Record<string, unknown>): DirectMessageSearch => ({
+		...validateConversationSearch(search),
+		...idParam(search, "message"),
+	}),
+	preloadStaleTime: 0,
+	loader: ({ context, params }) => {
+		prefetchConversation(context.queries, params.conversation);
+		return ConversationPage.preload();
+	},
+	component: () => {
+		const { conversation } = directMessageRoute.useParams();
+		const navigate = directMessageRoute.useNavigate();
+		const changeThread = useThreadChange((thread, replace) =>
+			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		);
+		const search = directMessageRoute.useSearch();
+		return (
+			<ConversationScreen place={useDirectMessage(conversation)}>
+				{(found, user) => (
+					<ConversationPage
+						conversation={found.conversation}
+						pod={found.pod}
+						conversationId={conversation}
+						user={user}
+						threadId={search.thread}
+						focusMessageId={search.message}
+						onThreadChange={changeThread}
+						staged={stagedOf(search)}
+						onStagedChange={(staged, how) =>
+							void navigate({
+								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
+								...how,
+							})
+						}
+					/>
+				)}
+			</ConversationScreen>
+		);
+	},
+});
+
 /** Every approval across the workspace, and each one in full on its own page. */
 const approvalsRoute = createRoute({
 	getParentRoute: () => shellRoute,
@@ -1554,9 +1652,8 @@ const conversationRoute = createRoute({
 });
 
 /**
- * The pod at `podSlug` and the bot the conversation is with, once found, for a
- * screen of the conversation; while it loads nothing, and if it cannot be
- * found, why.
+ * The conversation in the pod at `podSlug`, once its pod and bot are found,
+ * for a screen of it; see `ConversationScreen`.
  */
 function PodConversationScreen({
 	podSlug,
@@ -1567,17 +1664,40 @@ function PodConversationScreen({
 	conversationId: string;
 	children: (found: ConversationPlace, user: SessionUser) => ReactNode;
 }) {
+	return (
+		<ConversationScreen place={useConversationPlace(podSlug, conversationId)}>
+			{children}
+		</ConversationScreen>
+	);
+}
+
+/**
+ * A screen of a conversation, once `place` has found where it is and who it
+ * is with; while it loads nothing, and if it cannot be found, why.
+ */
+function ConversationScreen<Place>({
+	place: { found, isPending, error },
+	children,
+}: {
+	place: { found: Place | undefined; isPending: boolean; error: unknown };
+	children: (found: Place, user: SessionUser) => ReactNode;
+}) {
 	const { user } = useSession();
-	const { found, isPending, error } = useConversationPlace(podSlug, conversationId);
 
 	if (isPending) return null;
 	if (!found) {
 		return (
-			<EmptyState title={error ? "Could not load this conversation" : "No such conversation here"}>
-				{error
-					? "The API did not answer. Reload, or check that it is running."
-					: "It may have been removed — or you may not be a member of the pod it is in."}
-			</EmptyState>
+			// Lifted a little above the middle, as the pod's empty pages are.
+			<div className="flex min-h-0 flex-1 pb-20">
+				<EmptyState
+					title={error ? "Could not load this conversation" : "Conversation not found"}
+					icon={<MessageSquareOff strokeWidth={1.75} />}
+				>
+					{error
+						? "Reload the page, or check that the API is running."
+						: "It was removed, or you're not in it."}
+				</EmptyState>
+			</div>
 		);
 	}
 	if (!user) return null;
@@ -1665,6 +1785,11 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
+		directMessagesRoute.addChildren([
+			directMessagesIndexRoute,
+			newDirectMessageRoute,
+			directMessageRoute,
+		]),
 		youRoute,
 		youPodRoute,
 		podRoute.addChildren([
@@ -1769,6 +1894,7 @@ function pageDepth(pathname: string): number {
 		}
 		case "activity":
 		case "approvals":
+		case "dm":
 			return rest.length === 0 ? 0 : 1;
 		case "you":
 			// you/pods/$pod is one in.

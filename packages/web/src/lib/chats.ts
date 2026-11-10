@@ -6,12 +6,14 @@ import {
 	type MessageReplyTo,
 	type NewMessage,
 	type NewThread,
+	type PersonParticipant,
 	type Pod,
 	type RoutineUpdate,
 	type SessionUser,
 	type StartedThread,
 	type ThreadDetails,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import {
 	infiniteQueryOptions,
 	type QueryClient,
@@ -24,11 +26,13 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { useAgents } from "@/lib/agents.ts";
 import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
+import { NotReadyError } from "@/lib/failure.ts";
+import { countOf, listNames } from "@/lib/name-list.ts";
 import { findPod, usePods } from "@/lib/pods.ts";
 import { useRoutineActions } from "@/lib/routines.ts";
 import { threadQuery } from "@/lib/threads.ts";
@@ -115,10 +119,169 @@ export function useApprovalInbox() {
 	});
 }
 
+const directMessagesKey = (workspaceId: string | undefined) => ["direct-messages", workspaceId];
+
+/** The person's direct messages with other people, the most recent first. */
+export function useDirectMessages() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: directMessagesKey(workspaceId),
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.chats.directMessages({ params: { workspace: workspaceId } }),
+						{ signal },
+					)
+			: skipToken,
+	});
+}
+
+/**
+ * Sends a message to `userIds`, in the direct message between the person and
+ * them, which the API opens when they have none. Resolves once the lists that
+ * show it know of it, with the direct message it went to.
+ */
+export function useSendDirectMessage() {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: ({ userIds, message }: { userIds: readonly string[]; message: string }) => {
+			if (!workspaceId) throw new NotReadyError();
+			return Effect.runPromise(
+				client.api.chats.sendDirectMessage({
+					params: { workspace: workspaceId },
+					payload: { userIds: [...userIds], id: uuidv4(), message },
+				}),
+			);
+		},
+		onSuccess: ({ conversation }) =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
+				queries.invalidateQueries({ queryKey: directMessageKey(conversation.id) }),
+				queries.invalidateQueries({ queryKey: ["chat-messages", conversation.id] }),
+				queries.invalidateQueries({ queryKey: ["thread", conversation.id] }),
+			]),
+	});
+}
+
+/** What a direct message with somebody who has left the workspace goes by. */
+const FORMER_MEMBER = "Former member";
+
+/** The others in a direct message between people: those still here, by name, and how many have left. */
+export interface DirectPeople {
+	people: readonly PersonParticipant[];
+	formerMembers: number;
+}
+
+/** How many have left, as words: "1 former member". */
+function formerMembersOf(count: number): string {
+	return countOf(count, "former member", "former members");
+}
+
+/** A person, as a message's author or somebody it is written to. */
+export function personParticipantOf(person: {
+	id: string;
+	name: string;
+	email: string;
+	image?: string | null;
+}): PersonParticipant {
+	return {
+		kind: "person",
+		id: person.id,
+		name: person.name,
+		email: person.email,
+		handle: handleFromName(person.name),
+		image: person.image ?? null,
+	};
+}
+
+/** Whether a direct message is with one other person, rather than a group; who has left counts as one. */
+export function isOneToOne({ people, formerMembers }: DirectPeople): boolean {
+	return people.length + formerMembers <= 1;
+}
+
+/**
+ * The others in a direct message as its title says them: "Juno, Theo and
+ * Sam", then any who have left, "and 1 former member". One person who has
+ * left is a Former member.
+ */
+export function directPeopleTitle({ people, formerMembers }: DirectPeople): string {
+	if (people.length === 0)
+		return formerMembers <= 1 ? FORMER_MEMBER : formerMembersOf(formerMembers);
+	const names = people.map((person) => person.name);
+	if (formerMembers === 0) return listNames(names);
+	return `${names.join(", ")} and ${formerMembersOf(formerMembers)}`;
+}
+
+/** The others in a direct message as a list's row names them, shortest first: "Juno, Theo". */
+export function directPeopleRowName(direct: DirectPeople): string {
+	if (direct.people.length === 0) return directPeopleTitle(direct);
+	return directPeopleNames(direct).join(", ");
+}
+
+/** The others in a direct message, by name, then those who have left as how many: "1 former member". */
+export function directPeopleNames({ people, formerMembers }: DirectPeople): string[] {
+	return [
+		...people.map((person) => person.name),
+		...(formerMembers > 0 ? [formerMembersOf(formerMembers)] : []),
+	];
+}
+
+const directMessageKey = (conversationId: string) => ["direct-message", conversationId];
+
+/**
+ * The direct message `conversationId`, and who is in it, once loaded:
+ * `found` is `undefined` when it is not one of the person's in the workspace
+ * open, as one from another of their workspaces is not shown in this one's
+ * place, and `error` set only when it could not be loaded at all.
+ */
+export function useDirectMessage(conversationId: string): {
+	found: DirectPlace | undefined;
+	isPending: boolean;
+	error: unknown;
+} {
+	const workspace = useWorkspace();
+	// The list is fetched afresh as the workspace's events come and the window
+	// regains focus, so once it has the conversation, who is in it comes from
+	// there. Until the list is loaded the conversation is asked for alongside
+	// it, so the page does not wait on both in turn; once loaded, only one it
+	// does not have is.
+	const listed = useDirectMessages().data?.items.find(
+		(candidate) => candidate.conversation.id === conversationId,
+	);
+	const item = useQuery({
+		queryKey: directMessageKey(conversationId),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.chats.directMessage({ params: { conversationId } }), {
+				signal,
+			}),
+		enabled: !listed,
+	});
+	const missing = isApiFailure(item.error) && item.error._tag === "NotFound";
+	const loaded = listed ?? item.data;
+	const shown = loaded?.conversation.workspaceId === workspace.workspace?.id ? loaded : undefined;
+	// Kept while the conversation's people stay the same, so its screen is not
+	// handed a new one at every render.
+	const people = shown?.people;
+	const formerMembers = shown?.formerMembers;
+	const found = useMemo((): DirectPlace | undefined => {
+		if (!people || formerMembers === undefined) return undefined;
+		return { pod: null, conversation: { kind: "direct", people, formerMembers } };
+	}, [people, formerMembers]);
+	return {
+		found,
+		isPending: (!listed && item.isPending) || workspace.isPending,
+		error: missing ? undefined : item.error,
+	};
+}
+
 /** How much in the workspace is waiting for the person. */
 export type AttentionCounts = {
-	/** Messages that mention the person and that they have not read. */
-	unreadMentions: number;
+	/**
+	 * Messages written to the person that they have not read: those that
+	 * mention them, and every message in their direct messages.
+	 */
+	unreadForYou: number;
 	/** Everything in Inbox the person has not read: mentions, messages, runs and collaborations. */
 	unreadInInbox: number;
 	/** Approvals waiting on the person. */
@@ -127,15 +290,21 @@ export type AttentionCounts = {
 
 /**
  * How much in the workspace is waiting for the person, which the sidebar and the
- * app's badge count. What is unread comes from the activity feed, so it is
- * counted among its latest items only.
+ * app's badge count. Mentions in pods, and what else is unread, come from the
+ * activity feed, so they are counted among its latest items only; what is
+ * unread in direct messages comes from their list, which counts all of it.
  */
 export function useAttentionCounts(): AttentionCounts {
 	const { data: approvals } = useApprovalInbox();
 	const { data: activity } = useActivityFeed();
+	const { data: directMessages } = useDirectMessages();
+	const mentionsInPods =
+		activity?.items.filter((item) => item.kind === "mention" && item.unread && item.podId !== null)
+			.length ?? 0;
+	const unreadInDirectMessages =
+		directMessages?.items.reduce((sum, item) => sum + item.unreadMessages, 0) ?? 0;
 	return {
-		unreadMentions:
-			activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0,
+		unreadForYou: mentionsInPods + unreadInDirectMessages,
 		unreadInInbox: activity?.items.filter((item) => item.unread).length ?? 0,
 		waitingApprovals: approvals?.waiting.length ?? 0,
 	};
@@ -249,6 +418,7 @@ export function refreshChatMarkers(queries: QueryClient, workspaceId: string | u
 		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 		queries.invalidateQueries({ queryKey: ["chat-pod-markers", workspaceId] }),
 		queries.invalidateQueries({ queryKey: activityFeedKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
 	]);
 }
 
@@ -307,17 +477,27 @@ export function useOpenBotChannel(pod: Pod, hostAgentId: string | undefined) {
 	});
 }
 
-/** Which kind of conversation is open, and the bot it is with when it has one. */
+/**
+ * Which kind of conversation is open, and the bot it is with when it has one:
+ * a direct message is between people, one other or a group, with no bot.
+ */
 export type ConversationKind =
 	| { kind: "podChat" }
 	| { kind: "botChannel"; agent: Agent }
 	| { kind: "botThread"; agent: Agent }
-	| { kind: "peopleThread" };
+	| { kind: "peopleThread" }
+	| ({ kind: "direct" } & DirectPeople);
 
 /** A conversation's pod, and which kind of conversation it is. */
 export interface ConversationPlace {
 	pod: Pod;
-	conversation: ConversationKind;
+	conversation: Exclude<ConversationKind, { kind: "direct" }>;
+}
+
+/** A direct message between people, which is in no pod, and who is in it. */
+export interface DirectPlace {
+	pod: null;
+	conversation: Extract<ConversationKind, { kind: "direct" }>;
 }
 
 /**
@@ -380,7 +560,7 @@ function conversationKindOf(known: {
 	isThread: boolean;
 	hostAgentId: string | null | undefined;
 	agent: Agent | undefined;
-}): ConversationKind | undefined {
+}): ConversationPlace["conversation"] | undefined {
 	if (known.isPodChat) return { kind: "podChat" };
 	if (known.isBotChannel) return known.agent && { kind: "botChannel", agent: known.agent };
 	if (!known.isThread) return undefined;
@@ -538,14 +718,7 @@ export function useSendChatMessage(conversationId: string, user: SessionUser) {
 				message: {
 					id: input.id,
 					threadId: conversationId,
-					author: {
-						kind: "person",
-						id: user.id,
-						name: user.name,
-						email: user.email,
-						handle: handleFromName(user.name),
-						image: user.image,
-					},
+					author: personParticipantOf(user),
 					kind: "text",
 					status: "complete",
 					parts: [

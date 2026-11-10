@@ -24,7 +24,14 @@ import type { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { routine, thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
+import {
+	routine,
+	thread,
+	threadCompaction,
+	threadSummary,
+	turn,
+	workspaceMember,
+} from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
@@ -77,7 +84,7 @@ export const make = Effect.gen(function* () {
 				"list",
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const reachesPod = yield* visibility.reachesPod;
+					const reachesThread = yield* visibility.reachesThread;
 					return yield* query((db) =>
 						Effect.gen(function* () {
 							const rows = yield* db
@@ -89,7 +96,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(thread.workspaceId, workspaceId),
 										isNull(thread.parentThreadId),
-										reachesPod(thread.podId),
+										reachesThread(thread),
 									),
 								)
 								.orderBy(desc(thread.updatedAt), desc(thread.id));
@@ -109,7 +116,9 @@ export const make = Effect.gen(function* () {
 					// so a bad cursor says nothing about the thread.
 					const before = history.cursor ? yield* historyCursor(history.cursor) : undefined;
 					const standing = yield* visibility.thread(threadId);
-					const row = yield* query((db) => loadConversation(db, threadId, history.limit, before));
+					const row = yield* query((db) =>
+						loadConversation(db, standing.thread, history.limit, before),
+					);
 					if (!row) return yield* new ResourceHidden({ resource: "thread" });
 					const details = toThreadDetails(row, standing, history.limit);
 					const { routineId } = row;
@@ -141,7 +150,7 @@ export const make = Effect.gen(function* () {
 				"activity",
 				Effect.gen(function* () {
 					if (!isUuid(threadId)) return yield* new ResourceHidden({ resource: "thread" });
-					const reachesPod = yield* visibility.reachesPod;
+					const reachesThread = yield* visibility.reachesThread;
 					const [row] = yield* query((db) =>
 						db
 							.select({
@@ -153,7 +162,7 @@ export const make = Effect.gen(function* () {
 							.from(thread)
 							.leftJoin(threadSummary, eq(threadSummary.threadId, thread.id))
 							.leftJoin(threadCompaction, eq(threadCompaction.threadId, thread.id))
-							.where(and(eq(thread.id, threadId), reachesPod(thread.podId))),
+							.where(and(eq(thread.id, threadId), reachesThread(thread))),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "thread" });
 					return {
@@ -180,17 +189,23 @@ export class InvalidThreadHistoryCursor
 }
 
 /**
- * The thread, a page of its messages with their authors and the parts placed in
- * them, its participants and its pod's crew and members: one statement.
+ * The thread `place`, a page of its messages with their authors and the parts
+ * placed in them, its participants and its pod's crew and members, or a direct
+ * message's people: one statement. In a direct message, who has left the
+ * workspace keeps their rows, to have the conversation back should they rejoin,
+ * but is left out of who is in it, who joined in and who read it.
  */
 const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 	db: Executor,
-	threadId: string,
+	place: Pick<schema.ThreadRow, "id" | "type" | "workspaceId">,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
+	const direct = place.type === "direct";
+	/** In a direct message, whether the person `userId` is still in the workspace, and so in it. */
+	const stillHere = (userId: SQLWrapper) => inWorkspace(userId, place.workspaceId);
 	return yield* db.query.thread.findFirst({
-		where: { id: threadId },
+		where: { id: place.id },
 		extras: {
 			running: (row) => Turns.busyIn(sql`${row.id}`),
 			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
@@ -208,13 +223,26 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 					members: { ...personColumns, orderBy: { name: "asc" } },
 				},
 			},
+			// Only a direct message has any, so no other thread looks.
+			...(direct && {
+				directMembers: {
+					...personColumns,
+					where: { RAW: (person: { id: SQLWrapper }) => stillHere(person.id) },
+					orderBy: { name: "asc" as const },
+				},
+			}),
 			participants: {
 				columns: {},
+				// A bot joins in with no person.
+				...(direct && {
+					where: { RAW: (row) => sql`(${row.userId} is null or ${stillHere(row.userId)})` },
+				}),
 				orderBy: { createdAt: "asc", id: "asc" },
 				with: { user: personColumns, agent: agentColumns },
 			},
 			reads: {
 				columns: { readThrough: true, updatedAt: true },
+				...(direct && { where: { RAW: (row) => stillHere(row.userId) } }),
 				with: { user: personColumns },
 			},
 			routineExecution: true,
@@ -252,12 +280,13 @@ function toThreadDetails(
 		// What this person may do with the approvals this thread raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: mayDecideApprovals(standing, row.routineExecutionId !== null, "pod"),
-			approveSandboxRequests: mayDecideApprovals(
-				standing,
-				row.routineExecutionId !== null,
-				"sandbox-managers",
-			),
+			// Only a thread in a pod raises approvals: a direct message has no bots.
+			approveToolCalls:
+				standing.kind === "pod" &&
+				mayDecideApprovals(standing.standing, row.routineExecutionId !== null, "pod"),
+			approveSandboxRequests:
+				standing.kind === "pod" &&
+				mayDecideApprovals(standing.standing, row.routineExecutionId !== null, "sandbox-managers"),
 		},
 		// A run's thread is always opened in a conversation.
 		routineExecution:
@@ -268,8 +297,11 @@ function toThreadDetails(
 		participants: row.participants.map(({ user: person, agent: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),
-		crew: row.pod.agents.map((crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent })),
-		members: row.pod.members.map(toPerson),
+		crew: (row.pod?.agents ?? []).map(
+			(crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent }),
+		),
+		// A direct message's people are its members, as a pod's are the pod's.
+		members: (row.pod?.members ?? row.directMembers ?? []).map(toPerson),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn?.error)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest
@@ -284,6 +316,14 @@ function toThreadDetails(
 		})),
 	};
 }
+
+/** SQL for "`userId` is a member of the workspace `workspaceId`". */
+const inWorkspace = (userId: SQLWrapper, workspaceId: string) => sql<boolean>`exists (
+	select 1
+	from ${workspaceMember}
+	where ${workspaceMember.userId} = ${userId}
+		and ${workspaceMember.workspaceId} = ${workspaceId}
+)`;
 
 /**
  * How many tokens the prompt of the thread's latest measured turn took, the

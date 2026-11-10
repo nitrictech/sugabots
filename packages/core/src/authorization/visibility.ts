@@ -11,7 +11,7 @@ import {
 	ResourceHidden,
 	reachedPodStandingsFor,
 	reachesPodFor,
-	requireReach,
+	reachesThreadFor,
 	type ThreadStanding,
 	threadStandingFor,
 } from "./access.ts";
@@ -20,16 +20,19 @@ import { CurrentActor } from "./current-actor.ts";
 /**
  * What the current actor can see. A pod is seen by whoever reaches it, and
  * everything inside it, its conversations and threads included, by whoever sees the
- * pod. Lists are scoped by `reachesPodFor`, the `pod.read` rule that
- * `Authorization` checks for one pod written as SQL, so a list holds the pods
- * that reading each one directly would allow.
+ * pod. A direct message between people is in no pod, and is seen by the
+ * people in it. Lists are scoped by `reachesPodFor` and `reachesThreadFor`,
+ * the rules `Authorization` checks for one pod or thread written as SQL, so a
+ * list holds what reading each one directly would allow.
  */
 export interface Interface {
 	/** The rule for the pods the actor reaches, for queries that scope a list. */
 	readonly reachesPod: Effect.Effect<ReachesPod, never, CurrentActor.Service>;
+	/** The rule for the threads the actor reaches, in a pod or in none, for queries that scope a list. */
+	readonly reachesThread: Effect.Effect<ReachesThread, never, CurrentActor.Service>;
 	/** The pods the actor reaches in the workspace, by name, with their standing in each. */
 	readonly pods: (workspaceId: string) => Effect.Effect<PodStanding[], never, CurrentActor.Service>;
-	/** The thread, with the actor's standing in its pod. */
+	/** The thread, with the actor's standing towards it. */
 	readonly thread: (
 		threadId: string,
 	) => Effect.Effect<ThreadStanding, ResourceHidden, CurrentActor.Service>;
@@ -47,6 +50,16 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  */
 export type ReachesPod = (podId: SQLWrapper) => SQL<boolean>;
 
+/**
+ * SQL for "somebody reaches this thread", given the columns naming it, its
+ * workspace and its pod: `thread`, or an alias of it.
+ */
+export type ReachesThread = (row: {
+	id: SQLWrapper;
+	workspaceId: SQLWrapper;
+	podId: SQLWrapper;
+}) => SQL<boolean>;
+
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Visibility");
 	return Service.of({
@@ -55,6 +68,13 @@ export const make = Effect.gen(function* () {
 			({ userId }) =>
 				(podId) =>
 					reachesPodFor(podId, userId),
+		),
+
+		reachesThread: Effect.map(
+			CurrentActor.Service,
+			({ userId }) =>
+				(row) =>
+					reachesThreadFor(row, userId),
 		),
 
 		pods: (workspaceId) =>
@@ -71,7 +91,8 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const standing = yield* query((db) => threadStandingFor(db, threadId, userId));
-					return yield* requireReach(standing, "thread");
+					if (!standing) return yield* new ResourceHidden({ resource: "thread" });
+					return standing;
 				}),
 			),
 
@@ -89,7 +110,7 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(thread.id, conversationId),
 											inArray(thread.type, [...CONVERSATION_TYPES]),
-											reachesPodFor(thread.podId, userId),
+											reachesThreadFor(thread, userId),
 										),
 									)
 									.limit(1),

@@ -8,7 +8,7 @@ export const closedChannelAccess: ChannelAccess.Interface = {
 	workspace: () => Effect.undefined,
 	thread: () => Effect.undefined,
 	me: () => Effect.undefined,
-	reachesPod: () => Effect.succeed(false),
+	hears: () => Effect.succeed(false),
 };
 
 /** Grants every channel, for stream cases that are not about who may listen. */
@@ -16,5 +16,5 @@ export const openChannelAccess: ChannelAccess.Interface = {
 	workspace: (workspaceId) => Effect.succeed(workspaceChannel(workspaceId)),
 	thread: (threadId) => Effect.succeed(threadChannel(threadId)),
 	me: () => Effect.map(CurrentActor.Service, ({ userId }) => personChannel(userId)),
-	reachesPod: () => Effect.succeed(true),
+	hears: () => Effect.succeed(true),
 };

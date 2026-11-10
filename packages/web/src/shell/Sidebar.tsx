@@ -15,6 +15,7 @@ import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
 import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
+import { DirectMessages } from "@/shell/DirectMessages.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { InboxNews } from "@/shell/InboxNews.tsx";
 import { NewInPodMenu } from "@/shell/NewInPod.tsx";
@@ -33,12 +34,13 @@ export type SidebarView = "inbox" | "approvals" | "settings" | "artifacts" | "ro
 /**
  * The column down the left: Inbox and Approvals across every pod and the
  * workspace's Settings, then each pod in turn, with its artifacts, then its
- * channels and its bots in one list, and you and Help at the foot. A phone has `MobileTabBar` and `MobileHome` instead.
+ * channels and its bots in one list, then your direct messages, and you and
+ * Help at the foot. A phone has `MobileTabBar` and `MobileHome` instead.
  */
 export function Sidebar() {
 	const { data: pods } = usePods();
 	const { data: markers } = usePodChatMarkers();
-	const { unreadMentions, unreadInInbox, waitingApprovals } = useAttentionCounts();
+	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
@@ -62,7 +64,7 @@ export function Sidebar() {
 				}))}
 			currentPodId={current?.id}
 			view={place.view}
-			unreadMentions={unreadMentions}
+			unreadForYou={unreadForYou}
 			unreadInInbox={unreadInInbox}
 			waitingApprovals={waitingApprovals}
 			workspace={workspace}
@@ -74,6 +76,12 @@ export function Sidebar() {
 			// A phone has its tabs instead, and Home in place of the pods.
 			className="max-md:hidden"
 			newIn={(pod) => <NewInPodMenu pod={pod} />}
+			directMessages={
+				<DirectMessages
+					selectedConversationId={place.directMessageId}
+					newMessageOpen={place.newDirectMessage}
+				/>
+			}
 			conversationsOf={(pod) => (
 				<ConversationList
 					pod={pod}
@@ -90,6 +98,10 @@ interface SidebarPlace {
 	podSlug: string | undefined;
 	view: SidebarView | undefined;
 	selected: ListSelection | undefined;
+	/** The direct message open, if one is. */
+	directMessageId: string | undefined;
+	/** Whether New message is open, starting a direct message. */
+	newDirectMessage: boolean;
 	inSettings: boolean;
 }
 
@@ -136,6 +148,9 @@ function useSidebarPlace(): SidebarPlace {
 							: startingWith
 								? { kind: "newThread", handle: startingWith }
 								: undefined,
+		directMessageId:
+			conversation && matchRoute({ to: "/$workspace/dm/$conversation" }) ? conversation : undefined,
+		newDirectMessage: Boolean(matchRoute({ to: "/$workspace/dm/new" })),
 		inSettings,
 	};
 }
@@ -144,7 +159,7 @@ export function SidebarView({
 	pods,
 	currentPodId,
 	view,
-	unreadMentions = 0,
+	unreadForYou = 0,
 	unreadInInbox = 0,
 	waitingApprovals = 0,
 	workspace,
@@ -155,6 +170,7 @@ export function SidebarView({
 	onSignOut,
 	className,
 	newIn,
+	directMessages,
 	conversationsOf,
 }: {
 	/** Every pod the viewer reaches, shared first, then Personal, with how each stands. */
@@ -162,9 +178,12 @@ export function SidebarView({
 	/** The pod the page open is in, while it is in one. */
 	currentPodId: string | undefined;
 	view: SidebarView | undefined;
-	/** How many unread messages in Inbox mention the viewer, which Inbox counts. */
-	unreadMentions?: number;
-	/** How much in Inbox the viewer has not read, which marks Inbox with a dot while nothing mentions them. */
+	/**
+	 * How many unread messages are written to the viewer, mentioning them or in
+	 * their direct messages, which Inbox counts.
+	 */
+	unreadForYou?: number;
+	/** How much in Inbox the viewer has not read, which marks Inbox with a dot while nothing is written to them. */
 	unreadInInbox?: number;
 	/** How many approvals wait on the viewer, which Approvals counts. */
 	waitingApprovals?: number;
@@ -180,6 +199,8 @@ export function SidebarView({
 	className?: string;
 	/** What makes a channel or a bot in a pod, at the end of its name. */
 	newIn?: (pod: Pod) => ReactNode;
+	/** The viewer's direct messages, under the pods. */
+	directMessages?: ReactNode;
 	/** A pod's channels and bots, under its artifacts. */
 	conversationsOf: (pod: Pod) => ReactNode;
 }) {
@@ -209,9 +230,7 @@ export function SidebarView({
 					icon={<Inbox />}
 					label="Inbox"
 					selected={view === "inbox"}
-					end={
-						<InboxNews unreadMentions={unreadMentions} unreadInInbox={unreadInInbox} size="md" />
-					}
+					end={<InboxNews unreadForYou={unreadForYou} unreadInInbox={unreadInInbox} size="md" />}
 				/>
 				<SidebarLink
 					render={<Link from="/$workspace" to="./approvals" />}
@@ -270,6 +289,7 @@ export function SidebarView({
 						</SidebarPod>
 					);
 				})}
+				{directMessages}
 			</div>
 			<div className="flex items-center gap-1.5 border-border border-t px-3 py-2">
 				{user && workspace ? (

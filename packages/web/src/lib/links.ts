@@ -24,6 +24,30 @@ export function activityLink() {
 	return linkOptions({ from: "/$workspace", to: "./activity" });
 }
 
+/** The person's direct messages with other people. */
+export function directMessagesLink() {
+	return linkOptions({ from: "/$workspace", to: "./dm" });
+}
+
+/** Starting a direct message: choosing whom to, and writing the first message. */
+export function newDirectMessageLink() {
+	return linkOptions({ from: "/$workspace", to: "./dm/new" });
+}
+
+/**
+ * One direct message, by its conversation's id, jumped to `message` when one
+ * is given. The address names no pod, as a direct message between people is
+ * in none.
+ */
+export function directMessageLink(conversationId: string, search: { message?: string } = {}) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./dm/$conversation",
+		params: { conversation: conversationId },
+		search,
+	});
+}
+
 /** A pod's conversation list. */
 export function podLink(pod: Pod) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod", params: { pod: pod.slug } });

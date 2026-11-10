@@ -212,10 +212,10 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
 		);
 
-		expect(await access(member.id).reachesPod(conversation.podId)).toBe(true);
-		expect(await access(administrator.id).reachesPod(conversation.podId)).toBe(true);
+		expect(await access(member.id).hears(podAudience(conversation.podId))).toBe(true);
+		expect(await access(administrator.id).hears(podAudience(conversation.podId))).toBe(true);
 		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
-		expect(await access(elsewhere.id).reachesPod(conversation.podId)).toBe(false);
+		expect(await access(elsewhere.id).hears(podAudience(conversation.podId))).toBe(false);
 	});
 
 	it("gives an administrator without a row in the pod nothing, since reach is the row", async () => {
@@ -224,10 +224,19 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			db
 				.delete(podMember)
 				.where(
-					and(eq(podMember.podId, conversation.podId), eq(podMember.userId, administrator.id)),
+					and(
+						eq(podMember.podId, podAudience(conversation.podId).podId),
+						eq(podMember.userId, administrator.id),
+					),
 				),
 		);
 
 		expect(await access(administrator.id).thread(conversation.id)).toBeUndefined();
 	});
 });
+
+/** Who hears what is said of a thread in the pod `podId`, which a fixture's conversation is always in. */
+function podAudience(podId: string | null) {
+	if (podId === null) throw new Error("The fixture's conversation is in no pod");
+	return { kind: "pod" as const, podId };
+}

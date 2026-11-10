@@ -13,6 +13,7 @@ import {
 	collaborationStatusSchema,
 	MESSAGE_MAX_LENGTH,
 	messageSchema,
+	personParticipantSchema,
 	threadParticipantSchema,
 	toolCallPartSchema,
 } from "./threads.ts";
@@ -37,16 +38,21 @@ export type ChatPageQuery = typeof chatPageQuerySchema.Type;
 const conversationFields = {
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	podId: uuidSchema,
 	title: Schema.String,
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 };
 
+/** What every kind of conversation in a pod has: all but a direct message. */
+const inPodFields = {
+	...conversationFields,
+	podId: uuidSchema,
+};
+
 /** One of a shared pod's chats, where its people talk and start threads. */
 export const podChatSchema = Schema.Struct({
 	kind: Schema.Literal("pod_chat"),
-	...conversationFields,
+	...inPodFields,
 	/** Whether it is the pod's first chat, which is never archived. */
 	main: Schema.Boolean,
 	/** When somebody archived it; null while it is listed. */
@@ -62,7 +68,7 @@ export type PodChat = typeof podChatSchema.Type;
  */
 export const conversationThreadSchema = Schema.Struct({
 	kind: Schema.Literal("thread"),
-	...conversationFields,
+	...inPodFields,
 	/** The bot it is with; null when it is between people. */
 	hostAgentId: Schema.NullOr(uuidSchema),
 	/** The pod's chat it was started from, by its id; null when it was started with a bot directly. */
@@ -79,7 +85,7 @@ export type ConversationThread = typeof conversationThreadSchema.Type;
  */
 export const botChannelSchema = Schema.Struct({
 	kind: Schema.Literal("bot_channel"),
-	...conversationFields,
+	...inPodFields,
 	/** The bot the channel is with. */
 	hostAgentId: uuidSchema,
 });
@@ -89,7 +95,7 @@ export type BotChannel = typeof botChannelSchema.Type;
 /** A routine's own thread, where each of its runs posts. */
 export const routineFeedSchema = Schema.Struct({
 	kind: Schema.Literal("routine_feed"),
-	...conversationFields,
+	...inPodFields,
 	/** The bot that runs the routine. */
 	hostAgentId: uuidSchema,
 	routineId: uuidSchema,
@@ -97,12 +103,28 @@ export const routineFeedSchema = Schema.Struct({
 
 export type RoutineFeed = typeof routineFeedSchema.Type;
 
-/** Something people open and post in: a pod's chat, a bot's channel, a thread, or a routine's thread. */
+/** The most people a direct message between people may have, its sender included. */
+export const MAX_DIRECT_MESSAGE_PEOPLE = 9;
+
+/**
+ * A direct message between two people, or a group of them, which nobody else
+ * sees. It is in no pod, and has no bots. Its people never change: a
+ * different set of people is a different one.
+ */
+export const directSchema = Schema.Struct({
+	kind: Schema.Literal("direct"),
+	...conversationFields,
+});
+
+export type Direct = typeof directSchema.Type;
+
+/** Something people open and post in: a pod's chat, a bot's channel, a thread, a routine's thread, or a direct message. */
 export const conversationSchema = Schema.Union([
 	podChatSchema,
 	botChannelSchema,
 	conversationThreadSchema,
 	routineFeedSchema,
+	directSchema,
 ]);
 
 export type Conversation = typeof conversationSchema.Type;
@@ -218,7 +240,6 @@ export type ApprovalInbox = typeof approvalInboxSchema.Type;
 
 /** Where something in the activity feed happened, and whether the person has caught up with it. */
 const activityPlaceFields = {
-	podId: uuidSchema,
 	/** The conversation it is in, which opens it. */
 	conversationId: uuidSchema,
 	at: isoTimestampSchema,
@@ -242,6 +263,8 @@ export const activityItemSchema = Schema.Union([
 		author: threadParticipantSchema,
 		/** The start of what it says. */
 		preview: Schema.String,
+		/** The pod it is in; null in a direct message between people, which is in none. */
+		podId: Schema.NullOr(uuidSchema),
 		...activityPlaceFields,
 	}),
 	Schema.Struct({
@@ -256,6 +279,7 @@ export const activityItemSchema = Schema.Union([
 		agent: agentParticipantSchema,
 		/** The start of the run's last reply, or null while it has written nothing. */
 		preview: Schema.NullOr(Schema.String),
+		podId: uuidSchema,
 		...activityPlaceFields,
 	}),
 	Schema.Struct({
@@ -267,6 +291,7 @@ export const activityItemSchema = Schema.Union([
 		status: collaborationStatusSchema,
 		/** What the asking bot asked. */
 		brief: Schema.String,
+		podId: uuidSchema,
 		...activityPlaceFields,
 	}),
 ]);
@@ -339,6 +364,66 @@ export const chatListSchema = Schema.Struct({
 });
 
 export type ChatList = typeof chatListSchema.Type;
+
+/**
+ * One of the person's direct messages, with one other person or a group.
+ * `people` leaves out the person themselves, and anybody who has left the
+ * workspace; `formerMembers` counts those.
+ */
+export const directMessageListItemSchema = Schema.Struct({
+	conversation: directSchema,
+	/** The others in it, by name. */
+	people: Schema.mutable(Schema.Array(personParticipantSchema)),
+	/** How many others in it have left the workspace. */
+	formerMembers: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	/** Its newest message with words in it, or null until one is written. */
+	lastMessage: Schema.NullOr(
+		Schema.Struct({
+			/** The message's first line, shortened for a one-line row. */
+			preview: Schema.String,
+			/** Who wrote it; null once their account is gone. */
+			authorUserId: Schema.NullOr(uuidSchema),
+			at: isoTimestampSchema,
+		}),
+	),
+	/** How many messages the others finished since the person last read it or wrote in it. */
+	unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+export type DirectMessageListItem = typeof directMessageListItemSchema.Type;
+
+/** The person's direct messages in a workspace, the most recent message first. */
+export const directMessageListSchema = Schema.Struct({
+	items: Schema.mutable(Schema.Array(directMessageListItemSchema)),
+});
+
+export type DirectMessageList = typeof directMessageListSchema.Type;
+
+/**
+ * A message to one person or a group: it goes to the direct message between
+ * the sender and them, which is opened if they have none. Naming the sender
+ * too changes nothing, so up to the whole group may be named.
+ */
+export const newDirectMessageSchema = Schema.Struct({
+	/** The others it is to, by id. */
+	userIds: Schema.Array(uuidSchema).check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_DIRECT_MESSAGE_PEOPLE),
+	),
+	/** The message's id, so sending it again does not send it twice. */
+	id: uuidSchema,
+	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
+});
+
+export type NewDirectMessage = typeof newDirectMessageSchema.Type;
+
+/** The direct message a new message went to, and the message. */
+export const sentDirectMessageSchema = Schema.Struct({
+	conversation: directSchema,
+	message: messageSchema,
+}).annotate({ identifier: "SentDirectMessage" });
+
+export type SentDirectMessage = typeof sentDirectMessageSchema.Type;
 
 /** A message that starts a thread from a pod's chat, and the bot it is for, if one. */
 export const newThreadSchema = Schema.Struct({

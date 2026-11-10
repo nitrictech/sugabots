@@ -56,7 +56,7 @@ export function ChatThreadPanel({
 	onOpenArtifact?: (artifactId: string) => void;
 }) {
 	const query = useThread(threadId);
-	const authorLinkOf = useAuthorLinks(query.data?.thread.podId);
+	const authorLinkOf = useAuthorLinks(query.data?.thread.podId ?? undefined);
 	useThreadEvents(threadId);
 	const notices = useThreadNotices(threadId);
 	const heading = useRef<HTMLHeadingElement>(null);
@@ -119,7 +119,8 @@ export function ChatThreadPanel({
 					: title,
 		subheading: type === "collaboration" ? other && `${mine?.name} and ${other.name}` : undefined,
 		headingRef: heading,
-		actions: type === "routine" && routineExecution && (
+		// A routine's run is always in its bot's pod.
+		actions: type === "routine" && routineExecution && details.thread.podId && (
 			<RoutineHeaderActions execution={routineExecution} podId={details.thread.podId} />
 		),
 	};

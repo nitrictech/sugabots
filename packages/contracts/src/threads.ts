@@ -30,6 +30,7 @@ export const threadTypeSchema = Schema.Literals([
 	"routine",
 	"routine_feed",
 	"system_agent",
+	"direct",
 ]);
 
 export type ThreadType = typeof threadTypeSchema.Type;
@@ -46,6 +47,7 @@ export const NOTIFYING_THREAD_TYPES: ReadonlySet<ThreadType> = new Set([
 	"conversation",
 	"pod_chat",
 	"bot_channel",
+	"direct",
 ]);
 
 export const threadHistoryQuerySchema = Schema.Struct({
@@ -65,7 +67,8 @@ export type ThreadHistoryQuery = typeof threadHistoryQuerySchema.Type;
 export const threadSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	podId: uuidSchema,
+	/** The pod it is in; null on a direct message between people, which is in none. */
+	podId: Schema.NullOr(uuidSchema),
 	/** The bot the thread is with; null on a pod's chat, and on a thread between people. */
 	hostAgentId: Schema.NullOr(uuidSchema),
 	/**

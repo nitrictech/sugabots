@@ -23,6 +23,7 @@ import {
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
+import { threadPodId } from "../../threads/rooms.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
 import { withImagesCounted } from "../../tools/images.ts";
 import { mayRunTools } from "../lifecycle.ts";
@@ -273,7 +274,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.ToolCallDecided({
 								...toolCallChange(decided, placed.deciderName),
 								workspaceId: placed.workspaceId,
-								podId: placed.podId,
+								podId: threadPodId(decided.threadId, placed.podId),
 							}),
 						]);
 						return true;
@@ -314,7 +315,7 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(connection.id, binding.connectionId),
 											eq(connection.workspaceId, scope.workspaceId),
-											eq(connection.podId, scope.podId),
+											eq(connection.podId, threadPodId(input.threadId, scope.podId)),
 											eq(connection.configurationRevision, binding.connectionRevision),
 										),
 									)

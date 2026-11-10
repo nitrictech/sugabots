@@ -12,6 +12,7 @@ import type { ConversationEvent } from "../../events.ts";
 import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
+import { threadPodId } from "../../threads/rooms.ts";
 import { lineageOf } from "../../threads/tree.ts";
 import { makeRecords, type WaitOutcome } from "./repository.ts";
 
@@ -209,7 +210,7 @@ const crewNamed = (parent: schema.ThreadRow, name: string) =>
 				.from(agent)
 				.where(
 					and(
-						crewOf(parent.podId),
+						crewOf(threadPodId(parent.id, parent.podId)),
 						eq(agent.workspaceId, parent.workspaceId),
 						sql`lower(${agent.name}) = lower(${name.trim()})`,
 					),

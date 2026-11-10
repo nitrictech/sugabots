@@ -18,6 +18,7 @@ import type * as schema from "../../database/schema.ts";
 import {
 	agent,
 	collaboration,
+	directMember,
 	message,
 	messageReaction,
 	routineExecution,
@@ -45,6 +46,7 @@ import {
 	withReplyTo,
 } from "./participants.ts";
 import type { Channel, ThreadId } from "./rooms.ts";
+import { threadPodId } from "./rooms.ts";
 
 /**
  * The only writer of `thread`, `thread_participant` and `thread_read`,
@@ -64,6 +66,16 @@ export interface Interface {
 		podId: string;
 		hostAgentId: string;
 		initiatorUserId: string | null;
+	}) => Effect.Effect<schema.ThreadRow>;
+	/**
+	 * The direct message between `memberIds` in the workspace, in no pod,
+	 * created on first use with them as its members: one for each set of
+	 * people, whichever of them opens it, however their ids are written.
+	 */
+	readonly openDirect: (placement: {
+		workspaceId: string;
+		memberIds: readonly string[];
+		initiatorUserId: string;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * The thread hanging off the message `originMessageId` in the channel
@@ -275,6 +287,26 @@ function resultOf(run: RunPosting): NonNullable<Message["routineResultOf"]> {
 	};
 }
 
+/**
+ * What a direct message between people is called where a title is needed:
+ * lists name it for the others in it, who differ for each of them.
+ */
+const DIRECT_MESSAGE_TITLE = "Direct message";
+
+/** What names the direct message between these people, whichever of them opens it. */
+function directKeyOf(memberIds: readonly string[]): string {
+	// Lower-cased as Postgres writes a uuid, so the same people are named the same way.
+	const ids = new Set(memberIds.map((id) => id.toLowerCase()));
+	return [...ids].sort().join(DIRECT_KEY_SEPARATOR);
+}
+
+const DIRECT_KEY_SEPARATOR = ":";
+
+/** The people a direct message's key names, by id. */
+export function membersOfDirectKey(directKey: string): string[] {
+	return directKey.split(DIRECT_KEY_SEPARATOR);
+}
+
 /** One person's emoji on a message in a thread. */
 export interface Reaction {
 	readonly threadId: string;
@@ -472,6 +504,62 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		openDirect: (placement) =>
+			operation(
+				"openDirect",
+				transaction(
+					Effect.gen(function* () {
+						const directKey = directKeyOf(placement.memberIds);
+						// Each person once, as the key names them.
+						const memberIds = membersOfDirectKey(directKey);
+						const id = yield* ids.next;
+						const [created] = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: placement.workspaceId,
+									podId: null,
+									hostAgentId: null,
+									conversationId: id,
+									type: "direct",
+									title: DIRECT_MESSAGE_TITLE,
+									directKey,
+									initiatorUserId: placement.initiatorUserId,
+								})
+								.onConflictDoNothing({
+									target: [thread.workspaceId, thread.directKey],
+									where: sql`${thread.type} = 'direct'`,
+								})
+								.returning(),
+						);
+						if (created) {
+							yield* query((db) =>
+								db
+									.insert(directMember)
+									.values(memberIds.map((userId) => ({ threadId: created.id, userId }))),
+							);
+							return created;
+						}
+						const [opened] = yield* query((db) =>
+							db
+								.select()
+								.from(thread)
+								.where(
+									and(
+										eq(thread.workspaceId, placement.workspaceId),
+										eq(thread.type, "direct"),
+										eq(thread.directKey, directKey),
+									),
+								)
+								.limit(1),
+						);
+						if (!opened) return yield* Effect.die(new Error("The direct message was not opened"));
+						return opened;
+					}),
+				),
+			),
+
 		openThread: (input) =>
 			operation(
 				"openThread",
@@ -522,7 +610,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ThreadOpened({
 								workspaceId: created.workspaceId,
-								podId: created.podId,
+								podId: threadPodId(created.id, created.podId),
 								parentThreadId: input.parent.id,
 								threadId: created.id,
 							}),
@@ -576,7 +664,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.BriefedThreadStarted({
 								workspaceId: created.workspaceId,
-								podId: created.podId,
+								podId: threadPodId(created.id, created.podId),
 								threadId: created.id,
 								hostAgentId: input.hostAgentId,
 								briefMessageId: brief.id,
@@ -609,7 +697,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ConversationDoneChanged({
 								workspaceId: conversation.workspaceId,
-								podId: conversation.podId,
+								podId: threadPodId(conversation.id, conversation.podId),
 								threadId: conversation.id,
 							}),
 						]);
@@ -681,7 +769,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.PodChatChanged({
 								workspaceId: started.workspaceId,
-								podId: started.podId,
+								podId: threadPodId(started.id, started.podId),
 								threadId: started.id,
 							}),
 						]);
@@ -713,7 +801,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.PodChatChanged({
 								workspaceId: chat.workspaceId,
-								podId: chat.podId,
+								podId: threadPodId(chat.id, chat.podId),
 								threadId: chat.id,
 							}),
 						]);

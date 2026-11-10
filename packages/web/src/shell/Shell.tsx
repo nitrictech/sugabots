@@ -22,10 +22,10 @@ export function Shell() {
 	useWorkspaceEvents();
 	useNotificationsInThisBrowser();
 	useVisibleHeight();
-	const { unreadMentions, waitingApprovals } = useAttentionCounts();
+	const { unreadForYou, waitingApprovals } = useAttentionCounts();
 	const { workspace } = useWorkspace();
 	useAppBadge(
-		unreadMentions + waitingApprovals,
+		unreadForYou + waitingApprovals,
 		workspace ? `${APP_NAME} | ${workspace.name}` : APP_NAME,
 	);
 

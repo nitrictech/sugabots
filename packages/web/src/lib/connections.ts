@@ -61,8 +61,8 @@ export interface ConnectionLook {
  * missing from the map belongs to a connection that has since been removed;
  * callers write the handle out rather than dropping the step.
  */
-export function useConnectionLooks(podId: string): ReadonlyMap<string, ConnectionLook> {
-	const connections = useConnections(podId);
+export function useConnectionLooks(podId: string | null): ReadonlyMap<string, ConnectionLook> {
+	const connections = useConnections(podId ?? undefined);
 	const found = connections.data;
 	return useMemo(() => {
 		const looks = new Map<string, ConnectionLook>();

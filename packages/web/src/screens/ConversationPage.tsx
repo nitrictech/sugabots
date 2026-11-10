@@ -10,7 +10,8 @@ import { ConversationChat, type Staged, type StagedChange } from "./Conversation
 interface ConversationPageProps {
 	/** Which kind of conversation it is, and its bot when it has one. */
 	conversation: ConversationKind;
-	pod: Pod;
+	/** The pod it is in; null for a direct message between people, which is in none. */
+	pod: Pod | null;
 	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
@@ -26,10 +27,20 @@ interface ConversationPageProps {
 	/** What is open large beside the chat. */
 	staged?: Staged;
 	onStagedChange: StagedChange;
+	/** Without its header, as New message shows a conversation under its To field. */
+	headerless?: boolean;
+	/** Once a message written here has been sent. */
+	onSent?: () => void;
+	/**
+	 * Hidden under something else on the page, as New message's suggestions
+	 * cover the conversation under them: the viewer is not looking at it, so
+	 * it is neither read nor kept from notifying them.
+	 */
+	covered?: boolean;
 }
 
 export function ConversationPage({ away, ...chat }: ConversationPageProps) {
-	usePresence(chat.conversationId);
+	usePresence(chat.covered ? undefined : chat.conversationId);
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"

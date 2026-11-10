@@ -1,10 +1,15 @@
 import type { ActivityItem, Pod } from "@sugabots/contracts";
 import { Link, linkOptions, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CheckCheck, Inbox as InboxIcon, ListFilter } from "lucide-react";
+import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
-import { useActivityFeed, useAttentionCounts, useMarkChatsRead } from "@/lib/chats.ts";
-import { activityThreadLink } from "@/lib/links.ts";
+import {
+	useActivityFeed,
+	useAttentionCounts,
+	useDirectMessages,
+	useMarkChatsRead,
+} from "@/lib/chats.ts";
+import { activityThreadLink, directMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { usePods } from "@/lib/pods.ts";
@@ -71,13 +76,24 @@ export function Inbox({ children }: { children: ReactNode }) {
 		if (!next.delete(kind)) next.add(kind);
 		setKinds(next);
 	};
-	const podOf = (item: ActivityItem) => pods?.find((candidate) => candidate.id === item.podId);
+	// A direct message between people is in no pod.
+	const placeOf = (item: ActivityItem): RowPlace | undefined => {
+		if (item.podId === null) return { kind: "direct" };
+		const pod = pods?.find((candidate) => candidate.id === item.podId);
+		return pod && { kind: "pod", pod };
+	};
 	const markRead = useMarkChatsRead();
-	// Each item is read as its conversation is, so marking those reads them all.
+	const directMessages = useDirectMessages();
+	// Each item is read as its conversation is, so marking those reads them all;
+	// and every direct message with anything unread, which the app's badge counts
+	// however long ago it was written, past what the feed holds.
 	const unreadConversationIds = [
-		...new Set(
-			(feed.data?.items ?? []).filter((item) => item.unread).map((item) => item.conversationId),
-		),
+		...new Set([
+			...(feed.data?.items ?? []).filter((item) => item.unread).map((item) => item.conversationId),
+			...(directMessages.data?.items ?? [])
+				.filter((item) => item.unreadMessages > 0)
+				.map((item) => item.conversation.id),
+		]),
 	];
 
 	return (
@@ -159,7 +175,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 					)}
 					{items.map((item) => (
 						<li key={itemIdOf(item)}>
-							<InboxRow item={item} pod={podOf(item)} selected={isChosen(item, chosen)} />
+							<InboxRow item={item} place={placeOf(item)} selected={isChosen(item, chosen)} />
 						</li>
 					))}
 				</ul>
@@ -369,10 +385,18 @@ function FaceOf({ item }: { item: ActivityItem }) {
 	}
 }
 
+/** The message a row is about, when it is one. */
+function itemMessageId(item: ActivityItem): string | undefined {
+	return item.kind === "mention" || item.kind === "message" ? item.messageId : undefined;
+}
+
 /** The id a row is chosen by: its message's, or its run's or collaboration's thread's. */
 function itemIdOf(item: ActivityItem): string {
 	return item.kind === "routine" || item.kind === "collaboration" ? item.threadId : item.messageId;
 }
+
+/** Where a row's item is: in one of the pods, or in a direct message between people, in none. */
+type RowPlace = { kind: "pod"; pod: Pod } | { kind: "direct" };
 
 /**
  * Where a row opens: a run or collaboration as a page of its own, and a
@@ -398,16 +422,17 @@ function activityItemLink(item: ActivityItem, pod: Pod) {
  */
 function InboxRow({
 	item,
-	pod,
+	place,
 	selected,
 }: {
 	item: ActivityItem;
-	/** The pod the item is in, once the pods are loaded; until then the row cannot open. */
-	pod: Pod | undefined;
+	/** Where the item is, once the pods are loaded; until then the row cannot open. */
+	place: RowPlace | undefined;
 	/** Whether it is the one open beside the list. */
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
+	const pod = place?.kind === "pod" ? place.pod : undefined;
 	const content = (
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
@@ -438,6 +463,12 @@ function InboxRow({
 							<span className="sr-only">in {pod.name}</span>
 						</span>
 					)}
+					{place?.kind === "direct" && (
+						<span title="Direct message" className="flex text-muted-foreground">
+							<MessageCircle aria-hidden size={14} strokeWidth={2} />
+							<span className="sr-only">in a direct message</span>
+						</span>
+					)}
 				</span>
 				<span className="flex min-w-0 items-baseline gap-2">
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{detail}</span>
@@ -447,10 +478,12 @@ function InboxRow({
 		</>
 	);
 	const layout = "flex gap-3 rounded-lg p-2.5";
-	if (!pod) return <div className={layout}>{content}</div>;
+	if (!place) return <div className={layout}>{content}</div>;
 	return (
 		<Link
-			{...activityItemLink(item, pod)}
+			{...(place.kind === "pod"
+				? activityItemLink(item, place.pod)
+				: directMessageLink(item.conversationId, { message: itemMessageId(item) }))}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				layout,

@@ -13,6 +13,7 @@ import { Ids } from "../../../ids/ids.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import { threadPodId } from "../../threads/rooms.ts";
 import { placeOf } from "../sandbox/tools.ts";
 import { DesktopUnavailable, startDesktop } from "./browser.ts";
 
@@ -92,7 +93,10 @@ export const make = Effect.gen(function* () {
 				// The UI hides the desktop then too, but this is what stops a request
 				// from making a sandbox for an agent that a sandbox manager kept off.
 				if (!agent.usesSandbox) return yield* new DesktopUnavailable({ reason: NO_SANDBOX });
-				const pod = { workspaceId: thread.workspaceId, podId: thread.podId };
+				const pod = {
+					workspaceId: thread.workspaceId,
+					podId: threadPodId(thread.id, thread.podId),
+				};
 				const provider = yield* providers.enabled(pod.workspaceId);
 				if (!provider) return yield* new DesktopUnavailable({ reason: SANDBOXES_OFF });
 				const holder: PodSandboxes.Holder = { kind: "viewer", id: yield* ids.random };

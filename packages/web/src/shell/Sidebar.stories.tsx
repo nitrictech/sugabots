@@ -7,6 +7,7 @@ import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { storyChannelFor, storyConversationFor, storyPodChatFor } from "@/story-app.tsx";
 import { ConversationListView } from "./ConversationList.tsx";
+import { DirectMessagesSection } from "./DirectMessages.tsx";
 import { SidebarView } from "./Sidebar.tsx";
 import {
 	accountManager,
@@ -16,6 +17,9 @@ import {
 	leadResearcher,
 	personal,
 	revenue,
+	withMarco,
+	withPriya,
+	withPriyaAndTheo,
 } from "./story-fixtures.ts";
 
 const suga = {
@@ -81,13 +85,16 @@ const meta = preview.meta({
 		],
 		currentPodId: revenue.id,
 		view: undefined,
-		unreadMentions: 1,
+		unreadForYou: 1,
 		unreadInInbox: 3,
 		waitingApprovals: 2,
 		workspace: suga,
 		workspaces: [suga, nitric],
 		user: { name: "Rowan Ellis", email: "rowan@example.com" },
 		onSignOut: fn(),
+		directMessages: (
+			<DirectMessagesSection items={[withPriya, withPriyaAndTheo, withMarco]} status="ready" />
+		),
 		conversationsOf: (pod) =>
 			pod.id === revenue.id ? (
 				revenueList
@@ -123,7 +130,7 @@ const API = import.meta.env.VITE_API_URL as string;
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /^Inbox/ })).toHaveTextContent(
-			"1 unread mention",
+			"1 unread message for you",
 		);
 		await expect(canvas.getByRole("link", { name: /^Approvals/ })).toHaveTextContent(
 			"2 waiting on you",
@@ -141,7 +148,7 @@ export const Default = meta.story({
 
 /** Inbox open, with nothing new in it or waiting: neither counts anything. */
 export const InboxOpen = meta.story({
-	args: { view: "inbox", unreadMentions: 0, unreadInInbox: 0, waitingApprovals: 0 },
+	args: { view: "inbox", unreadForYou: 0, unreadInInbox: 0, waitingApprovals: 0 },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: "Inbox" })).toHaveAttribute(
 			"aria-current",
@@ -158,11 +165,11 @@ export const InboxOpen = meta.story({
  * dot where the count would be, since nothing in it needs you.
  */
 export const InboxUnreadWithoutMentions = meta.story({
-	args: { unreadMentions: 0, unreadInInbox: 3 },
+	args: { unreadForYou: 0, unreadInInbox: 3 },
 	play: async ({ canvas }) => {
 		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
 		await expect(inbox).toHaveTextContent("3 unread items");
-		await expect(inbox).not.toHaveTextContent(/\d+ unread mention/);
+		await expect(inbox).not.toHaveTextContent(/\d+ unread messages? for you/);
 	},
 });
 

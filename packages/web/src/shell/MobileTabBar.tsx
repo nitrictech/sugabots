@@ -23,8 +23,8 @@ type MobileTab = (typeof TABS)[number];
 export function MobileTabBar({ className }: { className?: string }) {
 	const tab = useMobileTab();
 	const typing = useTyping();
-	const homePod = useHomePodSlug();
-	const { unreadMentions, unreadInInbox, waitingApprovals } = useAttentionCounts();
+	const home = useHomePlace();
+	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { user } = useSession();
 	if (typing) return null;
 	return (
@@ -52,8 +52,10 @@ export function MobileTabBar({ className }: { className?: string }) {
 				/>
 				<TabLink
 					render={
-						homePod ? (
-							<Link from="/$workspace" to="./pods/$pod" params={{ pod: homePod }} />
+						home?.kind === "directMessages" ? (
+							<Link from="/$workspace" to="./dm" />
+						) : home?.kind === "pod" ? (
+							<Link from="/$workspace" to="./pods/$pod" params={{ pod: home.slug }} />
 						) : (
 							<Link from="/$workspace" to="./agents" />
 						)
@@ -67,9 +69,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 					current={tab === "inbox"}
 					icon={<Inbox />}
 					label="Inbox"
-					count={
-						<InboxNews unreadMentions={unreadMentions} unreadInInbox={unreadInInbox} size="sm" />
-					}
+					count={<InboxNews unreadForYou={unreadForYou} unreadInInbox={unreadInInbox} size="sm" />}
 				/>
 				<TabLink
 					render={<Link from="/$workspace" to="./approvals" />}
@@ -185,15 +185,31 @@ function isTextEntry(element: Element | null): boolean {
 	return element instanceof HTMLElement && element.isContentEditable;
 }
 
+/** Where Home goes back to: a pod, or the direct messages. */
+type HomePlace = { kind: "pod"; slug: string } | { kind: "directMessages" };
+
 /**
- * The pod Home last showed, so coming back to Home from another tab returns
- * to it; until one is shown, Home opens the workspace's first.
+ * The pod or the direct messages Home last showed, so coming back to Home
+ * from another tab returns there; until one is shown, Home opens the
+ * workspace's first pod.
  */
-function useHomePodSlug(): string | undefined {
+function useHomePlace(): HomePlace | undefined {
 	const { pod } = useParams({ strict: false });
+	const matchRoute = useMatchRoute();
 	const { data: pods } = usePods();
-	const [last, setLast] = useState<string>();
-	if (pod !== undefined && pod !== last) setLast(pod);
-	const remembered = pod ?? last;
-	return remembered !== undefined && findPod(pods, remembered) ? remembered : undefined;
+	const [last, setLast] = useState<HomePlace>();
+	const showing: HomePlace | undefined = matchRoute({ to: "/$workspace/dm", fuzzy: true })
+		? { kind: "directMessages" }
+		: pod !== undefined
+			? { kind: "pod", slug: pod }
+			: undefined;
+	if (showing && !samePlace(showing, last)) setLast(showing);
+	const remembered = showing ?? last;
+	if (remembered?.kind === "pod" && !findPod(pods, remembered.slug)) return undefined;
+	return remembered;
+}
+
+function samePlace(left: HomePlace, right: HomePlace | undefined): boolean {
+	if (left.kind === "pod") return right?.kind === "pod" && right.slug === left.slug;
+	return right?.kind === left.kind;
 }

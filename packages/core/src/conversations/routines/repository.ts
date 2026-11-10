@@ -16,6 +16,7 @@ import { routine, routineExecution, routineTrigger, thread } from "../../databas
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { threadPodId } from "../threads/rooms.ts";
 import type { Turns } from "../turns/turns.ts";
 import { inScope, type Scope } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
@@ -157,7 +158,7 @@ export const make = Effect.gen(function* () {
 			if (!root?.conversationId) {
 				return yield* Effect.die(new Error("Routine thread is in no conversation"));
 			}
-			return { conversationId: root.conversationId, podId: root.podId };
+			return { conversationId: root.conversationId, podId: threadPodId(run.threadId, root.podId) };
 		});
 
 	/**

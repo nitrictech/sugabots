@@ -2,8 +2,8 @@ import { type Channel, type StreamEvent, streamEvent } from "@sugabots/contracts
 import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { toPerson } from "@sugabots/core/conversations/threads/participants";
+import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import { userText } from "@sugabots/errors";
 import {
 	Clock,
@@ -97,7 +97,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					since: resumeFrom(request.headers["last-event-id"]),
 					timing,
 					stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
-					mayHear: (podId) => access.reachesPod(podId),
+					mayHear: (audience) => access.hears(audience),
 				});
 			}).pipe(asSessionUser);
 
@@ -160,11 +160,10 @@ const streamChannel = Effect.fnUntraced(function* ({
 	 */
 	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
 	/**
-	 * Whether the actor may hear an event meant only for the people who reach
-	 * the pod `podId` (see `PodAudience`). One they may not is skipped, not
-	 * the end of the stream.
+	 * Whether the actor may hear an event meant only for `audience` (see
+	 * `Audience`). One they may not is skipped, not the end of the stream.
 	 */
-	mayHear: (podId: string) => Effect.Effect<boolean, never, CurrentActor.Service>;
+	mayHear: (audience: Audience.Group) => Effect.Effect<boolean, never, CurrentActor.Service>;
 }) {
 	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
 	const recheckMillis = Duration.toMillis(Duration.fromInputUnsafe(recheck));
@@ -215,12 +214,12 @@ const streamChannel = Effect.fnUntraced(function* ({
 								authorizedUntil = now + recheckMillis;
 							}
 							if (leaving.signal.aborted) break;
-							const audience = PodAudience.audienceOf(delivery.event);
-							if (audience.podId !== undefined && !(await runPromise(mayHear(audience.podId)))) {
+							const heard = Audience.read(delivery.event);
+							if (heard.audience && !(await runPromise(mayHear(heard.audience)))) {
 								continue;
 							}
 							if (
-								!(await runPromise(Queue.offer(queue, frame(delivery.seq, audience.event)), {
+								!(await runPromise(Queue.offer(queue, frame(delivery.seq, heard.event)), {
 									signal: leaving.signal,
 								}))
 							) {

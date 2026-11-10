@@ -66,6 +66,7 @@ export function ChatComposer({
 	addressed,
 	attachments,
 	needsText = false,
+	hasRecipients = true,
 	notice,
 }: {
 	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
@@ -98,6 +99,8 @@ export function ChatComposer({
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
 	needsText?: boolean;
+	/** Whether the message has anybody to go to: Send is off until it does, as in New message until somebody is chosen. */
+	hasRecipients?: boolean;
 	/** A strip over everything else in the box, of what the person should know before sending, such as a connection bots can't use. */
 	notice?: ReactNode;
 }) {
@@ -346,7 +349,10 @@ export function ChatComposer({
 						type="submit"
 						aria-label={submitLabel}
 						disabled={
-							sending || !canSend(value, attachments.items) || (needsText && value.trim() === "")
+							sending ||
+							!hasRecipients ||
+							!canSend(value, attachments.items) ||
+							(needsText && value.trim() === "")
 						}
 						className="focus-ring grid size-7.5 place-items-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
 					>

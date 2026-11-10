@@ -3,9 +3,9 @@ export * as ThreadFeed from "./thread-feed.ts";
 import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { Effect } from "effect";
+import { Audience } from "../database/events/audience.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
-import { PodAudience } from "../database/events/pod-audience.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
@@ -22,8 +22,8 @@ export const handler =
  *
  * A thread's events go on its own channel. The workspace channel, which feeds
  * the lists, hears `thread.changed` naming the thread whenever what a list
- * shows of it may have changed, for the people who reach the thread's pod
- * alone (see `PodAudience`).
+ * shows of it may have changed, for the people who reach the thread alone
+ * (see `Audience`).
  */
 function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 	return ConversationEvent.$match(event, {
@@ -181,10 +181,17 @@ function threadChanged(workspaceId: string, podId: string, threadId: string): Pe
 	];
 }
 
-function listedThreadChanged(workspaceId: string, podId: string, threadId: string): PendingEvent {
+/** `podId` is null for a direct message between people, which is in no pod. */
+function listedThreadChanged(
+	workspaceId: string,
+	podId: string | null,
+	threadId: string,
+): PendingEvent {
+	const event = streamEvent("thread.changed", { threadId });
 	return {
 		channel: workspaceChannel(workspaceId),
-		event: PodAudience.forPod(podId, streamEvent("thread.changed", { threadId })),
+		event:
+			podId === null ? Audience.forDirectMessage(threadId, event) : Audience.forPod(podId, event),
 	};
 }
 
@@ -197,7 +204,7 @@ function conversationThreadChanged(
 ): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
-		event: PodAudience.forPod(
+		event: Audience.forPod(
 			podId,
 			streamEvent("conversation.thread_changed", { conversationId, threadId }),
 		),

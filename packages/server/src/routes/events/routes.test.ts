@@ -1,7 +1,7 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
+import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -137,7 +137,7 @@ describe("authorisation", () => {
 		const { app } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.undefined,
-			reachesPod: () => Effect.succeed(false),
+			hears: () => Effect.succeed(false),
 			me: () => Effect.succeed("person:me"),
 		});
 
@@ -154,7 +154,7 @@ describe("authorisation", () => {
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),
-			reachesPod: () => Effect.succeed(true),
+			hears: () => Effect.succeed(true),
 			me: () => Effect.succeed("person:me"),
 		});
 
@@ -270,7 +270,7 @@ describe("the stream", () => {
 			{
 				workspace: () => Effect.undefined,
 				thread: () => Effect.succeed(channel),
-				reachesPod: () => Effect.succeed(true),
+				hears: () => Effect.succeed(true),
 				me: () => Effect.succeed("person:me"),
 			},
 			{ recheck: 0 },
@@ -292,7 +292,7 @@ describe("the stream", () => {
 					asked += 1;
 					return "thread:root" as const;
 				}),
-			reachesPod: () => Effect.succeed(true),
+			hears: () => Effect.succeed(true),
 			me: () => Effect.succeed("person:me"),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);
@@ -388,11 +388,11 @@ describe("events meant for one pod's people", () => {
 	const UNREACHED = "0199a3a0-0000-7000-8000-0000000000c2";
 	const reachingOne: ChannelAccess.Interface = {
 		...openChannelAccess,
-		reachesPod: (podId) => Effect.succeed(podId === REACHED),
+		hears: (audience) => Effect.succeed(audience.kind === "pod" && audience.podId === REACHED),
 	};
 	const channel = `workspace:${WORKSPACE}` as const;
 	const about = (podId: string, threadId: string) =>
-		PodAudience.forPod(podId, streamEvent("thread.changed", { threadId }));
+		Audience.forPod(podId, streamEvent("thread.changed", { threadId }));
 
 	it("skips what a listener outside the pod may not hear, and sends the rest without the pod", async () => {
 		const { app, bus } = server(reachingOne);

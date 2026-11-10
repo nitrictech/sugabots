@@ -3,20 +3,29 @@ export * as Chats from "./chats.ts";
 import type {
 	BotChannel,
 	ConversationThread,
+	Direct,
 	Message,
 	PodChat,
 	RoutineFeed,
 	ThreadType,
 } from "@sugabots/contracts";
+import { MAX_DIRECT_MESSAGE_PEOPLE } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, isNotNull, isNull, not, notExists, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, not, notExists, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, message, pod, routine, type ThreadRow } from "../../database/schema.ts";
+import {
+	agent,
+	message,
+	pod,
+	routine,
+	type ThreadRow,
+	workspaceMember,
+} from "../../database/schema.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
@@ -24,9 +33,15 @@ import { FloorControl } from "../floor/floor-control.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { crewOf, personColumns } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { isChannel } from "../threads/rooms.ts";
+import { isChannel, threadPodId } from "../threads/rooms.ts";
 import { Turns } from "../turns/turns.ts";
-import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
+import {
+	toBotChannel,
+	toConversationThread,
+	toDirect,
+	toPodChat,
+	toRoutineFeed,
+} from "./conversation.ts";
 import { threadTitleFrom } from "./thread-title.ts";
 
 /**
@@ -46,6 +61,26 @@ export interface Interface {
 		podId: string;
 		hostAgentId: string;
 	}) => Effect.Effect<BotChannel, AuthorizationDenied | HostNotCrew, CurrentActor.Service>;
+	/**
+	 * Posts the actor's message to `userIds`, other members of the workspace
+	 * named by its id or its slug, in the direct message between them and the
+	 * actor, which is opened first if there is none: one for each set of
+	 * people, so adding somebody makes another and they never see what was
+	 * said before. Hidden when any is not a member; refused when nobody but the
+	 * actor is named, or more than `MAX_DIRECT_MESSAGE_PEOPLE` would be in it.
+	 * Sending the same message again returns it unchanged.
+	 */
+	readonly sendDirectMessage: (input: {
+		workspace: string;
+		/** The others it is to; the actor is in it, and named here or not changes nothing. */
+		userIds: readonly string[];
+		messageId: string;
+		content: string;
+	}) => Effect.Effect<
+		{ conversation: Direct; message: Message },
+		AuthorizationDenied | DirectToSelf | TooManyInDirect | ThreadRepository.MessageIdConflict,
+		CurrentActor.Service
+	>;
 	/**
 	 * The shared pod's first chat, opened on first use, in a workspace named by
 	 * its id or its slug. Hidden unless the actor reaches the pod; a Personal
@@ -222,6 +257,78 @@ export const make = Effect.gen(function* () {
 			});
 		});
 
+	/**
+	 * Posts the actor's message in `conversation`, which they have been found
+	 * to reach, and gives the floor, unless it is a direct message, which has
+	 * no bots. Posting the same message again returns it unchanged.
+	 */
+	const postIn = (
+		conversation: ThreadRow,
+		input: {
+			messageId: string;
+			content: string;
+			attachments?: readonly string[];
+			replyTo?: string;
+		},
+	) =>
+		Effect.gen(function* () {
+			const sender = yield* senderOf(yield* CurrentActor.Service);
+			const posted = yield* threads.post({
+				id: input.messageId,
+				threadId: conversation.id,
+				author: sender,
+				content: input.content,
+				replyTo: input.replyTo,
+				attachments: input.attachments ?? [],
+			});
+			if (posted._tag === "AlreadyPosted") return posted.message;
+			// A direct message is between people only: it is never done, and no bot is there to answer.
+			if (conversation.type === "direct") return posted.message;
+			// Something new in a done conversation is not left where nobody looks.
+			yield* threads.setDone(conversation, false);
+			// Checked once the message is known to be new, so sending it again
+			// still returns it; refusing here rolls the post back.
+			if (conversation.hostAgentId && (yield* hostModelOf(conversation.hostAgentId)) === null) {
+				return yield* new HostHasNoModel();
+			}
+			yield* floor.giveFloor({
+				id: posted.message.id,
+				threadId: conversation.id,
+				content: posted.message.content,
+			});
+			return posted.message;
+		});
+
+	/**
+	 * The others a direct message from `actorId` to `userIds` is with, by the
+	 * ids the workspace's members are stored under, so the same people are
+	 * named the same way however the request wrote them.
+	 */
+	const directMessageOthers = Effect.fnUntraced(function* (
+		workspaceId: string,
+		actorId: string,
+		userIds: readonly string[],
+	) {
+		if (!userIds.every(isUuid)) return yield* new ResourceHidden({ resource: "member" });
+		const named = new Set(userIds.map((id) => id.toLowerCase()));
+		const othersNamed = [...named].filter((id) => id !== actorId.toLowerCase()).length;
+		if (othersNamed === 0) return yield* new DirectToSelf();
+		if (othersNamed + 1 > MAX_DIRECT_MESSAGE_PEOPLE) return yield* new TooManyInDirect();
+		const members = yield* query((db) =>
+			db
+				.select({ userId: workspaceMember.userId })
+				.from(workspaceMember)
+				.where(
+					and(
+						eq(workspaceMember.workspaceId, workspaceId),
+						inArray(workspaceMember.userId, [...named]),
+					),
+				),
+		);
+		if (members.length !== named.size) return yield* new ResourceHidden({ resource: "member" });
+		return members.map((member) => member.userId).filter((id) => id !== actorId);
+	});
+
 	return Service.of({
 		openBotChannel: (input) =>
 			operation(
@@ -242,6 +349,38 @@ export const make = Effect.gen(function* () {
 						});
 						yield* startInterview(channel, actor.userId);
 						return toBotChannel(channel);
+					}),
+				),
+			),
+
+		sendDirectMessage: (input) =>
+			operation(
+				"sendDirectMessage",
+				transaction(
+					Effect.gen(function* () {
+						const { workspaceId, actor } = yield* authorization.workspace(
+							input.workspace,
+							"workspace.read",
+						);
+						const otherIds = yield* directMessageOthers(workspaceId, actor.userId, input.userIds);
+						const conversation = yield* threads.openDirect({
+							workspaceId,
+							memberIds: [actor.userId, ...otherIds],
+							initiatorUserId: actor.userId,
+						});
+						// It neither quotes a message nor carries files, so neither can be
+						// missing, and it has no bot, so none can be without a model.
+						const message = yield* postIn(conversation, {
+							messageId: input.messageId,
+							content: input.content,
+						}).pipe(
+							Effect.catchTags({
+								ReplyTargetNotFound: Effect.die,
+								UploadsNotFound: Effect.die,
+								HostHasNoModel: Effect.die,
+							}),
+						);
+						return { conversation: toDirect(conversation), message };
 					}),
 				),
 			),
@@ -309,7 +448,7 @@ export const make = Effect.gen(function* () {
 					const chat = yield* visibility.conversation(input.conversationId);
 					if (chat.type !== "pod_chat")
 						return yield* new ResourceHidden({ resource: "conversation" });
-					yield* authorization.pod(chat.podId, "pod.update");
+					yield* authorization.pod(threadPodId(chat.id, chat.podId), "pod.update");
 					if (chat.archivedAt) return yield* new ChatArchived();
 					if ("archived" in input.change && chat.main) return yield* new FirstChatNotArchivable();
 					yield* threads.changeChat(
@@ -358,32 +497,9 @@ export const make = Effect.gen(function* () {
 			operation(
 				"post",
 				transaction(
-					Effect.gen(function* () {
-						const visible = yield* visibility.conversation(input.conversationId);
-						const sender = yield* senderOf(yield* CurrentActor.Service);
-						const posted = yield* threads.post({
-							id: input.messageId,
-							threadId: visible.id,
-							author: sender,
-							content: input.content,
-							replyTo: input.replyTo,
-							attachments: input.attachments ?? [],
-						});
-						if (posted._tag === "AlreadyPosted") return posted.message;
-						// Something new in a done conversation is not left where nobody looks.
-						yield* threads.setDone(visible, false);
-						// Checked once the message is known to be new, so sending it again
-						// still returns it; refusing here rolls the post back.
-						if (visible.hostAgentId && (yield* hostModelOf(visible.hostAgentId)) === null) {
-							return yield* new HostHasNoModel();
-						}
-						yield* floor.giveFloor({
-							id: posted.message.id,
-							threadId: visible.id,
-							content: posted.message.content,
-						});
-						return posted.message;
-					}),
+					Effect.flatMap(visibility.conversation(input.conversationId), (visible) =>
+						postIn(visible, input),
+					),
 				),
 			),
 
@@ -397,7 +513,11 @@ export const make = Effect.gen(function* () {
 						const hostAgentId =
 							parent.type === "bot_channel" ? parent.hostAgentId : input.hostAgentId;
 						if (hostAgentId) {
-							const placement = { ...parent, hostAgentId };
+							const placement = {
+								...parent,
+								podId: threadPodId(parent.id, parent.podId),
+								hostAgentId,
+							};
 							if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
 								return yield* new HostNotCrew();
 							}
@@ -540,6 +660,20 @@ export const layer = layerNoDeps.pipe(
 
 /** The threads that are an item of their own in Inbox: a routine run's and a collaboration's. */
 const ITEM_THREAD_TYPES: ReadonlySet<ThreadType> = new Set(["routine", "collaboration"]);
+
+/** Somebody tried to open a direct message with themselves. */
+export class DirectToSelf extends Data.TaggedError("DirectToSelf") implements UserFacing {
+	get userMessage() {
+		return userText`You can't send a direct message to yourself`;
+	}
+}
+
+/** More people were named for a direct message than one may have. */
+export class TooManyInDirect extends Data.TaggedError("TooManyInDirect") implements UserFacing {
+	get userMessage() {
+		return userText`A direct message can have at most ${MAX_DIRECT_MESSAGE_PEOPLE} people`;
+	}
+}
 
 /** The bot asked to host the conversation is not crew in its pod, or the pod is out of reach. */
 export class HostNotCrew extends Data.TaggedError("HostNotCrew") implements UserFacing {

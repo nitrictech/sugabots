@@ -5,7 +5,8 @@ import { Authorization } from "@sugabots/core/authorization/authorization";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
 import { query, serviceOperations } from "@sugabots/core/database/database";
-import { pod } from "@sugabots/core/database/schema";
+import type { Audience } from "@sugabots/core/database/events/audience";
+import { pod, thread } from "@sugabots/core/database/schema";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 
@@ -28,10 +29,11 @@ export interface Interface {
 	/** The current actor's own channel, which nobody else may have. */
 	me(): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	/**
-	 * Whether the current actor reaches the pod `podId`, by `Visibility`'s
-	 * rule, and so may hear what a workspace channel says of its threads.
+	 * Whether the current actor is in `audience`, by `Visibility`'s rules, and
+	 * so may hear what a workspace channel says of the threads it is for: they
+	 * reach its pod, or are in its direct message.
 	 */
-	reachesPod(podId: string): Effect.Effect<boolean, never, CurrentActor.Service>;
+	hears(audience: Audience.Group): Effect.Effect<boolean, never, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -61,10 +63,23 @@ export const make = Effect.gen(function* () {
 
 		me: () => Effect.map(CurrentActor.Service, ({ userId }) => personChannel(userId)),
 
-		reachesPod: (podId) =>
+		hears: (audience) =>
 			operation(
-				"reachesPod",
+				"hears",
 				Effect.gen(function* () {
+					if (audience.kind === "direct") {
+						const { threadId } = audience;
+						const reachesThread = yield* visibility.reachesThread;
+						const [reached] = yield* query((db) =>
+							db
+								.select({ id: thread.id })
+								.from(thread)
+								.where(and(eq(thread.id, threadId), reachesThread(thread)))
+								.limit(1),
+						);
+						return reached !== undefined;
+					}
+					const { podId } = audience;
 					const reaches = yield* visibility.reachesPod;
 					const [reached] = yield* query((db) =>
 						db

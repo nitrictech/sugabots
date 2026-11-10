@@ -46,6 +46,10 @@ import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	type ConversationKind,
 	chatItemCreatedAt,
+	type DirectPeople,
+	directPeopleNames,
+	directPeopleTitle,
+	isOneToOne,
 	useChatHistory,
 	useChatList,
 	useChatMessages,
@@ -72,6 +76,7 @@ import {
 } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -87,6 +92,7 @@ import {
 	type ChatPlace,
 	type HeaderPlace,
 	PeopleChatHeader,
+	PHONE_FACE_SIZE_PX,
 } from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
@@ -98,6 +104,7 @@ import {
 	PeopleDetails,
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
+import { DirectMembersButton } from "./DirectMembers.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { botsNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
@@ -149,10 +156,14 @@ export function ConversationChat({
 	onThreadChange,
 	staged,
 	onStagedChange,
+	headerless = false,
+	onSent,
+	covered = false,
 }: {
 	/** Which kind of conversation it is, and its bot when it has one. */
 	conversation: ConversationKind;
-	pod: Pod;
+	/** The pod it is in; null for a direct message between people, which is in none. */
+	pod: Pod | null;
 	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
@@ -164,6 +175,12 @@ export function ConversationChat({
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
 	onStagedChange: StagedChange;
+	/** Without its header, as New message shows a conversation under its To field. */
+	headerless?: boolean;
+	/** Once a message written here has been sent. */
+	onSent?: () => void;
+	/** Hidden under something else on the page, so nothing in it counts as seen. */
+	covered?: boolean;
 }) {
 	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
@@ -172,7 +189,9 @@ export function ConversationChat({
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
 	const mainThread = useThread(conversationId);
-	const authorLinkOf = useAuthorLinks(pod.id);
+	// A direct message between people is in no pod, and has no bots in it.
+	const podId = pod?.id ?? null;
+	const authorLinkOf = useAuthorLinks(pod?.id);
 	useThreadEvents(conversationId);
 	const notices = useThreadNotices(conversationId);
 	const optimistic = useOptimisticChatItems(conversationId);
@@ -185,8 +204,8 @@ export function ConversationChat({
 	const [startError, setStartError] = useState<string>();
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
-	const [draft, setDraft] = useChatDraft(user.id, pod.id, conversationId);
-	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, conversationId);
+	const [draft, setDraft] = useChatDraft(user.id, podId, conversationId);
+	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, podId, conversationId);
 	const attachments = useComposerAttachments(conversationId);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
@@ -208,6 +227,8 @@ export function ConversationChat({
 	// Where people talk among themselves, the bots they name reply; elsewhere the
 	// chat's own bot does, asking any other bot named for its help.
 	const namedBotsReply = isPodChat || conversation.kind === "peopleThread";
+	// A direct message between people goes by the others' names.
+	const peopleName = conversation.kind === "direct" ? directPeopleTitle(conversation) : undefined;
 	const host = agent
 		? details?.participants.find(
 				(participant): participant is AgentParticipant =>
@@ -223,7 +244,7 @@ export function ConversationChat({
 	const startedThreads = threadsByMessage(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
-	useMarkReadWhileSeen(conversationId, newest, latestInView);
+	useMarkReadWhileSeen(conversationId, newest, latestInView && !covered);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
 	// Found across all the messages, not in each part they're shown in, or each part would bring a face of its own alive.
 	const answeringFace = findAnsweringFace(shownMessages, false);
@@ -251,7 +272,7 @@ export function ConversationChat({
 				(message) => message.author.kind === "person" && message.author.id === user.id,
 			)
 		: undefined;
-	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, pod.id, conversationId);
+	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, podId, conversationId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
 	const named = botsNamed(draft, crew);
 	const repliedToBot = crew.find(
@@ -389,6 +410,7 @@ export function ConversationChat({
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
+			onSent?.();
 		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));
 			setReplyingTo((current) => current ?? answered);
@@ -398,6 +420,7 @@ export function ConversationChat({
 
 	/** Opens a thread started from a message here in its own place. */
 	function openPodThread(threadId: string) {
+		if (!pod) return;
 		void navigate(conversationLink({ pod, conversationId: threadId }));
 	}
 
@@ -410,6 +433,8 @@ export function ConversationChat({
 			openThread(message.routineResultOf.threadId);
 			return;
 		}
+		// Threads start from a pod's chats and bots' channels, which are all in pods.
+		if (!pod) return;
 		try {
 			const thread = await threadFrom.mutateAsync(message.id);
 			await navigate(conversationLink({ pod, conversationId: thread.id }));
@@ -445,7 +470,7 @@ export function ConversationChat({
 		// opens in its place, unless that is the chat already open.
 		if (runThreadIds.has(nextThreadId)) {
 			const run = runsResulting.get(nextThreadId);
-			if (run && run.routineId !== details?.routine?.id) {
+			if (run && pod && run.routineId !== details?.routine?.id) {
 				void navigate(routineThreadLink(pod, run.routineId));
 			}
 			return;
@@ -455,7 +480,7 @@ export function ConversationChat({
 	}
 
 	const title = details?.thread.title;
-	const chats = useChatList(pod.slug).data?.chats;
+	const chats = useChatList(pod?.slug).data?.chats;
 	const listedChat = chats?.find((chat) => chat.conversation.id === conversationId)?.conversation;
 	// The channel a thread between people was started from, which its header names it as in.
 	const startedIn = chats?.find((chat) => chat.conversation.id === details?.thread.parentThreadId)
@@ -465,7 +490,7 @@ export function ConversationChat({
 	// A bot's channel goes by the bot's name, and is kept going rather than marked done;
 	// in a Personal pod it is the person's own with their bot.
 	const ongoing = conversation.kind === "botChannel";
-	const direct = ongoing && pod.kind === "personal";
+	const personalChannel = conversation.kind === "botChannel" && pod?.kind === "personal";
 	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
 	const done =
 		details?.thread.type === "conversation" && !ongoing
@@ -480,8 +505,9 @@ export function ConversationChat({
 			: undefined;
 	// Back from a thread returns to where it lives: its bot's chat, or the channel it was started from.
 	const parentChannelId = details?.thread.parentThreadId;
-	const back: BackTo =
-		conversation.kind === "botThread" && !details?.routine
+	const back: BackTo = !pod
+		? { to: "directMessages" }
+		: conversation.kind === "botThread" && !details?.routine
 			? { to: "bot", pod, agent: conversation.agent }
 			: startedIn !== undefined && parentChannelId
 				? { to: "channel", pod, conversationId: parentChannelId, name: `#${startedIn}` }
@@ -504,7 +530,7 @@ export function ConversationChat({
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
-				inPersonalPod={pod.kind === "personal"}
+				inPersonalPod={pod?.kind === "personal"}
 				title={ongoing ? undefined : title}
 				done={done}
 				conversationId={conversationId}
@@ -517,7 +543,7 @@ export function ConversationChat({
 				title={podChatName}
 				menu={
 					listedChat &&
-					pod.permissions.rename && (
+					pod?.permissions.rename && (
 						<ChatMenu
 							pod={pod}
 							conversationId={conversationId}
@@ -527,18 +553,31 @@ export function ConversationChat({
 					)
 				}
 			/>
+		) : conversation.kind === "direct" ? (
+			<PeopleChatHeader
+				{...headerPlace}
+				// Nothing opens beside a direct message: who is in a group drops down from its members' count.
+				details={undefined}
+				title={peopleName ?? ""}
+				face={<DirectPeopleAvatar {...conversation} size={PHONE_FACE_SIZE_PX} />}
+				detail={
+					isOneToOne(conversation) ? undefined : (
+						<DirectMembersButton direct={conversation} user={user} />
+					)
+				}
+			/>
 		) : (
 			<PeopleChatHeader
 				{...headerPlace}
 				title={title ?? ""}
 				done={done}
-				within={startedIn === undefined ? pod.name : `#${startedIn}`}
+				within={startedIn === undefined ? pod?.name : `#${startedIn}`}
 			/>
 		);
 	if (!details || (agent && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
-				{header}
+				{!headerless && header}
 				{!mainThread.isPending && (
 					<EmptyState title="Could not load this conversation">
 						The API did not answer. Reload this page to try again.
@@ -562,7 +601,7 @@ export function ConversationChat({
 			? `Message ${listNames(draftMentions.map((person) => person.name))}`
 			: details.routine && agent
 				? `Message ${agent.name} about this routine`
-				: `Message ${agent?.name ?? (isPodChat ? podChatName : pod.name)}`;
+				: `Message ${agent?.name ?? peopleName ?? (isPodChat ? podChatName : (pod?.name ?? podChatName))}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
 	const contents: ThreadContents = {
 		participants: details.participants,
@@ -613,9 +652,11 @@ export function ConversationChat({
 				 * tabs do at the foot, and they scroll on under them. Only the pieces
 				 * take a tap; anywhere else reaches the message beneath.
 				 */}
-				<div className="max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto">
-					{header}
-				</div>
+				{!headerless && (
+					<div className="max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto">
+						{header}
+					</div>
+				)}
 				<FileDropTarget
 					onDropFiles={agent?.model === null ? undefined : attachments.attach}
 					className="flex min-h-0 flex-1 flex-col"
@@ -661,10 +702,12 @@ export function ConversationChat({
 							)}
 							{messages.isSuccess &&
 								!messages.hasNextPage &&
-								(details.thread.parentThreadId ? (
+								(details.thread.parentThreadId && pod ? (
 									<ThreadIntro details={details} pod={pod} />
-								) : isPodChat ? (
+								) : isPodChat && pod ? (
 									<PodChatIntro pod={pod} name={podChatName} details={details} />
+								) : conversation.kind === "direct" ? (
+									<DirectIntro {...conversation} />
 								) : details.thread.type === "routine_feed" ? (
 									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
@@ -672,7 +715,7 @@ export function ConversationChat({
 										<ChatIntro
 											agent={agent}
 											place={
-												direct
+												personalChannel
 													? { kind: "personal" }
 													: conversation.kind === "botChannel"
 														? { kind: "channel" }
@@ -699,7 +742,7 @@ export function ConversationChat({
 											onOpenDesktop={openDesktop}
 											fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
 											previews={!staged}
-											podId={pod.id}
+											podId={podId}
 											approvalCapabilities={details.capabilities}
 											queued={queued}
 											sending={sending}
@@ -748,7 +791,7 @@ export function ConversationChat({
 										</div>
 									) : group.item.kind === "routine_paused" ? (
 										<PausedLine at={group.item.createdAt} />
-									) : group.item.kind === "routine" && details.routine && host ? (
+									) : group.item.kind === "routine" && details.routine && host && pod ? (
 										<RunMessage
 											item={group.item}
 											agent={host}
@@ -781,7 +824,7 @@ export function ConversationChat({
 						</div>
 					</div>
 					<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
-						{agent?.model === null ? (
+						{agent?.model === null && pod ? (
 							<AgentNotSetUp agent={agent} pod={pod} />
 						) : (
 							<ChatComposer
@@ -812,7 +855,7 @@ export function ConversationChat({
 									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
 								}}
 								attachments={attachments}
-								notice={<ConnectionsNotice pod={pod} botName={agent?.name} />}
+								notice={pod && <ConnectionsNotice pod={pod} botName={agent?.name} />}
 							/>
 						)}
 						{/*
@@ -831,7 +874,7 @@ export function ConversationChat({
 				</FileDropTarget>
 			</div>
 			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
-			{staged?.kind === "artifact" ? (
+			{staged?.kind === "artifact" && pod ? (
 				<ArtifactStage
 					pod={pod}
 					artifactId={staged.artifactId}
@@ -847,7 +890,7 @@ export function ConversationChat({
 							: onStagedChange(undefined)
 					}
 				/>
-			) : staged?.kind === "desktop" && agent ? (
+			) : staged?.kind === "desktop" && agent && pod ? (
 				<DesktopStage
 					threadId={details.thread.id}
 					agent={agent}
@@ -855,7 +898,7 @@ export function ConversationChat({
 					mayUse={pod.permissions.useDesktops}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "threads" && agent ? (
+			) : staged?.kind === "threads" && agent && pod ? (
 				<ThreadsStage
 					agent={agent}
 					pod={pod}
@@ -863,7 +906,7 @@ export function ConversationChat({
 					onTabChange={(tab) => onStagedChange({ kind: "threads", tab }, { replace: true })}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "routines" && agent ? (
+			) : staged?.kind === "routines" && agent && pod ? (
 				<RoutinesStage
 					agent={agent}
 					pod={pod}
@@ -887,13 +930,14 @@ export function ConversationChat({
 			) : (
 				place.kind === "own" &&
 				place.detailsOpen &&
+				conversation.kind !== "direct" &&
 				(isPodChat ? (
 					<ChannelDetails
 						name={podChatName}
 						people={details.members.length}
 						bots={details.crew.filter((member) => member.kind === "agent").length}
 						channel={
-							listedChat && pod.permissions.rename
+							listedChat && pod?.permissions.rename
 								? { pod, conversationId, name: podChatName, archivable: !listedChat.main }
 								: undefined
 						}
@@ -901,7 +945,7 @@ export function ConversationChat({
 						contents={contents}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : details.routine && agent ? (
+				) : details.routine && agent && pod ? (
 					<RoutinePanel
 						agent={agent}
 						pod={pod}
@@ -909,7 +953,7 @@ export function ConversationChat({
 						standing={details.routine}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : agent ? (
+				) : agent && pod ? (
 					<DetailsSidebar
 						agent={agent}
 						pod={pod}
@@ -1396,16 +1440,16 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 }
 
 /**
- * The top of a chat, once there is nothing older to load: whom it is with;
- * in a thread, what they do; in a Personal pod, that it is the person's own;
- * or, in a bot's channel, that it is the channel's start.
- */
-/**
  * Where a bot's chat is: the person's own with it, its channel, or a thread
  * with it, which starts under the thread's name once that is known.
  */
 type IntroPlace = { kind: "personal" } | { kind: "channel" } | { kind: "thread"; title?: string };
 
+/**
+ * The top of a chat, once there is nothing older to load: whom it is with;
+ * in a thread, what they do; in a Personal pod, that it is the person's own;
+ * or, in a bot's channel, that it is the channel's start.
+ */
 function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 	// A thread is about something, so its name leads and the bot is beside it, smaller.
 	if (place.kind === "thread" && place.title) {
@@ -1439,6 +1483,34 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 			</p>
 		</div>
 	);
+}
+
+/**
+ * The top of a direct message between people, once there is nothing older to
+ * load: whom it is with, and that only the people in it see it.
+ */
+function DirectIntro(direct: DirectPeople) {
+	const name = directPeopleTitle(direct);
+	const description =
+		direct.people.length === 0
+			? "They have left the workspace, so they won't see anything new here."
+			: isOneToOne(direct)
+				? `This is the start of your direct messages with ${name}. Only the two of you can see them.`
+				: `This is a private conversation between ${everyoneNamed(directPeopleNames(direct))}. Only the people here can see it.`;
+	return (
+		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
+			<DirectPeopleAvatar {...direct} size={64} />
+			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-tight text-balance">
+				{name}
+			</h2>
+			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">{description}</p>
+		</div>
+	);
+}
+
+/** Everyone in a direct message, `others` then you, each named, however many: "A, B and you". */
+function everyoneNamed(others: readonly string[]): string {
+	return `${others.join(", ")} and you`;
 }
 
 /**

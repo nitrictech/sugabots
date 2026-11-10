@@ -28,6 +28,7 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
+import { threadPodId } from "../threads/rooms.ts";
 import {
 	type Ended,
 	endedAs,
@@ -221,7 +222,10 @@ export const make = Effect.gen(function* () {
 				);
 			}
 			yield* toolCalls.abandonUnfinished([turnId], userMessage);
-			if (reply) yield* emit([endAnnouncement({ turnId, ...reply }, ended)]);
+			if (reply) {
+				const podId = threadPodId(reply.threadId, reply.podId);
+				yield* emit([endAnnouncement({ turnId, ...reply, podId }, ended)]);
+			}
 			return ended;
 		});
 

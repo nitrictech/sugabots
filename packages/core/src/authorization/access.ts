@@ -4,7 +4,15 @@ import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { agent, pod, podMember, thread, workspace, workspaceMember } from "../database/schema.ts";
+import {
+	agent,
+	directMember,
+	pod,
+	podMember,
+	thread,
+	workspace,
+	workspaceMember,
+} from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import {
@@ -26,7 +34,9 @@ import {
  *
  * **Reach** is a stored `pod_member` row in a shared pod, or ownership of a
  * Personal pod. No role reaches a shared pod without a row: administrators are
- * put in every one instead, by the triggers described on `podMember`.
+ * put in every one instead, by the triggers described on `podMember`. A
+ * direct message between people is in no pod: a `direct_member` row reaches
+ * it while its person is in the workspace, whatever their role.
  *
  * **Hidden** and **forbidden** are different refusals. A resource the caller
  * cannot reach is hidden, so an id cannot be probed for; a resource they can
@@ -54,10 +64,14 @@ export interface AgentStanding extends PodStanding {
 	agent: schema.AgentRow;
 }
 
-/** The caller's standing towards a thread, which is their standing in its pod. */
-export interface ThreadStanding extends PodStanding {
-	thread: schema.ThreadRow;
-}
+/**
+ * The caller's standing towards a thread they reach: in a pod, their standing
+ * there, which decides what else they may do in it; a direct message is in no
+ * pod, and being in it permits only reading it and writing in it.
+ */
+export type ThreadStanding =
+	| { kind: "pod"; thread: schema.ThreadRow; standing: PodStanding }
+	| { kind: "direct"; thread: schema.ThreadRow };
 
 /**
  * The resource is not there, or the caller may not know that it is. Answered
@@ -236,8 +250,9 @@ export const agentStandingFor = Effect.fn("Access.agentStandingFor")(function* (
 });
 
 /**
- * A thread and `userId`'s standing in its pod, in one query. `undefined` when
- * there is no such thread.
+ * A thread `userId` reaches, with their standing towards it, in one query.
+ * `undefined` when there is no such thread or they do not reach it, which are
+ * answered alike.
  */
 export const threadStandingFor = Effect.fn("Access.threadStandingFor")(function* (
 	db: Executor,
@@ -246,14 +261,30 @@ export const threadStandingFor = Effect.fn("Access.threadStandingFor")(function*
 ) {
 	if (!isUuid(threadId)) return undefined;
 	const [row] = yield* db
-		.select({ thread, ...standingColumns })
+		.select({
+			thread,
+			pod,
+			role: workspaceMember.role,
+			membershipId: podMember.id,
+			inDirect: reachesDirectFor(thread, userId),
+		})
 		.from(thread)
-		.innerJoin(pod, eq(pod.id, thread.podId))
+		.leftJoin(pod, eq(pod.id, thread.podId))
 		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
 		.leftJoin(podMember, podMembershipOf(userId))
 		.where(eq(thread.id, threadId))
 		.limit(1);
-	return row ? { ...standingFromRow(row, userId), thread: row.thread } : undefined;
+	if (!row) return undefined;
+	if (!row.pod) {
+		const direct: ThreadStanding = { kind: "direct", thread: row.thread };
+		return row.inDirect ? direct : undefined;
+	}
+	const inPod: ThreadStanding = {
+		kind: "pod",
+		thread: row.thread,
+		standing: standingFromRow({ ...row, pod: row.pod }, userId),
+	};
+	return inPod.standing.may("pod.read") ? inPod : undefined;
 });
 
 /**
@@ -324,6 +355,37 @@ export function reachesPodFor(podId: SQLWrapper, userId: string | SQLWrapper): S
 					and ${roleIsOneOf(ROLES_READING_SHARED_PODS)}
 				)
 			)
+	)`;
+}
+
+/**
+ * SQL for "`userId` reaches the thread `row`": the pod rule for a thread in a
+ * pod, and membership of the direct message for one in none. Written as SQL
+ * for lists, as `threadStandingFor` decides it for one thread.
+ */
+export function reachesThreadFor(
+	row: { id: SQLWrapper; workspaceId: SQLWrapper; podId: SQLWrapper },
+	userId: string | SQLWrapper,
+): SQL<boolean> {
+	return sql`(${reachesPodFor(row.podId, userId)} or ${reachesDirectFor(row, userId)})`;
+}
+
+/**
+ * SQL for "`userId` is in the direct message `row` and still in its
+ * workspace". False for every other thread, which has no `direct_member` rows.
+ */
+function reachesDirectFor(
+	row: { id: SQLWrapper; workspaceId: SQLWrapper },
+	userId: string | SQLWrapper,
+): SQL<boolean> {
+	return sql`exists (
+		select 1
+		from ${directMember} as reach_direct_member
+		inner join ${workspaceMember} as reach_direct_workspace_member
+			on reach_direct_workspace_member.user_id = reach_direct_member.user_id
+			and reach_direct_workspace_member.workspace_id = ${row.workspaceId}
+		where reach_direct_member.thread_id = ${row.id}
+			and reach_direct_member.user_id = ${userId}
 	)`;
 }
 
