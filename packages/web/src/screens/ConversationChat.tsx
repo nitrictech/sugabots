@@ -99,7 +99,8 @@ import {
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import { botsNamed, groupMentionsBy, mentionableIn, textWithMentions } from "./mentions.tsx";
+import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
+import { botsNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
@@ -1347,13 +1348,17 @@ function StartedFrom({
 				{messageAuthorName(message.author)}
 			</span>
 			{message.content !== "" && (
-				<p className="m-0 whitespace-pre-wrap break-words text-sm text-soft-foreground leading-normal">
-					{textWithMentions(message.content, [
-						...mentionable,
-						// Written in a pod's chat or a bot's channel, as every message a thread starts from is.
-						...groupMentionsBy(message.author, members, "pod_chat"),
-					])}
-				</p>
+				<div className="min-w-0 text-sm text-soft-foreground leading-normal">
+					<MessageMarkdown
+						text={message.content}
+						mentionable={[
+							...mentionable,
+							// Written in a pod's chat or a bot's channel, as every message a thread starts from is.
+							...groupMentionsBy(message.author, members, "pod_chat"),
+						]}
+						writer={writerOf(message.author)}
+					/>
+				</div>
 			)}
 			{attached.length > 0 && (
 				<p className="m-0 truncate text-xs text-muted-foreground">{attached.join(", ")}</p>

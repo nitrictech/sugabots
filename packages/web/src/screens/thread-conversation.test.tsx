@@ -145,7 +145,7 @@ afterEach(() => {
 });
 
 describe("what people and bots write", () => {
-	it("renders a bot's Markdown without interpreting a person's", async () => {
+	it("renders Markdown from people and bots alike", async () => {
 		const asked = "Is **this** bold?";
 		const answered = "**Tim's bill** is high.\n\n- Look up plans\n- Draft a note";
 		show([
@@ -159,7 +159,7 @@ describe("what people and bots write", () => {
 
 		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
-		expect(screen.getByText(asked)).toBeDefined();
+		expect(screen.getByText("this").getAttribute("data-streamdown")).toBe("strong");
 	});
 
 	it("copies a reply as the bot wrote it, Markdown and all", async () => {

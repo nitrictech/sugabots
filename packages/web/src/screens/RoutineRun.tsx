@@ -165,7 +165,7 @@ export function RunMessage({
 				</div>
 				{report ? (
 					<div className="min-w-0 self-stretch break-words text-sm text-body-foreground leading-normal">
-						<MessageMarkdown text={report} mentionable={mentionable} />
+						<MessageMarkdown text={report} mentionable={mentionable} writer="bot" />
 					</div>
 				) : outcome === "running" ? (
 					<span aria-hidden className="typing-dots typing-dots-small mt-2 text-muted-foreground">
