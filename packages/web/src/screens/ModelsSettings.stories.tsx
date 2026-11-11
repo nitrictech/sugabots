@@ -148,6 +148,20 @@ const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	status: "signed_out",
 	hasApiKey: false,
 });
+/** Connected with a key, then switched off: paused, so still connected. */
+const pausedDeepseek = provider(
+	7,
+	"deepseek",
+	"DeepSeek",
+	[model("deepseek-chat", "DeepSeek Chat", true)],
+	{ active: false },
+);
+/** A new key whose test failed: it holds the key, but stays off until a key passes. */
+const rejectedGroq = provider(8, "groq", "Groq", [], {
+	active: false,
+	status: "error",
+	lastTestError: "The provider rejected the API key",
+});
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -265,6 +279,43 @@ export const Overview = meta.story({
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
 		await expect(canvas.getAllByRole("button", { name: "Connect" }).length).toBeGreaterThan(0);
 		await expect(canvas.getByRole("button", { name: /^Add a provider/ })).toBeInTheDocument();
+	},
+});
+
+/** A provider switched off keeps its key, so it stays in the list, connected but Disabled. */
+export const SwitchedOff = meta.story({
+	parameters: { providers: [...providers, pausedDeepseek] },
+	play: async ({ canvas }) => {
+		const row = await canvas.findByRole("link", { name: /DeepSeek/ });
+		await expect(row).toHaveTextContent("Disabled");
+		await expect(row).toHaveTextContent("API key set");
+		await expect(row).not.toHaveTextContent("Connected");
+	},
+});
+
+/** Working providers lead, then a failed one, then a switched-off one, whatever their usual order. */
+export const SortedByState = meta.story({
+	parameters: {
+		providers: [{ ...openrouter, active: false }, anthropic, openai, ollama, rejectedGroq, chatgpt],
+	},
+	play: async ({ canvas }) => {
+		await canvas.findByRole("link", { name: /OpenRouter/ });
+		const order = canvas
+			.getAllByRole("link")
+			.map((link) => link.textContent ?? "")
+			.filter((text) => /Connected|Connection failed|Disabled/.test(text))
+			.map((text) => text.match(/^(OpenRouter|Anthropic|OpenAI|Ollama|Groq)/)?.[0]);
+		await expect(order).toEqual(["Anthropic", "OpenAI", "Ollama", "Groq", "OpenRouter"]);
+	},
+});
+
+/** A key that failed its test reads Connection failed, not Disabled: it wants a new key, not switching on. */
+export const ConnectionFailed = meta.story({
+	parameters: { providers: [...providers, rejectedGroq] },
+	play: async ({ canvas }) => {
+		const row = await canvas.findByRole("link", { name: /Groq/ });
+		await expect(row).toHaveTextContent("Connection failed");
+		await expect(row).not.toHaveTextContent("Disabled");
 	},
 });
 
