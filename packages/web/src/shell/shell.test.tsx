@@ -2628,4 +2628,20 @@ describe("the app's badge", () => {
 		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));
 		expect(clearAppBadge).toHaveBeenCalled();
 	});
+
+	it("counts again what is waiting when the workspace's events start over", async () => {
+		pageTitle();
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		client.api.chats.approvals.mockReturnValue(
+			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
+		);
+		mount(linearPage);
+		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
+
+		client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
+		updates.emit(streamEvent("reset"));
+
+		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));
+	});
 });

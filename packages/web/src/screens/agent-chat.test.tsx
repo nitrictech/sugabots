@@ -647,6 +647,35 @@ describe("ongoing agent Chat", () => {
 		expect(composer.textContent).toBe("");
 	});
 
+	it("fetches the Chat again when its workspace's events start over", async () => {
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.workspace).toHaveBeenCalled());
+
+		const missed = {
+			...agentMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fe",
+			content: "Sent while the stream was behind",
+			parts: [{ type: "text" as const, text: "Sent while the stream was behind" }],
+			createdAt: "2026-09-18T09:25:00.000Z",
+		};
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{ kind: "message", message: mainMessage },
+					{ kind: "message", message: agentMessage },
+					{ kind: "message", message: missed },
+				],
+				nextCursor: null,
+			}),
+		);
+		updates.emit(streamEvent("reset"));
+
+		await screen.findByText("Sent while the stream was behind");
+	});
+
 	it("keeps following the latest message while the agent works, and when it answers", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
