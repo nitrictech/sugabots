@@ -32,9 +32,9 @@ import { OAuthTokens } from "./sign-in/sign-in.ts";
  *
  * A provider is switched on only by a successful test of its current
  * configuration, through `recordTest`; `update` can only switch it off, and a
- * new key switches it off until it has been tried. A new address takes away
- * the key, headers and sign-in the provider held, other than a key or headers
- * given with it, and so switches it off too.
+ * new key or a new address switches it off until it has been tried. A new
+ * address also takes away the key, headers and sign-in the provider held,
+ * other than a key or headers given with it.
  */
 export interface Interface {
 	/**
@@ -311,12 +311,7 @@ export const make = Effect.gen(function* () {
 						);
 						const [current] = yield* query((db) =>
 							db
-								.select({
-									baseUrl: modelProvider.baseUrl,
-									apiKeyEncrypted: modelProvider.apiKeyEncrypted,
-									customHeadersEncrypted: modelProvider.customHeadersEncrypted,
-									oauthTokensEncrypted: modelProvider.oauthTokensEncrypted,
-								})
+								.select({ baseUrl: modelProvider.baseUrl })
 								.from(modelProvider)
 								.where(inProvider)
 								.for("update"),
@@ -329,12 +324,8 @@ export const make = Effect.gen(function* () {
 							changes.apiKey !== undefined ||
 							changes.customHeaders !== undefined;
 						const values = {
-							// A new key is on only once a test of it has succeeded, and one
-							// moved off the credentials it held has none to be on with.
-							active:
-								changes.apiKey !== undefined || (moved && holdsCredential(current))
-									? false
-									: changes.active,
+							// A new key or a new address is on only once a test of it has succeeded.
+							active: changes.apiKey !== undefined || moved ? false : changes.active,
 							connectedById: connectedByAfter(changes, changedById),
 							baseUrl: changes.baseUrl,
 							apiFormat: changes.apiFormat,
@@ -803,20 +794,6 @@ function storedApiKey(
 ) {
 	if (apiKey === undefined) return moved ? null : undefined;
 	return apiKey === null ? null : cipher.encrypt(apiKey);
-}
-
-/** Whether a stored row holds a key, headers or a sign-in, any of which may be secret. */
-function holdsCredential(
-	row: Pick<
-		ModelProviderRow,
-		"apiKeyEncrypted" | "customHeadersEncrypted" | "oauthTokensEncrypted"
-	>,
-): boolean {
-	return (
-		row.apiKeyEncrypted !== null ||
-		row.customHeadersEncrypted.length > 0 ||
-		row.oauthTokensEncrypted !== null
-	);
 }
 
 /** `providerLacksCredential` for a stored row, which holds the key and sign-in rather than says whether it has them. */

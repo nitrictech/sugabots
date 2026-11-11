@@ -496,6 +496,27 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
 			expect(await repository.endpoint(workspaceId, headed)).toMatchObject({ apiKey: "secret" });
 		});
+
+		it.each([
+			{ httpStatus: 200, active: true },
+			{ httpStatus: 503, active: false },
+		])(
+			"has a keyless provider on at its new address only once it answers there: $httpStatus",
+			async ({ httpStatus, active }) => {
+				const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+				if (!ollama) throw new Error("fixture");
+				await switchOn(ollama.id);
+				const setup = await setupWith(() => Response.json({ models: [] }, { status: httpStatus }));
+
+				await setup.update({
+					workspace: workspaceId,
+					providerId: ollama.id,
+					changes: { baseUrl: "http://other-host:11434/v1" },
+				});
+
+				expect(await view(ollama.id)).toMatchObject({ active });
+			},
+		);
 	});
 
 	describe("under an egress policy that forbids private addresses", () => {
