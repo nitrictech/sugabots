@@ -187,6 +187,12 @@ function pathOf(clearable: Clearable) {
 const LISTING_OPTIONS = { timeout: "30 seconds", maxOutputCharacters: 200_000 } as const;
 /** Removing trees of many small files, such as dependencies, unlinks every one of them. */
 const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } as const;
+/**
+ * When a clearing starts no more removals, well inside its timeout. A
+ * provider may stop only the command it started at the timeout, and a
+ * script left running would go on removing once a turn uses the sandbox.
+ */
+const STOP_REMOVING_AFTER_SECONDS = 90;
 
 const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const THREAD_FOLDER = new RegExp(`^${Sandboxes.THREADS_DIRECTORY}/(${ID})$`);
@@ -224,20 +230,24 @@ export const SET_ASIDE_DIRECTORY = `${Sandboxes.WORKSPACE_DIRECTORY}/.sugabots-c
  * Removes what an earlier clearing set aside, then the paths of
  * `clearables` in order, checking before each whether the workspace's
  * filesystem is still at least `belowShare` full, and prints each path it
- * removed. A path that isn't there is skipped. If `df` fails, it removes
- * nothing more. A path that can't be set aside, such as when the disk is
- * too full for {@link SET_ASIDE_DIRECTORY}, is removed where it is.
+ * removed. A path that isn't there is skipped. If `df` fails, or
+ * {@link STOP_REMOVING_AFTER_SECONDS} have passed, it removes nothing more.
+ * A path that can't be set aside, such as when the disk is too full for
+ * {@link SET_ASIDE_DIRECTORY}, is removed where it is.
  */
 function clearingScript(clearables: readonly Clearable[], belowShare: number) {
 	return [
+		// Folders without write permission, such as Go's module cache, can't
+		// have what's in them removed until they're given it.
+		`delete() { rm -rf -- "$1" 2>/dev/null || { chmod -R u+w -- "$1" && rm -rf -- "$1"; }; }`,
 		`set_aside=${SET_ASIDE_DIRECTORY}`,
-		`rm -rf -- "$set_aside"`,
+		`delete "$set_aside"`,
 		`mkdir -p -- "$set_aside" || set_aside=`,
 		`full() { df -B1 --output=used,avail ${Sandboxes.WORKSPACE_DIRECTORY} | awk -v share=${belowShare} 'NR == 2 { full = $1 >= ($1 + $2) * share } END { exit !full }'; }`,
 		"n=0",
 		[
-			`remove() { [ -e "$1" ] || return 0; full || exit 0; n=$((n + 1));`,
-			`if [ -n "$set_aside" ] && mv -T -- "$1" "$set_aside/$n"; then rm -rf -- "$set_aside/$n"; else rm -rf -- "$1"; fi`,
+			`remove() { [ "$SECONDS" -lt ${STOP_REMOVING_AFTER_SECONDS} ] || exit 0; [ -e "$1" ] || return 0; full || exit 0; n=$((n + 1));`,
+			`if [ -n "$set_aside" ] && mv -T -- "$1" "$set_aside/$n"; then delete "$set_aside/$n"; else delete "$1"; fi`,
 			`&& printf '%s\\n' "$1"; }`,
 		].join(" "),
 		...clearables.map((clearable) => `remove ${pathOf(clearable)}`),

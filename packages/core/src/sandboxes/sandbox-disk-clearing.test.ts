@@ -283,15 +283,18 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 		);
 
 		it(
-			"removes deleted agents' homes and the caches the rest have, and leaves the rest of their homes alone",
+			"removes deleted agents' homes, read-only folders and all, and the caches the rest have, and leaves the rest of their homes alone",
 			async () => {
 				const deletedAgent = crypto.randomUUID();
+				const goModule = `${deletedAgent}/go/pkg/mod/example.com/module@v1.0.0`;
 				await run(
 					[
 						`mkdir -p ${Sandboxes.AGENTS_DIRECTORY}`,
 						`cd ${Sandboxes.AGENTS_DIRECTORY}`,
-						`mkdir -p ${deletedAgent}/notes ${agentId}/notes ${agentId}/.cache/pip ${agentId}/.bun/install/cache/a ${agentId}/.bun/bin`,
-						`touch ${deletedAgent}/notes/a ${agentId}/notes/a ${agentId}/.cache/pip/a ${agentId}/.bun/install/cache/a/b ${agentId}/.bun/bin/bun`,
+						`mkdir -p ${goModule} ${agentId}/notes ${agentId}/.cache/pip ${agentId}/.bun/install/cache/a ${agentId}/.bun/bin`,
+						`touch ${goModule}/go.mod ${agentId}/notes/a ${agentId}/.cache/pip/a ${agentId}/.bun/install/cache/a/b ${agentId}/.bun/bin/bun`,
+						// As Go leaves its module cache.
+						`chmod 555 ${goModule}`,
 					].join(" && "),
 				);
 
@@ -337,7 +340,7 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 			"removes what a clearing cut short set aside, even with nothing else to clear",
 			async () => {
 				await run(
-					`mkdir -p ${SET_ASIDE_DIRECTORY}/1/node_modules && touch ${SET_ASIDE_DIRECTORY}/1/node_modules/a`,
+					`mkdir -p ${SET_ASIDE_DIRECTORY}/1/node_modules && touch ${SET_ASIDE_DIRECTORY}/1/node_modules/a && chmod 555 ${SET_ASIDE_DIRECTORY}/1/node_modules`,
 				);
 
 				const clearing = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, NEVER_FULL));
