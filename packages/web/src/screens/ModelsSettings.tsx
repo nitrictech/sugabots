@@ -1,5 +1,4 @@
 import {
-	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderPreset,
 	type ProviderPresetId,
@@ -7,7 +6,6 @@ import {
 	providerCatalog,
 	providerIsConnected,
 	providerIsReady,
-	providerIsUsable,
 	providerPreset,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -361,7 +359,7 @@ export function SystemModelSettings() {
 	);
 }
 
-/** Picking one of the models that are switched on, grouped by provider. */
+/** Picking one of the models the workspace offers bots, grouped by provider. */
 function ModelChoicePage({
 	title,
 	description,
@@ -375,15 +373,8 @@ function ModelChoicePage({
 	pending: boolean;
 	choose: (modelId: string) => Promise<unknown>;
 }) {
-	const providers = useModelProviders();
+	const models = useModels();
 	const [error, setError] = useState<unknown>();
-	const choices = (providers.data ?? [])
-		.filter(providerIsUsable)
-		.flatMap((provider) =>
-			provider.models
-				.filter((model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"))
-				.map((model) => ({ ...model, providerId: provider.id, providerName: provider.name })),
-		);
 
 	async function chooseModel(modelId: string) {
 		setError(undefined);
@@ -398,10 +389,10 @@ function ModelChoicePage({
 		<SettingsPage back={<BackToModels />} backOnWide title={title} description={description}>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			<ModelChoiceList
-				models={choices}
+				models={models.data?.models ?? []}
 				chosen={current}
 				onChoose={pending ? undefined : (modelId) => void chooseModel(modelId)}
-				empty={providers.isPending ? undefined : "No models are switched on yet."}
+				empty={models.isPending ? undefined : "No models are switched on yet."}
 			/>
 			<p className="-mt-5 m-0 px-0.5 text-subtle-foreground text-xs">
 				Only models that are switched on appear here.

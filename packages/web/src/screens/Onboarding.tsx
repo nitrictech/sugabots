@@ -5,7 +5,6 @@ import {
 	type AgentColor,
 	type AgentFace,
 	type AgentShape,
-	effectiveCapabilities,
 	type ModelProvider,
 	type Pod,
 	type ProviderModel,
@@ -31,7 +30,7 @@ import {
 } from "react";
 import { useAgents, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { isEmbeddingModel, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import {
 	useChooseFirstModel,
 	useCompleteOnboarding,
@@ -488,8 +487,9 @@ function ChooseModelStep({
 		const index = starters.indexOf(model.modelId);
 		return index === -1 ? starters.length : index;
 	};
+	// Every model a bot could run on, switched on or not, since choosing one switches it on.
 	const choices = provider.models
-		.filter((model) => !effectiveCapabilities(model).includes("embeddings"))
+		.filter((model) => !isEmbeddingModel(model))
 		.sort((a, b) => rank(a) - rank(b));
 	const [chosenId, setChosenId] = useState(
 		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,

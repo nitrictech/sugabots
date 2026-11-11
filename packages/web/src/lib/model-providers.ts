@@ -1,15 +1,40 @@
-import type {
-	ModelProviderUpdate,
-	NewModelProvider,
-	ProviderModelSwitchOff,
-	ProviderModelUpdate,
-	ProviderSwitchOff,
+import {
+	effectiveCapabilities,
+	type ModelProvider,
+	type ModelProviderUpdate,
+	type NewModelProvider,
+	type ProviderModel,
+	type ProviderModelSwitchOff,
+	type ProviderModelUpdate,
+	type ProviderSwitchOff,
+	providerIsUsable,
 } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
+
+/**
+ * The provider's models bots can run on, by the server's rule for the models a
+ * workspace offers: switched on, at a provider that is connected and switched
+ * on, and not an embedding model. Where only the offered models are needed,
+ * `useModels` reads that list from the server instead.
+ */
+export function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
+	if (!providerIsUsable(provider)) return [];
+	return provider.models.filter((model) => model.enabled && !isEmbeddingModel(model));
+}
+
+/**
+ * An embedding model cannot hold a conversation, so no bot runs on one. A model
+ * is one while it has the capability and an admin has not switched it off.
+ */
+export function isEmbeddingModel(
+	model: Pick<ProviderModel, "capabilities" | "disabledCapabilities">,
+): boolean {
+	return effectiveCapabilities(model).includes("embeddings");
+}
 
 export function useModelProviders() {
 	const workspaceId = useWorkspace().workspace?.id;

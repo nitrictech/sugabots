@@ -3,6 +3,7 @@ import {
 	agentColors,
 	agentFaces,
 	agentShapes,
+	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderModel,
 	type SystemAgent,
@@ -13,6 +14,7 @@ import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
 import { expect, fn, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { offeredModelsOf } from "@/lib/model-providers.ts";
 import {
 	accountManager,
 	chief,
@@ -226,19 +228,15 @@ function Preview({
 		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: providers.flatMap((provider) =>
-				provider.models
-					.filter((model) => model.enabled)
-					.map((model) => ({
-						providerId: provider.id,
-						providerName: provider.name,
-						providerPreset: provider.preset,
-						providerActive: provider.active,
-						modelId: model.modelId,
-						displayName: model.displayName,
-						capabilities: model.capabilities.filter(
-							(capability) => !model.disabledCapabilities.includes(capability),
-						),
-					})),
+				offeredModelsOf(provider).map((model) => ({
+					providerId: provider.id,
+					providerName: provider.name,
+					providerPreset: provider.preset,
+					providerActive: provider.active,
+					modelId: model.modelId,
+					displayName: model.displayName,
+					capabilities: effectiveCapabilities(model),
+				})),
 			),
 			defaultModel,
 		});

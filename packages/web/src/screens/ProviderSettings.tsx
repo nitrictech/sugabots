@@ -9,7 +9,6 @@ import {
 	type ProviderSwitchOff,
 	presetSignInService,
 	presetSignsIn,
-	providerIsUsable,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
 	providerPreset,
@@ -45,7 +44,7 @@ import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
-import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { offeredModelsOf, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
@@ -1040,11 +1039,6 @@ function MoveBotsOffProviderDialog({
 			/>
 		</DialogForm>
 	);
-}
-
-/** The models the provider offers agents: none unless it is usable, connected and switched on. */
-function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
-	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
 
 /** The key, masked once saved; Replace swaps it for a new one. */
