@@ -20,7 +20,7 @@ export type Clearable =
 	| { readonly reason: "agent_deleted"; readonly agentId: string }
 	| { readonly reason: "agent_cache"; readonly agentId: string; readonly cache: AgentCache };
 
-export type ClearingReason = Clearable["reason"];
+type ClearingReason = Clearable["reason"];
 
 export interface Clearing {
 	readonly cleared: readonly Clearable[];

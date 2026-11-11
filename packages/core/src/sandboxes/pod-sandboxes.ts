@@ -1,5 +1,6 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
+import { posix } from "node:path";
 import { SANDBOX_DISK_WARNING_SHARE, sandboxDiskShare } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
@@ -13,7 +14,7 @@ import { reachOf } from "./allowed-hosts.ts";
 import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { type DiskUsage, measureDisk } from "./sandbox-disk.ts";
-import { freeDiskSpace } from "./sandbox-disk-clearing.ts";
+import { freeDiskSpace, SET_ASIDE_DIRECTORY } from "./sandbox-disk-clearing.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 import type { SandboxLeaseHolderKind } from "./sql.ts";
@@ -674,7 +675,7 @@ export const make = Effect.gen(function* () {
 			);
 			const archivePath = `/tmp/sugabots-workspace-${yield* ids.random}.tgz`;
 			const packed = yield* old.exec(
-				`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores -czf ${archivePath} .`,
+				`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores --exclude=./${posix.basename(SET_ASIDE_DIRECTORY)} -czf ${archivePath} .`,
 				COPY_STEP,
 			);
 			if (packed.exitCode !== 0) {
