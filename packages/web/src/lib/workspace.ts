@@ -13,7 +13,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
@@ -189,17 +189,29 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 }
 
 /**
- * Leaving takes the whole client with it: every pod, agent and conversation on
- * screen belonged to a workspace this person is no longer in, so the cache is
- * cleared rather than refetched.
+ * Leaving takes the workspace out of the client rather than refetching it: the
+ * API answers anything asked about it with a 403 once this person is gone.
+ *
+ * Like deleting, the workspace leaves the list at once and `/` opens another,
+ * or onboarding when there is none. Once its screens have closed, what is
+ * cached under its id goes too. Pods and conversations are cached by their own
+ * ids, so theirs expires unread with the cache's `gcTime` instead.
  */
 export function useLeaveWorkspace(workspaceId: string) {
 	const queries = useQueryClient();
+	const navigate = useNavigate();
 	return useMutation({
 		mutationFn: () =>
 			Effect.runPromise(client.api.workspaces.leave({ params: { workspace: workspaceId } })),
 		onSuccess: async () => {
-			await queries.invalidateQueries();
+			queries.setQueryData(workspacesQuery.queryKey, (workspaces) =>
+				workspaces?.filter((workspace) => workspace.id !== workspaceId),
+			);
+			await navigate({ to: "/", replace: true });
+			queries.removeQueries({
+				type: "inactive",
+				predicate: (query) => query.queryKey.includes(workspaceId),
+			});
 		},
 	});
 }
