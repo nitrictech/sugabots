@@ -16,7 +16,7 @@ import {
 	type ToolAccess,
 } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { movesAddress, stillConfiguredAs } from "../tested-configuration.ts";
+import { hasMovedAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import { type AugmentationTool, augmentConnectionTools } from "./augmentations.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
@@ -352,7 +352,7 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!current) return undefined;
-							moved = movesAddress(changes.url, current.url);
+							moved = hasMovedAddress(changes.url, current.url);
 							if (choosesAccess) {
 								const names = toolsOf({
 									kind: current.kind,

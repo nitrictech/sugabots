@@ -19,7 +19,7 @@ import type { Egress, EgressRefused } from "./network/egress.ts";
  * given for, and one kept would be sent to the new address, which whoever
  * changed it may own.
  */
-export function movesAddress(next: string | undefined, stored: string): boolean {
+export function hasMovedAddress(next: string | undefined, stored: string): boolean {
 	return next !== undefined && next !== stored;
 }
 
