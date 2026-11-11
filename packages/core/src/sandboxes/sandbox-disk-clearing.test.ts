@@ -13,9 +13,11 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import {
-	clearFinishedThreadFolders,
+	AGENT_CACHES,
 	clearingOrder,
+	freeDiskSpace,
 	MAX_FOLDERS_CLEARED_AT_ONCE,
+	SET_ASIDE_DIRECTORY,
 } from "./sandbox-disk-clearing.ts";
 import { Sandboxes } from "./sandboxes.ts";
 
@@ -157,8 +159,9 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 		return run.id;
 	}
 
-	it("clears deleted threads' folders, then ended runs', then done conversations', oldest first", async () => {
+	it("clears deleted threads' folders, then deleted agents' homes, then ended runs', then agents' caches, then done conversations', oldest first", async () => {
 		const deleted = crypto.randomUUID();
+		const deletedAgent = crypto.randomUUID();
 		const newerRun = await aRoutineRun("completed", at(30));
 		const olderRun = await aRoutineRun("failed", at(90));
 		const newerDone = await aConversation(true, at(20));
@@ -166,20 +169,18 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 		const helpWithNewerDone = await aCollaboration(newerDone, at(10));
 
 		const order = await runOnPostgres(
-			clearingOrder(workspaceId, [
-				helpWithNewerDone,
-				newerDone,
-				newerRun,
-				olderDone,
-				deleted,
-				olderRun,
-			]),
+			clearingOrder(workspaceId, {
+				threadIds: [helpWithNewerDone, newerDone, newerRun, olderDone, deleted, olderRun],
+				agentIds: [agentId, deletedAgent],
+			}),
 		);
 
 		expect(order).toEqual([
 			{ threadId: deleted, reason: "thread_deleted" },
+			{ agentId: deletedAgent, reason: "agent_deleted" },
 			{ threadId: olderRun, reason: "routine_run_ended" },
 			{ threadId: newerRun, reason: "routine_run_ended" },
+			...AGENT_CACHES.map((cache) => ({ agentId, cache, reason: "agent_cache" })),
 			{ threadId: olderDone, reason: "conversation_done" },
 			{ threadId: newerDone, reason: "conversation_done" },
 			{ threadId: helpWithNewerDone, reason: "conversation_done" },
@@ -192,7 +193,12 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 		const waitingForApproval = await aConversation(true, at(600), "waiting");
 
 		expect(
-			await runOnPostgres(clearingOrder(workspaceId, [open, running, waitingForApproval])),
+			await runOnPostgres(
+				clearingOrder(workspaceId, {
+					threadIds: [open, running, waitingForApproval],
+					agentIds: [],
+				}),
+			),
 		).toEqual([]);
 	});
 
@@ -237,11 +243,15 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 			return ran.stdout.text;
 		};
 
-		/** Every path under the threads' folders, relative to them. */
-		const threadFolders = async () =>
-			(await run(`cd ${Sandboxes.THREADS_DIRECTORY} && find . -mindepth 1 | sort`))
-				.split("\n")
-				.filter(Boolean);
+		beforeEach(async () => {
+			await run(`rm -rf ${Sandboxes.THREADS_DIRECTORY} ${Sandboxes.AGENTS_DIRECTORY}`);
+		});
+
+		/** Every path under `directory`, relative to it. */
+		const pathsUnder = async (directory: string) =>
+			(await run(`cd ${directory} && find . -mindepth 1 | sort`)).split("\n").filter(Boolean);
+
+		const threadFolders = () => pathsUnder(Sandboxes.THREADS_DIRECTORY);
 
 		it(
 			"removes finished threads' folders, and leaves open threads' alone",
@@ -251,7 +261,6 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 				const open = await aConversation(false, at(60));
 				await run(
 					[
-						`rm -rf ${Sandboxes.THREADS_DIRECTORY}`,
 						`mkdir -p ${Sandboxes.THREADS_DIRECTORY}`,
 						`cd ${Sandboxes.THREADS_DIRECTORY}`,
 						`mkdir -p ${deleted}/repo ${ended}/repo ${open}/repo`,
@@ -259,9 +268,7 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 					].join(" && "),
 				);
 
-				const clearing = await runOnPostgres(
-					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
-				);
+				const clearing = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, ALWAYS_FULL));
 
 				expect(clearing).toEqual({
 					cleared: [
@@ -276,17 +283,67 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 		);
 
 		it(
+			"removes deleted agents' homes and the caches the rest have, and leaves the rest of their homes alone",
+			async () => {
+				const deletedAgent = crypto.randomUUID();
+				await run(
+					[
+						`mkdir -p ${Sandboxes.AGENTS_DIRECTORY}`,
+						`cd ${Sandboxes.AGENTS_DIRECTORY}`,
+						`mkdir -p ${deletedAgent}/notes ${agentId}/notes ${agentId}/.cache/pip ${agentId}/.bun/install/cache/a ${agentId}/.bun/bin`,
+						`touch ${deletedAgent}/notes/a ${agentId}/notes/a ${agentId}/.cache/pip/a ${agentId}/.bun/install/cache/a/b ${agentId}/.bun/bin/bun`,
+					].join(" && "),
+				);
+
+				const clearing = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, ALWAYS_FULL));
+
+				expect(clearing).toEqual({
+					cleared: [
+						{ agentId: deletedAgent, reason: "agent_deleted" },
+						{ agentId, cache: ".cache", reason: "agent_cache" },
+						{ agentId, cache: ".bun/install/cache", reason: "agent_cache" },
+					],
+					stoppedAtTimeout: false,
+				});
+				expect(await pathsUnder(Sandboxes.AGENTS_DIRECTORY)).toEqual([
+					`./${agentId}`,
+					`./${agentId}/.bun`,
+					`./${agentId}/.bun/bin`,
+					`./${agentId}/.bun/bin/bun`,
+					`./${agentId}/.bun/install`,
+					`./${agentId}/notes`,
+					`./${agentId}/notes/a`,
+				]);
+				expect(await pathsUnder(SET_ASIDE_DIRECTORY)).toEqual([]);
+			},
+			SLOW,
+		);
+
+		it(
 			"clears nothing once the workspace is below the share",
 			async () => {
 				const ended = await aRoutineRun("completed", at(60));
 				await run(`mkdir -p ${Sandboxes.THREADS_DIRECTORY}/${ended}/repo`);
 
-				const clearing = await runOnPostgres(
-					clearFinishedThreadFolders(sandbox, workspaceId, NEVER_FULL),
-				);
+				const clearing = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, NEVER_FULL));
 
 				expect(clearing).toEqual({ cleared: [], stoppedAtTimeout: false });
 				expect(await threadFolders()).toContain(`./${ended}/repo`);
+			},
+			SLOW,
+		);
+
+		it(
+			"removes what a clearing cut short set aside, even with nothing else to clear",
+			async () => {
+				await run(
+					`mkdir -p ${SET_ASIDE_DIRECTORY}/1/node_modules && touch ${SET_ASIDE_DIRECTORY}/1/node_modules/a`,
+				);
+
+				const clearing = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, NEVER_FULL));
+
+				expect(clearing).toEqual({ cleared: [], stoppedAtTimeout: false });
+				expect(await pathsUnder(SET_ASIDE_DIRECTORY)).toEqual([]);
 			},
 			SLOW,
 		);
@@ -299,19 +356,14 @@ describe.skipIf(!env.DATABASE_URL)("which thread folders may be cleared, against
 				);
 				await run(
 					[
-						`rm -rf ${Sandboxes.THREADS_DIRECTORY}`,
 						`mkdir -p ${Sandboxes.THREADS_DIRECTORY}`,
 						`cd ${Sandboxes.THREADS_DIRECTORY}`,
 						`mkdir ${deleted.join(" ")}`,
 					].join(" && "),
 				);
 
-				const first = await runOnPostgres(
-					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
-				);
-				const second = await runOnPostgres(
-					clearFinishedThreadFolders(sandbox, workspaceId, ALWAYS_FULL),
-				);
+				const first = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, ALWAYS_FULL));
+				const second = await runOnPostgres(freeDiskSpace(sandbox, workspaceId, ALWAYS_FULL));
 
 				expect(first.cleared).toHaveLength(MAX_FOLDERS_CLEARED_AT_ONCE);
 				expect(second.cleared).toHaveLength(1);
