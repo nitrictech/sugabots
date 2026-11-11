@@ -55,6 +55,12 @@ export const fromE2b = (
 		cause instanceof SandboxNotFoundError
 			? new Sandboxes.Missing({ provider: "e2b", sandboxId: id })
 			: unavailable(cause);
+	const destroy = (id: string) =>
+		Effect.tryPromise({
+			// False when E2B no longer had it, which is what destroying asks for.
+			try: () => E2bSandbox.kill(id, options()),
+			catch: unavailable,
+		}).pipe(Effect.asVoid);
 
 	return {
 		capabilities: {
@@ -97,8 +103,8 @@ export const fromE2b = (
 		}).pipe(Effect.asVoid),
 		create: (spec) =>
 			Effect.tryPromise({
-				try: async () => {
-					const sandbox = await E2bSandbox.create(connection.template, {
+				try: () =>
+					E2bSandbox.create(connection.template, {
 						...options(),
 						metadata: { ...spec.labels },
 						timeoutMs: Duration.toMillis(IDLE_BACKSTOP),
@@ -107,15 +113,22 @@ export const fromE2b = (
 						// told otherwise; private, they need the sandbox's traffic token.
 						// Set only here: updating the network leaves it as it is.
 						network: { ...egressOf(spec.reach), allowPublicTraffic: false },
-					});
-					await sandbox.commands.run(
-						`mkdir -p ${Sandboxes.WORKSPACE_DIRECTORY} && chown ${AGENT_USER}: ${Sandboxes.WORKSPACE_DIRECTORY}`,
-						{ user: "root" },
-					);
-					return toSandbox(sandbox);
-				},
+					}),
 				catch: unavailable,
-			}),
+			}).pipe(
+				Effect.flatMap((sandbox) =>
+					Effect.tryPromise({
+						try: async () => {
+							await sandbox.commands.run(
+								`mkdir -p ${Sandboxes.WORKSPACE_DIRECTORY} && chown ${AGENT_USER}: ${Sandboxes.WORKSPACE_DIRECTORY}`,
+								{ user: "root" },
+							);
+							return toSandbox(sandbox);
+						},
+						catch: unavailable,
+					}).pipe(Effect.onError(() => destroy(sandbox.sandboxId).pipe(Effect.ignore))),
+				),
+			),
 		open: (id) =>
 			Effect.tryPromise({
 				try: async () => {
@@ -143,12 +156,7 @@ export const fromE2b = (
 				try: () => E2bSandbox.pause(id, options()),
 				catch: missingOr(id),
 			}).pipe(Effect.asVoid),
-		destroy: (id) =>
-			Effect.tryPromise({
-				// False when E2B no longer had it, which is what destroying asks for.
-				try: () => E2bSandbox.kill(id, options()),
-				catch: unavailable,
-			}).pipe(Effect.asVoid),
+		destroy,
 	};
 
 	function toSandbox(sandbox: E2bSandbox): Sandboxes.Sandbox {

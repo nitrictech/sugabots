@@ -92,6 +92,17 @@ export const fromOpenSandbox = (
 		isNotFound(cause)
 			? new Sandboxes.Missing({ provider: "opensandbox", sandboxId: id })
 			: unavailable(cause);
+	const destroy = (id: string) =>
+		Effect.tryPromise({
+			try: () =>
+				manager()
+					.killSandbox(id)
+					.catch((cause: unknown) => {
+						// Already gone, which is what destroying asks for.
+						if (!isNotFound(cause)) throw cause;
+					}),
+			catch: unavailable,
+		});
 
 	return {
 		// Docker keeps memory across a pause, but Kubernetes keeps only the
@@ -143,7 +154,7 @@ export const fromOpenSandbox = (
 							return toSandbox(sandbox);
 						},
 						catch: unavailable,
-					}),
+					}).pipe(Effect.onError(() => destroy(sandbox.id).pipe(Effect.ignore))),
 				),
 			),
 		open: (id) =>
@@ -190,17 +201,7 @@ export const fromOpenSandbox = (
 				try: () => manager().pauseSandbox(id),
 				catch: missingOr(id),
 			}),
-		destroy: (id) =>
-			Effect.tryPromise({
-				try: () =>
-					manager()
-						.killSandbox(id)
-						.catch((cause: unknown) => {
-							// Already gone, which is what destroying asks for.
-							if (!isNotFound(cause)) throw cause;
-						}),
-				catch: unavailable,
-			}),
+		destroy,
 	};
 
 	function toSandbox(sandbox: OpenSandbox): Sandboxes.Sandbox {

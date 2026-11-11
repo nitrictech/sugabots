@@ -1,4 +1,4 @@
-import { Sandbox, SandboxApiException } from "@alibaba-group/opensandbox";
+import { Sandbox, SandboxApiException, SandboxManager } from "@alibaba-group/opensandbox";
 import { SANDBOX_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { Effect, Redacted, Result } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -41,4 +41,42 @@ describe("OpenSandbox creation failures", () => {
 			);
 		},
 	);
+});
+
+describe("OpenSandbox setup failures", () => {
+	it("destroys a sandbox it made when readying it for agents fails", async () => {
+		const setupFailure = new Error("exec failed");
+		vi.spyOn(Sandbox, "create").mockResolvedValue({
+			id: "made-sandbox",
+			commands: { run: vi.fn().mockRejectedValue(setupFailure) },
+		} as unknown as Sandbox);
+		const killSandbox = vi.fn().mockResolvedValue(undefined);
+		vi.spyOn(SandboxManager, "create").mockReturnValue({
+			killSandbox,
+		} as unknown as SandboxManager);
+		const provider = fromOpenSandbox(
+			{
+				provider: "opensandbox",
+				baseUrl: "http://localhost:8090",
+				apiKey: Redacted.make("test-key"),
+				image: "example/image:latest",
+				size: SANDBOX_OPENSANDBOX_DEFAULT_SIZE,
+				networkMode: "allowlist",
+			},
+			await Effect.runPromise(Ids.make),
+		);
+		const result = await Effect.runPromise(
+			Effect.result(
+				provider.create({
+					labels: {},
+					reach: { kind: "open", blockedHosts: [] },
+					workName: "test",
+				}),
+			),
+		);
+		expect(Result.isFailure(result)).toBe(true);
+		if (!Result.isFailure(result)) return;
+		expect(result.failure.cause).toBe(setupFailure);
+		expect(killSandbox).toHaveBeenCalledWith("made-sandbox");
+	});
 });
