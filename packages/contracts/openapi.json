@@ -19692,6 +19692,16 @@
 							}
 						]
 					},
+					"connectedBy": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
 					"models": {
 						"type": "array",
 						"items": {
@@ -19715,6 +19725,7 @@
 					"enabledModelCount",
 					"lastTestedAt",
 					"lastTestError",
+					"connectedBy",
 					"models"
 				],
 				"additionalProperties": false

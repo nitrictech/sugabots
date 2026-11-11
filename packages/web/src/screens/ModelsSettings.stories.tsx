@@ -81,6 +81,7 @@ function provider(
 		enabledModelCount: models.filter((one) => one.enabled).length,
 		lastTestedAt: null,
 		lastTestError: null,
+		connectedBy: null,
 		models,
 		...over,
 	};
@@ -126,6 +127,7 @@ const openrouter = provider(
 			["tools", ...(index % 2 === 0 ? (["vision"] as const) : [])],
 		);
 	}),
+	{ connectedBy: "Tim Holm" },
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -154,13 +156,14 @@ const pausedDeepseek = provider(
 	"deepseek",
 	"DeepSeek",
 	[model("deepseek-chat", "DeepSeek Chat", true)],
-	{ active: false },
+	{ active: false, connectedBy: "Tim Holm" },
 );
 /** A new key whose test failed: it holds the key, but stays off until a key passes. */
 const rejectedGroq = provider(8, "groq", "Groq", [], {
 	active: false,
 	status: "error",
 	lastTestError: "The provider rejected the API key",
+	connectedBy: "Tim Holm",
 });
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
@@ -316,6 +319,17 @@ export const ConnectionFailed = meta.story({
 		const row = await canvas.findByRole("link", { name: /Groq/ });
 		await expect(row).toHaveTextContent("Connection failed");
 		await expect(row).not.toHaveTextContent("Disabled");
+	},
+});
+
+/** Switched off, it still names who connected it, until Disconnect takes the key away. */
+export const SwitchedOffProvider = meta.story({
+	parameters: { providers: [...providers, pausedDeepseek] },
+	render: () => <ProviderSettings providerId={pausedDeepseek.id} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "DeepSeek" })).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Use DeepSeek" })).not.toBeChecked();
+		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
 	},
 });
 
@@ -536,6 +550,7 @@ export const LargeCatalog = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
+		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
 		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);

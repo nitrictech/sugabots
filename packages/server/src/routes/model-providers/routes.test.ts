@@ -45,6 +45,7 @@ const groq: ModelProvider = {
 	enabledModelCount: 0,
 	lastTestedAt: null,
 	lastTestError: null,
+	connectedBy: null,
 	models: [],
 };
 

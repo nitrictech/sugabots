@@ -52,6 +52,8 @@ export const modelProvider = pgTable(
 		oauthTokensEncrypted: text("oauth_tokens_encrypted"),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
+		/** Who connected it: who gave it its key, signed it in, or switched on one that takes neither. */
+		connectedById: uuid("connected_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
