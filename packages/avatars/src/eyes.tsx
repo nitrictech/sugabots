@@ -4,9 +4,17 @@ import type { RefObject } from "react";
 import { Mark, markKey } from "./face-drawing.tsx";
 import {
 	ARC_EYE_STROKE_WIDTH,
+	ARC_SHUT_RISE,
 	type FaceMark,
+	FLATTEST_ARC_HEIGHT,
 	faceMarks,
+	OPEN_EYE_FADES,
+	SMILE_ARC_BASELINE_SHARE,
+	SMILE_ARC_SHOWS,
+	SMILE_ARC_WIDENING,
 	THINKING_DOT_RADIUS,
+	THINKING_DOT_XS,
+	THINKING_DOT_Y,
 	viewboxPercentage,
 } from "./face-marks.ts";
 import type { FaceDrawing } from "./face-rig.ts";
@@ -75,7 +83,7 @@ function OpenEye({
 	const scaleY = useTransform(height, (shown) =>
 		Math.max(shown, ARC_EYE_STROKE_WIDTH / drawnHeight),
 	);
-	const opacity = useTransform(smile, [0, 0.5], [1, 0]);
+	const opacity = useTransform(smile, [...OPEN_EYE_FADES], [1, 0]);
 	return (
 		<motion.g style={{ scaleY, opacity }}>
 			<Mark mark={mark} color={color} />
@@ -97,7 +105,7 @@ function SmileArc({
 	color: string;
 	smile: MotionValue<number>;
 }) {
-	const opacity = useTransform(smile, [0, 0.3], [0, 1]);
+	const opacity = useTransform(smile, [...SMILE_ARC_SHOWS], [0, 1]);
 	return (
 		<motion.path
 			d={smileArcPath(eye)}
@@ -115,8 +123,8 @@ function smileArcPath(eye: OpenEyeMark): string {
 		eye.shape === "circle"
 			? [eye.cx, eye.cy, eye.r * 2]
 			: [eye.x + eye.width / 2, eye.y + eye.height / 2, eye.width];
-	const radius = width / 2 + 0.6;
-	const baseline = centreY + radius * 0.4;
+	const radius = width / 2 + SMILE_ARC_WIDENING;
+	const baseline = centreY + radius * SMILE_ARC_BASELINE_SHARE;
 	return `M${centreX - radius} ${baseline}a${radius} ${radius} 0 0 1 ${radius * 2} 0`;
 }
 
@@ -142,12 +150,6 @@ function ArcEye({
 }
 
 /**
- * How far an arc eye rises as it shuts: its arcs stand on a line about two
- * units below where open eyes are centred.
- */
-const ARC_SHUT_RISE = 2;
-
-/**
  * The arc eyes' path with each arc's height cut by `flat`, from 0 (as drawn)
  * to 1 (a straight line). The arcs are the path's relative `a` commands, whose
  * second number is their height.
@@ -156,19 +158,15 @@ function flattenArcs(d: string, flat: number): string {
 	return d.replace(
 		/a([\d.]+) ([\d.]+)/g,
 		(_, width: string, height: string) =>
-			`a${width} ${Math.max(Number(height) * (1 - flat), 0.01)}`,
+			`a${width} ${Math.max(Number(height) * (1 - flat), FLATTEST_ARC_HEIGHT)}`,
 	);
 }
 
-/*
- * A thinking bot's three dots, across where its eyes were, on the 40-unit
- * face the eyes are drawn for. They're HTML, not SVG, so the browser can raise
- * them on the GPU (see face-rig.ts).
+/**
+ * The thinking dots, grown in as the mood turns to thinking; the middle one
+ * grows last. They're HTML, not SVG, so the browser can raise them on the GPU
+ * (see face-rig.ts).
  */
-const THINKING_DOT_XS = [14, 20, 26] as const;
-const THINKING_DOT_Y = 20;
-
-/** The thinking dots, grown in as the mood turns to thinking; the middle one grows last. */
 export function ThinkingDots({ color, drawing }: { color: string; drawing: FaceDrawing }) {
 	const [left, middle, right] = drawing.layers.dots;
 	return (

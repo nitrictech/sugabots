@@ -1,6 +1,6 @@
 import type { Easing } from "motion/react";
 import { viewboxPercentage } from "./face-marks.ts";
-import type { Path } from "./layer-motion.ts";
+import { type KeyframesPath, layerKinds, type Path, type Values } from "./layer-motion.ts";
 
 /*
  * One hop, as keyframes at these moments (seconds): crouch, take off, top,
@@ -23,37 +23,69 @@ const SQUASHING: Easing[] = HOP_TIMES.slice(1).map(() => "easeInOut");
 /** How the bot springs back to rest after landing: a quick wobble. */
 const SETTLE = { stiffness: 500, damping: 12 };
 
-/** The paths of one hop, `size` times as big as a full one, for the layers it moves. */
-export function hopPaths(size: number): { rise: Path; squash: Path[]; eyesDrop: Path[] } {
-	const scaled = (frames: number[], rest: number) =>
-		frames.map((frame) => rest + (frame - rest) * size);
-	const keyframes = (frames: number[][], ease: Easing[]): Path => ({
-		kind: "keyframes",
-		frames,
-		times: HOP_TIMES,
-		ease,
-		seconds: HOP_SECONDS,
-	});
-	const widths = scaled(HOP.scaleX, 1);
-	const heights = scaled(HOP.scaleY, 1);
-	return {
-		rise: keyframes(
-			scaled(HOP.rise, 0).map((height) => [viewboxPercentage(height)]),
+/** The layers a hop moves. */
+type HopLayer = "hopRise" | "hopSquash" | "hopEyesDrop";
+
+const hopKeyframes = (frames: Values[], ease: Easing[]): KeyframesPath => ({
+	kind: "keyframes",
+	frames,
+	times: HOP_TIMES,
+	ease,
+	seconds: HOP_SECONDS,
+});
+
+const settleTo = (layer: HopLayer): Path => ({
+	kind: "spring",
+	to: layerKinds[layer].rest,
+	...SETTLE,
+});
+
+/** A full hop: the paths each layer it moves plays, one after another. */
+export const FULL_HOP: Readonly<Record<HopLayer, readonly Path[]>> = {
+	hopRise: [
+		hopKeyframes(
+			HOP.rise.map((height) => [viewboxPercentage(height)]),
 			RISE_AND_FALL,
 		),
-		squash: [
-			keyframes(
-				widths.map((width, index) => [width, heights[index] ?? 1]),
-				SQUASHING,
-			),
-			{ kind: "spring", to: [1, 1], ...SETTLE },
-		],
-		eyesDrop: [
-			keyframes(
-				scaled(HOP.eyesDrop, 0).map((drop) => [viewboxPercentage(drop)]),
-				SQUASHING,
-			),
-			{ kind: "spring", to: [0], ...SETTLE },
-		],
+	],
+	hopSquash: [
+		hopKeyframes(
+			HOP.scaleX.map((width, index) => [width, HOP.scaleY[index] ?? 1]),
+			SQUASHING,
+		),
+		settleTo("hopSquash"),
+	],
+	hopEyesDrop: [
+		hopKeyframes(
+			HOP.eyesDrop.map((drop) => [viewboxPercentage(drop)]),
+			SQUASHING,
+		),
+		settleTo("hopEyesDrop"),
+	],
+};
+
+/**
+ * The paths of one hop, `size` times as big as `FULL_HOP`, for the layers it
+ * moves: each value's distance from where its layer rests is scaled by `size`.
+ */
+export function hopPaths(size: number): Record<HopLayer, readonly Path[]> {
+	const scaled = (layer: HopLayer) => {
+		const rest = layerKinds[layer].rest;
+		const about = (values: Values) =>
+			values.map((value, index) => {
+				const resting = rest[index] ?? 0;
+				return resting + (value - resting) * size;
+			});
+		return FULL_HOP[layer].map(
+			(path): Path =>
+				path.kind === "spring"
+					? { ...path, to: about(path.to) }
+					: { ...path, frames: path.frames.map(about) },
+		);
+	};
+	return {
+		hopRise: scaled("hopRise"),
+		hopSquash: scaled("hopSquash"),
+		hopEyesDrop: scaled("hopEyesDrop"),
 	};
 }
