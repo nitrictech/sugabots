@@ -39,7 +39,7 @@ describe("GitHub API errors", () => {
 				"POST",
 				"/repos/acme/web/pulls/5/reviews",
 				{ bearer: "installation-token" },
-			).pipe(Effect.flip),
+			).pipe(Effect.asVoid, Effect.flip),
 		);
 		expect(failure).toMatchObject({ _tag: "GitHubRequestFailed", status: 422, reason });
 	});
