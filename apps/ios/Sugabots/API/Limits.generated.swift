@@ -43,8 +43,8 @@ enum Limits {
 	static let inviteLifetimeDays = 2
 	/// `DEFAULT_QUIET_HOURS` in `@sugabots/contracts`.
 	static let defaultQuietHours = (from: "22:00", to: "08:00")
-	/// `LARGE_MODEL_CATALOG` in `@sugabots/contracts`.
-	static let largeModelCatalog = 20
+	/// `MODEL_SEARCH_THRESHOLD` in `@sugabots/contracts`.
+	static let modelSearchThreshold = 20
 	/// `THREADS_SHOWN` in `@sugabots/contracts`.
 	static let threadsShown = 6
 }

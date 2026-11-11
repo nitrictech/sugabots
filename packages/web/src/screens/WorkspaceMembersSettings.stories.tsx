@@ -48,12 +48,18 @@ const inPod = (member: typeof ryan) => ({
 	removable: member.role !== "owner" && member.role !== "admin",
 });
 
-/** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Somebody asked and not yet arrived, sent a day and a half ago. Expiring in
+ * half a day, so the expiry copy reads the same whenever it runs.
+ */
 const alex = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	email: "alex@nitric.io",
 	role: "member",
-	expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+	sentAt: new Date(Date.now() - 36 * HOUR_MS).toISOString(),
+	expiresAt: new Date(Date.now() + 12 * HOUR_MS).toISOString(),
 };
 
 const roster = `${import.meta.env.VITE_API_URL}/workspaces/:workspace`;
@@ -132,7 +138,7 @@ export const Managing = meta.story({
 		await expect(canvas.getByRole("link", { name: /Ryan Eyes/ })).toHaveTextContent("(you)");
 		// People and invitations are two requests, so the invitation is awaited.
 		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
-		await expect(canvas.getByText("Expires within a day")).toBeInTheDocument();
+		await expect(canvas.getByText(/^Sent .+, expires in \d+ hours$/)).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Resend" })).toBeInTheDocument();
 	},
 });

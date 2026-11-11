@@ -25,20 +25,26 @@ export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
 
 /**
- * The size of an E2B workspace's sandboxes unless it sets another: room to
- * install a repository's dependencies and run its checks. E2B's own default,
- * 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
+ * Room to install a repository's dependencies and run its checks. E2B's own
+ * default, 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
  */
 export const SANDBOX_E2B_DEFAULT_SIZE = { cpuCount: 2, memoryGiB: 4 } as const;
 
 /**
- * Bounds for an E2B sandbox's size. The account's plan sets the real limit,
- * which E2B enforces when the template is built.
+ * The OpenSandbox SDK's own default. Docker refuses more vCPUs than its host
+ * has, and Kubernetes reserves the whole size on a node, so a larger default
+ * would stop sandboxes starting on small hosts.
  */
-export const sandboxE2bCpuCountSchema = Schema.Int.check(
+export const SANDBOX_OPENSANDBOX_DEFAULT_SIZE = { cpuCount: 1, memoryGiB: 2 } as const;
+
+/**
+ * Bounds for a sandbox's size. The real limit is the E2B account's plan, or
+ * what OpenSandbox's hosts have room for.
+ */
+export const sandboxCpuCountSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
-export const sandboxE2bMemoryGiBSchema = Schema.Int.check(
+export const sandboxMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
 
@@ -55,6 +61,8 @@ export interface SandboxProviderPreset {
 	/** What sandboxes are made from: an image for OpenSandbox, a template for E2B. */
 	imageLabel: string;
 	defaultImage: string;
+	/** The size of its sandboxes unless the workspace sets another. */
+	defaultSize: { readonly cpuCount: number; readonly memoryGiB: number };
 	/** What it is good for, in the line under its name where one is chosen. */
 	description: string;
 }
@@ -67,6 +75,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		baseUrl: "http://localhost:8090",
 		imageLabel: "Image",
 		defaultImage: SANDBOX_IMAGE,
+		defaultSize: SANDBOX_OPENSANDBOX_DEFAULT_SIZE,
 		description: "Runs on your own Docker or Kubernetes",
 	},
 	{
@@ -75,6 +84,7 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		hosting: "remote",
 		imageLabel: "Template",
 		defaultImage: SANDBOX_E2B_TEMPLATE,
+		defaultSize: SANDBOX_E2B_DEFAULT_SIZE,
 		description: "Hosted microVMs, or E2B Embed on your own server",
 	},
 ];
@@ -126,6 +136,9 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			preset: Schema.Literal("opensandbox"),
 			serverUrl: Schema.optional(providerUrlSchema),
 			image: Schema.optional(image),
+			/** The most each sandbox may use. */
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
@@ -136,8 +149,8 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			sandboxUrl: Schema.optional(providerUrlSchema),
 			template: Schema.optional(nameSchema),
 			/** What the template is built with, so every sandbox made from it has. */
-			cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
-			memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
+			cpuCount: Schema.optional(sandboxCpuCountSchema),
+			memoryGiB: Schema.optional(sandboxMemoryGiBSchema),
 			/** Left out, {@link SANDBOX_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
 			networkMode: Schema.optional(sandboxNetworkModeSchema),
 		}),
@@ -155,8 +168,12 @@ export const sandboxProviderSettingsSchema = providerSettingsWithImageSchema(ima
 /**
  * Settings as they are read back. An image saved before images' names were
  * checked is shown as it is, so the page that would correct it still loads.
+ * Its JSON is that of {@link sandboxProviderSettingsSchema}, so the API
+ * document names it the same.
  */
-const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema);
+const savedSandboxProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema).annotate({
+	identifier: "SandboxProviderSettings",
+});
 
 export type SandboxProviderSettings = typeof sandboxProviderSettingsSchema.Type;
 
@@ -173,7 +190,7 @@ export const sandboxProviderSchema = Schema.Struct({
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
-});
+}).annotate({ identifier: "SandboxProvider" });
 
 export type SandboxProvider = typeof sandboxProviderSchema.Type;
 
@@ -215,6 +232,73 @@ export const sandboxProviderTestResultSchema = Schema.Struct({
 
 export type SandboxProviderTestResult = typeof sandboxProviderTestResultSchema.Type;
 
+const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/** A folder of a pod's sandbox and how much of its disk it takes. */
+export const sandboxDiskFolderSchema = Schema.Union([
+	/** A bot's home, its own across every thread in the pod. */
+	Schema.Struct({ kind: Schema.Literal("home"), agentId: uuidSchema, bytes: byteCountSchema }),
+	/** Every thread's folder together, where the bots clone and build. */
+	Schema.Struct({ kind: Schema.Literal("threads"), bytes: byteCountSchema }),
+	/** `/tmp`. */
+	Schema.Struct({ kind: Schema.Literal("temporary"), bytes: byteCountSchema }),
+]);
+
+export type SandboxDiskFolder = typeof sandboxDiskFolderSchema.Type;
+
+/**
+ * How full a pod's sandbox's disk was when last measured, which it is every
+ * few minutes while it runs. A paused sandbox's disk doesn't change, so its
+ * last measurement still holds.
+ */
+export const sandboxDiskSchema = Schema.Struct({
+	usedBytes: byteCountSchema,
+	/** What its files can fill: what they use and what is still free to them. */
+	totalBytes: byteCountSchema,
+	measuredAt: isoTimestampSchema,
+	/** Largest first; null when they couldn't be sized, such as when it took too long. */
+	folders: Schema.NullOr(Schema.Array(sandboxDiskFolderSchema)),
+});
+
+export type SandboxDisk = typeof sandboxDiskSchema.Type;
+
+/** Past this share of its disk, a sandbox is close to full. */
+export const SANDBOX_DISK_WARNING_SHARE = 0.8;
+/** Past this share, commands that write are about to fail. */
+export const SANDBOX_DISK_CRITICAL_SHARE = 0.9;
+
+/** The share of its disk a sandbox's files use, from 0 to 1. */
+export function sandboxDiskShare(disk: Pick<SandboxDisk, "usedBytes" | "totalBytes">) {
+	return disk.totalBytes === 0 ? 1 : Math.min(disk.usedBytes / disk.totalBytes, 1);
+}
+
+/** The share of its disk a sandbox's files use, as a whole percent, as people are shown it. */
+export function sandboxDiskPercent(disk: Pick<SandboxDisk, "usedBytes" | "totalBytes">) {
+	return Math.round(sandboxDiskShare(disk) * 100);
+}
+
+/** How full the disk is: `warning` and `critical` past their shares of it. */
+export function sandboxDiskLevel(disk: Pick<SandboxDisk, "usedBytes" | "totalBytes">) {
+	const share = sandboxDiskShare(disk);
+	if (share >= SANDBOX_DISK_CRITICAL_SHARE) return "critical";
+	if (share >= SANDBOX_DISK_WARNING_SHARE) return "warning";
+	return "normal";
+}
+
+const BYTE_UNITS = ["bytes", "KB", "MB", "GB", "TB"] as const;
+const BYTES_PER_KB = 1024;
+
+/** A size on disk as people read one, in units of 1024: `512 KB`, `18.4 GB`. */
+export function formatDiskSize(bytes: number) {
+	const exponent = Math.min(
+		Math.max(Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(BYTES_PER_KB)), 0),
+		BYTE_UNITS.length - 1,
+	);
+	const value = bytes / BYTES_PER_KB ** exponent;
+	const shown = exponent === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
+	return `${shown} ${BYTE_UNITS[exponent]}`;
+}
+
 /** A pod's sandbox as the pod's settings show it. */
 export const podSandboxStateSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("none") }),
@@ -231,6 +315,8 @@ export const podSandboxStateSchema = Schema.Union([
 		peopleWatching: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		/** Whether the workspace's enabled provider would make it from another image, or is another provider. */
 		upgradeAvailable: Schema.Boolean,
+		/** Null until it has been measured. */
+		disk: Schema.NullOr(sandboxDiskSchema),
 	}),
 ]);
 
@@ -245,6 +331,11 @@ export const podSandboxSchema = Schema.Struct({
 });
 
 export type PodSandbox = typeof podSandboxSchema.Type;
+
+/** The disk of one pod's sandbox, for the workspace's overview of its pods' sandboxes. */
+export const podSandboxDiskSchema = Schema.Struct({ podId: uuidSchema, disk: sandboxDiskSchema });
+
+export type PodSandboxDisk = typeof podSandboxDiskSchema.Type;
 
 /**
  * How a provider's template stands, for a provider that builds its sandboxes

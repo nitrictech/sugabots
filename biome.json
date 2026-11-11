@@ -158,6 +158,19 @@
 		},
 		{
 			"includes": [
+				"packages/web/src/lib/artifact-kind-catalog.ts",
+				"packages/web/src/lib/model-makers.ts",
+				"packages/web/src/lib/notification-choices.ts",
+				"packages/web/src/lib/page-frame.ts",
+				"packages/web/src/lib/provider-hues.ts",
+				"packages/web/src/lib/routine-trigger-words.ts",
+				"packages/web/src/lib/screen-limits.ts",
+				"packages/web/src/lib/tool-access-labels.ts"
+			],
+			"plugins": ["./lint/plain-data-imports-only-types.grit"]
+		},
+		{
+			"includes": [
 				"packages/web/src/ui/dialog.tsx",
 				"packages/web/src/ui/dropdown-menu.tsx",
 				"packages/web/src/ui/select.tsx",

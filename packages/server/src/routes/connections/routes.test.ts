@@ -44,6 +44,7 @@ const wiki: Connection = {
 	kind: "mcp",
 	auth: "header",
 	signedIn: true,
+	signInExpired: false,
 	secretHeader: null,
 	hasSecret: false,
 	appSettingsUrl: null,

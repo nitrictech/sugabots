@@ -8,6 +8,7 @@ import {
 	type PersonParticipant,
 	type RoutineResultOf,
 	type ThreadParticipant,
+	type ThreadType,
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
@@ -27,16 +28,15 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
-import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
-import { GROUP_MENTIONS, textWithMentions } from "./mentions.tsx";
+import { groupMentionsBy } from "./mentions.tsx";
 import { SideThreadLine, type SideThreadStatus } from "./SideThreadLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 import {
 	type AnsweringFace,
-	dateWithYear,
 	formatDay,
 	isTyping,
 	sameDay,
@@ -77,6 +77,8 @@ export function ThreadConversation({
 	host,
 	isRunning,
 	participants,
+	members,
+	threadType,
 	dividers = true,
 	onOpenThread,
 	onOpenArtifact,
@@ -111,6 +113,10 @@ export function ThreadConversation({
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: ThreadParticipant[];
+	/** The pod's people, whom a person's `@here` or `@channel` would notify. */
+	members: readonly PersonParticipant[];
+	/** What kind of thread it is, which decides whether `@here` and `@channel` notify anyone. */
+	threadType: ThreadType;
 	/**
 	 * Day markers between messages. Off where the caller places its own, as the
 	 * chat does between these messages and its activity rows.
@@ -227,6 +233,8 @@ export function ThreadConversation({
 										: undefined
 								}
 								participants={participants}
+								members={members}
+								threadType={threadType}
 								looks={looks}
 								fileNames={fileNames}
 								podId={podId}
@@ -352,6 +360,8 @@ function MessageRow({
 	message,
 	startsGroup,
 	participants,
+	members,
+	threadType,
 	looks,
 	fileNames,
 	podId,
@@ -381,6 +391,8 @@ function MessageRow({
 	/** Whether it heads its author's group, so it carries their face and name. */
 	startsGroup: boolean;
 	participants: ThreadParticipant[];
+	members: readonly PersonParticipant[];
+	threadType: ThreadType;
 	looks: ReturnType<typeof useConnectionLooks>;
 	/** The thread's files by id, for the tool line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
@@ -425,7 +437,9 @@ function MessageRow({
 	// A tap is a touch screen's hover: it shows a follow-up's time, as hovering does.
 	function toggleTimeOnTouch(event: MouseEvent) {
 		if (startsGroup || !window.matchMedia(NO_HOVER).matches) return;
-		if (event.target instanceof Element && event.target.closest("a, button")) return;
+		// A tap in a mention's card, drawn elsewhere on the page, still reaches here through React.
+		if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
+		if (event.target.closest("a, button, [role=button]")) return;
 		setTimeTapped((shown) => !shown);
 	}
 	const agent = author.kind === "agent" ? author : undefined;
@@ -433,6 +447,7 @@ function MessageRow({
 	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
 	const files = message.parts.filter((part): part is FilePart => part.type === "file");
 	const segments = segmentsOf(message);
+	const mentionable = [...participants, ...groupMentionsBy(author, members, threadType)];
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
@@ -544,6 +559,13 @@ function MessageRow({
 						);
 					}
 					if (!segment.text) return null;
+					const markdown = (
+						<MessageMarkdown
+							text={segment.text}
+							mentionable={mentionable}
+							writer={writerOf(author)}
+						/>
+					);
 					return (
 						<div
 							key={segment.key}
@@ -554,19 +576,10 @@ function MessageRow({
 									className="reply-grow"
 									style={{ ["--reveal-duration" as string]: `${revealDurationMs(segment.text)}ms` }}
 								>
-									<div>
-										<MessageMarkdown text={segment.text} mentionable={participants} />
-									</div>
+									<div>{markdown}</div>
 								</div>
-							) : agent ? (
-								<MessageMarkdown text={segment.text} mentionable={participants} />
 							) : (
-								<p className="m-0 whitespace-pre-wrap">
-									{textWithMentions(
-										segment.text,
-										author.kind === "person" ? [...participants, ...GROUP_MENTIONS] : participants,
-									)}
-								</p>
+								markdown
 							)}
 						</div>
 					);
@@ -822,18 +835,14 @@ export function DaySeparator({ at }: { at: string }) {
 }
 
 /** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */
-function formatFullTimestamp(createdAt: string): string {
+export function formatFullTimestamp(createdAt: string): string {
 	const date = new Date(createdAt);
-	const dateFormat: Intl.DateTimeFormatOptions =
-		date.getFullYear() === new Date().getFullYear()
-			? { month: "short", day: "numeric" }
-			: dateWithYear;
 	const time = new Intl.DateTimeFormat(undefined, {
 		hour: "numeric",
 		minute: "2-digit",
 		second: "2-digit",
 	}).format(date);
-	return `${formatDay(date, { dateFormat })} at ${time}`;
+	return `${formatDay(date)} at ${time}`;
 }
 
 function formatTime(createdAt: string): string {

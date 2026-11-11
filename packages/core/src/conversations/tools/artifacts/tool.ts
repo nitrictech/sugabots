@@ -7,6 +7,7 @@ import {
 	artifactTitleSchema,
 	artifactWrittenSchema,
 	type BuiltInToolKey,
+	MAX_ARTIFACT_CONTENT_CHARACTERS,
 } from "@sugabots/contracts";
 import { type Tool, tool } from "ai";
 import { Effect, Option, Schema } from "effect";
@@ -47,10 +48,10 @@ type Written = typeof artifactWrittenSchema.Type;
 
 type Refusal = { status: "refused"; reason: string };
 
-const artifactIdSchema = Schema.String.annotate({
+const artifactIdSchema = Schema.String.check(Schema.isUUID()).annotate({
 	description: "The artifact's id, from artifact_list or the write that made it",
 });
-const baseVersionSchema = Schema.Int.annotate({
+const baseVersionSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
 	description:
 		"The version your change is based on, from artifact_read or your last write. A change based on an older version is refused.",
 });
@@ -182,8 +183,11 @@ export function artifactTools({
 			inputSchema: Schema.Struct({
 				artifactId: artifactIdSchema,
 				baseVersion: baseVersionSchema,
-				oldText: Schema.String.check(Schema.isMinLength(1)),
-				newText: Schema.String,
+				oldText: Schema.String.check(
+					Schema.isMinLength(1),
+					Schema.isMaxLength(MAX_ARTIFACT_CONTENT_CHARACTERS),
+				),
+				newText: Schema.String.check(Schema.isMaxLength(MAX_ARTIFACT_CONTENT_CHARACTERS)),
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: (input) =>
 				refusingChanges(

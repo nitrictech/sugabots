@@ -12,7 +12,11 @@ declare module "@novnc/novnc" {
 		constructor(target: HTMLElement, url: string);
 		viewOnly: boolean;
 		scaleViewport: boolean;
+		/** The JPEG quality, 0 to 9, it asks the server to encode with. */
+		qualityLevel: number;
 		background: string;
+		/** Whether a click or tap on the screen moves focus to it. */
+		focusOnClick: boolean;
 		disconnect(): void;
 		/** Puts text on the remote desktop's clipboard. */
 		clipboardPasteFrom(text: string): void;

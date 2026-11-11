@@ -3,10 +3,10 @@ import { tool } from "ai";
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { agent, message, threadFile, user } from "../../../database/schema.ts";
+import { agent, type MessageRow, message, threadFile, user } from "../../../database/schema.ts";
 import { loadFileParts } from "../../threads/file-parts.ts";
 import { describeAttachment, formatHistoryTime } from "../../threads/message-text.ts";
-import { participantColumns, toMessage } from "../../threads/participants.ts";
+import { type ParticipantRow, participantColumns, toMessage } from "../../threads/participants.ts";
 
 const MAX_MATCHES = 10;
 /** Enough of a message to answer from; the whole of a long one would crowd out the others. */
@@ -51,7 +51,7 @@ export function searchHistoryTool({
 	run: RunEffect;
 }) {
 	return tool({
-		description: `Search the messages in this thread from before the summary of its earlier history, which you only have that summary of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
+		description: `Search the messages here from before the summary of its earlier history, which you only have that summary of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
 		inputSchema: Schema.Struct({
 			query: Schema.optional(
 				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
@@ -76,8 +76,7 @@ export function searchHistoryTool({
 			}
 			if (!keptFrom) {
 				return {
-					refused:
-						"You have this thread's whole history already; there is nothing older to search.",
+					refused: "You have the whole history here already; there is nothing older to search.",
 				};
 			}
 			const search: HistorySearch = {
@@ -126,27 +125,37 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 		returned.map(({ message: row }) => row.id),
 	);
 	return {
-		messages: returned.map(({ message: row, ...author }): HistoryMatch => {
-			const found = toMessage(row, author);
-			const said =
-				row.content.length <= MATCH_CHARACTERS
-					? row.content
-					: `${row.content.slice(0, MATCH_CHARACTERS)}…`;
-			return {
-				author:
-					found.author.kind === "routine_trigger" ? found.author.routineName : found.author.name,
-				at: formatHistoryTime(row.createdAt),
-				text: [
-					said,
-					...(files.get(row.id) ?? []).map((file) => describeAttachment(file, { usesSandbox })),
-				]
-					.filter((line) => line !== "")
-					.join("\n"),
-			};
-		}),
+		messages: returned.map(({ message: row, ...author }) =>
+			toHistoryMatch(
+				row,
+				author,
+				(files.get(row.id) ?? []).map((file) => describeAttachment(file, { usesSandbox })),
+			),
+		),
 		more: rows.length > MAX_MATCHES,
 	};
 });
+
+/**
+ * A found message as a bot is given it: who wrote it, when, and what it said,
+ * cut short when long, followed by a line for each file it carried.
+ */
+export function toHistoryMatch(
+	row: MessageRow,
+	author: ParticipantRow,
+	attachmentLines: readonly string[],
+): HistoryMatch {
+	const found = toMessage(row, author);
+	const said =
+		row.content.length <= MATCH_CHARACTERS
+			? row.content
+			: `${row.content.slice(0, MATCH_CHARACTERS)}…`;
+	return {
+		author: found.author.kind === "routine_trigger" ? found.author.routineName : found.author.name,
+		at: formatHistoryTime(row.createdAt),
+		text: [said, ...attachmentLines].filter((line) => line !== "").join("\n"),
+	};
+}
 
 /**
  * Which messages match `words`, and how to put the best first. Three ways,
@@ -162,7 +171,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
  * substring-only matches follow. Each expression is the one its index on
  * `message.content` is built on, so the indexes are used.
  */
-function wordMatch(words: string): { where: SQL; best: SQL[] } {
+export function wordMatch(words: string): { where: SQL; best: SQL[] } {
 	const english = sql`to_tsvector('english', ${message.content}) @@ websearch_to_tsquery('english', ${words})`;
 	const simple = sql`to_tsvector('simple', ${message.content}) @@ websearch_to_tsquery('simple', ${words})`;
 	const terms = substringTerms(words);
@@ -199,6 +208,6 @@ function substringTerms(words: string): string[] {
 }
 
 /** `term` with LIKE's wildcards taken literally. */
-function escapeLike(term: string): string {
+export function escapeLike(term: string): string {
 	return term.replace(/[\\%_]/g, (character) => `\\${character}`);
 }

@@ -74,7 +74,7 @@ extension NotificationLevel {
 }
 
 extension WorkspaceRole {
-	/// What each role is called, by its raw value, as `WORKSPACE_ROLE_LABELS`.
+	/// What each role is called, by its raw value, as `workspaceRoleLabel`.
 	static let labels: [String: String] = [
 		"owner": "Owner",
 		"admin": "Admin",
@@ -82,7 +82,7 @@ extension WorkspaceRole {
 		"viewer": "Viewer",
 	]
 
-	/// What each role may do, by its raw value, as `WORKSPACE_ROLE_DESCRIPTIONS`.
+	/// What each role may do, by its raw value, as `workspaceRoleDescription`.
 	static let descriptions: [String: String] = [
 		"owner": "Administers the workspace, decides who else does, and can hand it on.",
 		"admin": "Administers the workspace, its providers and every shared pod.",
@@ -92,7 +92,7 @@ extension WorkspaceRole {
 }
 
 extension ConnectionAccess {
-	/// Each setting in words, by its raw value, as `ACCESS_WORDS`.
+	/// Each setting in words, by its raw value, as `TOOL_ACCESS_LABELS`.
 	static let words: [String: String] = [
 		"allow": "Allowed",
 		"ask": "Ask first",

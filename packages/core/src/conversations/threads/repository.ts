@@ -44,6 +44,7 @@ import {
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
+import type { Channel, ThreadId } from "./rooms.ts";
 
 /**
  * The only writer of `thread`, `thread_participant` and `thread_read`,
@@ -65,18 +66,33 @@ export interface Interface {
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/**
-	 * The thread hanging off the message `originMessageId` in `parent`, a pod's
-	 * chat or a bot's channel, opened and announced when it has none: with the
-	 * bot `hostAgentId`, or between people when it is null, and `initiatorUserId`.
+	 * The thread hanging off the message `originMessageId` in the channel
+	 * `parent`, opened and announced when it has none: with the bot
+	 * `hostAgentId`, or between people when it is null, and `initiatorUserId`.
 	 * A message has one thread, so `opened` is false when it already had it.
 	 */
 	readonly openThread: (input: {
-		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">;
+		parent: Pick<Channel<schema.ThreadRow>, "id" | "workspaceId" | "podId">;
 		originMessageId: string;
 		hostAgentId: string | null;
 		title: string;
 		initiatorUserId: string;
 	}) => Effect.Effect<{ thread: schema.ThreadRow; opened: boolean }>;
+	/**
+	 * Starts a thread in the pod with the bot `hostAgentId`, for the person
+	 * `initiatorUserId`, both in it. Its first message is `brief`, written by
+	 * the bot `briefingAgentId`, which may be the host itself; announced so the
+	 * host takes its turn on the brief.
+	 */
+	readonly startBriefedThread: (input: {
+		workspaceId: string;
+		podId: string;
+		hostAgentId: string;
+		initiatorUserId: string;
+		briefingAgentId: string;
+		title: string;
+		brief: string;
+	}) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * Marks the conversation `thread` done, or reopens it, and announces it
 	 * when that changed it. Only a conversation is ever done, so any other
@@ -196,13 +212,13 @@ export interface Interface {
 		title: string;
 	}) => Effect.Effect<string>;
 	/**
-	 * Calls the thread `title`, unless it is a bot's channel, which goes by its
-	 * bot's name. True when the thread took the title.
+	 * Calls the thread `title`. Never a channel, which goes by the name people
+	 * or its bot gave it. True when the thread was still there to take it.
 	 */
-	readonly retitle: (threadId: string, title: string) => Effect.Effect<boolean>;
+	readonly retitle: (threadId: ThreadId, title: string) => Effect.Effect<boolean>;
 	/** Retitles the thread the system agent `systemAgentKey` works in under `servedThreadId`. */
 	readonly retitleSystemAgentThread: (input: {
-		servedThreadId: string;
+		servedThreadId: ThreadId;
 		systemAgentKey: SystemAgentKey;
 		title: string;
 	}) => Effect.Effect<void>;
@@ -468,6 +484,61 @@ export const make = Effect.gen(function* () {
 							}),
 						]);
 						return { thread: created, opened: true };
+					}),
+				),
+			),
+
+		startBriefedThread: (input) =>
+			operation(
+				"startBriefedThread",
+				transaction(
+					Effect.gen(function* () {
+						const id = yield* ids.next;
+						const created = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									id,
+									workspaceId: input.workspaceId,
+									podId: input.podId,
+									hostAgentId: input.hostAgentId,
+									conversationId: id,
+									type: "conversation",
+									title: input.title,
+									initiatorUserId: input.initiatorUserId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						// One bot per thread: the briefing bot writes the first message without joining.
+						yield* query((db) =>
+							db.insert(threadParticipant).values([
+								{ threadId: created.id, userId: input.initiatorUserId },
+								{ threadId: created.id, agentId: input.hostAgentId },
+							]),
+						);
+						const brief = yield* query((db) =>
+							db
+								.insert(message)
+								.values({
+									threadId: created.id,
+									authorAgentId: input.briefingAgentId,
+									kind: "text",
+									status: "complete",
+									parts: [{ type: "text", text: input.brief }],
+									content: input.brief,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("message")));
+						yield* emit([
+							ConversationEvent.BriefedThreadStarted({
+								workspaceId: created.workspaceId,
+								podId: created.podId,
+								threadId: created.id,
+								hostAgentId: input.hostAgentId,
+								briefMessageId: brief.id,
+							}),
+						]);
+						return created;
 					}),
 				),
 			),
@@ -927,7 +998,7 @@ export const make = Effect.gen(function* () {
 						db
 							.update(thread)
 							.set({ title, updatedAt: now })
-							.where(and(eq(thread.id, threadId), ne(thread.type, "bot_channel")))
+							.where(eq(thread.id, threadId))
 							.returning({ id: thread.id }),
 					),
 				).pipe(Effect.map((retitled) => retitled.length > 0)),
@@ -966,10 +1037,13 @@ export const make = Effect.gen(function* () {
 								.select({ at: sql`min(${streaming.createdAt})` })
 								.from(streaming)
 								.where(and(eq(streaming.threadId, threadId), eq(streaming.status, "streaming")));
-							// A routine's thread lists its runs among its messages, so reading it reads them too.
+							// A routine's thread lists its runs among its messages, so reading it reads
+							// them too: through when the newest ended, or began while it still runs.
 							const run = alias(thread, "run_thread");
 							const newestRun = db
-								.select({ at: sql`max(${routineExecution.acceptedAt})` })
+								.select({
+									at: sql`max(coalesce(${routineExecution.finishedAt}, ${routineExecution.acceptedAt}))`,
+								})
 								.from(routineExecution)
 								.innerJoin(run, eq(run.id, routineExecution.threadId))
 								.where(eq(run.conversationId, threadId));

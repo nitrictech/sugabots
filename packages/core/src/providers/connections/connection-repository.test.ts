@@ -132,22 +132,35 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		const wiki = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		const tracker = await create({ name: "Tracker", url: "https://tracker.example.com/mcp" });
 		await create({ name: "Linear", url: "https://mcp.linear.app/mcp", auth: "oauth" });
+		const notion = await create({
+			name: "Notion",
+			url: "https://mcp.notion.com/mcp",
+			auth: "oauth",
+		});
+		await connections.saveOauthRecord(workspaceId, notion.id, {
+			clientInformation: { client_id: "client-1" },
+			signInRejectedAt: "2026-10-05T21:00:08.000Z",
+		});
 		await listTools(wiki.id, [lookup, edit]);
 		await connections.update(workspaceId, podId, wiki.id, { toolAccess: { edit: "off" } });
 		await listTools(tracker.id, [lookup, wipe]);
 		await connections.update(workspaceId, podId, tracker.id, { toolAccess: { lookup: "off" } });
 
-		const targets = await connections.targetsForPod(workspaceId, podId);
+		const forPod = await connections.targetsForPod(workspaceId, podId);
 
-		// Linear is still waiting on its sign-in, and every one of Tracker's tools
-		// is off, so neither is reached.
-		expect(targets).toEqual([
-			expect.objectContaining({
-				connectionId: wiki.id,
-				handle: "wiki",
-				toolAccess: { edit: "off" },
-			}),
-		]);
+		// Linear is still waiting on its first sign-in, Notion's was refused, and
+		// every one of Tracker's tools is off, so none of them is reached.
+		expect(forPod).toEqual({
+			targets: [
+				expect.objectContaining({
+					connectionId: wiki.id,
+					handle: "wiki",
+					toolAccess: { edit: "off" },
+				}),
+			],
+			signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
+		});
+		expect(await shown(notion.id)).toMatchObject({ signedIn: false, signInExpired: true });
 	});
 
 	it("gives a tool nobody chose for its default, and keeps a choice while its tool is not listed", async () => {
@@ -234,6 +247,42 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		expect(tools).toContainEqual(expect.objectContaining({ name: "push_branch", access: "ask" }));
 	});
 
+	it("lists Linear's upload beside a Linear server's own tools, to choose for like them", async () => {
+		const made = await create({ name: "Linear", url: "https://mcp.linear.app/mcp" });
+		await listTools(made.id, [lookup]);
+
+		expect(
+			(await shown(made.id))?.tools.map(({ name, readOnly, access }) => ({
+				name,
+				readOnly,
+				access,
+			})),
+		).toEqual([
+			{ name: "lookup", readOnly: true, access: "allow" },
+			{ name: "upload_file", readOnly: false, access: "allow" },
+		]);
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { upload_file: "off" } });
+		expect((await shown(made.id))?.tools).toContainEqual(
+			expect.objectContaining({ name: "upload_file", access: "off" }),
+		);
+	});
+
+	it("leaves Linear's upload to the server when the server lists one of its own", async () => {
+		const made = await create({ name: "Linear", url: "https://mcp.linear.app/mcp" });
+		await listTools(made.id, [{ ...edit, name: "upload_file" }]);
+
+		expect((await shown(made.id))?.tools).toEqual([
+			expect.objectContaining({ name: "upload_file", readOnly: false, access: "ask" }),
+		]);
+	});
+
+	it("adds nothing to a server outside the catalog", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		await listTools(made.id, [lookup]);
+
+		expect((await shown(made.id))?.tools.map((tool) => tool.name)).toEqual(["lookup"]);
+	});
+
 	it("hands a turn an HTTP connection, with this version's method tools", async () => {
 		const [made] = await onDatabase((db) =>
 			db
@@ -253,7 +302,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 
 		await connections.update(workspaceId, podId, made.id, { toolAccess: { delete: "ask" } });
 
-		expect(await connections.targetsForPod(workspaceId, podId)).toEqual([
+		expect((await connections.targetsForPod(workspaceId, podId)).targets).toEqual([
 			expect.objectContaining({ connectionId: made.id, kind: "http" }),
 		]);
 		expect((await shown(made.id))?.tools.map(({ name, access }) => [name, access])).toEqual([

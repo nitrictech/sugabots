@@ -21,11 +21,13 @@ export const TurnRequest = Schema.Struct({
 	triggerMessageId: Schema.String,
 	reason: Schema.Literals([
 		"mention",
+		"reply",
 		"default",
 		"collaboration",
 		"routine",
 		"resume",
 		"interview",
+		"brief",
 	]) satisfies Schema.Codec<TurnReason>,
 });
 export type TurnRequest = typeof TurnRequest.Type;

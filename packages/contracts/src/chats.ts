@@ -11,6 +11,7 @@ import {
 import {
 	agentParticipantSchema,
 	collaborationStatusSchema,
+	MESSAGE_MAX_LENGTH,
 	messageSchema,
 	threadParticipantSchema,
 	toolCallPartSchema,
@@ -165,7 +166,7 @@ export const podChatMarkersSchema = Schema.Struct({
 		Schema.Struct({
 			unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 			needsApproval: Schema.Boolean,
-			/** How many of its routines' latest runs failed. */
+			/** How many of its routines' latest runs failed since the person last opened them. */
 			failedRoutines: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		}),
 	),
@@ -285,8 +286,10 @@ export const listedRoutineSchema = Schema.Struct({
 		id: uuidSchema,
 		name: Schema.String,
 		state: routineStateSchema,
-		/** Its latest run failed, and nothing has run it since. */
+		/** Its latest run failed, and the person has not opened its thread since. */
 		failed: Schema.Boolean,
+		/** It paused itself after runs in a row failed, rather than somebody pausing it. */
+		pausedAfterFailures: Schema.Boolean,
 	}),
 	/** The bot that runs it. */
 	agent: agentSchema,
@@ -337,7 +340,7 @@ export type ChatList = typeof chatListSchema.Type;
 /** A message that starts a thread from a pod's chat, and the bot it is for, if one. */
 export const newThreadSchema = Schema.Struct({
 	id: uuidSchema,
-	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
+	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 	/** Files the sender uploaded to the pod's chat and has not sent yet, which move to the thread. */
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),
@@ -370,7 +373,7 @@ export type NewChat = typeof newChatSchema.Type;
 export const startedThreadSchema = Schema.Struct({
 	conversation: conversationThreadSchema,
 	message: messageSchema,
-});
+}).annotate({ identifier: "StartedThread" });
 
 export type StartedThread = typeof startedThreadSchema.Type;
 
@@ -400,6 +403,19 @@ export const chatMessageItemSchema = Schema.Union([
 		error: Schema.NullOr(Schema.String),
 		/** What the run's bot last said in it, or null while it has said nothing. */
 		report: Schema.NullOr(Schema.String),
+		createdAt: isoTimestampSchema,
+	}),
+	/** In a bot's channel: another bot asking it for help, which links to the collaboration's thread. */
+	Schema.Struct({
+		kind: Schema.Literal("collaboration"),
+		id: uuidSchema,
+		threadId: uuidSchema,
+		/** What it was asked: the first line of the brief. */
+		title: Schema.String,
+		/** The bot that asked. */
+		initiator: agentParticipantSchema,
+		/** How the asked bot's work in the thread stands. */
+		state: Schema.Literals(["running", "done", "failed"]),
 		createdAt: isoTimestampSchema,
 	}),
 	/** In a routine's thread: the routine, by its id, paused itself after failing twice in a row. */

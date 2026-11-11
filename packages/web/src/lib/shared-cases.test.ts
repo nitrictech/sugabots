@@ -5,6 +5,7 @@ import {
 	type MessagePart,
 	mentionedHandles,
 	messagePreview,
+	type PersonParticipant,
 	quotedPreview,
 	type RoutineTriggerInput,
 	splitAroundMentions,
@@ -34,10 +35,10 @@ import toolNameCases from "../../../contracts/cases/tool-names.cases.json" with 
 import toolStepCases from "../../../contracts/cases/tool-steps.cases.json" with { type: "json" };
 import {
 	firstBotNamed,
+	groupMentionsBy,
 	type MentionTarget,
 	mentionTargetKey,
 	targetWithHandle,
-	withGroupMentions,
 } from "../screens/mentions.tsx";
 import {
 	findAnsweringFace,
@@ -148,8 +149,11 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 			mentionedHandles,
 			canStartMention,
 			firstBotNamed: (draft: string, crew: ThreadParticipant[]) => firstBotNamed(draft, crew)?.id,
-			withGroupMentions: (mentionable: ThreadParticipant[], threadType: ThreadType) =>
-				withGroupMentions(mentionable, threadType).map(mentionTargetKey),
+			groupMentionsBy: (
+				writer: Parameters<typeof groupMentionsBy>[0],
+				members: PersonParticipant[],
+				threadType: ThreadType,
+			) => groupMentionsBy(writer, members, threadType).map(mentionTargetKey),
 			targetWithHandle: (mentionable: MentionTarget[], handle: string) => {
 				const target = targetWithHandle(mentionable, handle);
 				return target && mentionTargetKey(target);
@@ -212,7 +216,7 @@ const suites: { file: string; cases: Cases; rules: Record<string, Rule> }[] = [
 		cases: muteCases,
 		rules: {
 			formatUntil: (until: string, now: string, locale: string) =>
-				formatUntil(new Date(until), new Date(now), locale),
+				formatUntil(new Date(until), { now: new Date(now), locale }),
 			muteUntil: (label: string, now: string) => {
 				const duration = MUTE_DURATIONS.find((one) => one.label === label);
 				return duration && localTimeText(duration.until(new Date(now)));

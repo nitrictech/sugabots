@@ -15,19 +15,15 @@ if (!bot || !pod) throw new Error("The story app has no bot in a pod");
  * menu once the person's notification settings have loaded.
  */
 async function openMenuOf(row: Element) {
-	await waitFor(
-		async () => {
-			await userEvent.pointer({ keys: "[MouseRight]", target: row });
-			await expect(screen.getByRole("menu")).toBeVisible();
-		},
-		{ timeout: 10_000 },
-	);
+	await waitFor(async () => {
+		await userEvent.pointer({ keys: "[MouseRight]", target: row });
+		await expect(screen.getByRole("menu")).toBeVisible();
+	});
 }
 
 /**
- * Clicks a menu item that closes the menus, and waits until they have closed.
- * The accessibility check after each story would otherwise find their focus
- * guards while a busy machine is still animating them away.
+ * Clicks a menu item that closes the menus, and waits until they have closed,
+ * so the next step finds the page rather than the menu, or opens it afresh.
  */
 async function chooseAndClose(item: HTMLElement) {
 	await userEvent.click(item);
@@ -95,7 +91,7 @@ export const MutingABot = meta.story({
 	render: () => <StoryApp path={chatPath(bot)} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
-		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
+		const row = await sidebar.findByText(bot.name);
 		await openMenuOf(row);
 		await expect(await screen.findByRole("group", { name: "Notify you about…" })).toBeVisible();
 		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Nothing" }));
@@ -117,7 +113,7 @@ export const MutingABotForAWhile = meta.story({
 	render: () => <StoryApp path={chatPath(bot)} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
-		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
+		const row = await sidebar.findByText(bot.name);
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await chooseAndClose(await screen.findByRole("menuitem", { name: "Mute for 1 hour" }));
@@ -135,7 +131,7 @@ export const OpeningNotificationSettings = meta.story({
 	render: () => <StoryApp path={chatPath(bot)} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
-		const row = await sidebar.findByText(bot.name, {}, { timeout: 10_000 });
+		const row = await sidebar.findByText(bot.name);
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await chooseAndClose(await screen.findByRole("menuitem", { name: "Notification settings" }));

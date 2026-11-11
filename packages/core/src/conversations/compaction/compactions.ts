@@ -95,7 +95,7 @@ export const make = Effect.gen(function* () {
 						// Only what the last compaction kept can be summarised now (see
 						// `planCompaction`), so nothing before it is read.
 						const transcript = yield* query((db) =>
-							loadTranscript(db, scope.threadId, previous?.keptFrom),
+							loadTranscript(db, scope.threadId, { from: previous?.keptFrom }),
 						);
 						const sourceIndex = transcript.findIndex((row) => row.id === request.sourceMessageId);
 						const history = transcript

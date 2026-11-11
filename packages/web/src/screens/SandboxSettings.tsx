@@ -1,5 +1,4 @@
 import {
-	SANDBOX_E2B_DEFAULT_SIZE,
 	SANDBOX_NETWORK_MODE_DEFAULT,
 	type SandboxNetworkMode,
 	type SandboxProvider,
@@ -7,8 +6,9 @@ import {
 	type SandboxProviderSettings,
 	type SandboxProviderTestResult,
 	type SandboxProviderUpdate,
-	sandboxE2bCpuCountSchema,
-	sandboxE2bMemoryGiBSchema,
+	sandboxCpuCountSchema,
+	sandboxDiskShare,
+	sandboxMemoryGiBSchema,
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
 } from "@sugabots/contracts";
@@ -17,10 +17,11 @@ import { Schema } from "effect";
 import { useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import {
 	usePrepareSandboxTemplate,
+	useSandboxDisks,
 	useSandboxProviderActions,
 	useSandboxProviders,
 	useSandboxTemplate,
@@ -40,16 +41,18 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { DiskMeter, DiskPercent, diskSummary } from "./SandboxDisk.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
  * The workspace's computers, experimental: a switch for whether bots get a
  * Linux computer per pod to run commands on, which provider makes those
- * computers, that provider's account, what the computers may reach, and the
- * bots using one. A workspace may keep a provider configured for each preset;
- * the switch enables the chosen one, which disables any other. Code calls a
- * computer a sandbox; people read "computer".
+ * computers, that provider's account, what the computers may reach, the bots
+ * using one, and how full each pod's computer's disk is. A workspace may keep
+ * a provider configured for each preset; the switch enables the chosen one,
+ * which disables any other. Code calls a computer a sandbox; people read
+ * "computer".
  */
 
 const networkModes: readonly { value: SandboxNetworkMode; label: string }[] = [
@@ -194,6 +197,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 				}
 			/>
 			<BotsUsingAComputer />
+			<PodDisks />
 		</>
 	);
 }
@@ -228,6 +232,46 @@ function BotsUsingAComputer() {
 					sub={pod.name}
 					chevron
 					render={<Link {...agentSettingsLink({ pod, agent })} />}
+				/>
+			))}
+		</SettingsGroup>
+	);
+}
+
+/**
+ * How full each pod's computer's disk was when last measured, fullest first,
+ * each opening the pod's Computer page, which shows what fills it. Hidden
+ * until one has been measured.
+ */
+function PodDisks() {
+	const { data: disks } = useSandboxDisks();
+	const { data: pods } = usePods();
+	const podById = new Map(pods?.map((pod) => [pod.id, pod]));
+	const measured = (disks ?? [])
+		.flatMap(({ podId, disk }) => {
+			const pod = podById.get(podId);
+			return pod ? [{ pod, disk }] : [];
+		})
+		.toSorted((a, b) => sandboxDiskShare(b.disk) - sandboxDiskShare(a.disk));
+	if (measured.length === 0) return null;
+	return (
+		<SettingsGroup
+			label="Disk use by pod"
+			note="Measured every few minutes while each computer is on. Once a pod's disk fills, its bots' commands fail."
+		>
+			{measured.map(({ pod, disk }) => (
+				<SettingsRow
+					key={pod.id}
+					label={pod.name}
+					sub={
+						<>
+							<DiskMeter disk={disk} label={`${pod.name} disk used`} />
+							{diskSummary(disk)}
+						</>
+					}
+					trailing={<DiskPercent disk={disk} />}
+					chevron
+					render={<Link {...podSettingsPageLink(pod, "computer")} />}
 				/>
 			))}
 		</SettingsGroup>
@@ -371,38 +415,38 @@ function ProviderSettings({
 							onConfigure({ settings: { ...settings, sandboxUrl: sandboxUrl || undefined } })
 						}
 					/>
-					<TextEntryRow
-						label="vCPUs"
-						saved={settings.cpuCount?.toString()}
-						placeholder={String(SANDBOX_E2B_DEFAULT_SIZE.cpuCount)}
-						disabled={pending}
-						clearable
-						onSave={(typed) => {
-							const cpuCount = wholeNumber(typed);
-							if (typed && !Schema.is(sandboxE2bCpuCountSchema)(cpuCount)) {
-								onInvalid("Enter a whole number of vCPUs, from 1 to 64.");
-								return Promise.resolve();
-							}
-							return onConfigure({ settings: { ...settings, cpuCount } });
-						}}
-					/>
-					<TextEntryRow
-						label="Memory"
-						saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
-						placeholder={`${SANDBOX_E2B_DEFAULT_SIZE.memoryGiB} GiB`}
-						disabled={pending}
-						clearable
-						onSave={(typed) => {
-							const memoryGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
-							if (typed && !Schema.is(sandboxE2bMemoryGiBSchema)(memoryGiB)) {
-								onInvalid("Enter a whole number of GiB, from 1 to 64.");
-								return Promise.resolve();
-							}
-							return onConfigure({ settings: { ...settings, memoryGiB } });
-						}}
-					/>
 				</>
 			)}
+			<TextEntryRow
+				label="vCPUs"
+				saved={settings.cpuCount?.toString()}
+				placeholder={String(preset.defaultSize.cpuCount)}
+				disabled={pending}
+				clearable
+				onSave={(typed) => {
+					const cpuCount = wholeNumber(typed);
+					if (typed && !Schema.is(sandboxCpuCountSchema)(cpuCount)) {
+						onInvalid("Enter a whole number of vCPUs, from 1 to 64.");
+						return Promise.resolve();
+					}
+					return onConfigure({ settings: { ...settings, cpuCount } });
+				}}
+			/>
+			<TextEntryRow
+				label="Memory"
+				saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
+				placeholder={`${preset.defaultSize.memoryGiB} GiB`}
+				disabled={pending}
+				clearable
+				onSave={(typed) => {
+					const memoryGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
+					if (typed && !Schema.is(sandboxMemoryGiBSchema)(memoryGiB)) {
+						onInvalid("Enter a whole number of GiB, from 1 to 64.");
+						return Promise.resolve();
+					}
+					return onConfigure({ settings: { ...settings, memoryGiB } });
+				}}
+			/>
 			{chosen === "e2b" && provider && hasKey && <TemplateRow providerId={provider.id} />}
 			{provider && hasKey && (
 				<SettingsRow
@@ -510,7 +554,7 @@ function networkSummary(settings: SandboxProviderSettings): string {
 
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
-		? "The server's own API key, from its configuration. Leave the image empty to use the default."
+		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a pod's computer is reset; on Kubernetes, one too big for any node never starts."
 		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's computer is reset.";
 }
 

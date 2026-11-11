@@ -19,6 +19,7 @@ import {
 	WEBHOOK_ENCODING_OPTIONS,
 	WEBHOOK_SECRET_LABELS,
 	WEBHOOK_SOURCE_LABELS,
+	WEBHOOK_SOURCE_NOTES,
 	WEBHOOK_SOURCE_SECRET_PLACEHOLDERS,
 	type WebhookGenericKind,
 	type WebhookSourceChoice,
@@ -117,13 +118,10 @@ export const NO_SECRET_NOTE =
 export function authNote(auth: WebhookAuth): string {
 	switch (auth.kind) {
 		case "github":
-			return "Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret.";
 		case "stripe":
-			return "Add the address as an endpoint in Stripe, and paste its signing secret.";
 		case "slack":
-			return "Set the address as your Slack app's Request URL, and paste its Signing Secret.";
 		case "linear":
-			return "Add the address as a webhook in Linear, and paste its signing secret.";
+			return WEBHOOK_SOURCE_NOTES[auth.kind];
 		case "hmac":
 			return `Sign the raw request body with the secret using HMAC ${labelOf(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}.`;
 		case "api_key":

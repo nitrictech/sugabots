@@ -14,6 +14,8 @@ import { HttpResponse, http } from "msw";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { findAnsweringFace } from "./thread-layout.ts";
@@ -84,6 +86,8 @@ const meta = preview.meta({
 		host,
 		isRunning: false,
 		participants: [host, person],
+		members: [person, jay],
+		threadType: "conversation",
 		podId: POD,
 		onOpenThread: fn(),
 		fileUrlOf,
@@ -965,7 +969,8 @@ export const TypingWithTheBot = meta.story({
  * A mention names someone in their own colours: a bot on its tint, a person on
  * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
  * Linear Handler has not joined; it is named from the pod's crew. A handle in
- * code, one that names nobody, and an email address stay plain text.
+ * code and one that names nobody stay plain text, and an email address is a
+ * link rather than a mention.
  */
 export const Mentions = meta.story({
 	tags: ["ai-generated"],
@@ -996,7 +1001,307 @@ export const Mentions = meta.story({
 		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
 		// Mentions add to Streamdown's markdown rather than replacing it.
 		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
-		await expect(canvas.getByText(/jay@example\.com and @nobody\./)).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "jay@example.com" })).toBeInTheDocument();
+		await expect(canvas.getByText(/and @nobody\./)).toBeInTheDocument();
+	},
+});
+
+/**
+ * A link in a bot's reply is a real link: hovering shows where it goes, and a
+ * middle or Ctrl-click opens it in a new tab. A plain click on one off the app
+ * asks first, showing the whole address; one back into the app opens unasked.
+ */
+export const Links = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000501",
+				host,
+				"The timeout is tracked in [the checkout issue](https://linear.app/nitric/issue/CHK-12). The run that hit it is [in Routines](/routines).",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		const external = canvas.getByRole("link", { name: "the checkout issue" });
+		await expect(external).toHaveAttribute("href", "https://linear.app/nitric/issue/CHK-12");
+		await expect(canvas.getByRole("link", { name: "in Routines" })).toHaveAttribute(
+			"href",
+			"/routines",
+		);
+		await userEvent.click(external);
+		const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+		await expect(within(warning).getByRole("link", { name: "Open link" })).toHaveAttribute(
+			"href",
+			"https://linear.app/nitric/issue/CHK-12",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	},
+});
+
+/**
+ * A reply a model left a `**` open in is closed for it, but nothing it wrote
+ * is lost: a `<` that isn't the start of HTML stays, words after it included.
+ */
+export const UnclosedMarkupInAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000510",
+				host,
+				"The parser returns a List<String for each row, so **check the empty ones",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText(/List<String for each row/, { selector: "p" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByText("check the empty ones", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+	},
+});
+
+/**
+ * A person's message is markdown too, as a bot's is, but keeps each line they
+ * typed, and a single `~` is only a tilde. HTML in it is shown as the text it
+ * is, and an image as a link to it, so it doesn't load for everyone who reads.
+ */
+export const PeoplesMarkdown = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000511",
+				person,
+				[
+					"**Deploy checklist** for `checkout-api`:",
+					"- bump the version",
+					"- ~~skip~~ run the migrations",
+					"",
+					"Then restart it with",
+					"```sh",
+					"bun run deploy --service checkout-api",
+					"```",
+					"Thanks!",
+					"Ping me after",
+					"<b>not bold</b>",
+					"",
+					"Back in ~5 min, ~10 at most. ![The deploy dashboard](https://example.com/deploys.png) [**![Status page](https://example.com/badge.png)**](https://status.example.com)",
+				].join("\n"),
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Deploy checklist", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText("checkout-api", { selector: "code" })).toBeInTheDocument();
+		await expect(canvas.getByText("skip", { selector: "del" })).toBeInTheDocument();
+		await expect(canvas.getByRole("group", { name: "Code block" })).toHaveTextContent(
+			"bun run deploy --service checkout-api",
+		);
+		// Two lines typed one under the other stay two lines.
+		const closing = canvas.getByText(/^Thanks!/);
+		await expect(closing.querySelectorAll("br")).toHaveLength(2);
+		await expect(closing).toHaveTextContent("<b>not bold</b>");
+		await expect(canvas.getAllByRole("deletion")).toHaveLength(1);
+		await expect(canvas.getByRole("link", { name: "The deploy dashboard" })).toHaveAttribute(
+			"href",
+			"https://example.com/deploys.png",
+		);
+		await expect(canvas.queryByRole("img", { name: "The deploy dashboard" })).toBeNull();
+		// An image inside a link is only its words there, not a second link.
+		const status = canvas.getByRole("link", { name: "Status page" });
+		await expect(status).toHaveAttribute("href", "https://status.example.com");
+		await expect(within(status).queryByRole("link")).toBeNull();
+	},
+});
+
+/**
+ * A link in a person's message that shows its address, as a bare URL does,
+ * opens without asking, accented letters and all. One whose text says
+ * something else asks first, showing where it really goes, as every link off
+ * the app in a bot's reply does. An `@` in an address is not a mention. Only
+ * web and email links are links: a relative one, or one that would open an
+ * app, is shown as written.
+ */
+export const PeoplesLinks = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000512",
+				person,
+				"The notes are at https://example.com/café-notes and the setup is in [the docs](https://example.com/setup). Mine are at https://medium.com/@sam-rivera/notes. Old ones are [in Routines](/routines) and <vscode://file/notes.md>.",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		// Keeps the test's own tab where it is; `defaultPrevented` still says whether the link asked first.
+		const asked: boolean[] = [];
+		function stayHere(event: MouseEvent) {
+			asked.push(event.defaultPrevented);
+			event.preventDefault();
+		}
+		window.addEventListener("click", stayHere);
+		try {
+			const bare = canvas.getByRole("link", { name: "https://example.com/café-notes" });
+			await expect(bare).toHaveAttribute("href", "https://example.com/caf%C3%A9-notes");
+			await userEvent.click(bare);
+			await expect(asked).toEqual([false]);
+			await expect(screen.queryByRole("dialog")).toBeNull();
+
+			await userEvent.click(canvas.getByRole("link", { name: "the docs" }));
+			const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+			await expect(within(warning).getByText("https://example.com/setup")).toBeVisible();
+			await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+			const withHandle = canvas.getByRole("link", { name: "https://medium.com/@sam-rivera/notes" });
+			await expect(within(withHandle).queryByRole("button")).toBeNull();
+
+			await expect(canvas.queryByRole("link", { name: "in Routines" })).toBeNull();
+			await expect(canvas.queryByRole("link", { name: "vscode://file/notes.md" })).toBeNull();
+			await expect(
+				canvas.getByText(/\[in Routines\]\(\/routines\) and <vscode:\/\/file\/notes\.md>/),
+			).toBeInTheDocument();
+		} finally {
+			window.removeEventListener("click", stayHere);
+		}
+	},
+});
+
+/** The rest of the pod, so `@here` has more people to notify than its card lists. */
+const podmates = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
+	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
+);
+
+/** The workspace the bots below are in, whose roster holds what each does. */
+const workspace = {
+	id: growthDesk.workspaceId,
+	name: "Nitric",
+	slug: "nitric",
+	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+};
+
+/** Called by Escape in the panel `MentionCards` draws the conversation in. */
+const closePanel = fn();
+
+/**
+ * Clicking a mention, or pressing Enter or Space on it, opens a card: a
+ * person's face, name, role and handle; a bot's, with what it does; and for
+ * `@here`, who it notifies, leaving out its writer and every bot. Escape
+ * closes the card and leaves the panel the conversation is in open, and so
+ * does a click outside it.
+ */
+export const MentionCards = meta.story({
+	args: {
+		participants: [host, person, jay, ...podmates],
+		members: [person, jay, ...podmates],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000420",
+				jay,
+				"@sam-rivera can you pair with @issue-triager on the flaky test? @here the release waits on it. Not @nobody.",
+			),
+		],
+	},
+	decorators: [
+		function WithBots(Story) {
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connections", POD], []);
+				client.setQueryData(["workspaces"], [workspace]);
+				client.setQueryData(
+					["workspaces", workspace.id, "members"],
+					[
+						{
+							id: "0199a3a0-0000-7000-8000-000000000430",
+							role: "admin",
+							user: { id: person.id, email: person.email, name: person.name, image: null },
+							joinedAt: "2026-09-01T00:00:00.000Z",
+						},
+					],
+				);
+				client.setQueryData(
+					["agents", workspace.id],
+					[
+						{
+							...growthDesk,
+							id: host.id,
+							name: host.name,
+							handle: host.handle,
+							description: "Sorts new issues by area and urgency, and asks for what's missing.",
+						},
+					],
+				);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
+	],
+	beforeEach() {
+		closePanel.mockClear();
+	},
+	render: function InAPanel(args) {
+		const panel = usePanelKeys<HTMLDivElement>(closePanel);
+		return (
+			<div {...panel} className="outline-none">
+				<ThreadConversation {...args} />
+			</div>
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const page = within(document.body);
+		const sam = canvas.getByRole("button", { name: "@sam-rivera" });
+		await userEvent.click(sam);
+		const samCard = await page.findByRole("dialog", { name: /Sam Rivera/ });
+		await expect(within(samCard).getByText("@sam-rivera")).toBeVisible();
+		await expect(within(samCard).getByText("Admin")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+		await expect(sam).toHaveFocus();
+		await expect(closePanel).not.toHaveBeenCalled();
+
+		canvas.getByRole("button", { name: /Issue Triager/ }).focus();
+		await userEvent.keyboard("{Enter}");
+		const botCard = await page.findByRole("dialog", { name: /Issue Triager/ });
+		await expect(within(botCard).getByText("@issue-triager")).toBeVisible();
+		await expect(
+			await within(botCard).findByText(/Sorts new issues by area and urgency/),
+		).toBeVisible();
+		await userEvent.click(canvas.getByText(/the release waits on it/));
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		canvas.getByRole("button", { name: "@here" }).focus();
+		await userEvent.keyboard(" ");
+		const hereCard = await page.findByRole("dialog", { name: "@here" });
+		const notified = within(hereCard).getByRole("list", { name: "Notifies" });
+		// Sam and the six others: five named, then the rest counted. Not Jay, who wrote it.
+		await expect(within(notified).getAllByRole("listitem")).toHaveLength(5);
+		await expect(within(notified).getByText("Sam Rivera")).toBeVisible();
+		await expect(within(hereCard).queryByText("Jay Park")).toBeNull();
+		await expect(within(hereCard).getByText("and 2 more")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		// A handle nobody has is only text.
+		await expect(canvas.queryByRole("button", { name: "@nobody" })).toBeNull();
+		await expect(closePanel).not.toHaveBeenCalled();
 	},
 });
 
@@ -1118,13 +1423,11 @@ export const Reactions = meta.story({
 		await userEvent.keyboard("hundred points");
 		// The search's only result is active once it applies, and Enter chooses it. A
 		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(
-			() =>
-				expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "💯");
@@ -1161,13 +1464,11 @@ export const ReactFromToolbar = meta.story({
 		await userEvent.keyboard("thumbs up");
 		// The search's only result is active once it applies, and Enter chooses it. A
 		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(
-			() =>
-				expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		// The picker's data writes 👍 with a variation selector after it, which a reaction leaves off.

@@ -3,7 +3,7 @@ import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { routineExecution } from "../../database/schema.ts";
+import { routineExecution, thread, threadRead } from "../../database/schema.ts";
 import { lineageOf } from "../threads/tree.ts";
 
 /** A run as the API describes it, listed in the conversation `conversationId`. */
@@ -111,6 +111,26 @@ export const routineAcceptsWork = Effect.fn("RoutineExecution.routineAcceptsWork
 		(execution.state === "queued" || execution.state === "running")
 	);
 });
+
+/**
+ * Whether the latest run of the routine `routineId` failed and `userId` has
+ * not opened the routine's thread since it ended, as a value for a query.
+ * Opening the thread reads it through its newest run's end.
+ */
+export function latestRunFailedUnseen(routineId: SQLWrapper, userId: string): SQL<boolean> {
+	return sql<boolean>`coalesce((
+		select ${routineExecution.state} = 'failed' and not exists (
+			select 1 from ${threadRead} join ${thread} on ${thread.id} = ${threadRead.threadId}
+			where ${thread.routineId} = ${routineId}
+				and ${threadRead.userId} = ${userId}
+				and ${threadRead.readThrough} >= ${routineExecution.finishedAt}
+		)
+		from ${routineExecution}
+		where ${routineExecution.routineId} = ${routineId}
+		order by ${routineExecution.acceptedAt} desc, ${routineExecution.id} desc
+		limit 1
+	), false)`;
+}
 
 /** Whether the latest run of the routine `routineId` failed, as a value for a query. */
 export function latestRunFailed(routineId: SQLWrapper): SQL<boolean> {

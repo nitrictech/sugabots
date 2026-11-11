@@ -252,7 +252,7 @@ interface Line {
 	unpricedRequests: number;
 }
 
-const SYSTEM_AGENTS_WORK = "Summaries, titles, routing, compaction, model tests";
+const SYSTEM_AGENTS_WORK = "Summaries, titles, compaction, model tests";
 
 /** A bar for what isn't one bot's or pod's, drawn in the neutral grey the design gives it. */
 const NEUTRAL_BAR = "var(--subtle-foreground)";

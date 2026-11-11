@@ -1,9 +1,14 @@
-import type { ConnectionKind, Pod, RoutineTrigger } from "@sugabots/contracts";
+import type { Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useConnections } from "@/lib/connections.ts";
 import { podSettingsLink } from "@/lib/links.ts";
+import {
+	TRIGGER_KINDS,
+	type TriggerKind,
+	type TriggerKindChoice,
+} from "@/lib/routine-trigger-words.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DialogFormBody, DialogFormHeader, DialogFormStep } from "@/ui/dialog-form.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
@@ -14,28 +19,6 @@ import { RoutineTriggerIcon } from "./ChatActivityRow.tsx";
  * integrations its bot's pod connects to. There may be many, so the
  * first step of adding one is a searchable list of only those the pod can use.
  */
-
-export type TriggerKind = RoutineTrigger["kind"];
-
-export interface TriggerKindChoice {
-	readonly kind: TriggerKind;
-	readonly label: string;
-	readonly sub: string;
-	/** The kind of connection the bot's pod needs for it, for an integration's trigger. */
-	readonly connection?: ConnectionKind;
-}
-
-/** Every kind of trigger, Sugabots' own first, in the order the dialog lists them. */
-export const TRIGGER_KINDS: readonly TriggerKindChoice[] = [
-	{ kind: "cron", label: "Schedule", sub: "On the days and at the times you pick" },
-	{ kind: "webhook", label: "Webhook", sub: "When something calls its address" },
-	{
-		kind: "github",
-		label: "GitHub",
-		sub: "When something happens on a repository: pull requests, issues, checks, pushes",
-		connection: "github",
-	},
-];
 
 export function triggerKindChoice(kind: TriggerKind): TriggerKindChoice {
 	const found = TRIGGER_KINDS.find((choice) => choice.kind === kind);

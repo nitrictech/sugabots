@@ -27,10 +27,10 @@ export type MarkdownBlock =
 	| { type: "table"; header: string[]; rows: string[][] }
 	| { type: "rule" };
 
-/** The blocks `MessageMarkdown` draws for `markdown`. */
+/** The blocks `MessageMarkdown` draws for `markdown` as a bot writes it. */
 export function markdownOutline(markdown: string): MarkdownBlock[] {
 	const { container, unmount } = render(
-		createElement(MessageMarkdown, { text: markdown, mentionable: [] }),
+		createElement(MessageMarkdown, { text: markdown, mentionable: [], writer: "bot" }),
 	);
 	const root = container.firstElementChild;
 	const outline = root ? blocksIn(root) : [];

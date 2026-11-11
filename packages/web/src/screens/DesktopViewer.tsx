@@ -2,8 +2,8 @@ import type RFB from "@novnc/novnc";
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Monitor, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Keyboard, Monitor, X } from "lucide-react";
+import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
@@ -163,6 +163,7 @@ function ComputerScreen({
 }) {
 	const [inControl, setInControl] = useState(false);
 	const agentUsing = useDesktopInUse(threadId, agent.id);
+	const keyboard = useRef<HTMLTextAreaElement>(null);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
 			{/* As large as the room left by the controls allows, keeping the desktop's 4:3 shape. */}
@@ -173,6 +174,7 @@ function ComputerScreen({
 						agentId={agent.id}
 						viewOnly={!inControl}
 						offersReconnect
+						keyboardInput={keyboard}
 					/>
 				</div>
 			</div>
@@ -189,8 +191,7 @@ function ComputerScreen({
 						<>You can watch what {agent.name} does here.</>
 					) : inControl ? (
 						<>
-							<b className="font-semibold text-foreground">You</b> have control. What you do here is
-							real.
+							<b className="font-semibold text-foreground">You</b> have control
 						</>
 					) : agentUsing ? (
 						<>
@@ -200,6 +201,23 @@ function ComputerScreen({
 						<>Watching</>
 					)}
 				</span>
+				{inControl && (
+					<Button
+						size="sm"
+						variant="secondary"
+						aria-label="Keyboard"
+						className="hidden pointer-coarse:inline-flex"
+						// Keeps an open keyboard's field focused, so this click can close it.
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={() => {
+							const field = keyboard.current;
+							if (document.activeElement === field) field?.blur();
+							else field?.focus();
+						}}
+					>
+						<Keyboard aria-hidden />
+					</Button>
+				)}
 				{mayUse && (
 					<Button
 						size="sm"
@@ -265,6 +283,8 @@ type Standing = "connecting" | "connected" | "ended" | "idle";
  */
 const IDLE_TIMEOUT_MINUTES = 5;
 const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
+/** noVNC's JPEG quality, 0 to 9, which the desktop encodes changing regions at. */
+const DESKTOP_JPEG_QUALITY = 4;
 const INPUT_EVENTS = ["pointerdown", "pointermove", "wheel", "keydown"] as const;
 
 /**
@@ -277,6 +297,7 @@ export function DesktopScreen({
 	agentId,
 	viewOnly,
 	offersReconnect,
+	keyboardInput,
 }: {
 	threadId: string;
 	agentId: string;
@@ -284,6 +305,12 @@ export function DesktopScreen({
 	viewOnly: boolean;
 	/** Shows a Reconnect button once disconnected, for a screen nothing else covers. */
 	offersReconnect: boolean;
+	/**
+	 * Given while not `viewOnly`, a hidden field whose typing goes to the
+	 * desktop; focusing it opens a touch screen's keyboard, which a phone only
+	 * shows for a text field.
+	 */
+	keyboardInput?: Ref<HTMLTextAreaElement>;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
 	const connected = useRef<RFB | undefined>(undefined);
@@ -322,7 +349,7 @@ export function DesktopScreen({
 		// Linux apps know, Command on a Mac included.
 		let pasting = false;
 		const keepPasteShortcut = (event: KeyboardEvent) => {
-			if (viewOnlyNow.current || !isPasteShortcut(event)) return;
+			if (viewOnlyNow.current || !isCommandShortcut(event, "KeyV")) return;
 			pasting = true;
 			event.stopPropagation();
 		};
@@ -333,12 +360,40 @@ export function DesktopScreen({
 			const text = event.clipboardData?.getData("text/plain");
 			if (!text) return;
 			viewer.clipboardPasteFrom(text);
-			viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
-			viewer.sendKey(XK_V, "KeyV");
-			viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
+			pressControlWith(viewer, XK_V, "KeyV");
+		};
+		// On a Mac, noVNC sends ⌘C as Super+C, which the desktop's Linux apps
+		// don't treat as copying.
+		const copyWithControl = (event: KeyboardEvent) => {
+			if (!IS_MAC || viewOnlyNow.current || !viewer) return;
+			const copyKey = COPY_KEYS.find(({ code }) => isCommandShortcut(event, code));
+			if (!copyKey) return;
+			event.preventDefault();
+			event.stopPropagation();
+			pressControlWith(viewer, copyKey.keysym, copyKey.code);
+		};
+		// What the desktop copies arrives from the network, outside any gesture
+		// of the person's, and most browsers only let a page write the clipboard
+		// shortly after one. Usually the copy shortcut just pressed counts; when
+		// it doesn't, the text waits for the person's next click or key.
+		let copied: string | undefined;
+		const copyOut = () => {
+			if (copied === undefined) return;
+			const text = copied;
+			copied = undefined;
+			void navigator.clipboard.writeText(text).catch(() => {
+				copied ??= text;
+			});
+		};
+		const copyOutWhileInControl = (event: Event) => {
+			if (viewOnlyNow.current) return;
+			copied = (event as CustomEvent<{ text: string }>).detail.text;
+			copyOut();
 		};
 		element.addEventListener("keydown", keepPasteShortcut, { capture: true });
+		element.addEventListener("keydown", copyWithControl, { capture: true });
 		document.addEventListener("paste", pasteIntoDesktop);
+		for (const event of GESTURE_EVENTS) element.addEventListener(event, copyOut, { capture: true });
 		// A hidden page's connection may be closed, and only reported closed once the page is shown.
 		let hiddenWhileConnected = document.hidden;
 		let droppedWhileHidden = false;
@@ -370,9 +425,13 @@ export function DesktopScreen({
 			viewer = opened;
 			connected.current = opened;
 			opened.scaleViewport = true;
+			// Below noVNC's default of 6: over a long link, smaller JPEG updates
+			// settle a scroll about a quarter sooner, for a little softness.
+			opened.qualityLevel = DESKTOP_JPEG_QUALITY;
 			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => setStanding("connected"));
+			opened.addEventListener("clipboard", copyOutWhileInControl);
 			opened.addEventListener("disconnect", () => {
 				if (viewer !== opened) return;
 				viewer = undefined;
@@ -388,7 +447,11 @@ export function DesktopScreen({
 			clearInterval(idleCheck);
 			for (const event of INPUT_EVENTS) element.removeEventListener(event, used, { capture: true });
 			element.removeEventListener("keydown", keepPasteShortcut, { capture: true });
+			element.removeEventListener("keydown", copyWithControl, { capture: true });
 			document.removeEventListener("paste", pasteIntoDesktop);
+			for (const event of GESTURE_EVENTS) {
+				element.removeEventListener(event, copyOut, { capture: true });
+			}
 			document.removeEventListener("visibilitychange", reconnectWhenShown);
 			const closing = viewer;
 			viewer = undefined;
@@ -400,6 +463,15 @@ export function DesktopScreen({
 	return (
 		<div className="relative aspect-4/3 w-full overflow-hidden rounded-panel bg-list">
 			<div ref={screen} className="absolute inset-0" />
+			{keyboardInput && !viewOnly && (
+				<KeyboardField
+					ref={keyboardInput}
+					viewer={connected}
+					onTyped={() => {
+						lastUsedAt.current = Date.now();
+					}}
+				/>
+			)}
 			{standing !== "connected" && (
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-xs">
 					<p>{STANDING_TEXT[standing]}</p>
@@ -414,14 +486,127 @@ export function DesktopScreen({
 	);
 }
 
-/** X11's keysyms for the left Control key and `v`, which noVNC sends as they are. */
+/** X11's keysyms for the keys sent by hand, which noVNC passes on as they are. */
 const XK_CONTROL_L = 0xffe3;
+const XK_SUPER_L = 0xffeb;
+const XK_SUPER_R = 0xffec;
+const XK_C = 0x0063;
 const XK_V = 0x0076;
+const XK_X = 0x0078;
+const XK_BACKSPACE = 0xff08;
+const XK_RETURN = 0xff0d;
 
-/** ⌘V on a Mac, Ctrl+V elsewhere, without the Shift or Alt of a different shortcut. */
-function isPasteShortcut(event: KeyboardEvent): boolean {
-	const command = navigator.userAgent.includes("Mac") ? event.metaKey : event.ctrlKey;
-	return command && !event.shiftKey && !event.altKey && event.code === "KeyV";
+/**
+ * What the keyboard field holds before any typing: text for Backspace to
+ * delete, since a field with nothing to delete reports no input, and for an
+ * on-screen keyboard to revise as it corrects a word. noVNC's own app does the same.
+ */
+const KEYBOARD_FIELD_FILLER = "_".repeat(100);
+
+/**
+ * A hidden field that sends what is typed into it to the desktop, by the
+ * difference each change makes, as on-screen keyboards report little else
+ * dependably: Android's give most keys no key code, and any may replace a
+ * word it has corrected.
+ */
+function KeyboardField({
+	ref,
+	viewer,
+	onTyped,
+}: {
+	ref: Ref<HTMLTextAreaElement>;
+	viewer: RefObject<RFB | undefined>;
+	onTyped: () => void;
+}) {
+	const sent = useRef(KEYBOARD_FIELD_FILLER);
+	const refill = (field: HTMLTextAreaElement) => {
+		field.value = KEYBOARD_FIELD_FILLER;
+		field.setSelectionRange(field.value.length, field.value.length);
+		sent.current = KEYBOARD_FIELD_FILLER;
+	};
+	const typed = (event: FormEvent<HTMLTextAreaElement>) => {
+		const field = event.currentTarget;
+		if (viewer.current) typeDifference(viewer.current, sent.current, field.value);
+		sent.current = field.value;
+		onTyped();
+		// Refilled between words only: a keyboard mid-word revises the field's text.
+		const composing = (event.nativeEvent as InputEvent).isComposing;
+		const length = field.value.length;
+		const filler = KEYBOARD_FIELD_FILLER.length;
+		if (!composing && (length < filler / 2 || length > filler * 2)) refill(field);
+	};
+	// While typing, a tap on the desktop would otherwise focus noVNC's screen and close the keyboard.
+	const setDesktopTakesFocus = (takesFocus: boolean) => {
+		if (viewer.current) viewer.current.focusOnClick = takesFocus;
+	};
+	return (
+		<textarea
+			ref={ref}
+			aria-label="Type on the desktop"
+			defaultValue={KEYBOARD_FIELD_FILLER}
+			autoCapitalize="off"
+			autoComplete="off"
+			autoCorrect="off"
+			spellCheck={false}
+			// Transparent, not hidden: a phone won't focus a field it can't display.
+			className="pointer-events-none absolute bottom-0 left-0 size-px resize-none opacity-0"
+			onFocus={(event) => {
+				refill(event.currentTarget);
+				setDesktopTakesFocus(false);
+			}}
+			onBlur={() => setDesktopTakesFocus(true)}
+			onInput={typed}
+		/>
+	);
+}
+
+/** Sends the desktop the Backspaces and characters that turn `before` into `after`. */
+function typeDifference(desktop: RFB, before: string, after: string) {
+	const was = Array.from(before);
+	const now = Array.from(after);
+	let kept = 0;
+	while (kept < was.length && kept < now.length && was[kept] === now[kept]) kept++;
+	for (let index = kept; index < was.length; index++) desktop.sendKey(XK_BACKSPACE, "Backspace");
+	// No key code, so the desktop types the character itself rather than a key its layout maps.
+	for (const character of now.slice(kept)) desktop.sendKey(keysymFor(character), "");
+}
+
+/** X11's keysym for a character: Latin-1's as they are, the rest of Unicode's offset by 0x1000000. */
+function keysymFor(character: string): number {
+	if (character === "\n") return XK_RETURN;
+	const codePoint = character.codePointAt(0) ?? 0;
+	return codePoint < 0x100 ? codePoint : 0x1000000 | codePoint;
+}
+
+const COPY_KEYS = [
+	{ code: "KeyC", keysym: XK_C },
+	{ code: "KeyX", keysym: XK_X },
+] as const;
+
+/** The person's input a browser counts as a gesture, letting the page write the clipboard. */
+const GESTURE_EVENTS = ["pointerdown", "keydown"] as const;
+
+const IS_MAC = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
+/** ⌘ and `code` on a Mac, Ctrl and `code` elsewhere, without the Shift or Alt of a different shortcut. */
+function isCommandShortcut(event: KeyboardEvent, code: string): boolean {
+	const command = IS_MAC ? event.metaKey : event.ctrlKey;
+	return command && !event.shiftKey && !event.altKey && event.code === code;
+}
+
+/**
+ * Presses Ctrl and `keysym` on the desktop, the shortcuts its Linux apps know.
+ * ⌘, which noVNC has already sent down as Super, is let go first, or the app
+ * would see Super+Ctrl.
+ */
+function pressControlWith(viewer: RFB, keysym: number, code: string) {
+	if (IS_MAC) {
+		viewer.sendKey(XK_SUPER_L, "MetaLeft", false);
+		viewer.sendKey(XK_SUPER_R, "MetaRight", false);
+	}
+	viewer.sendKey(XK_CONTROL_L, "ControlLeft", true);
+	viewer.sendKey(keysym, code);
+	viewer.sendKey(XK_CONTROL_L, "ControlLeft", false);
 }
 
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {

@@ -31,6 +31,7 @@ describe("the turn's note on connection tools", () => {
 		const note = toolCatalogNote({
 			catalog: buildCatalog({ wiki__lookup: lookup }),
 			unavailable: [],
+			signInExpired: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
 			addable: [],
 			connectionsPageUrl,
@@ -44,6 +45,7 @@ describe("the turn's note on connection tools", () => {
 		const note = toolCatalogNote({
 			catalog: [],
 			unavailable: [],
+			signInExpired: [],
 			instructions: {},
 			addable: [sentry],
 			connectionsPageUrl,
@@ -51,5 +53,23 @@ describe("the turn's note on connection tools", () => {
 
 		expect(note).toContain(`[Connect <Name>](${connectionsPageUrl})`);
 		expect(note).toContain("- Sentry (Errors and performance issues)");
+	});
+
+	it("tells the model which connections need signing in again, apart from ones not answering", () => {
+		const note = toolCatalogNote({
+			catalog: [],
+			unavailable: ["wiki"],
+			signInExpired: ["linear"],
+			instructions: {},
+			addable: [],
+			connectionsPageUrl,
+		});
+
+		expect(note).toContain(
+			"aren't answering right now, so their tools can't be found or run: wiki.",
+		);
+		expect(note).toContain("sign-ins have expired");
+		expect(note).toMatch(/signs in again[^\n]*: linear\./);
+		expect(note).toMatch(/linear\.[^\n]*\[Connections\]\(/);
 	});
 });

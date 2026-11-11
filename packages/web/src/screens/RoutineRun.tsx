@@ -28,7 +28,13 @@ import { formatDay } from "./thread-layout.ts";
 type RunItem = Extract<ChatMessageItem, { kind: "routine" }>;
 
 /** How a run went, or that its routine is paused, as the dot beside it says it. */
-export type RunOutcome = "passed" | "failed" | "running" | "cancelled" | "paused";
+export type RunOutcome =
+	| "passed"
+	| "failed"
+	| "running"
+	| "cancelled"
+	| "paused"
+	| "pausedAfterFailures";
 
 const OUTCOME_LABEL: Record<RunOutcome, string> = {
 	passed: "Passed",
@@ -36,6 +42,7 @@ const OUTCOME_LABEL: Record<RunOutcome, string> = {
 	running: "Running",
 	cancelled: "Cancelled",
 	paused: "Paused",
+	pausedAfterFailures: "Paused after failures",
 };
 
 const OUTCOME_DOT: Record<RunOutcome, string> = {
@@ -44,10 +51,13 @@ const OUTCOME_DOT: Record<RunOutcome, string> = {
 	running: "bg-subtle-foreground",
 	cancelled: "bg-disabled-foreground",
 	paused: "bg-disabled-foreground",
+	pausedAfterFailures: "bg-destructive-text",
 };
 
 /** A run's state, as the dot beside it says it. */
-export function outcomeOf(state: RunItem["state"]): Exclude<RunOutcome, "paused"> {
+export function outcomeOf(
+	state: RunItem["state"],
+): Exclude<RunOutcome, "paused" | "pausedAfterFailures"> {
 	if (state === "completed") return "passed";
 	if (state === "failed") return "failed";
 	if (state === "cancelled") return "cancelled";
@@ -155,7 +165,7 @@ export function RunMessage({
 				</div>
 				{report ? (
 					<div className="min-w-0 self-stretch break-words text-sm text-body-foreground leading-normal">
-						<MessageMarkdown text={report} mentionable={mentionable} />
+						<MessageMarkdown text={report} mentionable={mentionable} writer="bot" />
 					</div>
 				) : outcome === "running" ? (
 					<span aria-hidden className="typing-dots typing-dots-small mt-2 text-muted-foreground">

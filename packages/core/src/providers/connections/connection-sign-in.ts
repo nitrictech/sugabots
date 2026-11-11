@@ -2,7 +2,7 @@ export * as ConnectionSignIn from "./connection-sign-in.ts";
 
 import { CONNECTION_SIGN_IN_CALLBACK_PATH } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Installation } from "../../installation/installation.ts";
 import { Egress } from "../network/egress.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
@@ -68,6 +68,7 @@ export const make = Effect.gen(function* () {
 					Effect.runPromiseWith(context)(
 						connections.saveOauthRecord(workspaceId, connectionId, record),
 					),
+				now: () => Effect.runPromiseWith(context)(DateTime.nowAsDate),
 			},
 			{ redirectUrl, clientName: "Sugabots", startedByUserId },
 		);

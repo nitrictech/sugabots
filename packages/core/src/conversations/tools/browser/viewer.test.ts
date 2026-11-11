@@ -13,17 +13,20 @@ import {
 	workspaceMember,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { Egress } from "../../../providers/network/egress.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
+import { unimplemented } from "../../../testing.ts";
 import { SandboxTools } from "../sandbox.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
 
 /**
  * Watching an agent's desktop, against Postgres and a real OpenSandbox server
- * running the default image (`docker compose --profile sandboxes up -d` and
- * `bun run build:sandbox`, with OPENSANDBOX_URL and OPENSANDBOX_API_KEY set).
+ * running the local build of the default image (`docker compose --profile
+ * sandboxes up -d` and `bun run build:sandbox`, with OPENSANDBOX_URL and
+ * OPENSANDBOX_API_KEY set).
  */
 const env = process.env;
 const configured = env.DATABASE_URL && env.OPENSANDBOX_URL && env.OPENSANDBOX_API_KEY;
@@ -62,6 +65,8 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					),
 				),
 				Effect.provide(SandboxCredentials.none),
+				// Registries are asked what an image's tag names, as in production.
+				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -158,7 +163,11 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			providers.create(workspaceId, {
 				createdById: ownerId,
 				provider: {
-					settings: { preset: "opensandbox", serverUrl: env.OPENSANDBOX_URL },
+					settings: {
+						preset: "opensandbox",
+						serverUrl: env.OPENSANDBOX_URL,
+						image: "sugabots-sandbox:dev",
+					},
 					enabled: true,
 					apiKey: env.OPENSANDBOX_API_KEY,
 				},

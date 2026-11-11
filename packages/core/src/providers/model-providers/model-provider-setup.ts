@@ -1,6 +1,7 @@
 export * as ModelProviderSetup from "./model-provider-setup.ts";
 
 import type {
+	BotMove,
 	ModelProvider,
 	ModelProviderUpdate,
 	NewModelProvider,
@@ -188,6 +189,37 @@ export interface Interface {
 		| ModelInUse,
 		CurrentActor.Service
 	>;
+	/**
+	 * Switches a model off and moves the bots on it to `moveBotsTo`, returning
+	 * how many moved, and the default and the system agents to `newBotsTo` and
+	 * `summariesTo`, as {@link SettingMoves} says.
+	 */
+	readonly switchOffModel: (
+		input: InProvider & { modelId: string; moveBotsTo?: string } & SettingMoves,
+	) => Effect.Effect<
+		number,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ProviderModelsRequireCredential
+		| ProviderModelNotFound
+		| ModelProviderRepository.ModelNotEnabled
+		| ModelInUse,
+		CurrentActor.Service
+	>;
+	/**
+	 * Switches a provider off and moves the bots on each `from` model to its
+	 * `to`, as {@link Interface.switchOffModel} does for one model.
+	 */
+	readonly switchOff: (
+		input: InProvider & { moveBots: readonly BotMove[] } & SettingMoves,
+	) => Effect.Effect<
+		number,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ModelProviderRepository.ModelNotEnabled
+		| ModelInUse,
+		CurrentActor.Service
+	>;
 	readonly removeModel: (
 		input: InProvider & { modelId: string },
 	) => Effect.Effect<
@@ -203,6 +235,17 @@ export interface Interface {
 		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
 		CurrentActor.Service
 	>;
+}
+
+/**
+ * Where the workspace's default and its system agents move as a switch-off
+ * stops offering the model they run on. Every model moved to must still be
+ * offered afterwards. One left out stays put, and the switch-off fails with
+ * `ModelInUse` if that leaves it on a model no longer offered.
+ */
+export interface SettingMoves {
+	newBotsTo?: string;
+	summariesTo?: string;
 }
 
 /** A workspace, by its id or its slug. */
@@ -249,6 +292,40 @@ export const make = Effect.gen(function* () {
 				(provider) =>
 					new ProviderModelsRequireCredential({ missing: missingCredential(provider.preset) }),
 			),
+		);
+
+	/**
+	 * Runs `switchOff`, then moves the crew agents on each `from` the workspace
+	 * no longer offers to its `to`, which it must, and returns how many moved.
+	 * A `from` the workspace still offers was named in error, and keeps its bots.
+	 * The default and the system agents move as {@link SettingMoves} says.
+	 */
+	const movingOffSwitchedOff = <E, R>(
+		workspaceId: string,
+		{ moves, newBotsTo, summariesTo }: { moves: readonly BotMove[] } & SettingMoves,
+		switchOff: Effect.Effect<unknown, E, R>,
+	) =>
+		keepingHeldModelsOffered(
+			workspaceId,
+			Effect.gen(function* () {
+				yield* switchOff;
+				if (newBotsTo !== undefined) {
+					yield* providers.requireEnabled(workspaceId, newBotsTo);
+					yield* providers.setDefaultModel(workspaceId, newBotsTo);
+				}
+				if (summariesTo !== undefined) {
+					yield* providers.requireEnabled(workspaceId, summariesTo);
+					yield* agents.setAllSystemAgentModels(workspaceId, summariesTo);
+				}
+				const moved = yield* Effect.forEach(moves, ({ from, to }) =>
+					Effect.gen(function* () {
+						if (yield* providers.isEnabled(workspaceId, from)) return 0;
+						yield* providers.requireEnabled(workspaceId, to);
+						return yield* agents.moveCrewAgentsToModel(workspaceId, from, to);
+					}),
+				);
+				return moved.reduce((total, count) => total + count, 0);
+			}),
 		);
 
 	/** The provider's sign-in, and a client that reaches its service. */
@@ -532,6 +609,45 @@ export const make = Effect.gen(function* () {
 					}
 					yield* adoptFirstModel(workspaceId);
 					return updated;
+				}),
+			),
+
+		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo, newBotsTo, summariesTo }) =>
+			operation(
+				"switchOffModel",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					const provider = yield* requireConnectedProvider(workspaceId, providerId);
+					const switchingOff = provider.models.find((candidate) => candidate.id === modelId);
+					if (!switchingOff) {
+						return yield* new ProviderModelNotFound();
+					}
+					return yield* movingOffSwitchedOff(
+						workspaceId,
+						{
+							moves: moveBotsTo ? [{ from: switchingOff.modelId, to: moveBotsTo }] : [],
+							newBotsTo,
+							summariesTo,
+						},
+						providers.updateModel(workspaceId, providerId, modelId, { enabled: false }),
+					);
+				}),
+			),
+
+		switchOff: ({ workspace, providerId, moveBots, newBotsTo, summariesTo }) =>
+			operation(
+				"switchOff",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					return yield* movingOffSwitchedOff(
+						workspaceId,
+						{ moves: moveBots, newBotsTo, summariesTo },
+						Effect.filterOrFail(
+							providers.update(workspaceId, providerId, { active: false }),
+							(updated) => updated !== undefined,
+							() => new ModelProviderNotFound(),
+						),
+					);
 				}),
 			),
 

@@ -787,6 +787,11 @@ struct BotChannel: Codable, Hashable, Sendable {
 	var hostAgentId: String
 }
 
+struct BotMove: Codable, Hashable, Sendable {
+	var from: String
+	var to: String
+}
+
 struct BotUsage: Codable, Hashable, Sendable {
 	var agentId: String
 	var name: String?
@@ -996,6 +1001,7 @@ struct ChatListItem: Codable, Hashable, Sendable {
 enum ChatMessageItem: Codable, Hashable, Sendable {
 	case message(MessageItem)
 	case routine(Routine)
+	case collaboration(Collaboration)
 	case routinePaused(RoutinePaused)
 	case thread(Thread)
 	/// A kind from a newer server than this app knows, by its `kind`.
@@ -1006,6 +1012,7 @@ enum ChatMessageItem: Codable, Hashable, Sendable {
 		switch tag {
 		case "message": self = .message(try MessageItem(from: decoder))
 		case "routine": self = .routine(try Routine(from: decoder))
+		case "collaboration": self = .collaboration(try Collaboration(from: decoder))
 		case "routine_paused": self = .routinePaused(try RoutinePaused(from: decoder))
 		case "thread": self = .thread(try Thread(from: decoder))
 		default: self = .unknown(tag)
@@ -1016,6 +1023,7 @@ enum ChatMessageItem: Codable, Hashable, Sendable {
 		switch self {
 		case let .message(value): try value.encode(to: encoder)
 		case let .routine(value): try value.encode(to: encoder)
+		case let .collaboration(value): try value.encode(to: encoder)
 		case let .routinePaused(value): try value.encode(to: encoder)
 		case let .thread(value): try value.encode(to: encoder)
 		case let .unknown(tag):
@@ -1062,6 +1070,54 @@ enum ChatMessageItem: Codable, Hashable, Sendable {
 			try container.encode(error, forKey: .error)
 			try container.encode(report, forKey: .report)
 			try container.encode(createdAt, forKey: .createdAt)
+		}
+	}
+
+	struct Collaboration: Codable, Hashable, Sendable {
+		var kind: String = "collaboration"
+		var id: String
+		var threadId: String
+		var title: String
+		var initiator: AgentParticipant
+		var state: State
+		var createdAt: Date
+
+		enum State: RawRepresentable, Codable, Hashable, Sendable, QueryValue {
+			case running
+			case done
+			case failed
+			/// A value from a newer server than this app knows.
+			case unknown(String)
+
+			/// Every value this app knows.
+			static let known: [Self] = [.running, .done, .failed]
+
+			init(rawValue: String) {
+				switch rawValue {
+				case "running": self = .running
+				case "done": self = .done
+				case "failed": self = .failed
+				default: self = .unknown(rawValue)
+				}
+			}
+
+			var rawValue: String {
+				switch self {
+				case .running: "running"
+				case .done: "done"
+				case .failed: "failed"
+				case let .unknown(value): value
+				}
+			}
+
+			init(from decoder: any Decoder) throws {
+				self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+			}
+
+			func encode(to encoder: any Encoder) throws {
+				var container = encoder.singleValueContainer()
+				try container.encode(rawValue)
+			}
 		}
 	}
 
@@ -1260,6 +1316,7 @@ struct Connection: Codable, Hashable, Sendable {
 	var url: String
 	var auth: ConnectionAuth
 	var signedIn: Bool
+	var signInExpired: Bool
 	var secretHeader: String?
 	var hasSecret: Bool
 	var appSettingsUrl: String?
@@ -1280,6 +1337,7 @@ struct Connection: Codable, Hashable, Sendable {
 		case url
 		case auth
 		case signedIn
+		case signInExpired
 		case secretHeader
 		case hasSecret
 		case appSettingsUrl
@@ -1302,6 +1360,7 @@ struct Connection: Codable, Hashable, Sendable {
 		try container.encode(url, forKey: .url)
 		try container.encode(auth, forKey: .auth)
 		try container.encode(signedIn, forKey: .signedIn)
+		try container.encode(signInExpired, forKey: .signInExpired)
 		try container.encode(secretHeader, forKey: .secretHeader)
 		try container.encode(hasSecret, forKey: .hasSecret)
 		try container.encode(appSettingsUrl, forKey: .appSettingsUrl)
@@ -1525,6 +1584,7 @@ struct ConnectionWithTools: Codable, Hashable, Sendable {
 	var url: String
 	var auth: ConnectionAuth
 	var signedIn: Bool
+	var signInExpired: Bool
 	var secretHeader: String?
 	var hasSecret: Bool
 	var appSettingsUrl: String?
@@ -1546,6 +1606,7 @@ struct ConnectionWithTools: Codable, Hashable, Sendable {
 		case url
 		case auth
 		case signedIn
+		case signInExpired
 		case secretHeader
 		case hasSecret
 		case appSettingsUrl
@@ -1569,6 +1630,7 @@ struct ConnectionWithTools: Codable, Hashable, Sendable {
 		try container.encode(url, forKey: .url)
 		try container.encode(auth, forKey: .auth)
 		try container.encode(signedIn, forKey: .signedIn)
+		try container.encode(signInExpired, forKey: .signInExpired)
 		try container.encode(secretHeader, forKey: .secretHeader)
 		try container.encode(hasSecret, forKey: .hasSecret)
 		try container.encode(appSettingsUrl, forKey: .appSettingsUrl)
@@ -1819,6 +1881,7 @@ struct ListedRoutine: Codable, Hashable, Sendable {
 		var name: String
 		var state: RoutineState
 		var failed: Bool
+		var pausedAfterFailures: Bool
 	}
 }
 
@@ -2811,6 +2874,11 @@ struct PodSandbox: Codable, Hashable, Sendable {
 	var canManage: Bool
 }
 
+struct PodSandboxDisk: Codable, Hashable, Sendable {
+	var podId: String
+	var disk: SandboxDisk
+}
+
 struct PodSandboxNetwork: Codable, Hashable, Sendable {
 	var mode: SandboxNetworkMode
 	var blocking: Bool
@@ -2894,6 +2962,7 @@ enum PodSandboxState: Codable, Hashable, Sendable {
 		var turnsUsing: Int
 		var peopleWatching: Int
 		var upgradeAvailable: Bool
+		var disk: SandboxDisk?
 
 		private enum CodingKeys: String, CodingKey {
 			case kind
@@ -2905,6 +2974,7 @@ enum PodSandboxState: Codable, Hashable, Sendable {
 			case turnsUsing
 			case peopleWatching
 			case upgradeAvailable
+			case disk
 		}
 
 		func encode(to encoder: any Encoder) throws {
@@ -2918,6 +2988,7 @@ enum PodSandboxState: Codable, Hashable, Sendable {
 			try container.encode(turnsUsing, forKey: .turnsUsing)
 			try container.encode(peopleWatching, forKey: .peopleWatching)
 			try container.encode(upgradeAvailable, forKey: .upgradeAvailable)
+			try container.encode(disk, forKey: .disk)
 		}
 
 		enum State: RawRepresentable, Codable, Hashable, Sendable, QueryValue {
@@ -3178,6 +3249,12 @@ enum ProviderModelCapability: RawRepresentable, Codable, Hashable, Sendable, Que
 	}
 }
 
+struct ProviderModelSwitchOff: Codable, Hashable, Sendable {
+	var moveBotsTo: String?
+	var newBotsTo: String?
+	var summariesTo: String?
+}
+
 struct ProviderModelUpdate: Codable, Hashable, Sendable {
 	var enabled: Bool?
 	var disabledCapabilities: [ProviderModelCapability]?
@@ -3352,6 +3429,12 @@ enum ProviderStatus: RawRepresentable, Codable, Hashable, Sendable, QueryValue {
 		var container = encoder.singleValueContainer()
 		try container.encode(rawValue)
 	}
+}
+
+struct ProviderSwitchOff: Codable, Hashable, Sendable {
+	var moveBots: [BotMove]
+	var newBotsTo: String?
+	var summariesTo: String?
 }
 
 struct ProviderTestResult: Codable, Hashable, Sendable {
@@ -4260,6 +4343,72 @@ struct SandboxBlockedHost: Codable, Hashable, Sendable {
 	}
 }
 
+struct SandboxDisk: Codable, Hashable, Sendable {
+	var usedBytes: Int
+	var totalBytes: Int
+	var measuredAt: Date
+	var folders: [SandboxDiskFolder]?
+
+	private enum CodingKeys: String, CodingKey {
+		case usedBytes
+		case totalBytes
+		case measuredAt
+		case folders
+	}
+
+	func encode(to encoder: any Encoder) throws {
+		var container = encoder.container(keyedBy: CodingKeys.self)
+		try container.encode(usedBytes, forKey: .usedBytes)
+		try container.encode(totalBytes, forKey: .totalBytes)
+		try container.encode(measuredAt, forKey: .measuredAt)
+		try container.encode(folders, forKey: .folders)
+	}
+}
+
+enum SandboxDiskFolder: Codable, Hashable, Sendable {
+	case home(Home)
+	case threads(Threads)
+	case temporary(Temporary)
+	/// A kind from a newer server than this app knows, by its `kind`.
+	case unknown(String)
+
+	init(from decoder: any Decoder) throws {
+		let tag = try decoder.container(keyedBy: AnyCodingKey.self).decode(String.self, forKey: AnyCodingKey("kind"))
+		switch tag {
+		case "home": self = .home(try Home(from: decoder))
+		case "threads": self = .threads(try Threads(from: decoder))
+		case "temporary": self = .temporary(try Temporary(from: decoder))
+		default: self = .unknown(tag)
+		}
+	}
+
+	func encode(to encoder: any Encoder) throws {
+		switch self {
+		case let .home(value): try value.encode(to: encoder)
+		case let .threads(value): try value.encode(to: encoder)
+		case let .temporary(value): try value.encode(to: encoder)
+		case let .unknown(tag):
+			throw EncodingError.invalidValue(tag, .init(codingPath: encoder.codingPath, debugDescription: "A kind this app doesn't know can't be sent."))
+		}
+	}
+
+	struct Home: Codable, Hashable, Sendable {
+		var kind: String = "home"
+		var agentId: String
+		var bytes: Int
+	}
+
+	struct Threads: Codable, Hashable, Sendable {
+		var kind: String = "threads"
+		var bytes: Int
+	}
+
+	struct Temporary: Codable, Hashable, Sendable {
+		var kind: String = "temporary"
+		var bytes: Int
+	}
+}
+
 enum SandboxNetworkMode: RawRepresentable, Codable, Hashable, Sendable, QueryValue {
 	case allowlist
 	case `open`
@@ -4409,6 +4558,8 @@ enum SandboxProviderSettings: Codable, Hashable, Sendable {
 		var preset: String = "opensandbox"
 		var serverUrl: String?
 		var image: String?
+		var cpuCount: Int?
+		var memoryGiB: Int?
 		var networkMode: SandboxNetworkMode?
 	}
 
@@ -4421,6 +4572,12 @@ enum SandboxProviderSettings: Codable, Hashable, Sendable {
 		var memoryGiB: Int?
 		var networkMode: SandboxNetworkMode?
 	}
+}
+
+struct SandboxProviderTestResult: Codable, Hashable, Sendable {
+	var reachable: Bool
+	var latencyMs: Int
+	var error: String?
 }
 
 struct SandboxProviderUpdate: Codable, Hashable, Sendable {
@@ -5833,6 +5990,7 @@ struct WorkspaceInvitation: Codable, Hashable, Sendable {
 	var email: String
 	var role: AssignableWorkspaceRole
 	var expiresAt: Date
+	var sentAt: Date
 }
 
 struct WorkspaceMember: Codable, Hashable, Sendable {
@@ -6396,6 +6554,10 @@ extension APIClient {
 			_ = try await client.callForData("DELETE", "workspaces/\(workspace)/model-providers/\(providerId)", query: [])
 		}
 
+		func switchOff(workspace: String, providerId: String, moveBots: [BotMove], newBotsTo: String? = nil, summariesTo: String? = nil) async throws -> SwitchOffResponse {
+			return try await client.call("POST", "workspaces/\(workspace)/model-providers/\(providerId)/switch-off", query: [], body: ProviderSwitchOff(moveBots: moveBots, newBotsTo: newBotsTo, summariesTo: summariesTo))
+		}
+
 		func test(workspace: String, providerId: String) async throws -> ProviderTestResult {
 			return try await client.call("POST", "workspaces/\(workspace)/model-providers/\(providerId)/test", query: [])
 		}
@@ -6432,12 +6594,24 @@ extension APIClient {
 			_ = try await client.callForData("DELETE", "workspaces/\(workspace)/model-providers/\(providerId)/models/\(modelId)", query: [])
 		}
 
+		func switchOffModel(workspace: String, providerId: String, modelId: String, moveBotsTo: String? = nil, newBotsTo: String? = nil, summariesTo: String? = nil) async throws -> SwitchOffModelResponse {
+			return try await client.call("POST", "workspaces/\(workspace)/model-providers/\(providerId)/models/\(modelId)/switch-off", query: [], body: ProviderModelSwitchOff(moveBotsTo: moveBotsTo, newBotsTo: newBotsTo, summariesTo: summariesTo))
+		}
+
+		struct SwitchOffResponse: Codable, Hashable, Sendable {
+			var moved: Int
+		}
+
 		struct SetModelsEnabledResponse: Codable, Hashable, Sendable {
 			var updated: Int
 		}
 
 		struct UpdateModelResponse: Codable, Hashable, Sendable {
 			var updated: Int
+		}
+
+		struct SwitchOffModelResponse: Codable, Hashable, Sendable {
+			var moved: Int
 		}
 	}
 }
@@ -6747,8 +6921,12 @@ extension APIClient {
 			return try await client.call("POST", "workspaces/\(workspace)/sandbox-providers/\(providerId)/template", query: [])
 		}
 
-		func test(workspace: String, providerId: String) async throws -> ProviderTestResult {
+		func test(workspace: String, providerId: String) async throws -> SandboxProviderTestResult {
 			return try await client.call("POST", "workspaces/\(workspace)/sandbox-providers/\(providerId)/test", query: [])
+		}
+
+		func disks(workspace: String) async throws -> [PodSandboxDisk] {
+			return try await client.call("GET", "workspaces/\(workspace)/sandbox-disks", query: [])
 		}
 
 		func network(workspace: String) async throws -> SandboxNetworkSettings {

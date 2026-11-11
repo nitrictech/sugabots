@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_MODELS } from "@sugabots/contracts";
 import { type DomainError, type UserText, userText } from "@sugabots/errors";
 import { Clock, Effect, ErrorReporter, Schema } from "effect";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
@@ -20,7 +21,6 @@ import { ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
  */
 
 const MAX_MODEL_RESPONSE_BYTES = 5_000_000;
-const MAX_MODELS = 2_000;
 /** How many models are asked about at once when a listing needs following up. */
 const INSPECT_CONCURRENCY = 4;
 
@@ -308,9 +308,9 @@ function requestModels(
 				problem: "The provider's model list didn't match its dialect",
 			});
 		}
-		if (listing.success.length > MAX_MODELS) {
+		if (listing.success.length > MAX_PROVIDER_MODELS) {
 			return yield* new ModelListTooLarge({
-				problem: `The provider listed more than ${MAX_MODELS} models`,
+				problem: `The provider listed more than ${MAX_PROVIDER_MODELS} models`,
 			});
 		}
 		const listed = distinctById(

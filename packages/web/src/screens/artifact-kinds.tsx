@@ -2,7 +2,7 @@ import type { ArtifactKind } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
-import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-files.ts";
+import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-catalog.ts";
 import type { PageAt } from "@/lib/artifacts.ts";
 import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
 import { HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
@@ -42,7 +42,7 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		Full: ({ content }) => (
 			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
 				<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
-					<MessageMarkdown text={content} mentionable={[]} />
+					<MessageMarkdown text={content} mentionable={[]} writer="bot" />
 				</article>
 			</div>
 		),
@@ -84,7 +84,7 @@ function DocumentPreview({
 			style={{ maxHeight: DOCUMENT_PREVIEW_HEIGHT_PX }}
 			className="focus-ring relative block w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
 		>
-			<MessageMarkdown text={content} mentionable={[]} />
+			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
 		</button>
 	);
 }

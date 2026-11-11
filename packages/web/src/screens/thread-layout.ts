@@ -81,7 +81,7 @@ export function isTyping(message: Message): boolean {
 }
 
 /** The collaborator a running reply has asked and not yet heard back from. */
-export function waitingOn(message: Message): string | undefined {
+function waitingOn(message: Message): string | undefined {
 	const last = message.parts.at(-1);
 	return last?.type === "collaboration" ? last.agentName : undefined;
 }
@@ -92,7 +92,7 @@ function wasPutToSomeone(call: ToolCallPart): boolean {
 	return status === "pending" || status === "allowed" || status === "denied";
 }
 
-export type Segment =
+type Segment =
 	| { type: "text"; key: string; text: string }
 	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
@@ -173,24 +173,20 @@ function shortDateFor(date: Date, now: Date): Intl.DateTimeFormatOptions {
 		: dateWithYear;
 }
 
-export const dateWithYear: Intl.DateTimeFormatOptions = {
+const dateWithYear: Intl.DateTimeFormatOptions = {
 	month: "short",
 	day: "numeric",
 	year: "numeric",
 };
 
 /**
- * "Today", "Yesterday", or the date in `dateFormat`: by default the month and
- * day, and the year only for another year. Days are `now`'s, by this device's
- * clock, and the date is written in `locale`, by default the browser's.
+ * "Today", "Yesterday", or the month and day, with the year only for another
+ * year. Days are `now`'s, by this device's clock, and the date is written in
+ * `locale`, by default the browser's.
  */
 export function formatDay(
 	date: Date,
-	{
-		now = new Date(),
-		locale,
-		dateFormat = shortDateFor(date, now),
-	}: { now?: Date; locale?: string; dateFormat?: Intl.DateTimeFormatOptions } = {},
+	{ now = new Date(), locale }: { now?: Date; locale?: string } = {},
 ): string {
 	if (sameDate(date, now)) {
 		return "Today";
@@ -200,7 +196,7 @@ export function formatDay(
 	if (sameDate(date, yesterday)) {
 		return "Yesterday";
 	}
-	return new Intl.DateTimeFormat(locale, dateFormat).format(date);
+	return new Intl.DateTimeFormat(locale, shortDateFor(date, now)).format(date);
 }
 
 export function sameDay(left: { createdAt: string }, right: { createdAt: string }): boolean {

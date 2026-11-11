@@ -1,9 +1,11 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, spyOn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
 import {
 	acmeRequest,
 	boardPackFailed,
@@ -14,23 +16,38 @@ import {
 	pricingPageUploading,
 } from "./attachment-story-fixtures.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { GROUP_MENTIONS } from "./mentions.tsx";
+import { groupMentionsBy } from "./mentions.tsx";
 
 /** Files attached in a fixed state, with spies for what the composer asks of them. */
 function withFiles(items: readonly ComposerAttachment[], leftOut = 0) {
 	return { items, leftOut, attach: fn(), remove: fn(), retry: fn() };
 }
 
+const issueTriager = {
+	id: "0199a3a0-0000-7000-8000-000000000001",
+	name: "Issue Triager",
+	handle: "issue-triager",
+	color: "green",
+	face: "arc",
+	shape: "circle",
+} as const;
+
+/** The workspace the bots are in, whose roster holds what each does. */
+const workspace = {
+	id: growthDesk.workspaceId,
+	name: "Nitric",
+	slug: "nitric",
+	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+};
+
+const sam = testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
+
+/** Who is writing the draft: someone other than Sam, so `@here` would notify Sam. */
+const WRITER_ID = "0199a3a0-0000-7000-8000-000000000004";
+
 const mentionable: ThreadParticipant[] = [
-	{
-		kind: "agent",
-		id: "0199a3a0-0000-7000-8000-000000000001",
-		name: "Issue Triager",
-		handle: "issue-triager",
-		color: "green",
-		face: "arc",
-		shape: "circle",
-	},
+	{ kind: "agent", ...issueTriager },
 	{
 		kind: "agent",
 		id: "0199a3a0-0000-7000-8000-000000000003",
@@ -40,7 +57,7 @@ const mentionable: ThreadParticipant[] = [
 		face: "dot",
 		shape: "circle",
 	},
-	testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" }),
+	sam,
 ];
 
 const meta = preview.meta({
@@ -53,7 +70,10 @@ const meta = preview.meta({
 		onValueChange: fn(),
 		onSubmit: fn(),
 		submitLabel: "Send message",
-		mentionable: [...mentionable, ...GROUP_MENTIONS],
+		mentionable: [
+			...mentionable,
+			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "conversation"),
+		],
 		attachments: withFiles([]),
 	},
 	decorators: [
@@ -159,6 +179,8 @@ export const SelectGroupMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Heads up @cha");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
+		// Sam is everyone else in the pod.
+		await expect(canvas.getByRole("option", { name: /Notifies 1 person/ })).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
 		await expect(within(input).getByText("@channel")).toHaveAttribute("data-mention", "@channel");
@@ -240,11 +262,7 @@ export const EmojiShortcode = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Hmm :thin");
-		const list = await canvas.findByRole(
-			"listbox",
-			{ name: "Emoji matching what was typed" },
-			{ timeout: 5_000 },
-		);
+		const list = await canvas.findByRole("listbox", { name: "Emoji matching what was typed" });
 		await expect(within(list).getAllByRole("option")[0]).toHaveAccessibleName("🤔 :thinking:");
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Hmm 🤔 ");
@@ -261,11 +279,7 @@ export const ClosedShortcode = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Shipped :tad");
-		await canvas.findByRole(
-			"listbox",
-			{ name: "Emoji matching what was typed" },
-			{ timeout: 5_000 },
-		);
+		await canvas.findByRole("listbox", { name: "Emoji matching what was typed" });
 		await userEvent.type(input, "a:");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Shipped 🎉");
 	},
@@ -274,33 +288,17 @@ export const ClosedShortcode = meta.story({
 /** The smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
 export const EmojiButton = meta.story({
 	args: { value: "Nice work" },
-	parameters: {
-		a11y: {
-			config: {
-				rules: [
-					{
-						// As in the picker's own stories: Frimousse numbers its grid from 0, where ARIA starts at 1.
-						id: "aria-valid-attr-value",
-						selector: "[frimousse-row], [frimousse-emoji]",
-						enabled: false,
-					},
-				],
-			},
-		},
-	},
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
 		const page = within(document.body);
-		await page.findByRole("gridcell", { name: "Grinning face" }, { timeout: 5_000 });
+		await page.findByRole("gridcell", { name: "Grinning face" });
 		await userEvent.keyboard("hundred points");
-		await waitFor(
-			() =>
-				expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-					"aria-selected",
-					"true",
-				),
-			{ timeout: 5_000 },
+		await waitFor(() =>
+			expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Nice work💯");
@@ -368,6 +366,85 @@ export const MentionChip = meta.story({
 });
 
 /**
+ * A mention in the draft opens the same card as one sent: on a click, or on
+ * Enter or Space once Tab reaches its chip, which neither sends the draft nor
+ * changes it. Escape closes the card and leaves the caret after the chip.
+ * Typing on a chip with the focus goes on in the text after it, and Backspace
+ * removes the chip.
+ */
+export const MentionCardsInTheDraft = meta.story({
+	args: { value: "@issue-triager and @here can you check the quote?" },
+	decorators: [
+		function WithBots(Story) {
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["workspaces"], [workspace]);
+				client.setQueryData(
+					["agents", workspace.id],
+					[
+						{
+							...growthDesk,
+							...issueTriager,
+							description: "Sorts new issues by area and urgency.",
+						},
+					],
+				);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
+	],
+	play: async ({ args, canvas, userEvent }) => {
+		const page = within(document.body);
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.click(within(input).getByRole("button", { name: /Issue Triager/ }));
+		const botCard = await page.findByRole("dialog", { name: /Issue Triager/ });
+		await expect(
+			await within(botCard).findByText("Sorts new issues by area and urgency."),
+		).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		await expect(input).toHaveFocus();
+
+		within(input).getByRole("button", { name: "@here" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const hereCard = await page.findByRole("dialog", { name: "@here" });
+		await expect(within(hereCard).getByText("Sam Rivera")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+		await expect(args.onSubmit).not.toHaveBeenCalled();
+		await expect(args.onValueChange).not.toHaveBeenCalled();
+		// Escape leaves the caret after the chip, to go on typing there.
+		await expect(input).toHaveFocus();
+		await userEvent.keyboard(",");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith(
+			"@issue-triager and @here, can you check the quote?",
+		);
+
+		// Typing on a chip with the focus goes on in the text after it, and Backspace removes it.
+		within(input)
+			.getByRole("button", { name: /Issue Triager/ })
+			.focus();
+		await userEvent.keyboard("!");
+		await expect(input).toHaveFocus();
+		await expect(args.onValueChange).toHaveBeenLastCalledWith(
+			"@issue-triager! and @here, can you check the quote?",
+		);
+		within(input).getByRole("button", { name: "@here" }).focus();
+		await userEvent.keyboard("{Backspace}");
+		await expect(args.onValueChange).toHaveBeenLastCalledWith(
+			"@issue-triager! and , can you check the quote?",
+		);
+	},
+});
+
+/**
  * LineKeysPastAChip: ⇧⌘← selects to the start of the line and ⌘⌫ deletes to
  * it, going past a chip, where the browser on its own stops at the chip.
  */
@@ -405,7 +482,7 @@ export const ReplyingTo = meta.story({
 	},
 	play: async ({ args, canvas, userEvent }) => {
 		await expect(canvas.getByText("Issue Triager")).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Cancel reply" }));
+		await userEvent.click(canvas.getByRole("button", { name: /^Stop replying to / }));
 		await expect(args.replyingTo?.onCancel).toHaveBeenCalledTimes(1);
 		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
 		await userEvent.keyboard("{Escape}");

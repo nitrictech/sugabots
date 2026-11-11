@@ -34,6 +34,13 @@ export const threadTypeSchema = Schema.Literals([
 
 export type ThreadType = typeof threadTypeSchema.Type;
 
+/** The types of room that are channels, which last and which threads are started from. */
+export const channelTypeSchema = Schema.Literals(["pod_chat", "bot_channel"]);
+
+export type ChannelType = typeof channelTypeSchema.Type;
+
+export const isChannelType = Schema.is(channelTypeSchema);
+
 /** The threads whose messages notify people: not a routine's feed, nor the threads bots work in. */
 export const NOTIFYING_THREAD_TYPES: ReadonlySet<ThreadType> = new Set([
 	"conversation",
@@ -180,6 +187,23 @@ export function mentionsEveryone(content: string): boolean {
 	return mentionedHandles(content).some(isGroupMentionHandle);
 }
 
+/**
+ * Whether a message's mentioned `handles` address only people: at least one
+ * is a person's or `@here`/`@channel`, and none is a bot's. A handle that is
+ * nobody's, as when a name is written out rather than picked, is only text
+ * and counts for neither. A bot replying wherever it is not named keeps out
+ * of such a message, as it is meant for the people.
+ */
+export function mentionsOnlyPeople(
+	handles: readonly string[],
+	known: { botHandles: ReadonlySet<string>; peopleHandles: ReadonlySet<string> },
+): boolean {
+	const mentionsPeople = handles.some(
+		(handle) => isGroupMentionHandle(handle) || known.peopleHandles.has(handle),
+	);
+	return mentionsPeople && !handles.some((handle) => known.botHandles.has(handle));
+}
+
 /** `content` without its mentions, the text around them kept as it is. */
 export function withoutMentions(content: string): string {
 	return splitAroundMentions(content)
@@ -321,6 +345,21 @@ export const toolCallPartSchema = Schema.Struct({
 });
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
+
+/** The tool a bot starts a thread with, for the person it is answering. */
+export const START_THREAD_TOOL = "start_thread";
+
+/** A thread a bot started with `start_thread`: what the tool returns, and what the chat links to. */
+export const botStartedThreadSchema = Schema.Struct({
+	id: uuidSchema,
+	title: Schema.String,
+	/** The bot it is with, by name, when that is another bot. */
+	with: Schema.optional(Schema.String),
+	/** That bot's id, which the chat finds it by. Absent from threads started before it was recorded. */
+	withBotId: Schema.optional(uuidSchema),
+});
+
+export type BotStartedThread = typeof botStartedThreadSchema.Type;
 
 /** A file attached to the message, served by the conversation it was sent in. */
 export const filePartSchema = Schema.Struct({
@@ -569,13 +608,15 @@ export const messageSchema = Schema.Struct({
 	/** People's reactions, in the order each emoji was first used. Absent when there are none. */
 	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
-}).check(
-	Schema.makeFilter(({ content, parts }) =>
-		content === parts.map((part) => (part.type === "text" ? part.text : "")).join("")
-			? undefined
-			: { issue: "Content must equal the combined text parts", path: ["content"] },
-	),
-);
+})
+	.check(
+		Schema.makeFilter(({ content, parts }) =>
+			content === parts.map((part) => (part.type === "text" ? part.text : "")).join("")
+				? undefined
+				: { issue: "Content must equal the combined text parts", path: ["content"] },
+		),
+	)
+	.annotate({ identifier: "Message" });
 
 export type Message = typeof messageSchema.Type;
 
@@ -681,10 +722,13 @@ export const threadActivitySchema = Schema.Struct({
 
 export type ThreadActivity = typeof threadActivitySchema.Type;
 
+/** How long a message may be. */
+export const MESSAGE_MAX_LENGTH = 20_000;
+
 export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,
 	/** May be empty when the message carries files. */
-	message: Schema.Trim.check(Schema.isMaxLength(20_000)),
+	message: Schema.Trim.check(Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 	/** Files the sender uploaded to the conversation and has not sent yet. They show in the order listed. */
 	attachments: Schema.optional(
 		Schema.Array(uuidSchema).check(Schema.isMaxLength(MAX_ATTACHMENTS_PER_MESSAGE)),

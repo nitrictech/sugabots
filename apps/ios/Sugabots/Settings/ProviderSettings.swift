@@ -566,7 +566,7 @@ private struct ProviderModelsGroup: View {
 	@State private var onWhenOpened: Set<String>?
 
 	var body: some View {
-		let large = provider.models.count > Limits.largeModelCatalog
+		let large = provider.models.count > Limits.modelSearchThreshold
 		let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
 		let on = onWhenOpened ?? Set(provider.models.filter(\.enabled).map(\.id))
 		let shown = provider.models

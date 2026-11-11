@@ -7,7 +7,6 @@ import {
 	type ListedRoutine,
 	type NotificationSettings,
 	type Pod,
-	THREADS_SHOWN,
 } from "@sugabots/contracts";
 import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -20,10 +19,13 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
 import { useOpenBots } from "@/lib/open-bots.ts";
+import { THREADS_SHOWN } from "@/lib/screen-limits.ts";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { TurnTakingAvatar } from "@/shell/Agent.tsx";
+import { FailedDot } from "@/shell/FailedDot.tsx";
 import { useNewBot } from "@/shell/NewInPod.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Which row of the list is open: the pod's first chat while it is being
@@ -482,7 +484,7 @@ function BotItem({
 		<div
 			onPointerEnter={() => face.current?.play("hop")}
 			className={cn(
-				"group/bot flex h-8 items-center rounded-sm pr-1.5 max-md:h-11 max-md:rounded-lg max-md:active:bg-row-selected",
+				"group/bot relative flex h-8 items-center rounded-sm pr-1.5 max-md:h-11 max-md:rounded-lg max-md:active:bg-row-selected",
 				shaded ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
@@ -509,14 +511,14 @@ function BotItem({
 					{label}
 				</button>
 			)}
-			{/* What is unread stays in view; the + comes in beside it under the pointer or on focus, and always on a phone. */}
+			{/* What is unread stays in its place, in line with every row's; the + shows under the pointer or on focus, over the end of the name beside it, and always on a phone. */}
 			{endMark && <span className={END_SLOT}>{endMark}</span>}
 			<span
 				className={cn(
-					"size-5.5 shrink-0 place-items-center",
-					endMark
-						? "hidden group-has-focus-visible/bot:grid group-hover/bot:grid max-md:grid"
-						: "grid",
+					"grid size-5.5 shrink-0 place-items-center",
+					endMark &&
+						"pointer-events-none absolute right-7 rounded-sm opacity-0 group-hover/bot:pointer-events-auto group-hover/bot:opacity-100 group-has-focus-visible/bot:pointer-events-auto group-has-focus-visible/bot:opacity-100 max-md:pointer-events-auto max-md:static max-md:bg-transparent max-md:opacity-100",
+					endMark && (shaded ? "bg-row-selected" : "bg-row-hover"),
 				)}
 			>
 				<IconButton
@@ -637,15 +639,6 @@ function AllThreadsRow({
 	);
 }
 
-/** A red dot at a bot's row's end while one of its routines' latest run failed. */
-function FailedDot() {
-	return (
-		<span className="size-1.5 shrink-0 rounded-full bg-destructive-text">
-			<span className="sr-only">Latest run failed</span>
-		</span>
-	);
-}
-
 /** A row under a bot or a channel, shaded while it is the one open. */
 function threadRowClassName(selected: boolean): string {
 	return cn(
@@ -702,9 +695,12 @@ const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 function UnreadMarker({ unreadMessages, needsYou }: { unreadMessages: number; needsYou: boolean }) {
 	const unread = unreadMessages > 0 && countOf(unreadMessages, "unread message", "unread messages");
 	if (!needsYou) return unread ? <span className="sr-only">{unread}</span> : null;
+	const label = unread ? `${unread}, needs you` : "Needs you";
 	return (
-		<span className="size-1.5 rounded-full bg-foreground">
-			<span className="sr-only">{unread ? `${unread}, needs you` : "Needs you"}</span>
-		</span>
+		<Tooltip label={label} side="right">
+			<span className="size-1.5 rounded-full bg-foreground">
+				<span className="sr-only">{label}</span>
+			</span>
+		</Tooltip>
 	);
 }

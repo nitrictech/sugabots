@@ -85,6 +85,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		appSettingsUrl: null,
@@ -422,8 +423,8 @@ describe("an admin", () => {
 		await openSlide("Model");
 
 		expect(await screen.findByRole("heading", { name: "Anthropic" })).toBeDefined();
-		// The one in use is checked, with nothing to press.
-		expect(screen.queryByRole("button", { name: MODELS[0] })).toBeNull();
+		// The one in use is pressed.
+		expect(screen.getByRole("button", { name: MODELS[0], pressed: true })).toBeDefined();
 		fireEvent.click(await screen.findByRole("button", { name: MODELS[1] }));
 
 		await waitFor(() =>
@@ -444,9 +445,11 @@ describe("an admin", () => {
 		fireEvent.click(await screen.findByRole("button", { name: MODELS[1] }));
 
 		expect(await screen.findByRole("alert")).toBeDefined();
-		// The save was undone, so the model in use is still the checked one.
-		await waitFor(() => expect(screen.queryByRole("button", { name: MODELS[0] })).toBeNull());
-		expect(screen.getByRole("button", { name: MODELS[1] })).toBeDefined();
+		// The save was undone, so the model in use is still the pressed one.
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: MODELS[0], pressed: true })).toBeDefined(),
+		);
+		expect(screen.getByRole("button", { name: MODELS[1], pressed: false })).toBeDefined();
 	});
 
 	it("switches web search off for the bot, reading pages with it, and back on", async () => {

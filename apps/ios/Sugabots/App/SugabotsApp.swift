@@ -203,7 +203,7 @@ private struct TabBar: View {
 			item(.inbox, "Inbox", count: store.unreadInInbox, label: "\(store.unreadInInbox) unread") {
 				Icon(.inbox, size: 24, strokeWidth: 1.75)
 			}
-			item(.approvals, "Approvals", count: store.waitingApprovals, label: "\(store.waitingApprovals) waiting on you", quiet: true) {
+			item(.approvals, "Approvals", count: store.waitingApprovals, label: "\(store.waitingApprovals) waiting on you") {
 				Icon(.shieldCheck, size: 24, strokeWidth: 1.75)
 			}
 			item(.you, "You") {
@@ -241,21 +241,22 @@ private struct TabBar: View {
 		let open = tab == target
 		return Button { if open { reopen(target) } else { tab = target } } label: {
 			VStack(spacing: 3) {
-				icon().frame(height: 24)
+				icon()
+					.frame(width: 24, height: 24)
+					// Pinned to the icon's corner, so it sits the same on every tab whatever its name's width.
+					.overlay(alignment: .topLeading) {
+						if count > 0 {
+							CountBadge(count: count, quiet: quiet)
+								.fixedSize()
+								.alignmentGuide(.leading) { _ in -14 }
+								.alignmentGuide(.top) { _ in 6 }
+						}
+					}
 				Text(name).font(Typeface.rubik(10, .medium))
 			}
 			.foregroundStyle(open ? Palette.foreground : Palette.mutedForeground)
 			.frame(maxWidth: .infinity, minHeight: 50)
 			.contentShape(Rectangle())
-			.overlay(alignment: .top) {
-				if count > 0 {
-					CountBadge(count: count, quiet: quiet)
-						.padding(2)
-						.background(Palette.glassRing, in: Capsule())
-						.alignmentGuide(HorizontalAlignment.center) { $0[.leading] - 6 }
-						.padding(.top, 0)
-				}
-			}
 		}
 		.buttonStyle(.plain)
 		.accessibilityLabel(count > 0 ? "\(name), \(label)" : name)

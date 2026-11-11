@@ -1,5 +1,7 @@
 import type {
+	ConnectionKind,
 	RepositoryEvent,
+	RoutineTrigger,
 	WebhookAuthKind,
 	WebhookHmacAlgorithm,
 	WebhookSignatureEncoding,
@@ -7,10 +9,33 @@ import type {
 } from "@sugabots/contracts";
 
 /*
- * What a routine's triggers are called where they are set up: a webhook's
- * senders and how it checks them, and the events at a repository. Plain data,
- * which the native apps' copies are generated from.
+ * What a routine's triggers are called where they are set up: the kinds of
+ * trigger, a webhook's senders and how it checks them, and the events at a
+ * repository. Plain data, which the native apps' copies are generated from.
+ * apps/codegen loads this module with Node, so it imports nothing but types.
  */
+
+export type TriggerKind = RoutineTrigger["kind"];
+
+export interface TriggerKindChoice {
+	readonly kind: TriggerKind;
+	readonly label: string;
+	readonly sub: string;
+	/** The kind of connection the bot's pod needs for it, for an integration's trigger. */
+	readonly connection?: ConnectionKind;
+}
+
+/** Every kind of trigger, Sugabots' own first, in the order the dialog lists them. */
+export const TRIGGER_KINDS: readonly TriggerKindChoice[] = [
+	{ kind: "cron", label: "Schedule", sub: "On the days and at the times you pick" },
+	{ kind: "webhook", label: "Webhook", sub: "When something calls its address" },
+	{
+		kind: "github",
+		label: "GitHub",
+		sub: "When something happens on a repository: pull requests, issues, checks, pushes",
+		connection: "github",
+	},
+];
 
 /** A way of checking a webhook's caller that isn't a known source's own signature. */
 export type WebhookGenericKind = Exclude<WebhookAuthKind, WebhookSource>;
@@ -32,6 +57,15 @@ export const WEBHOOK_SOURCE_SECRET_PLACEHOLDERS: Record<WebhookSource, string> =
 	stripe: "whsec_…",
 	slack: "The app's Signing Secret",
 	linear: "lin_wh_…",
+};
+
+/** What a caller must do to be let in, for each source, in the note under the webhook's rows. */
+export const WEBHOOK_SOURCE_NOTES: Record<WebhookSource, string> = {
+	github:
+		"Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret.",
+	stripe: "Add the address as an endpoint in Stripe, and paste its signing secret.",
+	slack: "Set the address as your Slack app's Request URL, and paste its Signing Secret.",
+	linear: "Add the address as a webhook in Linear, and paste its signing secret.",
 };
 
 export const WEBHOOK_AUTH_OPTIONS = [

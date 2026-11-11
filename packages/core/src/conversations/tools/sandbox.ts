@@ -18,6 +18,7 @@ import {
 	type AttachToReply,
 	COPY_FILE_TO_SANDBOX_TOOL,
 	copyFileToSandboxTool,
+	diskNote,
 	networkNote,
 	type OpenSandbox,
 	openOncePerTurn,
@@ -144,11 +145,12 @@ export const make = Effect.gen(function* () {
 						signsIn: false,
 					};
 				}
-				const [reach, blocked] = yield* operation(
+				const [reach, blocked, disk] = yield* operation(
 					"forTurn",
 					Effect.all([
 						reachOf(pod, sandboxes.forConnection(provider.connection)),
 						blockedHostsOf(pod.workspaceId),
+						podSandboxes.diskOf(pod),
 					]),
 				);
 				const holder: PodSandboxes.Holder = { kind: "turn", id: turnId };
@@ -194,7 +196,9 @@ export const make = Effect.gen(function* () {
 						allowlisted: reach.kind === "allowlist",
 					}),
 					usable: true,
-					note: networkNote(reach),
+					note: [networkNote(reach), diskNote(disk)]
+						.filter((line) => line !== undefined)
+						.join("\n\n"),
 					workspace: { open: openSandbox, place },
 					signsIn: sandboxes.forConnection(provider.connection).capabilities.credentials !== "none",
 				};

@@ -132,9 +132,7 @@ const meta = preview.meta({
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/can you sign off the Acme quote/, {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(/can you sign off the Acme quote/)).toBeInTheDocument();
 		await expect(canvas.queryByText(/that fixed it/)).toBeNull();
 		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
 		await expect(inbox).toHaveAttribute("aria-current", "page");
@@ -145,11 +143,7 @@ export const Default = meta.story({
 /** Turning Unread only off shows what has been read too, greyer and without its dot. */
 export const All = meta.story({
 	play: async ({ canvas }) => {
-		const unreadOnly = await canvas.findByRole(
-			"button",
-			{ name: "Unread only" },
-			{ timeout: 10_000 },
-		);
+		const unreadOnly = await canvas.findByRole("button", { name: "Unread only" });
 		await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
 		await userEvent.click(unreadOnly);
 		await expect(await canvas.findByText(/that fixed it/)).toBeVisible();
@@ -163,9 +157,7 @@ export const All = meta.story({
  */
 export const Filtered = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Filter" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Filter" }));
 		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Mentions/ }));
 		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Routines/ }));
 		await userEvent.keyboard("{Escape}");
@@ -198,9 +190,7 @@ export const MarkAllAsRead = meta.story({
 		);
 	},
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Mark all as read" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Mark all as read" }));
 		await expect(
 			await within(canvas.getByRole("region", { name: "Inbox" })).findByText("Nothing unread"),
 		).toBeVisible();
@@ -219,9 +209,9 @@ export const CaughtUp = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await within(
-				await canvas.findByRole("region", { name: "Inbox" }, { timeout: 10_000 }),
-			).findByText("Nothing unread", {}, { timeout: 10_000 }),
+			await within(await canvas.findByRole("region", { name: "Inbox" })).findByText(
+				"Nothing unread",
+			),
 		).toBeVisible();
 	},
 });
@@ -281,9 +271,7 @@ export const Opened = meta.story({
 		/>
 	),
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "Open thread" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: "Open thread" })).toBeVisible();
 		const inbox = canvas.getByRole("region", { name: "Inbox" });
 		await expect(
 			await within(inbox).findByRole("link", { name: /Jay Yu mentioned you/ }),
@@ -309,9 +297,7 @@ export const LongFeed = meta.story({
 		);
 	},
 	play: async ({ canvas, canvasElement }) => {
-		await expect(
-			await canvas.findByText("Renewal notes 40 are ready.", {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText("Renewal notes 40 are ready.")).toBeInTheDocument();
 		const page = canvasElement.ownerDocument.documentElement;
 		await expect(page.scrollHeight).toBeLessThanOrEqual(page.clientHeight);
 	},
@@ -321,7 +307,7 @@ export const LongFeed = meta.story({
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		const row = await canvas.findByText(/can you sign off the Acme quote/, {}, { timeout: 10_000 });
+		const row = await canvas.findByText(/can you sign off the Acme quote/);
 		await expect(row).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Mark all as read" })).toBeVisible();
 	},

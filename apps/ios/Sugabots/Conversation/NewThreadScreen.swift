@@ -111,7 +111,8 @@ struct NewThreadScreen: View {
 			placeholder: placeholder,
 			text: $draft,
 			// What is sent here starts a conversation, so `@here` and `@channel` are offered as in one.
-			mentionable: Mentions.withGroups((startsFrom?.mentionable ?? []).filter { $0.id != store.user.id }, threadType: .conversation),
+			mentionable: (startsFrom?.mentionable ?? []).filter { $0.id != store.user.id }.map(MentionTarget.participant)
+				+ Mentions.groups(writtenBy: store.user.id, members: startsFrom?.details?.members ?? [], threadType: .conversation),
 			attachments: attachments,
 			sending: starting,
 			error: failed ? "The thread was not started. Try again." : nil,

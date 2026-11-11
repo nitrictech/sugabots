@@ -15,6 +15,8 @@ import {
 /** GitHub's most comments in one review. */
 const MAX_REVIEW_COMMENTS = 100;
 
+const stackedPullRequestsSchema = Schema.Array(positiveIntegerSchema).check(Schema.isMinLength(1));
+
 /** The tools that open, change, comment on and review pull requests. */
 export function pullRequestTools({ connected, repositorySchema, onRepository, sign }: ToolContext) {
 	return {
@@ -96,6 +98,44 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 							),
 						),
 					),
+				),
+		}),
+		create_stack: tool({
+			description:
+				"Stack a chain of pull requests, so GitHub shows them as one stack and merging one merges those below it. Each must already have its base set to the branch of the one below it, with open_pull_request or update_pull_request. To put more on a stack that exists, use add_to_stack.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				pullRequests: stackedPullRequestsSchema.annotate({
+					description: "The pull requests' numbers, from the bottom of the stack to its top",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, pullRequests }) =>
+				onRepository(repository, (path) =>
+					Effect.map(connected.createStack({ repository: path, pullRequests }), (stack) => ({
+						status: "stacked",
+						...stack,
+					})),
+				),
+		}),
+		add_to_stack: tool({
+			description:
+				"Put pull requests on top of a stack. The first must already have its base set to the branch of the stack's top one, and each other to the branch of the one below it.",
+			inputSchema: Schema.Struct({
+				repository: repositorySchema,
+				stack: positiveIntegerSchema.annotate({
+					description:
+						"The stack's number, not a pull request's: from create_stack, or the stack in get_pull_request",
+				}),
+				pullRequests: stackedPullRequestsSchema.annotate({
+					description: "The new pull requests' numbers, from the lowest to the new top",
+				}),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository, stack, pullRequests }) =>
+				onRepository(repository, (path) =>
+					Effect.map(connected.addToStack({ repository: path, stack, pullRequests }), (added) => ({
+						status: "added",
+						...added,
+					})),
 				),
 		}),
 		comment_on_pull_request: tool({

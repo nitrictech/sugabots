@@ -2,8 +2,12 @@ import type { NotificationLevel } from "@sugabots/contracts";
 
 /*
  * The choices a person makes about notifications, as plain data, which the
- * native apps' copies are generated from.
+ * native apps' copies are generated from. apps/codegen loads this module with
+ * Node, so it imports nothing but types.
  */
+
+/** The quiet hours offered when somebody switches them on, in their device's time zone. */
+export const DEFAULT_QUIET_HOURS = { from: "22:00", to: "08:00" } as const;
 
 /** What each level is called where a person chooses one. */
 export const NOTIFICATION_LEVEL_LABELS: Record<NotificationLevel, string> = {

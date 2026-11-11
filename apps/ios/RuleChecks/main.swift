@@ -161,7 +161,14 @@ let suites: [(file: String, rules: [String: Rule], notCopied: [String: String])]
 			return try Mentions.canStart(at: utf16Index(argument(arguments, 1), in: text), in: text)
 		},
 		"firstBotNamed": { try Mentions.firstBot(in: argument($0, 0), among: argument($0, 1))?.id },
-		"withGroupMentions": { try Mentions.withGroups(argument($0, 0), threadType: argument($0, 1)).map(\.key) },
+		"groupMentionsBy": { arguments in
+			let writer: [String: String] = try argument(arguments, 0)
+			return try Mentions.groups(
+				writtenBy: writer["kind"] == "person" ? writer["id"] : nil,
+				members: argument(arguments, 1),
+				threadType: argument(arguments, 2)
+			).map(\.key)
+		},
 		"targetWithHandle": { try Mentions.target(withHandle: argument($0, 1), among: mentionTargets($0, 0))?.key },
 	], [:]),
 	("message-preview.cases.json", [

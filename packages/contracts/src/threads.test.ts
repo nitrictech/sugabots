@@ -10,6 +10,7 @@ import {
 	MESSAGE_PREVIEW_CHARACTERS,
 	mentionPattern,
 	mentionsEveryone,
+	mentionsOnlyPeople,
 	messagePartsFor,
 	messagePreview,
 	messageSchema,
@@ -225,6 +226,24 @@ describe("mentionsEveryone", () => {
 		"does not read %j as addressing everyone",
 		(content) => {
 			expect(mentionsEveryone(content)).toBe(false);
+		},
+	);
+});
+
+describe("mentionsOnlyPeople", () => {
+	const known = { botHandles: new Set(["reviewer"]), peopleHandles: new Set(["sam"]) };
+
+	it.each([[["sam"]], [["here"]], [["sam", "backlog"]]])(
+		"reads %j as addressing only people",
+		(handles) => {
+			expect(mentionsOnlyPeople(handles, known)).toBe(true);
+		},
+	);
+
+	it.each([[[]], [["backlog"]], [["reviewer"]], [["sam", "reviewer"]], [["channel", "reviewer"]]])(
+		"does not read %j as addressing only people",
+		(handles) => {
+			expect(mentionsOnlyPeople(handles, known)).toBe(false);
 		},
 	);
 });

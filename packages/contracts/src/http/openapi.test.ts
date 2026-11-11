@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import committed from "../../openapi.json" with { type: "json" };
+import { podSchema } from "../pods.ts";
 import { openApiDocument } from "./openapi.ts";
 
 describe("openapi.json", () => {
@@ -11,5 +12,10 @@ describe("openapi.json", () => {
 		const document = openApiDocument();
 		expect(document.components.schemas.Pod).toBeDefined();
 		expect(JSON.stringify(document.paths)).toContain('"$ref":"#/components/schemas/Pod"');
+	});
+
+	it("leaves the schemas it names as they were", () => {
+		openApiDocument();
+		expect(podSchema.ast.annotations?.identifier).toBeUndefined();
 	});
 });

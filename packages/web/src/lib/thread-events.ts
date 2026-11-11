@@ -356,11 +356,18 @@ async function applyWorkspaceEvent(
 	}
 }
 
-/** Whether a cached page of a chat's messages links the thread `conversationId`. */
+/**
+ * Whether a cached page of a chat's messages links the thread `conversationId`:
+ * a thread started from the chat, or a collaboration asked of its bot.
+ */
 function linksThread(data: unknown, conversationId: string): boolean {
 	const pages = (data as InfiniteData<ChatMessagesPage | undefined> | undefined)?.pages ?? [];
 	return pages.some((page) =>
-		page?.items.some((item) => item.kind === "thread" && item.threadId === conversationId),
+		page?.items.some(
+			(item) =>
+				(item.kind === "thread" || item.kind === "collaboration") &&
+				item.threadId === conversationId,
+		),
 	);
 }
 

@@ -107,12 +107,26 @@ export const makeRecords = Effect.gen(function* () {
 						if (!address) {
 							return yield* Effect.die(new Error("A collaboration's parent thread is gone"));
 						}
+						const [collaboratorChannel] = yield* query((db) =>
+							db
+								.select({ id: thread.id })
+								.from(thread)
+								.where(
+									and(
+										eq(thread.type, "bot_channel"),
+										eq(thread.podId, address.podId),
+										eq(thread.hostAgentId, input.collaborator.id),
+									),
+								)
+								.limit(1),
+						);
 						yield* emit([
 							ConversationEvent.CollaborationOpened({
 								...collaborationChange(opened, input.collaborator.name),
 								workspaceId: address.workspaceId,
 								podId: address.podId,
 								collaboratorAgentId: input.collaborator.id,
+								collaboratorChannelId: collaboratorChannel?.id ?? null,
 								briefMessageId: input.briefMessageId,
 							}),
 						]);

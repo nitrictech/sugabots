@@ -182,6 +182,7 @@ export function WorkspacePodsSettings({
 				>
 					<PodSandboxSettings
 						podId={selected.id}
+						bots={bots}
 						canManageNetwork={selected.permissions.manageSandbox}
 					/>
 				</SettingsPage>

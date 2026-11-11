@@ -41,6 +41,13 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 			.handle("remove", ({ params }) =>
 				providers.remove(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
+			.handle("switchOff", ({ params, payload }) =>
+				providers.switchOff({ ...params, ...payload }).pipe(
+					asSessionUser,
+					asHttpError(providerErrors),
+					Effect.map((moved) => ({ moved })),
+				),
+			)
 			.handle("test", ({ params }) =>
 				providers.test(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
@@ -77,6 +84,13 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 					asSessionUser,
 					asHttpError(providerErrors),
 					Effect.map((updated) => ({ updated })),
+				),
+			)
+			.handle("switchOffModel", ({ params, payload }) =>
+				providers.switchOffModel({ ...params, ...payload }).pipe(
+					asSessionUser,
+					asHttpError(providerErrors),
+					Effect.map((moved) => ({ moved })),
 				),
 			)
 			.handle("removeModel", ({ params }) =>

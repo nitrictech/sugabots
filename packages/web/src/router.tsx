@@ -47,6 +47,7 @@ import {
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { defaultPod, findPod, podsQuery, usePods } from "@/lib/pods.ts";
+import { loadFailure } from "@/lib/query.ts";
 import { type Session, SessionContext, useSession } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
@@ -67,13 +68,13 @@ import type { RoutinesView } from "@/screens/RoutinesStage.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
+import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { MobileHome } from "@/shell/MobileHome.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { You, YouPod } from "@/shell/You.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
-import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
 const ConversationPage = lazyNamed(
@@ -242,11 +243,15 @@ const indexRoute = createRoute({
  * address or the switcher, or here when there is no other.
  */
 function LandingRoute() {
-	const { workspace: chosen, isPending, error, refetch } = useWorkspace();
+	const { workspace: chosen, isPending, failure, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
 	const standing = useWorkspaceStanding();
+	if (failure) {
+		return (
+			<LoadFailure title="Could not load your workspace" error={failure.error} retry={refetch} />
+		);
+	}
 	if (isPending) return <div className="h-full bg-list" />;
-	if (error) return <RouteLoadFailure title="Could not load your workspace" onRetry={refetch} />;
 	if (!chosen) return <Navigate to="/onboarding" replace />;
 	if (chosen.setupCompletedAt === null && standing.isPending) {
 		return <div className="h-full bg-list" />;
@@ -568,11 +573,13 @@ const onboardingRoute = createRoute({
 function OnboardingRoute() {
 	const session = useSession();
 	const { workspace: madeSlug } = onboardingRoute.useSearch();
-	const { isPending, error, refetch } = useWorkspace();
+	const { isPending, failure, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
 
+	if (failure) {
+		return <LoadFailure title="Could not start setup" error={failure.error} retry={refetch} />;
+	}
 	if (isPending) return <div className="h-full bg-list" />;
-	if (error) return <RouteLoadFailure title="Could not start setup" onRetry={refetch} />;
 	return (
 		<WorkspaceSetup
 			session={session}
@@ -646,10 +653,16 @@ function ShellRoute() {
 	const workspaces = useWorkspaces();
 	const standing = useWorkspaceStanding();
 
-	if (workspace.isPending) return <div className="h-full bg-list" />;
-	if (workspace.error) {
-		return <RouteLoadFailure title="Could not load your workspace" onRetry={workspace.refetch} />;
+	if (workspace.failure) {
+		return (
+			<LoadFailure
+				title="Could not load your workspace"
+				error={workspace.failure.error}
+				retry={workspace.refetch}
+			/>
+		);
 	}
+	if (workspace.isPending) return <div className="h-full bg-list" />;
 	if (!workspace.workspace) {
 		// Somebody in no workspace at all has one to make, not a wrong address.
 		return workspaces.data?.length === 0 ? (
@@ -661,10 +674,17 @@ function ShellRoute() {
 	if (workspace.workspace.setupCompletedAt === null) {
 		// Setup left part way is finished before the workspace is used, by whoever may finish it.
 		// Anybody invited part way through uses it as it is.
-		if (standing.isPending) return <div className="h-full bg-list" />;
-		if (standing.error) {
-			return <RouteLoadFailure title="Could not load your workspace" onRetry={standing.refetch} />;
+		const standingFailure = loadFailure(standing);
+		if (standingFailure) {
+			return (
+				<LoadFailure
+					title="Could not load your workspace"
+					error={standingFailure.error}
+					retry={standing.refetch}
+				/>
+			);
 		}
+		if (standing.isPending) return <div className="h-full bg-list" />;
 		if (opensIntoSetup(workspace.workspace, standing.data?.permissions)) {
 			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
 		}
@@ -682,18 +702,6 @@ function opensIntoSetup(
 	permissions: WorkspacePermissions | undefined,
 ): boolean {
 	return workspace.setupCompletedAt === null && permissions?.manageProviders === true;
-}
-
-function RouteLoadFailure({ title, onRetry }: { title: string; onRetry: () => Promise<unknown> }) {
-	return (
-		<div className="grid h-full place-items-center bg-list p-6">
-			<EmptyState title={title}>
-				<Button variant="outline" onClick={() => void onRetry()}>
-					Try again
-				</Button>
-			</EmptyState>
-		</div>
-	);
 }
 
 const settingsRoute = createRoute({

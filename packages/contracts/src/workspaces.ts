@@ -59,7 +59,7 @@ export type WorkspaceRole = typeof workspaceRoleSchema.Type;
  * new role under an old role's name. `WORKSPACE_ROLE_DESCRIPTIONS` below is the same
  * bargain.
  */
-export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
+const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
 	owner: "Owner",
 	admin: "Admin",
 	member: "Member",
@@ -78,7 +78,7 @@ export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  * Member does not create pods, and a Viewer may still take part in a
  * conversation.
  */
-export const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
+const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin: "Administers the workspace, its providers and every shared pod.",
 	member: "Builds agents in the pods they are added to.",

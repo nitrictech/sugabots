@@ -15,7 +15,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "HealthResponse",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -67,7 +67,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Me",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -395,7 +395,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Workspace",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -1538,7 +1538,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "InvitationPreview",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -1631,7 +1631,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "AcceptedInvitation",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -1932,7 +1932,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Agent",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -2023,7 +2023,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Agent",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -2539,7 +2539,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Pod",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -3293,7 +3293,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SystemAgent",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -3702,7 +3702,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "WorkspaceModelsResponse",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -3794,7 +3794,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "WorkspaceModelsResponse",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -3906,7 +3906,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ModelProvider",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -4006,7 +4006,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ModelProvider",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -4201,6 +4201,138 @@
 				}
 			}
 		},
+		"/workspaces/{workspace}/model-providers/{providerId}/switch-off": {
+			"post": {
+				"tags": [
+					"modelProviders"
+				],
+				"operationId": "modelProviders.switchOff",
+				"parameters": [
+					{
+						"name": "workspace",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1
+						},
+						"required": true
+					},
+					{
+						"name": "providerId",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
+						},
+						"required": true
+					}
+				],
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"moved": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"required": [
+										"moved"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ForbiddenEncoded"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "NotFound",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NotFoundEncoded"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConflictEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				},
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProviderSwitchOff"
+							}
+						}
+					},
+					"required": true
+				}
+			}
+		},
 		"/workspaces/{workspace}/model-providers/{providerId}/test": {
 			"post": {
 				"tags": [
@@ -4333,7 +4465,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ProviderSignInStarted",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -4433,7 +4565,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ModelProvider",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -4545,7 +4677,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ProviderSignInOutcome",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -4657,7 +4789,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ProviderFetchResult",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -5011,7 +5143,9 @@
 						"name": "modelId",
 						"in": "path",
 						"schema": {
-							"type": "string"
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
 						},
 						"required": true
 					}
@@ -5149,7 +5283,9 @@
 						"name": "modelId",
 						"in": "path",
 						"schema": {
-							"type": "string"
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
 						},
 						"required": true
 					}
@@ -5232,6 +5368,148 @@
 				}
 			}
 		},
+		"/workspaces/{workspace}/model-providers/{providerId}/models/{modelId}/switch-off": {
+			"post": {
+				"tags": [
+					"modelProviders"
+				],
+				"operationId": "modelProviders.switchOffModel",
+				"parameters": [
+					{
+						"name": "workspace",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1
+						},
+						"required": true
+					},
+					{
+						"name": "providerId",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
+						},
+						"required": true
+					},
+					{
+						"name": "modelId",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+							"format": "uuid"
+						},
+						"required": true
+					}
+				],
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"moved": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"required": [
+										"moved"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ForbiddenEncoded"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "NotFound",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NotFoundEncoded"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConflictEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				},
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProviderModelSwitchOff"
+							}
+						}
+					},
+					"required": true
+				}
+			}
+		},
 		"/workspaces/{workspace}/search-provider": {
 			"get": {
 				"tags": [
@@ -5252,7 +5530,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SearchProviderResponse",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -5442,7 +5720,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SearchProvider",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -5627,7 +5905,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "WebAccess",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -5904,7 +6182,7 @@
 				"security": [],
 				"responses": {
 					"201": {
-						"description": "Success",
+						"description": "SandboxProvider",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6006,7 +6284,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxAccess",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6108,7 +6386,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Success",
+						"description": "SandboxProvider",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6323,7 +6601,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxTemplate",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6433,7 +6711,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxTemplate",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6549,7 +6827,102 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/ProviderTestResult"
+									"$ref": "#/components/schemas/SandboxProviderTestResult"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "BadRequest",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BadRequestEncoded"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UnauthorizedEncoded"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ForbiddenEncoded"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "NotFound",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NotFoundEncoded"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "PayloadTooLarge",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PayloadTooLargeEncoded"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "InternalServerError",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/InternalServerErrorEncoded"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/workspaces/{workspace}/sandbox-disks": {
+			"get": {
+				"tags": [
+					"sandboxProviders"
+				],
+				"operationId": "sandboxProviders.disks",
+				"parameters": [
+					{
+						"name": "workspace",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1
+						},
+						"required": true
+					}
+				],
+				"security": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"$ref": "#/components/schemas/PodSandboxDisk"
+									}
 								}
 							}
 						}
@@ -6637,7 +7010,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxNetworkSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6729,7 +7102,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxNetworkSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6846,7 +7219,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxNetworkSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -6938,7 +7311,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxNetworkSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7055,7 +7428,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "SandboxNetworkSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7148,7 +7521,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandbox",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7241,7 +7614,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandbox",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7344,7 +7717,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandbox",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7447,7 +7820,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandboxNetwork",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7540,7 +7913,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandboxNetwork",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7658,7 +8031,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodSandboxNetwork",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7751,7 +8124,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "GitHubAppForm",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -7874,7 +8247,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "GitHubAppInstall",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -8083,7 +8456,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConnectionRepositories",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -8184,7 +8557,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConnectionRepositories",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -8297,7 +8670,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConnectionRepositories",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -8966,7 +9339,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConnectionWithTools",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -9067,7 +9440,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Connection",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -9500,7 +9873,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConnectionOauthStart",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -9825,7 +10198,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Artifact",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -10136,7 +10509,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Artifact",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -10684,7 +11057,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ChatList",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -10776,7 +11149,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodChatMarkers",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -10868,7 +11241,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ActivityFeed",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11052,7 +11425,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "BotChannel",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11162,7 +11535,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "RoutineFeed",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11262,7 +11635,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "PodChat",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11652,7 +12025,7 @@
 				"security": [],
 				"responses": {
 					"201": {
-						"description": "Success",
+						"description": "StartedThread",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11763,7 +12136,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ConversationThread",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -11976,7 +12349,7 @@
 				"security": [],
 				"responses": {
 					"201": {
-						"description": "Success",
+						"description": "Message",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -12120,7 +12493,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ChatHistoryPage",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -13008,7 +13381,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ThreadActivity",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -13107,7 +13480,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "MessageReactions",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -13214,7 +13587,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "MessageReactions",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -13691,7 +14064,7 @@
 				"security": [],
 				"responses": {
 					"201": {
-						"description": "Success",
+						"description": "RoutineWriteResult",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -13804,7 +14177,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "RoutineScheduleOccurrences",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -14014,7 +14387,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Success",
+						"description": "RoutineWriteResult",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -14348,7 +14721,7 @@
 				"security": [],
 				"responses": {
 					"201": {
-						"description": "Success",
+						"description": "RoutineWriteResult",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -14479,7 +14852,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "Success",
+						"description": "RoutineWriteResult",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -14729,7 +15102,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "RoutineCurrentSecret",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -14838,7 +15211,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "RoutineSecret",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15073,7 +15446,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "IgnoredRoutineWebhook | RoutineWebhookChallenge",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15179,7 +15552,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "IgnoredRoutineWebhook | RoutineWebhookChallenge",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15295,7 +15668,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "WorkspaceUsage",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15377,7 +15750,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ReferralLink",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15439,7 +15812,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "ResetReferralLink",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15511,7 +15884,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "NotificationSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -15571,7 +15944,7 @@
 				"security": [],
 				"responses": {
 					"200": {
-						"description": "NotificationSettings",
+						"description": "Success",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -17125,6 +17498,28 @@
 				],
 				"additionalProperties": false
 			},
+			"BotMove": {
+				"type": "object",
+				"properties": {
+					"from": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 128,
+						"pattern": "^[\\w./:-]+$"
+					},
+					"to": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 128,
+						"pattern": "^[\\w./:-]+$"
+					}
+				},
+				"required": [
+					"from",
+					"to"
+				],
+				"additionalProperties": false
+			},
 			"BotUsage": {
 				"type": "object",
 				"properties": {
@@ -17212,7 +17607,8 @@
 							"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
 							"format": "uuid"
 						},
-						"minItems": 1
+						"minItems": 1,
+						"maxItems": 2000
 					},
 					"enabled": {
 						"type": "boolean"
@@ -17570,6 +17966,55 @@
 							"state",
 							"error",
 							"report",
+							"createdAt"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"collaboration"
+								]
+							},
+							"id": {
+								"type": "string",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+								"format": "uuid"
+							},
+							"threadId": {
+								"type": "string",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+								"format": "uuid"
+							},
+							"title": {
+								"type": "string"
+							},
+							"initiator": {
+								"$ref": "#/components/schemas/AgentParticipant"
+							},
+							"state": {
+								"type": "string",
+								"enum": [
+									"running",
+									"done",
+									"failed"
+								]
+							},
+							"createdAt": {
+								"type": "string",
+								"format": "date-time"
+							}
+						},
+						"required": [
+							"kind",
+							"id",
+							"threadId",
+							"title",
+							"initiator",
+							"state",
 							"createdAt"
 						],
 						"additionalProperties": false
@@ -17954,6 +18399,9 @@
 					"signedIn": {
 						"type": "boolean"
 					},
+					"signInExpired": {
+						"type": "boolean"
+					},
 					"secretHeader": {
 						"anyOf": [
 							{
@@ -18029,6 +18477,7 @@
 					"url",
 					"auth",
 					"signedIn",
+					"signInExpired",
 					"secretHeader",
 					"hasSecret",
 					"appSettingsUrl",
@@ -18297,9 +18746,15 @@
 						"anyOf": [
 							{
 								"type": "object",
+								"propertyNames": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 128
+								},
 								"additionalProperties": {
 									"$ref": "#/components/schemas/ConnectionAccess"
-								}
+								},
+								"maxProperties": 1000
 							},
 							{
 								"type": "null"
@@ -18346,6 +18801,9 @@
 						"$ref": "#/components/schemas/ConnectionAuth"
 					},
 					"signedIn": {
+						"type": "boolean"
+					},
+					"signInExpired": {
 						"type": "boolean"
 					},
 					"secretHeader": {
@@ -18429,6 +18887,7 @@
 					"url",
 					"auth",
 					"signedIn",
+					"signInExpired",
 					"secretHeader",
 					"hasSecret",
 					"appSettingsUrl",
@@ -18874,13 +19333,17 @@
 							},
 							"failed": {
 								"type": "boolean"
+							},
+							"pausedAfterFailures": {
+								"type": "boolean"
 							}
 						},
 						"required": [
 							"id",
 							"name",
 							"state",
-							"failed"
+							"failed",
+							"pausedAfterFailures"
 						],
 						"additionalProperties": false
 					},
@@ -20193,6 +20656,7 @@
 						"anyOf": [
 							{
 								"type": "string",
+								"maxLength": 100,
 								"pattern": "^[A-Za-z][A-Za-z_]*(?:\\/[A-Za-z0-9_+-]+)*$"
 							},
 							{
@@ -20755,7 +21219,8 @@
 								]
 							},
 							"sequence": {
-								"type": "integer"
+								"type": "integer",
+								"minimum": 0
 							}
 						},
 						"required": [
@@ -21107,6 +21572,24 @@
 				],
 				"additionalProperties": false
 			},
+			"PodSandboxDisk": {
+				"type": "object",
+				"properties": {
+					"podId": {
+						"type": "string",
+						"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+						"format": "uuid"
+					},
+					"disk": {
+						"$ref": "#/components/schemas/SandboxDisk"
+					}
+				},
+				"required": [
+					"podId",
+					"disk"
+				],
+				"additionalProperties": false
+			},
 			"PodSandboxNetwork": {
 				"type": "object",
 				"properties": {
@@ -21287,6 +21770,16 @@
 							},
 							"upgradeAvailable": {
 								"type": "boolean"
+							},
+							"disk": {
+								"anyOf": [
+									{
+										"$ref": "#/components/schemas/SandboxDisk"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": [
@@ -21298,7 +21791,8 @@
 							"lastUsedAt",
 							"turnsUsing",
 							"peopleWatching",
-							"upgradeAvailable"
+							"upgradeAvailable",
+							"disk"
 						],
 						"additionalProperties": false
 					}
@@ -21427,7 +21921,8 @@
 						]
 					},
 					"sequence": {
-						"type": "integer"
+						"type": "integer",
+						"minimum": 0
 					}
 				},
 				"required": [
@@ -21564,6 +22059,51 @@
 					"embeddings",
 					"reasoning"
 				]
+			},
+			"ProviderModelSwitchOff": {
+				"type": "object",
+				"properties": {
+					"moveBotsTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"newBotsTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summariesTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
 			},
 			"ProviderModelUpdate": {
 				"type": "object",
@@ -21723,6 +22263,48 @@
 					"error"
 				]
 			},
+			"ProviderSwitchOff": {
+				"type": "object",
+				"properties": {
+					"moveBots": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/BotMove"
+						},
+						"maxItems": 2000
+					},
+					"newBotsTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summariesTo": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[\\w./:-]+$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"moveBots"
+				],
+				"additionalProperties": false
+			},
 			"ProviderTestResult": {
 				"type": "object",
 				"properties": {
@@ -21763,6 +22345,7 @@
 					},
 					"timeZone": {
 						"type": "string",
+						"maxLength": 100,
 						"pattern": "^[A-Za-z][A-Za-z_]*(?:\\/[A-Za-z0-9_+-]+)*$"
 					}
 				},
@@ -23220,6 +23803,113 @@
 				],
 				"additionalProperties": false
 			},
+			"SandboxDisk": {
+				"type": "object",
+				"properties": {
+					"usedBytes": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"totalBytes": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"measuredAt": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"folders": {
+						"anyOf": [
+							{
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/SandboxDiskFolder"
+								}
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"usedBytes",
+					"totalBytes",
+					"measuredAt",
+					"folders"
+				],
+				"additionalProperties": false
+			},
+			"SandboxDiskFolder": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"home"
+								]
+							},
+							"agentId": {
+								"type": "string",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$",
+								"format": "uuid"
+							},
+							"bytes": {
+								"type": "integer",
+								"minimum": 0
+							}
+						},
+						"required": [
+							"kind",
+							"agentId",
+							"bytes"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"threads"
+								]
+							},
+							"bytes": {
+								"type": "integer",
+								"minimum": 0
+							}
+						},
+						"required": [
+							"kind",
+							"bytes"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"temporary"
+								]
+							},
+							"bytes": {
+								"type": "integer",
+								"minimum": 0
+							}
+						},
+						"required": [
+							"kind",
+							"bytes"
+						],
+						"additionalProperties": false
+					}
+				]
+			},
 			"SandboxNetworkMode": {
 				"type": "string",
 				"enum": [
@@ -23381,6 +24071,30 @@
 									}
 								]
 							},
+							"cpuCount": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 64
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"memoryGiB": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 64
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"networkMode": {
 								"anyOf": [
 									{
@@ -23477,6 +24191,33 @@
 						"additionalProperties": false
 					}
 				]
+			},
+			"SandboxProviderTestResult": {
+				"type": "object",
+				"properties": {
+					"reachable": {
+						"type": "boolean"
+					},
+					"latencyMs": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"error": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"reachable",
+					"latencyMs"
+				],
+				"additionalProperties": false
 			},
 			"SandboxProviderUpdate": {
 				"type": "object",
@@ -25768,13 +26509,18 @@
 					"expiresAt": {
 						"type": "string",
 						"format": "date-time"
+					},
+					"sentAt": {
+						"type": "string",
+						"format": "date-time"
 					}
 				},
 				"required": [
 					"id",
 					"email",
 					"role",
-					"expiresAt"
+					"expiresAt",
+					"sentAt"
 				],
 				"additionalProperties": false
 			},
@@ -26043,6 +26789,7 @@
 				"properties": {
 					"timeZone": {
 						"type": "string",
+						"maxLength": 100,
 						"pattern": "^[A-Za-z][A-Za-z_]*(?:\\/[A-Za-z0-9_+-]+)*$"
 					}
 				},

@@ -138,6 +138,11 @@ export const connectionSchema = Schema.Struct({
 	 * for GitHub, whether its app is installed. Always true for `header`.
 	 */
 	signedIn: Schema.Boolean,
+	/**
+	 * For `oauth`, whether a turn found the sign-in refused, so it is not
+	 * signed in until someone signs in again. Always false for `header`.
+	 */
+	signInExpired: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
 	/** For GitHub, where the owner of the connection's app changes or deletes it; null otherwise. */
@@ -237,7 +242,12 @@ export const connectionUpdateSchema = Schema.Struct({
 	/** Sets every tool the connection lists. */
 	access: Schema.optional(connectionAccessSchema),
 	/** Sets the tools named, by the server's name for each. Every name must be one the connection lists. */
-	toolAccess: Schema.optional(Schema.Record(Schema.String, connectionAccessSchema)),
+	toolAccess: Schema.optional(
+		Schema.Record(
+			Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+			connectionAccessSchema,
+		).check(Schema.isMaxProperties(1_000)),
+	),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
 	Schema.makeFilter((value) => value.access === undefined || value.toolAccess === undefined, {

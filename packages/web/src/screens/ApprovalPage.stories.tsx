@@ -87,9 +87,7 @@ const at = (callId: string) => () => (
 export const Answerable = meta.story({
 	render: at(answerable.call.id),
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("button", { name: /^Allow/ }, { timeout: 10_000 }),
-		).toBeEnabled();
+		await expect(await canvas.findByRole("button", { name: /^Allow/ })).toBeEnabled();
 		await expect(canvas.getByRole("button", { name: /^Deny/ })).toBeEnabled();
 	},
 });
@@ -98,9 +96,7 @@ export const Answerable = meta.story({
 export const Answered = meta.story({
 	render: at(answered.call.id),
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/Denied by Ryan Eyes/, undefined, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(/Denied by Ryan Eyes/, undefined)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},
 });
@@ -109,9 +105,7 @@ export const Answered = meta.story({
 export const NoLongerWaiting = meta.story({
 	render: at(stopped.call.id),
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(/No longer waiting/, undefined, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(/No longer waiting/, undefined)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},
 });
@@ -121,7 +115,7 @@ export const Missing = meta.story({
 	render: at("0199a3a0-0000-7000-8000-000000000899"),
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText("This request is no longer here", undefined, { timeout: 10_000 }),
+			await canvas.findByText("This request is no longer here", undefined),
 		).toBeInTheDocument();
 	},
 });

@@ -8,10 +8,12 @@ import {
 	newModelProviderSchema,
 	newProviderModelSchema,
 	providerFetchResultSchema,
+	providerModelSwitchOffSchema,
 	providerModelUpdateSchema,
 	providerSignInCompletionSchema,
 	providerSignInOutcomeSchema,
 	providerSignInStartedSchema,
+	providerSwitchOffSchema,
 	providerTestResultSchema,
 	workspaceModelsResponseSchema,
 } from "../../model-providers.ts";
@@ -23,7 +25,12 @@ import { Session } from "../middleware.ts";
 const root = "/workspaces/:workspace/model-providers";
 const workspace = { workspace: workspaceIdOrSlugSchema };
 const provider = { workspace: workspaceIdOrSlugSchema, providerId: uuidSchema };
-const model = { ...provider, modelId: Schema.String };
+const model = { ...provider, modelId: uuidSchema };
+
+/** How many bots a switch-off moved. */
+const movedCountSchema = Schema.Struct({
+	moved: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
 
 /** How many models a change reached. */
 const updatedCountSchema = Schema.Struct({
@@ -69,6 +76,12 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			params: provider,
 			error: [BadRequest, Conflict, ...refused],
 		}),
+		HttpApiEndpoint.post("switchOff", `${root}/:providerId/switch-off`, {
+			params: provider,
+			payload: providerSwitchOffSchema,
+			success: movedCountSchema,
+			error: [BadRequest, Conflict, ...refused],
+		}),
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
 			params: provider,
 			success: providerTestResultSchema,
@@ -111,6 +124,12 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			params: model,
 			payload: providerModelUpdateSchema,
 			success: updatedCountSchema,
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		HttpApiEndpoint.post("switchOffModel", `${root}/:providerId/models/:modelId/switch-off`, {
+			params: model,
+			payload: providerModelSwitchOffSchema,
+			success: movedCountSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.delete("removeModel", `${root}/:providerId/models/:modelId`, {

@@ -26,8 +26,10 @@ export const workspaceSchema = Schema.Struct({
 });
 export type Workspace = typeof workspaceSchema.Type;
 
+export const WORKSPACE_NAME_MAX_LENGTH = 64;
+
 export const workspaceDetailsSchema = Schema.Struct({
-	name: Schema.Trim.check(Schema.isMinLength(1)),
+	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(WORKSPACE_NAME_MAX_LENGTH)),
 	slug: workspaceSlugSchema,
 });
 export type WorkspaceDetails = typeof workspaceDetailsSchema.Type;
@@ -65,12 +67,17 @@ export const workspaceMemberUpdateSchema = Schema.Struct({ role: assignableWorks
 /** Who the owner hands the workspace to: one of its members, by membership id. */
 export const ownershipTransferSchema = Schema.Struct({ memberId: uuidSchema });
 
+/** How many days an invitation can be accepted for after it is sent or sent again. */
+export const INVITE_LIFETIME_DAYS = 2;
+
 /** An invitation still waiting to be accepted. */
 export const workspaceInvitationSchema = Schema.Struct({
 	id: uuidSchema,
 	email: emailSchema,
 	role: assignableWorkspaceRoleSchema,
 	expiresAt: isoTimestampSchema,
+	/** When the invitation was last emailed: when it was created, or last sent again. */
+	sentAt: isoTimestampSchema,
 });
 export type WorkspaceInvitation = typeof workspaceInvitationSchema.Type;
 

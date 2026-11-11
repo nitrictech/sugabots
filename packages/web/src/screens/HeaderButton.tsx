@@ -19,28 +19,32 @@ export function HeaderButton({
 	icon,
 	render,
 	onClick,
+	mark,
 	className,
 }: {
 	label: string;
 	icon: ReactNode;
+	/** A small mark on the button's corner, such as a dot saying something went wrong, and what it says. */
+	mark?: { dot: ReactNode; label: string };
 	render?: useRender.RenderProp;
 	onClick?: () => void;
 	className?: string;
 }) {
 	return (
 		<IconButton
-			label={label}
+			label={mark ? `${label}: ${mark.label}` : label}
 			variant="bar"
 			render={render}
 			onClick={onClick}
 			className={cn(
-				"text-muted-foreground hover:text-foreground md:@2xl/chat-header:flex md:@2xl/chat-header:w-auto md:@2xl/chat-header:gap-1.5 md:@2xl/chat-header:px-2.5",
+				"relative text-muted-foreground hover:text-foreground md:@2xl/chat-header:flex md:@2xl/chat-header:w-auto md:@2xl/chat-header:gap-1.5 md:@2xl/chat-header:px-2.5",
 				FLOATING_ON_PHONE,
 				className,
 			)}
 		>
 			{icon}
 			<span className="hidden font-medium text-xs md:@2xl/chat-header:inline">{label}</span>
+			{mark && <span className="absolute top-1 right-1 flex">{mark.dot}</span>}
 		</IconButton>
 	);
 }

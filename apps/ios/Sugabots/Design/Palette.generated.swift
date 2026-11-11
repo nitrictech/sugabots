@@ -53,11 +53,9 @@ extension Palette {
 	static let border = themed(light: UIColor(hex: "#E4E4E7"), dark: UIColor(hex: "#1C1C1F"))
 	static let borderStrong = themed(light: UIColor(hex: "#D4D4D8"), dark: UIColor(hex: "#26262A"))
 	static let borderDashed = themed(light: UIColor(hex: "#D4D4D8"), dark: UIColor(hex: "#3F3F46"))
-	/// The `glass` of a phone's floating controls, over whatever scrolls under them. `glass-ring`
-	/// cuts a count badge out of it.
+	/// The `glass` of a phone's floating controls, over whatever scrolls under them.
 	static let glass = themed(light: UIColor(hex: "#F7F7F8", alpha: 0.8), dark: UIColor(hex: "#1E1E22", alpha: 0.72))
 	static let glassEdge = themed(light: UIColor(hex: "#000000", alpha: 0.06), dark: UIColor(hex: "#FFFFFF", alpha: 0.08))
-	static let glassRing = themed(light: UIColor(hex: "#F1F1F3"), dark: UIColor(hex: "#1E1E22"))
 	/// The send button with nothing to send.
 	static let chipStrong = themed(light: UIColor(hex: "#E4E4E7"), dark: UIColor(hex: "#1F1F23"))
 	/// A pod tile, and a slot in one with no bot in it.

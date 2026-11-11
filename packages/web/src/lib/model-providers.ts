@@ -1,7 +1,9 @@
 import type {
 	ModelProviderUpdate,
 	NewModelProvider,
+	ProviderModelSwitchOff,
 	ProviderModelUpdate,
+	ProviderSwitchOff,
 } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
@@ -159,6 +161,42 @@ export function useProviderActions() {
 				);
 			},
 			onSuccess: refresh,
+		}),
+		switchOffModel: useMutation({
+			mutationFn: ({
+				providerId,
+				modelId,
+				...payload
+			}: { providerId: string; modelId: string } & ProviderModelSwitchOff) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.switchOffModel({
+						params: { workspace: workspaceId, providerId, modelId },
+						payload,
+					}),
+				);
+			},
+			onSuccess: () =>
+				Promise.all([
+					refresh(),
+					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+				]),
+		}),
+		switchOff: useMutation({
+			mutationFn: ({ providerId, ...payload }: { providerId: string } & ProviderSwitchOff) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.switchOff({
+						params: { workspace: workspaceId, providerId },
+						payload,
+					}),
+				);
+			},
+			onSuccess: () =>
+				Promise.all([
+					refresh(),
+					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+				]),
 		}),
 		updateModel: useMutation({
 			mutationFn: ({

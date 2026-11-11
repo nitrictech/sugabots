@@ -9,6 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
+import { connectServer } from "../../providers/connections/mcp.ts";
+import { SignInRequired } from "../../providers/connections/oauth.ts";
 import { ConnectionTools } from "./connections.ts";
 
 /**
@@ -91,7 +93,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 
 function toolsFor(...targets: ConnectionTarget[]) {
 	const offered = ConnectionTools.from({
-		connections: { targetsForPod: () => Effect.succeed(targets) },
+		connections: { targetsForPod: () => Effect.succeed({ targets, signInExpired: [] }) },
 		httpClients: { for: () => fetch },
 	});
 	return offered;
@@ -177,6 +179,78 @@ describe("a turn's connection tools", () => {
 		}
 	});
 
+	it("adds Linear's upload to a Linear connection, running without asking, and to no other", async () => {
+		const linear = target({
+			connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
+			handle: "linear",
+			url: "https://mcp.linear.app/mcp",
+			toolAccess: {},
+		});
+		const offered = ConnectionTools.from({
+			connections: {
+				targetsForPod: () => Effect.succeed({ targets: [linear, target()], signInExpired: [] }),
+			},
+			httpClients: { for: () => fetch },
+			// Linear's address, answered by the fixture server.
+			connect: (server, client) => connectServer({ ...server, url }, client),
+		});
+
+		const set = await run(offered.forPod("w", "p", NO_TURN));
+		try {
+			expect(Object.keys(set.tools).sort()).toEqual([
+				"linear__lookup",
+				"linear__upload_file",
+				"linear__wipe",
+				"wiki__lookup",
+				"wiki__wipe",
+			]);
+			expect(set.tools.linear__upload_file).toMatchObject({
+				handle: "linear",
+				access: "allow",
+				mutating: true,
+				remoteToolName: "upload_file",
+			});
+			expect(set.tools.linear__upload_file?.description).toContain(
+				"linear__prepare_attachment_upload",
+			);
+		} finally {
+			await set.close();
+		}
+	});
+
+	it("names a connection whose sign-in was refused apart from one that will not answer, and does not offer it to be added", async () => {
+		const linear = target({
+			connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
+			handle: "linear",
+			url: "https://mcp.linear.app/mcp",
+			auth: "oauth",
+		});
+		const offered = ConnectionTools.from({
+			connections: {
+				targetsForPod: () =>
+					Effect.succeed({
+						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
+						signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
+					}),
+			},
+			httpClients: { for: () => fetch },
+			connect: (server, client) =>
+				server.url === linear.url
+					? Promise.reject(new SignInRequired())
+					: connectServer(server, client),
+		});
+
+		const set = await run(offered.forPod("w", "p", NO_TURN));
+		try {
+			expect(set.signInExpired).toEqual(["notion", "linear"]);
+			// Notion is still the pod's, so the model isn't told to add it.
+			expect(set.addable.map((preset) => preset.id)).not.toContain("notion");
+			expect(set.unavailable).toEqual(["locked"]);
+		} finally {
+			await set.close();
+		}
+	});
+
 	describe("from one turn to the next", () => {
 		const callOptions = { toolCallId: "1", messages: [] } as never;
 
@@ -248,7 +322,7 @@ describe("a turn's connection tools", () => {
 		it("asks again once the connection has been edited", async () => {
 			const targets = [target()];
 			const offered = ConnectionTools.from({
-				connections: { targetsForPod: () => Effect.succeed(targets) },
+				connections: { targetsForPod: () => Effect.succeed({ targets, signInExpired: [] }) },
 				httpClients: { for: () => fetch },
 			});
 			await run(turnOn(offered));
@@ -280,4 +354,11 @@ describe("a turn's connection tools", () => {
 });
 
 /** A turn with no sandbox, for cases that only look at MCP servers' tools. */
-const NO_TURN = { turnId: "t", agentId: "a", workspace: undefined, sandboxSignsIn: false };
+const NO_TURN = {
+	turnId: "t",
+	agentId: "a",
+	threadId: "0199a3a0-0000-7000-8000-000000000001",
+	files: { read: () => Effect.die(new Error("No thread files in this test")) },
+	workspace: undefined,
+	sandboxSignsIn: false,
+};

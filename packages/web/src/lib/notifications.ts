@@ -365,8 +365,14 @@ function muteEnd(length: MuteLength, now: Date): Date {
 	return morning;
 }
 
-/** When a pause or mute ends: its time today, else its day and time, in `locale`, by default the browser's. */
-export function formatUntil(until: Date, now = new Date(), locale?: string): string {
+/**
+ * When a pause or mute ends: its time if `until` is on `now`'s day, else its
+ * weekday and time, written in `locale`, by default the browser's.
+ */
+export function formatUntil(
+	until: Date,
+	{ now = new Date(), locale }: { now?: Date; locale?: string } = {},
+): string {
 	const sameDay = until.toDateString() === now.toDateString();
 	return until.toLocaleString(locale, {
 		weekday: sameDay ? undefined : "short",

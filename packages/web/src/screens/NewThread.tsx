@@ -16,7 +16,7 @@ import { TurnTakingAvatar, WatchingAvatar } from "@/shell/Agent.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { PeopleChatHeader } from "./ChatHeader.tsx";
-import { firstBotNamed, mentionableIn, withGroupMentions } from "./mentions.tsx";
+import { firstBotNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
 
 /**
  * Starting a thread in a pod from its first message. Opened from a bot, it
@@ -77,10 +77,10 @@ export function NewThread({
 
 	// What is sent here starts a conversation, so `@here` and `@channel` are offered as in one.
 	const mentionable = details
-		? withGroupMentions(
-				mentionableIn(details).filter((candidate) => candidate.id !== userId),
-				"conversation",
-			)
+		? [
+				...mentionableIn(details).filter((candidate) => candidate.id !== userId),
+				...groupMentionsBy({ kind: "person", id: userId }, details.members, "conversation"),
+			]
 		: [];
 	const bots = details?.crew.filter(
 		(member): member is AgentParticipant => member.kind === "agent",

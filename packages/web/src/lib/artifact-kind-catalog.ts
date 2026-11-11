@@ -3,7 +3,8 @@ import type { ArtifactKind } from "@sugabots/contracts";
 /*
  * What each kind of artifact is called and what Download saves it as. Plain
  * data, which the native apps' copies are generated from; how each kind is
- * drawn is in `screens/artifact-kinds.tsx`.
+ * drawn is in `screens/artifact-kinds.tsx`. apps/codegen loads this module
+ * with Node, so it imports nothing but types.
  */
 
 /** What it is called beside its title, such as "Document". */

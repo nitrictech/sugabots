@@ -21,13 +21,14 @@ import {
 	searchProviderCatalog,
 } from "../../../packages/contracts/src/search-providers.ts";
 import {
-	WORKSPACE_ROLE_DESCRIPTIONS,
-	WORKSPACE_ROLE_LABELS,
+	workspaceRoleDescription,
+	workspaceRoleLabel,
+	workspaceRoleSchema,
 } from "../../../packages/contracts/src/workspaces.ts";
 import {
 	ARTIFACT_KIND_FILES,
 	ARTIFACT_KIND_LABELS,
-} from "../../../packages/web/src/lib/artifact-kind-files.ts";
+} from "../../../packages/web/src/lib/artifact-kind-catalog.ts";
 import { MODEL_MAKER_NAMES } from "../../../packages/web/src/lib/model-makers.ts";
 import {
 	MUTE_LENGTHS,
@@ -44,7 +45,7 @@ import {
 	WEBHOOK_SOURCE_LABELS,
 	WEBHOOK_SOURCE_SECRET_PLACEHOLDERS,
 } from "../../../packages/web/src/lib/routine-trigger-words.ts";
-import { ACCESS_WORDS } from "../../../packages/web/src/lib/tool-access-words.ts";
+import { TOOL_ACCESS_LABELS } from "../../../packages/web/src/lib/tool-access-labels.ts";
 import type { GeneratedFiles } from "./generated-files.ts";
 
 /** Everything the generated file holds, as data, for each app's copy to be written from. */
@@ -57,9 +58,13 @@ export const catalogs = {
 	notificationLevelLabels: NOTIFICATION_LEVEL_LABELS,
 	notificationLevelNotes: NOTIFICATION_LEVEL_NOTES,
 	muteLengths: MUTE_LENGTHS,
-	workspaceRoleLabels: WORKSPACE_ROLE_LABELS,
-	workspaceRoleDescriptions: WORKSPACE_ROLE_DESCRIPTIONS,
-	accessWords: ACCESS_WORDS,
+	workspaceRoleLabels: Object.fromEntries(
+		workspaceRoleSchema.literals.map((role) => [role, workspaceRoleLabel(role)]),
+	),
+	workspaceRoleDescriptions: Object.fromEntries(
+		workspaceRoleSchema.literals.map((role) => [role, workspaceRoleDescription(role)]),
+	),
+	accessWords: TOOL_ACCESS_LABELS,
 	webhookSourceLabels: WEBHOOK_SOURCE_LABELS,
 	webhookSourceOptions: Object.entries(WEBHOOK_SOURCE_LABELS).map(([value, label]) => ({
 		value,
@@ -164,15 +169,15 @@ extension NotificationLevel {
 }
 
 extension WorkspaceRole {
-	/// What each role is called, by its raw value, as \`WORKSPACE_ROLE_LABELS\`.
+	/// What each role is called, by its raw value, as \`workspaceRoleLabel\`.
 	static let labels: [String: String] = ${dictionary(data.workspaceRoleLabels, 1)}
 
-	/// What each role may do, by its raw value, as \`WORKSPACE_ROLE_DESCRIPTIONS\`.
+	/// What each role may do, by its raw value, as \`workspaceRoleDescription\`.
 	static let descriptions: [String: String] = ${dictionary(data.workspaceRoleDescriptions, 1)}
 }
 
 extension ConnectionAccess {
-	/// Each setting in words, by its raw value, as \`ACCESS_WORDS\`.
+	/// Each setting in words, by its raw value, as \`TOOL_ACCESS_LABELS\`.
 	static let words: [String: String] = ${dictionary(data.accessWords, 1)}
 }
 

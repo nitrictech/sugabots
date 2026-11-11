@@ -138,6 +138,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly podId: string;
 		readonly collaboratorAgentId: string;
+		/** The collaborator's channel in the pod, which lists the collaboration, or null while it has none. */
+		readonly collaboratorChannelId: string | null;
 		/** The brief, the first message in the collaboration's thread. */
 		readonly briefMessageId: string;
 	};
@@ -167,6 +169,17 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly podId: string;
 		readonly parentThreadId: string;
 		readonly threadId: string;
+	};
+	/**
+	 * A bot started the thread `threadId` for the person it was answering,
+	 * with the bot `hostAgentId`, whose first message is the brief it works from.
+	 */
+	BriefedThreadStarted: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadId: string;
+		readonly hostAgentId: string;
+		readonly briefMessageId: string;
 	};
 	/** Somebody started, renamed or archived the pod's chat `threadId`. */
 	PodChatChanged: {

@@ -23,6 +23,7 @@ import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotThreads } from "../chats/bot-threads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
@@ -54,7 +55,7 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { bindingOf, toolsForTurn } from "./tools.ts";
+import { bindingOf, toolsForTurn, withStartingFiles } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -95,6 +96,7 @@ type SegmentServices =
 	| ThreadFiles.Service
 	| BotRoutines.Service
 	| Installation.Service
+	| BotThreads.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -398,6 +400,7 @@ const streamReply = (
 			const files = yield* ThreadFiles.Service;
 			const routines = yield* BotRoutines.Service;
 			const installation = yield* Installation.Service;
+			const botThreads = yield* BotThreads.Service;
 			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
@@ -443,6 +446,8 @@ const streamReply = (
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
 					turnId: prepared.turnId,
 					agentId: prepared.context.agent.id,
+					threadId: prepared.context.thread.id,
+					files: withStartingFiles(files, prepared.context),
 					workspace: sandbox.usable ? sandbox.workspace : undefined,
 					sandboxSignsIn: sandbox.signsIn,
 				}),
@@ -493,6 +498,7 @@ const streamReply = (
 				agents,
 				webAppUrl: installation.webAppUrl,
 				routines,
+				threads: botThreads,
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
 				reply: {
@@ -526,6 +532,7 @@ const streamReply = (
 				toolCatalog: toolCatalogNote({
 					catalog,
 					unavailable: connections.unavailable,
+					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
 					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/connections`,

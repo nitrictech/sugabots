@@ -6,9 +6,12 @@ import { useAttentionCounts } from "@/lib/chats.ts";
 import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
 import { MobileTabBar } from "@/shell/MobileTabBar.tsx";
 import { NotificationsPrompt } from "@/shell/NotificationsPrompt.tsx";
 import { Sidebar } from "@/shell/Sidebar.tsx";
+
+const APP_NAME = "Sugabots";
 
 /**
  * The frame: the sidebar, then whatever the address shows beside it, under any
@@ -20,7 +23,11 @@ export function Shell() {
 	useNotificationsInThisBrowser();
 	useVisibleHeight();
 	const { unreadMentions, waitingApprovals } = useAttentionCounts();
-	useAppBadge(unreadMentions + waitingApprovals);
+	const { workspace } = useWorkspace();
+	useAppBadge(
+		unreadMentions + waitingApprovals,
+		workspace ? `${APP_NAME} | ${workspace.name}` : APP_NAME,
+	);
 
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (

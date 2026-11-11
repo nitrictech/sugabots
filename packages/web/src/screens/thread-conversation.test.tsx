@@ -83,6 +83,7 @@ function connection(handle: string, name: string, url: string): Connection {
 		kind: "mcp",
 		auth: "oauth",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: null,
 		hasSecret: false,
 		appSettingsUrl: null,
@@ -94,6 +95,9 @@ function connection(handle: string, name: string, url: string): Connection {
 		createdAt: "2026-09-18T08:00:00.000Z",
 	};
 }
+
+/** Someone else in the pod, whom a person's `@here` or `@channel` would notify. */
+const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
 
 /** Renders the thread, and returns `update` to redraw it as a live thread would. */
 function show(
@@ -109,6 +113,8 @@ function show(
 				host={host}
 				isRunning={false}
 				participants={participants}
+				members={[podmate]}
+				threadType="conversation"
 				podId={POD}
 				onOpenThread={() => undefined}
 				dividers={false}
@@ -139,7 +145,7 @@ afterEach(() => {
 });
 
 describe("what people and bots write", () => {
-	it("renders a bot's Markdown without interpreting a person's", async () => {
+	it("renders Markdown from people and bots alike", async () => {
 		const asked = "Is **this** bold?";
 		const answered = "**Tim's bill** is high.\n\n- Look up plans\n- Draft a note";
 		show([
@@ -153,7 +159,7 @@ describe("what people and bots write", () => {
 
 		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
-		expect(screen.getByText(asked)).toBeDefined();
+		expect(screen.getByText("this").getAttribute("data-streamdown")).toBe("strong");
 	});
 
 	it("copies a reply as the bot wrote it, Markdown and all", async () => {

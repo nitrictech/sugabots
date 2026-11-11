@@ -65,8 +65,8 @@ These files are generated, each by its script in `scripts/`, from the web's pack
 | `generate-api.ts` | `API/API.generated.swift`, and Android's `apps/android/api` client | `packages/contracts/openapi.json`, read by `api/model.ts` and written by `api/swift.ts` and `api/kotlin.ts` |
 | `generate-palette.ts` | `Design/Palette.generated.swift` | the colour tokens on `:root` in `packages/web/src/app.css` |
 | `generate-built-in-tools.ts` | `Conversation/BuiltInTools.generated.swift` | `builtInToolCatalog` in `@sugabots/contracts` |
-| `generate-limits.ts` | `API/Limits.generated.swift` | the limits in `@sugabots/contracts`, including the screens' own in `client-limits.ts` |
-| `generate-catalogs.ts` | `API/Catalogs.generated.swift` | the search and computer provider catalogs, role labels and webhook prefixes in `@sugabots/contracts`; the web's words and lists in `packages/web/src/lib` (`notification-choices.ts`, `model-makers.ts`, `tool-access-words.ts`, `routine-trigger-words.ts`, `artifact-kind-files.ts`, `provider-hues.ts`) |
+| `generate-limits.ts` | `API/Limits.generated.swift` | the limits in `@sugabots/contracts`, and the web's own in `packages/web/src/lib` (`screen-limits.ts`, `notification-choices.ts`) |
+| `generate-catalogs.ts` | `API/Catalogs.generated.swift` | the search and computer provider catalogs, role labels and webhook prefixes in `@sugabots/contracts`; the web's words and lists in `packages/web/src/lib` (`notification-choices.ts`, `model-makers.ts`, `tool-access-labels.ts`, `routine-trigger-words.ts`, `artifact-kind-catalog.ts`, `provider-hues.ts`) |
 | `generate-artifact-pages.ts` | `Artifacts/ArtifactPages.generated.swift` | `artifact-pages.ts` in `@sugabots/contracts`, `lib/page-frame.ts`, and `app.css`'s colours |
 | `generate-native-constants.ts` | `Design/NativeConstants.generated.swift` | `apps/native-constants.json` |
 

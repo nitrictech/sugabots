@@ -6,7 +6,6 @@ import {
 	type AgentFace,
 	type AgentShape,
 	effectiveCapabilities,
-	LARGE_MODEL_CATALOG,
 	type ModelProvider,
 	type Pod,
 	type ProviderModel,
@@ -14,6 +13,7 @@ import {
 	providerLacksCredential,
 	providerPreset,
 	slugify,
+	WORKSPACE_NAME_MAX_LENGTH,
 	type Workspace,
 } from "@sugabots/contracts";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
@@ -37,6 +37,7 @@ import {
 	useListFirstProviderModels,
 } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
+import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import type { Session } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
@@ -344,7 +345,7 @@ function WorkspaceStep({
 				autoFocus
 				value={name}
 				onChange={(event) => setName(event.target.value)}
-				maxLength={64}
+				maxLength={WORKSPACE_NAME_MAX_LENGTH}
 				placeholder={firstName ? `e.g. ${firstName}'s bots` : "e.g. Acme"}
 				className={fieldClass}
 			/>
@@ -475,7 +476,7 @@ function ChooseModelStep({
 		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,
 	);
 	const chosen = choices.find((model) => model.id === chosenId);
-	const large = choices.length > LARGE_MODEL_CATALOG;
+	const large = choices.length > MODEL_SEARCH_THRESHOLD;
 	const needle = search.trim().toLowerCase();
 	const shown = choices.filter(
 		(model) =>

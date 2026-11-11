@@ -36,6 +36,7 @@ function connection(
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
+		signInExpired: false,
 		secretHeader: "Authorization",
 		hasSecret: true,
 		appSettingsUrl: null,
@@ -115,6 +116,16 @@ const notion = connection(3, {
 	status: "missing_key",
 	tools: [],
 	lastTestedAt: null,
+});
+const asana = connection(9, {
+	name: "Asana",
+	handle: "asana",
+	url: "https://mcp.asana.com/sse",
+	auth: "oauth",
+	signedIn: false,
+	signInExpired: true,
+	secretHeader: null,
+	hasSecret: false,
 });
 const github = connection(4, {
 	name: "GitHub",
@@ -203,7 +214,17 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
-		const served = [current, stripe, notion, github, posthog, gitHubApp, gitHubAppPending, alerts];
+		const served = [
+			current,
+			stripe,
+			notion,
+			asana,
+			github,
+			posthog,
+			gitHubApp,
+			gitHubAppPending,
+			alerts,
+		];
 		msw.use(
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
@@ -226,9 +247,7 @@ const meta = preview.meta({
 
 /** Opens the connection's Individual tools, as a person would. */
 async function openIndividualTools() {
-	await userEvent.click(
-		await screen.findByRole("button", { name: /^Individual tools/ }, { timeout: 10_000 }),
-	);
+	await userEvent.click(await screen.findByRole("button", { name: /^Individual tools/ }));
 	await screen.findByRole("heading", { name: "Individual tools", level: 2 });
 }
 
@@ -240,7 +259,7 @@ async function openIndividualTools() {
 export const Opened = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
 		).toBeInTheDocument();
 		await expect(canvas.getAllByText("Connected by Ryan Eyes")[0]).toBeInTheDocument();
 		await expect(canvas.queryByText("https://mcp.linear.app/mcp")).toBeNull();
@@ -256,9 +275,7 @@ export const Opened = meta.story({
 /** What keeps it working, in rows: its secret to replace, and Test with how it went beside it. */
 export const KeepingItWorking = meta.story({
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("button", { name: "Replace secret" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("button", { name: "Replace secret" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Test connection" })).toBeInTheDocument();
 	},
 });
@@ -266,11 +283,7 @@ export const KeepingItWorking = meta.story({
 /** A whole kind at once: Allowed for changes moves every change still asking, and leaves the one set apart off. */
 export const SettingAKind = meta.story({
 	play: async ({ canvas }) => {
-		const changes = await canvas.findByRole(
-			"region",
-			{ name: "Tools that make changes" },
-			{ timeout: 10_000 },
-		);
+		const changes = await canvas.findByRole("region", { name: "Tools that make changes" });
 		await userEvent.click(within(changes).getByRole("radio", { name: "Allowed" }));
 		await expect(
 			await within(changes).findByRole("radio", { name: "Allowed", checked: true }),
@@ -291,11 +304,7 @@ export const SettingAKind = meta.story({
  */
 export const IndividualTools = meta.story({
 	play: async ({ canvas }) => {
-		const title = await canvas.findByRole(
-			"heading",
-			{ name: "Linear", level: 2 },
-			{ timeout: 10_000 },
-		);
+		const title = await canvas.findByRole("heading", { name: "Linear", level: 2 });
 		const { x, y } = title.getBoundingClientRect();
 		await openIndividualTools();
 		const toolsTitle = canvas.getByRole("heading", { name: "Individual tools", level: 2 });
@@ -315,9 +324,10 @@ export const IndividualTools = meta.story({
 export const FailedCheck = meta.story({
 	render: () => <StoryApp path={pagePath(stripe)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "How to fix this" }, { timeout: 10_000 }),
-		).toHaveAttribute("href", "https://sugabots.ai/docs/connections#troubleshooting");
+		await expect(await canvas.findByRole("link", { name: "How to fix this" })).toHaveAttribute(
+			"href",
+			"https://sugabots.ai/docs/connections#troubleshooting",
+		);
 	},
 });
 
@@ -325,9 +335,7 @@ export const FailedCheck = meta.story({
 export const NotSignedIn = meta.story({
 	render: () => <StoryApp path={pagePath(notion)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("button", { name: "Sign in" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
 		await expect(await canvas.findByText("No actions found yet")).toBeInTheDocument();
 	},
 });
@@ -339,11 +347,7 @@ export const GitHubApp = meta.story({
 	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
 	play: async ({ canvas }) => {
-		const repositories = await canvas.findByRole(
-			"region",
-			{ name: "Repositories" },
-			{ timeout: 10_000 },
-		);
+		const repositories = await canvas.findByRole("region", { name: "Repositories" });
 		await expect(within(repositories).getByText("acme/web")).toBeInTheDocument();
 		await expect(within(repositories).getByRole("link", { name: "the pod's app" })).toHaveAttribute(
 			"href",
@@ -372,12 +376,10 @@ export const AddingARepository = meta.story({
 	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add repository" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Add repository" }));
 		const dialog = await screen.findByRole("dialog", { name: "Add from acme" });
 		await expect(
-			await within(dialog).findByRole("button", { name: /^acme\/docs/ }, { timeout: 5_000 }),
+			await within(dialog).findByRole("button", { name: /^acme\/docs/ }),
 		).toBeInTheDocument();
 		await expect(within(dialog).queryByRole("button", { name: /^acme\/web/ })).toBeNull();
 	},
@@ -390,9 +392,7 @@ export const DisconnectingGitHub = meta.story({
 	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Disconnect GitHub" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Disconnect GitHub" }));
 		const dialog = await screen.findByRole("dialog", { name: "Disconnect GitHub?" });
 		await expect(within(dialog).getByRole("link", { name: "Delete GitHub App" })).toHaveAttribute(
 			"href",
@@ -409,10 +409,21 @@ export const GitHubAppNotInstalled = meta.story({
 	render: () => <StoryApp path={pagePath(gitHubAppPending)} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("button", { name: "Install on GitHub" }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: "Install on GitHub" }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Sign in" })).toBeNull();
 		await expect(canvas.queryByRole("region", { name: "Repositories" })).toBeNull();
+	},
+});
+
+/** A sign-in the server refused during a turn: Sign in again, and the tools it listed before. */
+export const SignInExpired = meta.story({
+	render: () => <StoryApp path={pagePath(asana)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("Sign-in expired", {}, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Sign in again" })).toBeInTheDocument();
 	},
 });
 
@@ -436,9 +447,7 @@ export const SearchingTools = meta.story({
 export const HundredsOfTools = meta.story({
 	render: () => <StoryApp path={pagePath(posthog)} />,
 	play: async ({ canvas, canvasElement }) => {
-		await expect(
-			await canvas.findByText("All 300 read tools", {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText("All 300 read tools")).toBeInTheDocument();
 		await openIndividualTools();
 		await expect(canvas.getByRole("group", { name: "query_300" })).toBeInTheDocument();
 		const window = document.documentElement;
@@ -465,7 +474,7 @@ export const LoadingTools = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("status", { name: "Loading tools" })).toBeInTheDocument();
 	},
@@ -487,7 +496,7 @@ export const Member = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("All 2 read tools")).toBeInTheDocument();
 		await expect(canvas.queryByRole("radio")).toBeNull();
@@ -500,9 +509,7 @@ export const Member = meta.story({
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "Connections" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("link", { name: "Connections" })).toBeInTheDocument();
 	},
 });
 
@@ -510,9 +517,7 @@ export const Phone = meta.story({
 export const AddedByUrl = meta.story({
 	render: () => <StoryApp path={pagePath(github)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText("https://api.githubcopilot.com/mcp/", {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText("https://api.githubcopilot.com/mcp/")).toBeInTheDocument();
 	},
 });
 
@@ -520,9 +525,7 @@ export const AddedByUrl = meta.story({
 export const HttpEndpoint = meta.story({
 	render: () => <StoryApp path={pagePath(alerts)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText("https://alerts.example.com/v2", {}, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText("https://alerts.example.com/v2")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Test connection" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Replace secret" })).toBeInTheDocument();
 	},

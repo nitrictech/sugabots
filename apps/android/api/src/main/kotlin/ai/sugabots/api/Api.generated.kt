@@ -383,6 +383,12 @@ data class BotChannel(
 )
 
 @Serializable
+data class BotMove(
+    val from: String,
+    val to: String,
+)
+
+@Serializable
 data class BotUsage(
     val agentId: String,
     @EncodeDefault val name: String? = null,
@@ -496,6 +502,29 @@ sealed interface ChatMessageItem {
     ) : ChatMessageItem
 
     @Serializable
+    data class Collaboration(
+        @EncodeDefault val kind: String = "collaboration",
+        val id: String,
+        val threadId: String,
+        val title: String,
+        val initiator: AgentParticipant,
+        val state: State,
+        val createdAt: Instant,
+    ) : ChatMessageItem {
+        @Serializable(with = State.Serializer::class)
+        enum class State(override val rawValue: String) : OpenEnum {
+            RUNNING("running"),
+            DONE("done"),
+            FAILED("failed"),
+
+            /** A value from a newer server than this app knows, which can't be sent. */
+            UNKNOWN("");
+
+            object Serializer : OpenEnumSerializer<State>("ai.sugabots.api.ChatMessageItem.Collaboration.State", entries, UNKNOWN)
+        }
+    }
+
+    @Serializable
     data class RoutinePaused(
         @EncodeDefault val kind: String = "routine_paused",
         val id: String,
@@ -524,6 +553,7 @@ sealed interface ChatMessageItem {
             when (val tag = tagOf(element, "kind")) {
                 "message" -> json.decodeFromJsonElement<Message>(element)
                 "routine" -> json.decodeFromJsonElement<Routine>(element)
+                "collaboration" -> json.decodeFromJsonElement<Collaboration>(element)
                 "routine_paused" -> json.decodeFromJsonElement<RoutinePaused>(element)
                 "thread" -> json.decodeFromJsonElement<Thread>(element)
                 else -> Unknown(tag)
@@ -533,6 +563,7 @@ sealed interface ChatMessageItem {
             when (value) {
                 is Message -> json.encodeToJsonElement<Message>(value)
                 is Routine -> json.encodeToJsonElement<Routine>(value)
+                is Collaboration -> json.encodeToJsonElement<Collaboration>(value)
                 is RoutinePaused -> json.encodeToJsonElement<RoutinePaused>(value)
                 is Thread -> json.encodeToJsonElement<Thread>(value)
                 is Unknown -> throw SerializationException("A kind this app doesn't know can't be sent.")
@@ -618,6 +649,7 @@ data class Connection(
     val url: String,
     val auth: ConnectionAuth,
     val signedIn: Boolean,
+    val signInExpired: Boolean,
     @EncodeDefault val secretHeader: String? = null,
     val hasSecret: Boolean,
     @EncodeDefault val appSettingsUrl: String? = null,
@@ -724,6 +756,7 @@ data class ConnectionWithTools(
     val url: String,
     val auth: ConnectionAuth,
     val signedIn: Boolean,
+    val signInExpired: Boolean,
     @EncodeDefault val secretHeader: String? = null,
     val hasSecret: Boolean,
     @EncodeDefault val appSettingsUrl: String? = null,
@@ -878,6 +911,7 @@ data class ListedRoutine(
         val name: String,
         val state: RoutineState,
         val failed: Boolean,
+        val pausedAfterFailures: Boolean,
     )
 }
 
@@ -1520,6 +1554,12 @@ data class PodSandbox(
 )
 
 @Serializable
+data class PodSandboxDisk(
+    val podId: String,
+    val disk: SandboxDisk,
+)
+
+@Serializable
 data class PodSandboxNetwork(
     val mode: SandboxNetworkMode,
     val blocking: Boolean,
@@ -1559,6 +1599,7 @@ sealed interface PodSandboxState {
         val turnsUsing: Long,
         val peopleWatching: Long,
         val upgradeAvailable: Boolean,
+        @EncodeDefault val disk: SandboxDisk? = null,
     ) : PodSandboxState {
         @Serializable(with = State.Serializer::class)
         enum class State(override val rawValue: String) : OpenEnum {
@@ -1681,6 +1722,13 @@ enum class ProviderModelCapability(override val rawValue: String) : OpenEnum {
 }
 
 @Serializable
+data class ProviderModelSwitchOff(
+    val moveBotsTo: String? = null,
+    val newBotsTo: String? = null,
+    val summariesTo: String? = null,
+)
+
+@Serializable
 data class ProviderModelUpdate(
     val enabled: Boolean? = null,
     val disabledCapabilities: List<ProviderModelCapability>? = null,
@@ -1773,6 +1821,13 @@ enum class ProviderStatus(override val rawValue: String) : OpenEnum {
 
     object Serializer : OpenEnumSerializer<ProviderStatus>("ai.sugabots.api.ProviderStatus", entries, UNKNOWN)
 }
+
+@Serializable
+data class ProviderSwitchOff(
+    val moveBots: List<BotMove>,
+    val newBotsTo: String? = null,
+    val summariesTo: String? = null,
+)
 
 @Serializable
 data class ProviderTestResult(
@@ -2320,6 +2375,57 @@ data class SandboxBlockedHost(
     val blockedAt: Instant,
 )
 
+@Serializable
+data class SandboxDisk(
+    val usedBytes: Long,
+    val totalBytes: Long,
+    val measuredAt: Instant,
+    @EncodeDefault val folders: List<SandboxDiskFolder>? = null,
+)
+
+@Serializable(with = SandboxDiskFolder.Serializer::class)
+sealed interface SandboxDiskFolder {
+    @Serializable
+    data class Home(
+        @EncodeDefault val kind: String = "home",
+        val agentId: String,
+        val bytes: Long,
+    ) : SandboxDiskFolder
+
+    @Serializable
+    data class Threads(
+        @EncodeDefault val kind: String = "threads",
+        val bytes: Long,
+    ) : SandboxDiskFolder
+
+    @Serializable
+    data class Temporary(
+        @EncodeDefault val kind: String = "temporary",
+        val bytes: Long,
+    ) : SandboxDiskFolder
+
+    /** A kind from a newer server than this app knows, by its `kind`, which can't be sent. */
+    data class Unknown(val tag: String) : SandboxDiskFolder
+
+    object Serializer : JsonUnionSerializer<SandboxDiskFolder>("ai.sugabots.api.SandboxDiskFolder") {
+        override fun decode(element: JsonElement, json: Json): SandboxDiskFolder =
+            when (val tag = tagOf(element, "kind")) {
+                "home" -> json.decodeFromJsonElement<Home>(element)
+                "threads" -> json.decodeFromJsonElement<Threads>(element)
+                "temporary" -> json.decodeFromJsonElement<Temporary>(element)
+                else -> Unknown(tag)
+            }
+
+        override fun encode(value: SandboxDiskFolder, json: Json): JsonElement =
+            when (value) {
+                is Home -> json.encodeToJsonElement<Home>(value)
+                is Threads -> json.encodeToJsonElement<Threads>(value)
+                is Temporary -> json.encodeToJsonElement<Temporary>(value)
+                is Unknown -> throw SerializationException("A kind this app doesn't know can't be sent.")
+            }
+    }
+}
+
 @Serializable(with = SandboxNetworkMode.Serializer::class)
 enum class SandboxNetworkMode(override val rawValue: String) : OpenEnum {
     ALLOWLIST("allowlist"),
@@ -2373,6 +2479,8 @@ sealed interface SandboxProviderSettings {
         @EncodeDefault val preset: String = "opensandbox",
         val serverUrl: String? = null,
         val image: String? = null,
+        val cpuCount: Long? = null,
+        val memoryGiB: Long? = null,
         val networkMode: SandboxNetworkMode? = null,
     ) : SandboxProviderSettings
 
@@ -2406,6 +2514,13 @@ sealed interface SandboxProviderSettings {
             }
     }
 }
+
+@Serializable
+data class SandboxProviderTestResult(
+    val reachable: Boolean,
+    val latencyMs: Long,
+    val error: String? = null,
+)
 
 @Serializable
 data class SandboxProviderUpdate(
@@ -3192,6 +3307,7 @@ data class WorkspaceInvitation(
     val email: String,
     val role: AssignableWorkspaceRole,
     val expiresAt: Instant,
+    val sentAt: Instant,
 )
 
 @Serializable
@@ -3721,6 +3837,10 @@ class ModelProvidersRoutes internal constructor(private val client: ApiCaller) {
         client.callForData("DELETE", "workspaces/${pathSegment(workspace)}/model-providers/${pathSegment(providerId)}")
     }
 
+    suspend fun switchOff(workspace: String, providerId: String, moveBots: List<BotMove>, newBotsTo: String? = null, summariesTo: String? = null): SwitchOffResponse {
+        return client.call("POST", "workspaces/${pathSegment(workspace)}/model-providers/${pathSegment(providerId)}/switch-off", body = client.jsonBody(ProviderSwitchOff(moveBots = moveBots, newBotsTo = newBotsTo, summariesTo = summariesTo)))
+    }
+
     suspend fun test(workspace: String, providerId: String): ProviderTestResult {
         return client.call("POST", "workspaces/${pathSegment(workspace)}/model-providers/${pathSegment(providerId)}/test")
     }
@@ -3757,6 +3877,15 @@ class ModelProvidersRoutes internal constructor(private val client: ApiCaller) {
         client.callForData("DELETE", "workspaces/${pathSegment(workspace)}/model-providers/${pathSegment(providerId)}/models/${pathSegment(modelId)}")
     }
 
+    suspend fun switchOffModel(workspace: String, providerId: String, modelId: String, moveBotsTo: String? = null, newBotsTo: String? = null, summariesTo: String? = null): SwitchOffModelResponse {
+        return client.call("POST", "workspaces/${pathSegment(workspace)}/model-providers/${pathSegment(providerId)}/models/${pathSegment(modelId)}/switch-off", body = client.jsonBody(ProviderModelSwitchOff(moveBotsTo = moveBotsTo, newBotsTo = newBotsTo, summariesTo = summariesTo)))
+    }
+
+    @Serializable
+    data class SwitchOffResponse(
+        val moved: Long,
+    )
+
     @Serializable
     data class SetModelsEnabledResponse(
         val updated: Long,
@@ -3765,6 +3894,11 @@ class ModelProvidersRoutes internal constructor(private val client: ApiCaller) {
     @Serializable
     data class UpdateModelResponse(
         val updated: Long,
+    )
+
+    @Serializable
+    data class SwitchOffModelResponse(
+        val moved: Long,
     )
 }
 
@@ -4033,8 +4167,12 @@ class SandboxProvidersRoutes internal constructor(private val client: ApiCaller)
         return client.call("POST", "workspaces/${pathSegment(workspace)}/sandbox-providers/${pathSegment(providerId)}/template")
     }
 
-    suspend fun test(workspace: String, providerId: String): ProviderTestResult {
+    suspend fun test(workspace: String, providerId: String): SandboxProviderTestResult {
         return client.call("POST", "workspaces/${pathSegment(workspace)}/sandbox-providers/${pathSegment(providerId)}/test")
+    }
+
+    suspend fun disks(workspace: String): List<PodSandboxDisk> {
+        return client.call("GET", "workspaces/${pathSegment(workspace)}/sandbox-disks")
     }
 
     suspend fun network(workspace: String): SandboxNetworkSettings {

@@ -1,5 +1,5 @@
-import { Schema } from "effect";
-import { OpenApi } from "effect/unstable/httpapi";
+import { Schema, type SchemaAST } from "effect";
+import { HttpApi, OpenApi } from "effect/unstable/httpapi";
 import * as contracts from "../index.ts";
 import { Api } from "./api.ts";
 
@@ -7,33 +7,38 @@ import { Api } from "./api.ts";
  * The API as an OpenAPI 3.1 document, for clients that can't import these
  * schemas: the native apps generate their models and requests from it.
  *
- * Effect writes a schema inline unless it has an `identifier`, so the same pod
+ * Effect writes a schema inline unless it's given a name, so the same pod
  * would reach a client as a dozen anonymous shapes. Rather than repeat each
- * schema's name at its definition, every schema this package exports as
- * `fooSchema` is named `Foo` here, and written once as that component wherever
- * the API uses it. A schema exported under a new name is named without
- * anything else to update.
+ * schema's name at its definition, every object, union and array schema this
+ * package exports as `fooSchema` is named `Foo` here, and written once as that
+ * component wherever the API uses it. A schema exported under a new name is
+ * named without anything else to update.
+ *
+ * A route that gives a schema its own status uses a copy of it. When the
+ * schema holds a transformation, such as a trimmed string or arbitrary JSON,
+ * Effect rebuilds the copy to write it, and only an `identifier` given at the
+ * schema's definition reaches the rebuilt copy.
  *
  * The live-update events are added as components too, since their routes
  * answer with a stream the document can't describe.
  */
 export function openApiDocument(): OpenApi.OpenAPISpec {
-	const exported = nameExportedSchemas();
-	const document = OpenApi.fromApi(Api);
-	const named = new NamedSchemas(namedByShape(exported, document.components.schemas));
-	const paths = named.refer(document.paths as Json) as OpenApi.OpenAPISpec["paths"];
-	const components = named.refer(document.components.schemas as Json) as Record<string, JsonObject>;
-	for (const [name, schema] of Object.entries(eventComponents())) {
-		components[name] = named.refer(schema as Json) as JsonObject;
-	}
+	const exportedSchemaName = exportedSchemaNames();
+	const api = Api.annotate(
+		HttpApi.AdditionalSchemas,
+		Object.entries(streamedEventSchemas).map(([name, schema]) =>
+			schema.annotate({ identifier: name }),
+		),
+	);
+	const document = withoutNumberedCopies(
+		OpenApi.fromApi(api, {
+			referencePolicy: ({ ast, identifier }) => exportedSchemaName(ast) ?? identifier,
+		}),
+	);
 	return {
 		...document,
 		info: { ...document.info, title: "Sugabots" },
-		paths,
-		components: {
-			...document.components,
-			schemas: sortedByKey({ ...components, ...named.components }),
-		},
+		components: { ...document.components, schemas: sortedByKey(document.components.schemas) },
 	};
 }
 
@@ -50,144 +55,66 @@ const streamedEventSchemas = {
 } satisfies Record<string, Schema.Top>;
 
 /**
- * Gives each exported schema the `identifier` Effect names it by: `podSchema`
- * is `Pod`. Effect reads it from the schema's AST, where it's set in place, so
- * the API, which holds these same schemas, is named without being rebuilt. A
- * schema exported under two names keeps the first, alphabetically.
+ * Returns a function that gives the component name of the exported schema an
+ * AST belongs to, or `undefined` for an AST of no exported schema. An AST
+ * belongs to a schema when it is the schema's own, an annotated copy of it, or
+ * the AST Effect writes either as JSON. A schema exported under two names
+ * keeps the first, alphabetically.
+ *
+ * Throws when two different exported schemas would share a name.
  */
-function nameExportedSchemas(): Map<string, Schema.Top> {
-	const named = new Map<string, Schema.Top>();
+function exportedSchemaNames(): (ast: SchemaAST.AST) => string | undefined {
+	const nameByContents = new Map<ReadonlyArray<unknown>, string>();
+	const add = (ast: SchemaAST.AST, name: string) => {
+		const contents = contentsOf(ast);
+		if (contents !== undefined && !nameByContents.has(contents)) {
+			nameByContents.set(contents, name);
+		}
+	};
+
+	const schemaByName = new Map<string, Schema.Top>();
 	const exports = Object.entries(contracts).sort(([a], [b]) => a.localeCompare(b));
 	for (const [exportName, value] of exports) {
 		if (!exportName.endsWith("Schema") || !Schema.isSchema(value)) continue;
-		const ast = value.ast as { annotations?: Record<string, unknown> };
-		const identifier = ast.annotations?.identifier;
-		if (typeof identifier === "string") {
-			if (!named.has(identifier)) named.set(identifier, value);
-			continue;
+		const identifier = value.ast.annotations?.identifier;
+		const name = typeof identifier === "string" ? identifier : componentName(exportName);
+		const sameName = schemaByName.get(name);
+		if (sameName !== undefined && sameName.ast !== value.ast) {
+			throw new Error(`Two different exported schemas are both named ${name}`);
 		}
-		const name = componentName(exportName);
-		ast.annotations = { ...ast.annotations, identifier: name };
-		named.set(name, value);
+		schemaByName.set(name, value);
+		add(value.ast, name);
+		add(encodedSide(Schema.toCodecJson(value).ast), name);
 	}
-	return named;
-}
-
-/**
- * The exported schemas to name by their shape where Effect wrote them inline.
- * Effect rebuilds a schema that holds arbitrary JSON, such as a tool call's
- * input, to encode it, and one a route gives its own status, and the rebuilt
- * schema loses its name. A schema Effect did name is matched by shape only if
- * it's distinctive enough that another of that shape is surely the same thing.
- */
-function namedByShape(exported: Map<string, Schema.Top>, components: Record<string, unknown>) {
-	const schemas = new Map<string, JsonObject>();
-	for (const [name, schema] of exported) {
-		const json = jsonSchemaOf(schema);
-		if (!isWorthNaming(json)) continue;
-		if (name in components && !isDistinctive(json)) continue;
-		schemas.set(name, json);
-	}
-	return schemas;
-}
-
-/**
- * Whether a schema's shape is particular enough that a match is no coincidence:
- * a union, or an object with three fields or more, or one that holds a named
- * schema. A lone `url` field could be anything's.
- */
-function isDistinctive(schema: JsonObject): boolean {
-	if (Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf)) return true;
-	const properties =
-		typeof schema.properties === "object" && schema.properties !== null
-			? Object.values(schema.properties)
-			: [];
-	return properties.length >= 3 || JSON.stringify(properties).includes('"$ref"');
-}
-
-/** A schema's JSON Schema, written as `OpenApi.fromApi` writes bodies, the schemas it uses referred to by name. */
-function jsonSchemaOf(schema: Schema.Top): JsonObject {
-	const document = Schema.toJsonSchemaDocument(Schema.toCodecJson(schema), {
-		onExcessProperty: "error",
-	});
-	const top = document.schema as JsonObject;
-	const definitions = document.definitions as Record<string, JsonObject>;
-	// A named schema's document only refers to it among its definitions.
-	const reference = typeof top.$ref === "string" ? top.$ref.replace("#/$defs/", "") : undefined;
-	return asComponentReferences((reference && definitions[reference]) || top);
-}
-
-/** Objects, unions and enums get names; a bare string or number is clearer written in place. */
-function isWorthNaming(schema: JsonObject): boolean {
-	if (schema.type === "object" && schema.properties) return true;
-	if (Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf)) return true;
-	return Array.isArray(schema.enum) && schema.enum.length > 1;
-}
-
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-/** Words that describe a schema rather than shape it, so two uses of one schema still match when only these differ. */
-const descriptiveKeys = new Set(["description", "title", "examples", "default"]);
-
-/** A schema's shape as a string, the same for two schemas that accept the same JSON. */
-function shapeKey(schema: Json): string {
-	const visit = (value: Json): Json => {
-		if (Array.isArray(value)) return value.map(visit);
-		if (value === null || typeof value !== "object") return value;
-		const entries = Object.entries(value)
-			.filter(([key]) => !descriptiveKeys.has(key))
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([key, child]) => [key, visit(child)]);
-		return Object.fromEntries(entries);
+	return (ast) => {
+		const contents = contentsOf(ast);
+		return contents === undefined ? undefined : nameByContents.get(contents);
 	};
-	return JSON.stringify(visit(schema));
 }
 
 /**
- * Replaces each inline schema shaped as one of `schemas` with a reference to
- * it, and collects the components those references name.
+ * Returns the array of members an AST shares with every annotated copy of it:
+ * an object's fields, a union's members, or an array's items. Two schemas
+ * built separately never share one, even when they accept the same JSON. A
+ * string, number or literal has none, as it's clearer written in place.
  */
-class NamedSchemas {
-	readonly components: Record<string, JsonObject> = {};
-	private readonly nameByShape = new Map<string, string>();
-	private readonly schemaByName: Map<string, JsonObject>;
-
-	constructor(schemas: Map<string, JsonObject>) {
-		this.schemaByName = schemas;
-		for (const [name, schema] of schemas) {
-			const shape = shapeKey(schema as Json);
-			// Two exports of one shape are aliases; the first name, alphabetically, is kept.
-			if (!this.nameByShape.has(shape)) this.nameByShape.set(shape, name);
-		}
+function contentsOf(ast: SchemaAST.AST): ReadonlyArray<unknown> | undefined {
+	switch (ast._tag) {
+		case "Objects":
+			return ast.propertySignatures.length > 0 ? ast.propertySignatures : undefined;
+		case "Union":
+			return ast.types;
+		case "Arrays":
+			return ast.rest;
+		default:
+			return undefined;
 	}
+}
 
-	/** `value` with every schema in it shaped as a named one replaced by a reference. */
-	refer(value: Json): Json {
-		if (Array.isArray(value)) return value.map((item) => this.refer(item));
-		if (value === null || typeof value !== "object") return value;
-		const name = this.nameByShape.get(shapeKey(value));
-		if (name === undefined) return this.referInside(value);
-		this.define(name);
-		const reference: { [key: string]: Json } = { $ref: `#/components/schemas/${name}` };
-		// A use can describe what it holds in its own words, beside the reference.
-		if (typeof value.description === "string") reference.description = value.description;
-		return reference;
-	}
-
-	private referInside(object: { [key: string]: Json }): { [key: string]: Json } {
-		return Object.fromEntries(
-			Object.entries(object).map(([key, child]) => [key, this.refer(child)]),
-		);
-	}
-
-	private define(name: string): void {
-		if (name in this.components) return;
-		const schema = this.schemaByName.get(name);
-		if (!schema) return;
-		// Claimed before its parts are visited, so a schema that contains itself ends.
-		this.components[name] = {};
-		this.components[name] = this.referInside(schema as { [key: string]: Json }) as JsonObject;
-	}
+/** Returns the AST a value of `ast` is written as, after each of its transformations. */
+function encodedSide(ast: SchemaAST.AST): SchemaAST.AST {
+	const lastLink = ast.encoding?.at(-1);
+	return lastLink ? encodedSide(lastLink.to) : ast;
 }
 
 /** `podSchema` → `Pod`. */
@@ -196,30 +123,59 @@ function componentName(exportName: string): string {
 	return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-type JsonObject = { [key: string]: unknown };
-
-/** The event unions and the schemas they use, as components that refer to one another. */
-function eventComponents(): Record<string, JsonObject> {
-	const components: Record<string, JsonObject> = {};
-	for (const [name, schema] of Object.entries(streamedEventSchemas)) {
-		const document = Schema.toJsonSchemaDocument(Schema.toCodecJson(schema), {
-			onExcessProperty: "error",
-		});
-		const definitions = document.definitions as Record<string, JsonObject>;
-		for (const [definition, value] of Object.entries(definitions)) {
-			components[definition] = asComponentReferences(value);
+/**
+ * Returns `document` with each numbered copy of a component, such as `Pod_1`,
+ * replaced by the component, `Pod`. Effect numbers an AST that asks for a
+ * name another AST already has: an annotated copy of a schema, such as the one
+ * a route makes to give the schema its own status, or a schema given another's
+ * name at its definition because it's written as the same JSON.
+ *
+ * Throws when a numbered copy is written differently from its component, as it
+ * then names a different schema.
+ */
+function withoutNumberedCopies(document: OpenApi.OpenAPISpec): OpenApi.OpenAPISpec {
+	const schemas = document.components.schemas;
+	const componentByCopy = new Map<string, string>();
+	for (const [name, schema] of Object.entries(schemas)) {
+		const component = /^(.+)_\d+$/.exec(name)?.[1];
+		if (component === undefined || !(component in schemas)) continue;
+		// Effect writes both from one generator, so the same schema is written in the same key order.
+		if (JSON.stringify(schema) !== JSON.stringify(schemas[component])) {
+			throw new Error(`${name} and ${component} are different schemas with one name`);
 		}
-		// Named itself, the union is among the definitions, and its document only refers to it.
-		if (!(name in definitions))
-			components[name] = asComponentReferences(document.schema as JsonObject);
+		componentByCopy.set(name, component);
 	}
-	return components;
+	const kept = Object.entries(schemas).filter(([name]) => !componentByCopy.has(name));
+	return withReferencesRenamed(
+		{ ...document, components: { ...document.components, schemas: Object.fromEntries(kept) } },
+		componentByCopy,
+	);
 }
 
-/** A JSON Schema with its `#/$defs/` references pointed at the document's components. */
-function asComponentReferences(schema: JsonObject): JsonObject {
-	const text = JSON.stringify(schema).replaceAll('"#/$defs/', '"#/components/schemas/');
-	return JSON.parse(text) as JsonObject;
+const componentReferencePrefix = "#/components/schemas/";
+
+/**
+ * Returns `value` with each `$ref` to a component named in `newNames` pointed
+ * at the component's new name. Only `$ref` values change, so a description
+ * that mentions a component keeps its words.
+ */
+function withReferencesRenamed<Value>(value: Value, newNames: ReadonlyMap<string, string>): Value {
+	const visit = (node: unknown): unknown => {
+		if (Array.isArray(node)) return node.map(visit);
+		if (node === null || typeof node !== "object") return node;
+		return Object.fromEntries(
+			Object.entries(node).map(([key, child]) => [
+				key,
+				key === "$ref" && typeof child === "string" ? renamedReference(child) : visit(child),
+			]),
+		);
+	};
+	const renamedReference = (reference: string): string => {
+		if (!reference.startsWith(componentReferencePrefix)) return reference;
+		const newName = newNames.get(reference.slice(componentReferencePrefix.length));
+		return newName === undefined ? reference : componentReferencePrefix + newName;
+	};
+	return visit(value) as Value;
 }
 
 function sortedByKey<Value>(record: Record<string, Value>): Record<string, Value> {

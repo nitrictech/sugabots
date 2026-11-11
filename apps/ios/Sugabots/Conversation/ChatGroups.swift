@@ -44,7 +44,8 @@ enum ChatGroups {
 				groups.append(Group(id: item.id, at: at, separated: separated, content: .paused(paused.createdAt)))
 			case let .routine(run):
 				groups.append(Group(id: item.id, at: at, separated: separated, content: .run(run)))
-			case .unknown:
+			// Not drawn yet: bots working together, which the web shows as a card.
+			case .collaboration, .unknown:
 				continue
 			}
 		}

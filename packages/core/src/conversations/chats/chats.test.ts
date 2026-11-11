@@ -4,7 +4,8 @@ import {
 	handleFromName,
 	threadChannel,
 } from "@sugabots/contracts";
-import { and, desc, eq, like } from "drizzle-orm";
+import { userText } from "@sugabots/errors";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Visibility } from "../../authorization/visibility.ts";
@@ -51,6 +52,7 @@ import {
 	TurnExecution,
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
+import { BotThreads } from "./bot-threads.ts";
 import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
@@ -371,6 +373,155 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prepared.context.askedBy).toBe(userId);
 	});
 
+	describe("threads a bot starts for the person it is answering", () => {
+		const botThreads = () => onPostgres(Context.get(conversations, BotThreads.Service));
+		const handleOf = async (id: string) => {
+			const [row] = await onDatabase((db) =>
+				db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, id)),
+			);
+			if (!row) throw new Error("fixture");
+			return row.handle;
+		};
+
+		it("starts it with the bot asked for, briefed by the starting bot, and asks that bot to work", async () => {
+			const started = await botThreads().start(
+				{ agentId, workspaceId, podId, askedBy: userId },
+				{
+					title: "March refunds",
+					brief: "Pull the refunds issued in March.",
+					withHandle: `@${await handleOf(recipientAgentId)}`,
+				},
+			);
+			expect(started).toEqual({
+				id: expect.any(String),
+				title: "March refunds",
+				with: "Impersonal Agent",
+				withBotId: recipientAgentId,
+			});
+			const participants = await onDatabase((db) =>
+				db
+					.select({ userId: threadParticipant.userId, agentId: threadParticipant.agentId })
+					.from(threadParticipant)
+					.where(eq(threadParticipant.threadId, started.id)),
+			);
+			expect(participants).toEqual(
+				expect.arrayContaining([
+					{ userId, agentId: null },
+					{ userId: null, agentId: recipientAgentId },
+				]),
+			);
+			expect(participants).toHaveLength(2);
+			const [run] = await runOnPostgres(runningTurns(started.id));
+			if (!run) throw new Error("The thread's bot was not asked");
+
+			const prepared = await prepareRunnable(
+				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+				run,
+			);
+
+			expect(prepared.context.agent.id).toBe(recipientAgentId);
+			// A bot wrote its brief, so it acts for the person only to mark the thread done.
+			expect(prepared.context.askedBy).toBeNull();
+			expect(prepared.context.startedFor).toBe(userId);
+			expect(prepared.context.messages).toEqual([
+				expect.objectContaining({
+					content: "Pull the refunds issued in March.",
+					author: expect.objectContaining({ kind: "agent", id: agentId }),
+				}),
+			]);
+		});
+
+		it("starts it with the starting bot itself when no other bot is named", async () => {
+			const started = await botThreads().start(
+				{ agentId, workspaceId, podId, askedBy: userId },
+				{ title: "Follow-up", brief: "Draft the follow-up email." },
+			);
+			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
+			const [run] = await runOnPostgres(runningTurns(started.id));
+			if (!run) throw new Error("The thread's bot was not asked");
+
+			const prepared = await prepareRunnable(
+				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
+				run,
+			);
+
+			expect(prepared.context.agent.id).toBe(agentId);
+			expect(prepared.context.askedBy).toBeNull();
+			expect(prepared.context.startedFor).toBe(userId);
+		});
+
+		it("marks the thread it is in done for the person who asked, but never a channel or a pod's chat", async () => {
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const { conversation: opened } = await chats.startThread({
+				conversationId: podChat.id,
+				messageId: crypto.randomUUID(),
+				content: "Can you check the renewal numbers?",
+				hostAgentId: agentId,
+			});
+			const bot = { agentId, workspaceId, podId, askedBy: userId };
+			const doneAt = async (threadId: string) => {
+				const [row] = await onDatabase((db) =>
+					db.select({ doneAt: thread.doneAt }).from(thread).where(eq(thread.id, threadId)),
+				);
+				return row?.doneAt ?? null;
+			};
+
+			await botThreads().markDone(bot, opened.id);
+
+			expect(await doneAt(opened.id)).toBeInstanceOf(Date);
+			const channel = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			for (const notAThread of [podChat.id, channel.id]) {
+				await expect(botThreads().markDone(bot, notAThread)).rejects.toMatchObject({
+					_tag: "NotAThread",
+				});
+			}
+			await expect(
+				botThreads().markDone({ ...bot, askedBy: null }, opened.id),
+			).rejects.toMatchObject({ _tag: "NobodyAsked" });
+		});
+
+		it("refuses when nobody asked, the bot is not in the pod, or the person can't reach the pod or thread", async () => {
+			const [outsider] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: "Outside the pod", email: `outsider-${crypto.randomUUID()}@example.com` })
+					.returning(),
+			);
+			if (!outsider) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: outsider.id, role: "member" }),
+			);
+			const brief = { title: "Elsewhere", brief: "Do it." };
+
+			await expect(
+				botThreads().start({ agentId, workspaceId, podId, askedBy: null }, brief),
+			).rejects.toMatchObject({ _tag: "NobodyAsked" });
+			await expect(
+				botThreads().start(
+					{ agentId, workspaceId, podId, askedBy: userId },
+					{ ...brief, withHandle: "@nobody-here" },
+				),
+			).rejects.toMatchObject({ _tag: "BotNotInPod" });
+			await expect(
+				botThreads().start({ agentId, workspaceId, podId, askedBy: outsider.id }, brief),
+			).rejects.toMatchObject({ _tag: "HostNotCrew" });
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const { conversation: opened } = await chats.startThread({
+				conversationId: podChat.id,
+				messageId: crypto.randomUUID(),
+				content: "Can you check the renewal numbers?",
+				hostAgentId: agentId,
+			});
+			await expect(
+				botThreads().markDone({ agentId, workspaceId, podId, askedBy: outsider.id }, opened.id),
+			).rejects.toMatchObject({ _tag: "ThreadHiddenFromAsker" });
+		});
+	});
+
 	it("lists a pod's routines by name, each with its thread once it has run", async () => {
 		const [quiet, ran] = await Promise.all(
 			["Weekly digest", "Overnight review"].map((name) =>
@@ -408,6 +559,44 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(
 			(await chats.openRoutineFeed({ workspace: workspaceId, routineId: quiet.routine.id })).title,
 		).toBe("Weekly digest");
+	});
+
+	it("marks a routine whose run failed until the person opens it after the run ends", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+		);
+		const accepted = await routines.run({
+			agentId,
+			routineId: created.routine.id,
+			requestId: crypto.randomUUID(),
+		});
+		const feed = await chats.openRoutineFeed({
+			workspace: workspaceId,
+			routineId: created.routine.id,
+		});
+		// Opened while the run was still going, so before it failed.
+		await chats.markRead(feed.id);
+		await onDatabase((db) =>
+			db
+				.update(routineExecution)
+				.set({
+					state: "failed",
+					startedAt: sql`${routineExecution.acceptedAt}`,
+					finishedAt: sql`${routineExecution.acceptedAt} + interval '1 minute'`,
+					error: userText`The reply took too long and was stopped.`,
+				})
+				.where(eq(routineExecution.id, accepted.executionId)),
+		);
+		const failed = async () => ({
+			listed: (await view.list({ workspace: workspaceId, pod: podId }))?.routines[0]?.routine
+				.failed,
+			counted: (await view.podMarkers(workspaceId)).pods[podId]?.failedRoutines ?? 0,
+		});
+
+		expect(await failed()).toEqual({ listed: true, counted: 1 });
+		await chats.markRead(feed.id);
+		expect(await failed()).toEqual({ listed: false, counted: 0 });
 	});
 
 	it("marks a conversation done, and reopens it when somebody writes in it", async () => {
@@ -1184,7 +1373,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
 	});
 
-	it("opens one chat per pod, where no bot answers, even one named in it", async () => {
+	it("opens one chat per pod, where a bot named in a message answers in the chat, and no bot otherwise", async () => {
 		const input = { workspace: workspaceId, podId };
 		const [first, again] = await Promise.all([chats.openPodChat(input), chats.openPodChat(input)]);
 		expect(again.id).toBe(first.id);
@@ -1196,11 +1385,101 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await chats.post({
 			conversationId: first.id,
 			messageId: crypto.randomUUID(),
-			content: `@${host?.handle} can you look at this?`,
+			content: "Morning, all.",
 		});
 
 		expect(await runOnPostgres(runningTurns(first.id))).toHaveLength(0);
-		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
+
+		await chats.post({
+			conversationId: first.id,
+			messageId: crypto.randomUUID(),
+			content: `@${host?.handle} can you look at this?`,
+		});
+
+		expect(await runOnPostgres(runningTurns(first.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "mention" }) }),
+		]);
+	});
+
+	it("asks the bot a message in the pod's chat replies to, though it names nobody", async () => {
+		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const [answer] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: podChat.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Nothing logged for yesterday." }],
+					content: "Nothing logged for yesterday.",
+				})
+				.returning({ id: message.id }),
+		);
+		if (!answer) throw new Error("The bot's message was not written");
+
+		await chats.post({
+			conversationId: podChat.id,
+			messageId: crypto.randomUUID(),
+			content: "Do you have saved routines?",
+			replyTo: answer.id,
+		});
+
+		expect(await runOnPostgres(runningTurns(podChat.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "reply" }) }),
+		]);
+	});
+
+	it("keeps a bot out of its channel for a message to a pod member, but not for a handle that is nobody's", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "@chat-member can you look at this?",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "Please raise this with @Backlog Manager, high priority.",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ agentId, reason: "default" }) }),
+		]);
+	});
+
+	it("keeps a bot out of its channel for a message to someone who left the pod but is still in the channel", async () => {
+		const channel = await chats.openBotChannel({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: agentId,
+		});
+		const [former] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Former member", email: `former-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!former) throw new Error("Could not create the former member");
+		await onDatabase((db) =>
+			db.insert(threadParticipant).values({ threadId: channel.id, userId: former.id }),
+		);
+
+		await chats.post({
+			conversationId: channel.id,
+			messageId: crypto.randomUUID(),
+			content: "@former-member are you still around?",
+		});
+
+		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
 	});
 
 	it("lists a pod's chat with what the person has not read in it, and counts that on the rail", async () => {
@@ -1379,7 +1658,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 							eq(event.channel, threadChannel(current.id)),
 							eq(event.type, "message.reactions_changed"),
 						),
-					),
+					)
+					.orderBy(event.seq),
 			);
 
 		const added = await reactions.add(asked.id, "👍🏽");
@@ -1644,7 +1924,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(secondPage?.nextCursor).toBeNull();
 	});
 
-	it("shows an agent collaboration in the asking chat only", async () => {
+	it("shows an agent collaboration in the asking chat and in the asked bot's channel", async () => {
 		const initiatorChat = await chats.openBotChannel({
 			workspace: workspaceId,
 			podId,
@@ -1734,9 +2014,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			kind: "message",
 			message: { parts: [{ type: "collaboration", threadId: child.id }] },
 		});
-		// The asked bot's own threads are about other things.
-		expect(inbound?.items).toEqual([]);
-		expect((await view.history(recipientChat.id))?.items).toEqual([]);
+		expect(inbound?.items).toEqual([
+			expect.objectContaining({
+				kind: "collaboration",
+				id: collaborationId,
+				threadId: child.id,
+				title: "Compare the launch plans",
+				initiator: expect.objectContaining({ kind: "agent", id: agentId }),
+			}),
+		]);
 	});
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {

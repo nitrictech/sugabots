@@ -15,9 +15,9 @@ describe.skipIf(!process.env.REGISTRY_TESTS)("pinning an image to its digest, ag
 		expect(pinned).toMatch(/^ghcr\.io\/nitrictech\/sugabots@sha256:[0-9a-f]{64}$/);
 	});
 
-	it("leaves an image the registry doesn't have as it is", async () => {
-		expect(await pinnedToDigest("ghcr.io/nitrictech/no-such-image:latest", unbound)).toBe(
-			"ghcr.io/nitrictech/no-such-image:latest",
-		);
+	it("says nothing of an image the registry doesn't have", async () => {
+		expect(
+			await pinnedToDigest("ghcr.io/nitrictech/no-such-image:latest", unbound),
+		).toBeUndefined();
 	});
 });

@@ -18,12 +18,7 @@ import {
 	MAX_ATTACHMENTS_PER_MESSAGE,
 } from "../../../packages/contracts/src/attachments.ts";
 import { CHAT_NAME_MAX_LENGTH } from "../../../packages/contracts/src/chats.ts";
-import {
-	DEFAULT_QUIET_HOURS,
-	INVITE_LIFETIME_DAYS,
-	LARGE_MODEL_CATALOG,
-	THREADS_SHOWN,
-} from "../../../packages/contracts/src/client-limits.ts";
+import { INVITE_LIFETIME_DAYS } from "../../../packages/contracts/src/membership.ts";
 import { POD_NAME_MAX_LENGTH } from "../../../packages/contracts/src/pods.ts";
 import {
 	MAX_EVERY_DAYS,
@@ -38,6 +33,11 @@ import {
 	MAX_REACTION_EMOJI_PER_MESSAGE,
 	MESSAGE_PREVIEW_CHARACTERS,
 } from "../../../packages/contracts/src/threads.ts";
+import { DEFAULT_QUIET_HOURS } from "../../../packages/web/src/lib/notification-choices.ts";
+import {
+	MODEL_SEARCH_THRESHOLD,
+	THREADS_SHOWN,
+} from "../../../packages/web/src/lib/screen-limits.ts";
 import type { GeneratedFiles } from "./generated-files.ts";
 
 /** A limit's value: a whole number, some text, or a few of those under names. */
@@ -65,7 +65,7 @@ export const limits: Readonly<Record<string, LimitValue>> = {
 	MESSAGE_PREVIEW_CHARACTERS,
 	INVITE_LIFETIME_DAYS,
 	DEFAULT_QUIET_HOURS,
-	LARGE_MODEL_CATALOG,
+	MODEL_SEARCH_THRESHOLD,
 	THREADS_SHOWN,
 };
 

@@ -20,11 +20,16 @@ export function readDocsTool(pages: readonly DocPage[]) {
 			pages.map(pageEntry).join("\n"),
 		].join("\n\n"),
 		inputSchema: Schema.Struct({
-			page: Schema.String.annotate({ description: "The page's name, as listed, like routines" }),
+			page: Schema.String.check(Schema.isMaxLength(200)).annotate({
+				description: "The page's name, as listed, like routines",
+			}),
 			sections: Schema.optional(
-				Schema.Array(Schema.String).annotate({
-					description: "Headings of the sections to read, as listed. Leave out for the whole page.",
-				}),
+				Schema.Array(Schema.String.check(Schema.isMaxLength(200)))
+					.check(Schema.isMaxLength(20))
+					.annotate({
+						description:
+							"Headings of the sections to read, as listed. Leave out for the whole page.",
+					}),
 			),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ page, sections }): Promise<ReadDocsResult> => readDocs(pages, page, sections),

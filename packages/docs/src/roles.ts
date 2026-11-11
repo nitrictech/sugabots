@@ -53,6 +53,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 		note: ANYONE_IN_THEIR_PERSONAL_POD,
 	},
 	{ label: "Connect models and web search", roles: ["owner", "admin"] },
+	{ label: "See what the workspace's models cost", roles: ["owner", "admin"] },
 	{ label: "Invite and manage members and viewers", roles: ["owner", "admin"] },
 	{ label: "Make, unmake and remove admins", roles: ["owner"] },
 	{ label: "Transfer ownership", roles: ["owner"] },

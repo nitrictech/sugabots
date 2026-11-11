@@ -6,11 +6,7 @@ import type {
 	SandboxProviderSettings,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import {
-	SANDBOX_E2B_DEFAULT_SIZE,
-	SANDBOX_NETWORK_MODE_DEFAULT,
-	sandboxProviderPreset,
-} from "@sugabots/contracts";
+import { SANDBOX_NETWORK_MODE_DEFAULT, sandboxProviderPreset } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
@@ -94,7 +90,7 @@ export const make = Effect.gen(function* () {
 		if (!row.apiKeyEncrypted) return undefined;
 		const apiKey = Redacted.make(cipher.decrypt(row.apiKeyEncrypted));
 		const settings = row.settings;
-		const defaultImage = sandboxProviderPreset(settings.preset).defaultImage;
+		const { defaultImage, defaultSize } = sandboxProviderPreset(settings.preset);
 		switch (settings.preset) {
 			case "opensandbox":
 				return settings.serverUrl
@@ -103,6 +99,7 @@ export const make = Effect.gen(function* () {
 							baseUrl: settings.serverUrl,
 							apiKey,
 							image: settings.image ?? defaultImage,
+							size: sizeIn(settings, defaultSize),
 							networkMode: networkModeIn(settings),
 						}
 					: undefined;
@@ -112,10 +109,7 @@ export const make = Effect.gen(function* () {
 					apiKey,
 					template: settings.template ?? defaultImage,
 					networkMode: networkModeIn(settings),
-					size: {
-						cpuCount: settings.cpuCount ?? SANDBOX_E2B_DEFAULT_SIZE.cpuCount,
-						memoryGiB: settings.memoryGiB ?? SANDBOX_E2B_DEFAULT_SIZE.memoryGiB,
-					},
+					size: sizeIn(settings, defaultSize),
 					...(settings.apiUrl && settings.sandboxUrl
 						? { endpoints: { apiUrl: settings.apiUrl, sandboxUrl: settings.sandboxUrl } }
 						: {}),
@@ -351,6 +345,17 @@ export function addressesIn(settings: SandboxProviderSettings): string[] {
 /** How the provider's sandboxes reach the internet, by its settings or the default. */
 export function networkModeIn(settings: SandboxProviderSettings): SandboxNetworkMode {
 	return settings.networkMode ?? SANDBOX_NETWORK_MODE_DEFAULT;
+}
+
+/** The most each of the provider's sandboxes may use, by its settings or its preset's default. */
+function sizeIn(
+	settings: { cpuCount?: number; memoryGiB?: number },
+	defaultSize: Sandboxes.Size,
+): Sandboxes.Size {
+	return {
+		cpuCount: settings.cpuCount ?? defaultSize.cpuCount,
+		memoryGiB: settings.memoryGiB ?? defaultSize.memoryGiB,
+	};
 }
 
 export function withUsualAddress(settings: SandboxProviderSettings): SandboxProviderSettings {

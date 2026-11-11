@@ -335,7 +335,7 @@ private struct ConversationContent: View {
 					Composer(
 						label: composerLabel(kind: kind, pod: pod, details: details),
 						text: $draft,
-						mentionable: composerMentionable(kind: kind),
+						mentionable: composerMentionable,
 						replyingTo: replyingTo,
 						cancelReply: { replyingTo = nil },
 						attachments: attachments,
@@ -385,14 +385,12 @@ private struct ConversationContent: View {
 		return "Message \(pod.name)"
 	}
 
-	/// The people here and this chat's own bot, not yourself, then `@here` and `@channel` where they notify somebody;
-	/// the pod's other bots are offered only in the pod's chat, where naming one starts a thread with it.
-	private func composerMentionable(kind: ConversationKind) -> [MentionTarget] {
-		let isPodChat: Bool = if case .podChat = kind { true } else { false }
-		let offered = model.mentionable.filter { member in
-			member.id != store.user.id && (member.agent == nil || isPodChat || member.id == host?.id)
-		}
-		return Mentions.withGroups(offered, threadType: model.details?.thread.type)
+	/// Everyone here and the pod's bots, not yourself, then `@here` and `@channel`
+	/// where they notify somebody. Naming a bot has it reply where people talk
+	/// among themselves, and asks this chat's own bot to bring it in elsewhere.
+	private var composerMentionable: [MentionTarget] {
+		model.mentionable.filter { $0.id != store.user.id }.map(MentionTarget.participant)
+			+ Mentions.groups(writtenBy: store.user.id, members: model.details?.members ?? [], threadType: model.details?.thread.type)
 	}
 
 	/// The bot a pod channel's draft mentions first, whom sending starts a thread with.

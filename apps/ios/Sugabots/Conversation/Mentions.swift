@@ -112,13 +112,16 @@ enum Mentions {
 		return handles(in: text).lazy.compactMap { handle in bots.first { $0.handle == handle } }.first
 	}
 
-	/// `mentionable`, and after it `@here` and `@channel` where a person writing in
-	/// a thread of `threadType` would notify somebody with them, as `withGroupMentions`.
-	static func withGroups(_ mentionable: [ThreadParticipant], threadType: ThreadType?) -> [MentionTarget] {
-		let people = mentionable.map(MentionTarget.participant)
-		let notifiesSomebody = threadType.map(notifyingThreadTypes.contains) == true
-			&& mentionable.contains { if case .person = $0 { true } else { false } }
-		return notifiesSomebody ? people + groupHandles.map { .group(handle: $0) } : people
+	/// `@here` and `@channel` as the person `writerId` can use them in a thread
+	/// of `threadType`, each notifying `members`, the pod's people, but the
+	/// writer, as `groupMentionsBy`. None where they would notify nobody, so they
+	/// stay text: written by a bot or a routine (a nil `writerId`), in a thread
+	/// that notifies nobody, or in a pod with nobody else in it.
+	static func groups(writtenBy writerId: String?, members: [PersonParticipant], threadType: ThreadType?) -> [MentionTarget] {
+		guard let writerId, threadType.map(notifyingThreadTypes.contains) == true,
+			members.contains(where: { $0.id != writerId })
+		else { return [] }
+		return groupHandles.map { .group(handle: $0) }
 	}
 
 	/// Whom `handle`, as a mention writes it, names among `mentionable`, as

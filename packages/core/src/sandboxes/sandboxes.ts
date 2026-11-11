@@ -89,7 +89,11 @@ export type TemplateStatus = "missing" | "building" | "ready" | "failed";
 
 export interface Info {
 	readonly state: "running" | "paused";
-	/** The image or template it was made from, as the provider names it. */
+	/**
+	 * The image or template it was made from, as the provider names it, which
+	 * may be another name for it than it was made with: a tag for an image
+	 * made from its digest.
+	 */
 	readonly image: string;
 	/**
 	 * Whether its {@link WORKSPACE_DIRECTORY} is kept apart from it, so a new
@@ -133,7 +137,7 @@ export interface E2bConnection {
 	/** The template sandboxes are made from. */
 	readonly template: string;
 	/** What the template is built with, so every sandbox made from it has. */
-	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
+	readonly size: Size;
 	readonly networkMode: SandboxNetworkMode;
 }
 
@@ -144,7 +148,14 @@ export interface OpenSandboxConnection {
 	readonly apiKey: Redacted.Redacted;
 	/** The image sandboxes are made from. */
 	readonly image: string;
+	/** The most each sandbox may use, set when it is made. */
+	readonly size: Size;
 	readonly networkMode: SandboxNetworkMode;
+}
+
+export interface Size {
+	readonly cpuCount: number;
+	readonly memoryGiB: number;
 }
 
 export type SandboxId = Brand.Branded<string, "SandboxId">;
@@ -170,6 +181,9 @@ export interface Opened {
 
 /** Where agents work. It belongs to the agents' user. */
 export const WORKSPACE_DIRECTORY = "/workspace";
+
+/** Where each thread's folder is, named by the thread's id. */
+export const THREADS_DIRECTORY = `${WORKSPACE_DIRECTORY}/threads`;
 
 export interface Sandbox {
 	readonly id: SandboxId;

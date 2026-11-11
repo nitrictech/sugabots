@@ -139,7 +139,13 @@ const chatList: ChatList = {
 	threads: [],
 	routines: [
 		{
-			routine: { id: outbound.id, name: "Overnight outbound", state: "enabled", failed: true },
+			routine: {
+				id: outbound.id,
+				name: "Overnight outbound",
+				state: "enabled",
+				failed: true,
+				pausedAfterFailures: false,
+			},
 			agent: growthDesk,
 			conversation: {
 				kind: "routine_feed",
@@ -155,7 +161,13 @@ const chatList: ChatList = {
 			mentionsYou: false,
 		},
 		{
-			routine: { id: renewals.id, name: "Renewal reminders", state: "paused", failed: false },
+			routine: {
+				id: renewals.id,
+				name: "Renewal reminders",
+				state: "paused",
+				failed: false,
+				pausedAfterFailures: false,
+			},
 			agent: accountManager,
 			conversation: null,
 			mentionsYou: false,
@@ -279,7 +291,7 @@ const meta = preview.meta({
  */
 export const Default = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		const list = await canvas.findByRole("region", { name: "Routines" }, { timeout: 10_000 });
+		const list = await canvas.findByRole("region", { name: "Routines" });
 		const chosen = await within(list).findByRole("link", { name: /^Overnight outbound/ });
 		await expect(chosen).toHaveAttribute("aria-current", "page");
 		await expect(await within(chosen).findByText("Failed")).toBeVisible();
@@ -289,9 +301,7 @@ export const Default = meta.story({
 			within(list).getByRole("heading", { name: "Growth Desk's routines" }),
 		).toBeVisible();
 		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		await expect(
-			await canvas.findByRole("button", { name: "Run now" }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("button", { name: "Run now" })).toBeVisible();
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		const quiet = await within(log).findByRole("article", { name: /: Passed$/ });
 		await expect(quiet).toHaveTextContent("Queued 38 leads. Nobody replied overnight.");
@@ -309,9 +319,7 @@ export const Default = meta.story({
 /** The routine's instructions, opened from the panel to change them in a dialog with room to write. */
 export const EditingInstructions = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "Edit instructions" }));
 		const dialog = await within(document.body).findByRole("dialog", { name: "Instructions" });
 		const field = within(dialog).getByRole("textbox", { name: "Instructions" });
@@ -326,9 +334,7 @@ export const EditingInstructions = meta.story({
 /** Add trigger, under the routine's schedule in the panel, starts by choosing the kind. */
 export const AddingTrigger = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Details" }, { timeout: 10_000 }),
-		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
 		const triggers = await canvas.findByRole("region", { name: "Triggers" });
 		await expect(within(triggers).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
@@ -342,9 +348,7 @@ export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: /^Renewal reminders/ }, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: /^Renewal reminders/ })).toBeVisible();
 	},
 });
 
@@ -359,9 +363,7 @@ export const Empty = meta.story({
 	},
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines`} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText("No routines in Revenue yet", {}, { timeout: 10_000 }),
-		).toBeVisible();
+		await expect(await canvas.findByText("No routines in Revenue yet")).toBeVisible();
 	},
 });
 
@@ -376,11 +378,7 @@ export const BotWithNone = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(
-				`No routines for ${leadResearcher.name} yet`,
-				{},
-				{ timeout: 10_000 },
-			),
+			await canvas.findByText(`No routines for ${leadResearcher.name} yet`),
 		).toBeVisible();
 		await expect(
 			canvas.getByRole("heading", { name: `${leadResearcher.name}'s routines` }),
@@ -416,11 +414,7 @@ export const BotWithNoneAsAMember = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(
-				`Ask someone who manages ${revenue.name}'s routines to set one up.`,
-				{},
-				{ timeout: 10_000 },
-			),
+			await canvas.findByText(`Ask someone who manages ${revenue.name}'s routines to set one up.`),
 		).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: "New routine" })).toBeNull();
 	},
@@ -431,7 +425,7 @@ export const BotWithNoneOnPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
-		const list = await canvas.findByRole("region", { name: "Routines" }, { timeout: 10_000 });
+		const list = await canvas.findByRole("region", { name: "Routines" });
 		await expect(
 			await within(list).findByText(`No routines for ${leadResearcher.name} yet`),
 		).toBeVisible();
@@ -448,23 +442,17 @@ export const BotWithNoneOnPhone = meta.story({
 export const BesideTheBotsChat = meta.story({
 	render: () => <StoryApp path={`${chatPath(growthDesk)}?routines=all`} />,
 	play: async ({ canvas, userEvent }) => {
-		const routines = await canvas.findByRole(
-			"region",
-			{ name: `${growthDesk.name}'s routines` },
-			{ timeout: 10_000 },
-		);
+		const routines = await canvas.findByRole("region", { name: `${growthDesk.name}'s routines` });
 		await userEvent.click(
 			await within(routines).findByRole("button", { name: /^Overnight outbound/ }),
 		);
 		// Its runs, in its own chat beside the bot's.
-		await waitFor(
-			() =>
-				expect(
-					canvas
-						.getAllByRole("log", { name: "Chat messages" })
-						.some((log) => log.textContent?.includes("Queued 38 leads. Nobody replied overnight.")),
-				).toBe(true),
-			{ timeout: 10_000 },
+		await waitFor(() =>
+			expect(
+				canvas
+					.getAllByRole("log", { name: "Chat messages" })
+					.some((log) => log.textContent?.includes("Queued 38 leads. Nobody replied overnight.")),
+			).toBe(true),
 		);
 		await userEvent.click(
 			canvas.getByRole("button", { name: `Back to ${growthDesk.name}'s routines` }),

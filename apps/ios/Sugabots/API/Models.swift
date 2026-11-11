@@ -137,6 +137,7 @@ extension ChatMessageItem: Identifiable {
 		case let .routine(run): "routine:\(run.id)"
 		case let .routinePaused(paused): "routine_paused:\(paused.id)"
 		case let .thread(thread): "thread:\(thread.id)"
+		case let .collaboration(collaboration): "collaboration:\(collaboration.id)"
 		case let .unknown(kind): "unknown:\(kind)"
 		}
 	}
@@ -147,6 +148,7 @@ extension ChatMessageItem: Identifiable {
 		case let .routine(run): run.createdAt
 		case let .routinePaused(paused): paused.createdAt
 		case let .thread(thread): thread.createdAt
+		case let .collaboration(collaboration): collaboration.createdAt
 		case .unknown: .distantPast
 		}
 	}

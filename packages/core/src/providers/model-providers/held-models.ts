@@ -67,10 +67,12 @@ export const keepingHeldModelsOffered = <A, E, R>(
 	withHeldModelsLocked(
 		workspaceId,
 		Effect.gen(function* () {
-			const held = yield* heldModels(workspaceId);
 			const before = yield* modelStates(workspaceId);
 			const result = yield* change;
 			const after = yield* modelStates(workspaceId);
+			// What holds a model once the change has run, so a change may move the
+			// default or a system agent off a model as it stops offering it.
+			const held = yield* heldModels(workspaceId);
 			const lost = [...held].find(
 				([modelId]) =>
 					(before.offered.has(modelId) && !after.offered.has(modelId)) ||

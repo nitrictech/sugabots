@@ -6,6 +6,14 @@
 - "Branches, commits, and PRs" section before creating a branch, committing, or opening a PR.
 - "UI development" section before changing components, views, or stories.
 
+## Working from an issue
+
+An issue records what its author thought was needed, not a verified requirement. Before planning:
+
+- For each requirement, find who needs it and why, in the issue, its comments or the code. If you can't find a reason, treat it as a question, not a task.
+- Ask about those before writing a plan, starting with the costliest. Anything that adds a table, migration, setting or API is expensive to remove once it ships.
+- When a requirement's reason stays unknown, propose cutting it or splitting it into its own issue rather than building it and leaving review to ask.
+
 ## Style and Practices
 
 Write only what the current task needs. Keep behavior, preconditions, and side effects clear without tracing distant definitions.
@@ -47,7 +55,9 @@ Follow `packages/core/src/email/email.ts`:
 
 ## UI development
 
+While the owner is still iterating on a design, make each change and hand it back. Don't add stories, run tests, or take screenshots between iterations. The story and verification steps below are for finishing a UI change, once the design is settled or it's going into a PR.
+
 - Start `bun run storybook` and use the `storybook` MCP's `docs-list` and `docs-show` to find existing components and verify their APIs. If the MCP is unavailable, inspect colocated stories and component types directly.
 - Use `get-storybook-story-instructions` before editing stories. Keep stories beside production components and cover meaningful states with deterministic fixtures.
 - Reuse the semantic tokens in `packages/web/src/app.css` and the controls in `packages/web/src/ui/`.
-- Verify changes with MCP `test-run` (or `bun run test:storybook` when MCP is unavailable), inspect relevant light/dark and narrow-viewport stories, and include preview links in the handoff.
+- When finishing, verify with MCP `test-run` (or `bun run test:storybook` when MCP is unavailable), inspect relevant light/dark and narrow-viewport stories, and include preview links in the handoff.

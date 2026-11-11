@@ -14,6 +14,7 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { MentionCard } from "./MentionCard.tsx";
 import {
 	MentionChip,
 	type MentionTarget,
@@ -24,9 +25,13 @@ import {
 /*
  * A message box whose text is plain, with `@handle` for a mention, but which
  * draws each finished mention of somebody it knows, or of everyone, as a chip:
- * kept whole, removed with one Backspace. A mention is finished once
- * whitespace follows it, so one still being typed stays text for the mention
- * menu to complete.
+ * kept whole, removed with one Backspace, and a button for the mention's card.
+ * A mention is finished once whitespace follows it, so one still being typed
+ * stays text for the mention menu to complete.
+ *
+ * A chip can take the focus, to open its card from the keyboard, but nothing
+ * is typed into it: typing there goes on in the text after it, and Backspace
+ * or Delete removes it.
  *
  * The browser edits the box; after each edit its text is read back, the
  * chips are drawn again where they changed, and the caret is put back where
@@ -106,6 +111,67 @@ export function MentionEditor({
 	const composing = useRef(false);
 	/** Whether the focus comes from a click, which places the caret itself. */
 	const pointing = useRef(false);
+	/**
+	 * The chip whose card is open, whom it names, and where the text goes on
+	 * after it, kept while the card closes so it has something to show as it
+	 * fades out. The place is kept as an offset, as the chip may be drawn again.
+	 */
+	const [card, setCard] = useState<{ chip: HTMLElement; target: MentionTarget; after: number }>();
+	const [cardOpen, setCardOpen] = useState(false);
+
+	/** Opens the card of the mention `chip` stands for, if whoever it names can still be mentioned. */
+	function openCard(root: HTMLElement, chip: HTMLElement) {
+		const handle = chip.getAttribute(MENTION_ATTRIBUTE);
+		const target = handle && targetWithHandle(mentionable, handle.slice(1));
+		if (!target) return;
+		// Copied from a template, so React does not keep it up to date.
+		chip.setAttribute("aria-expanded", "true");
+		setCard({ chip, target, after: rangeOfChip(root, chip).end });
+		setCardOpen(true);
+	}
+
+	function changeCardOpen(open: boolean) {
+		setCardOpen(open);
+		if (!open) card?.chip.setAttribute("aria-expanded", "false");
+	}
+
+	/** Focuses the box with the caret at `offset`, where typing goes on. */
+	function typeAt(offset: number) {
+		const root = box.current;
+		if (!root) return;
+		root.focus({ preventScroll: true });
+		placeCaret(root, offset);
+	}
+
+	/**
+	 * A key pressed on a chip with the focus: Enter or Space opens its card,
+	 * and Escape is the composer's, as in the text. Backspace or Delete removes
+	 * the chip, and anything typed goes on in the text after it.
+	 */
+	function onChipKeyDown(
+		event: KeyboardEvent<HTMLDivElement>,
+		root: HTMLElement,
+		chip: HTMLElement,
+	) {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			openCard(root, chip);
+			return;
+		}
+		if (event.key === "Escape") {
+			onKeyDown(event);
+			return;
+		}
+		if (event.key === "Backspace" || event.key === "Delete") {
+			event.preventDefault();
+			const range = rangeOfChip(root, chip);
+			root.focus({ preventScroll: true });
+			replace(range, "");
+			return;
+		}
+		// The focus moves before the key lands, so what it types goes into the text.
+		if (typesCharacter(event)) typeAt(rangeOfChip(root, chip).end);
+	}
 
 	/**
 	 * Draws the box again where it differs from what it holds: its chips kept,
@@ -231,10 +297,19 @@ export function MentionEditor({
 					composing.current = false;
 					readBack();
 				}}
+				onClick={(event) => {
+					const chip = chipAt(event.currentTarget, event.target);
+					if (chip) openCard(event.currentTarget, chip);
+				}}
 				onKeyDown={(event) => {
+					const root = event.currentTarget;
+					const focusedChip = chipAt(root, event.target);
+					if (focusedChip) {
+						onChipKeyDown(event, root, focusedChip);
+						return;
+					}
 					onKeyDown(event);
 					if (event.defaultPrevented || event.nativeEvent.isComposing) return;
-					const root = event.currentTarget;
 					// A chip can't be edited, so the browser stops a jump or a selection to the line's end at it.
 					const toLine = lineKey(event);
 					if (toLine) {
@@ -270,14 +345,18 @@ export function MentionEditor({
 					pointing.current = document.activeElement !== event.currentTarget;
 				}}
 				onFocus={(event) => {
+					const pointed = pointing.current;
+					pointing.current = false;
+					// A chip taking the focus leaves the text, and the caret, as they are.
+					if (event.target !== event.currentTarget) return;
 					// A draft kept from an earlier visit is picked up at its end, not before its first
 					// word, unless a click put the caret where it landed.
-					if (!pointing.current)
-						placeCaret(event.currentTarget, textOf(event.currentTarget).length);
-					pointing.current = false;
+					if (!pointed) placeCaret(event.currentTarget, textOf(event.currentTarget).length);
 					onFocus(event);
 				}}
-				onBlur={onBlur}
+				onBlur={(event) => {
+					if (event.target === event.currentTarget) onBlur(event);
+				}}
 				className={cn(
 					"block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.75 text-sm text-foreground leading-5.5 outline-none",
 					className,
@@ -290,13 +369,43 @@ export function MentionEditor({
 						target={target}
 						{...{ [MENTION_ATTRIBUTE]: `@${target.handle}` }}
 						contentEditable={false}
+						role="button"
+						tabIndex={0}
+						aria-haspopup="dialog"
+						aria-expanded={false}
 						className="select-none"
 					/>
 				)),
 				templates,
 			)}
+			{card && (
+				<MentionCard
+					target={card.target}
+					open={cardOpen}
+					onOpenChange={changeCardOpen}
+					opensFrom={{ chip: card.chip, returnFocus: () => typeAt(card.after) }}
+				/>
+			)}
 		</div>
 	);
+}
+
+/** The chip in `root` that `target`, where an event happened, is in, if any. */
+function chipAt(root: HTMLElement, target: EventTarget): HTMLElement | undefined {
+	if (!(target instanceof Element)) return undefined;
+	const chip = target.closest<HTMLElement>(`[${MENTION_ATTRIBUTE}]`);
+	return chip && root.contains(chip) ? chip : undefined;
+}
+
+/** Where `chip`, one of `root`'s, is in the text. */
+function rangeOfChip(root: HTMLElement, chip: HTMLElement): TextRange {
+	const index = [...root.childNodes].indexOf(chip);
+	return { start: offsetOf(root, root, index), end: offsetOf(root, root, index + 1) };
+}
+
+/** Whether `event` types a character, rather than being a shortcut or a key that moves or deletes. */
+function typesCharacter(event: KeyboardEvent): boolean {
+	return event.key.length === 1 && !event.ctrlKey && !event.metaKey;
 }
 
 /**

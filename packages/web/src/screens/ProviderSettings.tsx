@@ -1,22 +1,25 @@
+import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
 	effectiveCapabilities,
-	LARGE_MODEL_CATALOG,
 	type ModelProvider,
 	type ProviderModel,
 	type ProviderModelCapability,
 	type ProviderPresetId,
+	type ProviderSwitchOff,
 	presetSignInService,
 	presetSignsIn,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
 	providerPreset,
 	seededPresets,
+	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import {
 	Brain,
+	ChevronDown,
 	Eye,
 	Grid2X2,
 	Image,
@@ -27,7 +30,16 @@ import {
 	Search,
 	Wrench,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
+import {
+	type ComponentProps,
+	type FormEvent,
+	type ReactNode,
+	useDeferredValue,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -35,8 +47,9 @@ import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -48,6 +61,13 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -62,7 +82,9 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
+import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
@@ -132,18 +154,163 @@ export function BotFaces({ bots }: { bots: readonly Agent[] }) {
 	);
 }
 
+/**
+ * How a row of faces is laid out: centred under a dialog's text, or small
+ * beside a dropdown in a settings row. `fit` is the most faces that fit in
+ * one row, on a phone too.
+ */
+const FACE_ROWS = {
+	dialog: { size: 28, fit: 8, className: "justify-center gap-1.5" },
+	row: { size: 20, fit: 4, className: "justify-start gap-1" },
+} as const;
+
+/**
+ * The bots in `bots` as one row of faces, each named on hover or keyboard
+ * focus. Past a row, the last place counts the others and names them on hover.
+ */
+function NamedBotFaces({
+	bots,
+	label,
+	layout = "dialog",
+}: {
+	bots: readonly Agent[];
+	label: string;
+	layout?: keyof typeof FACE_ROWS;
+}) {
+	const { size, fit, className } = FACE_ROWS[layout];
+	const faced = bots.length > fit ? bots.slice(0, fit - 1) : bots;
+	const others = bots.slice(faced.length);
+	return (
+		<LivelyGroup>
+			<ul
+				aria-label={label}
+				// Room around each face for its focus ring and its hop.
+				className={`-m-1.5 flex list-none items-center p-1.5 ${className}`}
+			>
+				{faced.map((bot) => (
+					<li key={bot.id} className="flex">
+						<NamedBotFace bot={bot} size={size} />
+					</li>
+				))}
+				{others.length > 0 && (
+					<li className="ml-1 text-muted-foreground text-xs">
+						and <OtherBots bots={others} />
+					</li>
+				)}
+			</ul>
+		</LivelyGroup>
+	);
+}
+
+/** "N others", naming them on hover or keyboard focus. */
+function OtherBots({ bots }: { bots: readonly Agent[] }) {
+	return (
+		<Tooltip
+			label={<OtherBotsList bots={bots} />}
+			side="top"
+			onOpenChange={nameOnKeyboardFocusOnly}
+		>
+			<span
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its names show only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring cursor-default rounded-sm text-foreground underline decoration-dotted underline-offset-2"
+			>
+				{bots.length} {bots.length === 1 ? "other" : "others"}
+				<span className="sr-only">: {LIST.format(bots.map((bot) => bot.name))}</span>
+			</span>
+		</Tooltip>
+	);
+}
+
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+/**
+ * Each bot by its face and name. Past about a dozen it scrolls, fading out at
+ * the bottom while there are more below, as the scrollbar shows only while
+ * scrolling.
+ */
+function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
+	const list = useRef<HTMLUListElement>(null);
+	const [moreBelow, setMoreBelow] = useState(false);
+	const checkMoreBelow = () => {
+		const element = list.current;
+		if (!element) return;
+		// A pixel of slack, as zoomed pages scroll in fractions of one.
+		setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1);
+	};
+	useLayoutEffect(checkMoreBelow, []);
+	return (
+		<ul
+			ref={list}
+			aria-label="Other bots"
+			// It takes focus so the keyboard can scroll it.
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
+			tabIndex={0}
+			onScroll={checkMoreBelow}
+			className={`focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5 ${moreBelow ? "mask-b-from-75%" : ""}`}
+		>
+			{bots.map((bot) => (
+				<li key={bot.id} className="flex items-center gap-1.5">
+					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<span className="truncate">{bot.name}</span>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/** A dialog opened by pointer focuses its first trigger; only keyboard focus should open its tooltip. */
+function nameOnKeyboardFocusOnly(
+	open: boolean,
+	details: Parameters<NonNullable<ComponentProps<typeof Tooltip>["onOpenChange"]>>[1],
+) {
+	if (
+		open &&
+		details.reason === "trigger-focus" &&
+		!(details.event.target as Element).matches(":focus-visible")
+	) {
+		details.cancel();
+	}
+}
+
+/** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
+function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
+	const face = useRef<LivelyFace>(null);
+	return (
+		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
+			<span
+				role="img"
+				aria-label={bot.name}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
+				tabIndex={0}
+				className="focus-ring flex rounded-full"
+				onPointerEnter={() => face.current?.play("hop")}
+				onFocus={(event) =>
+					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
+				}
+			>
+				<TurnTakingAvatar bot={bot} size={size} faceRef={face} />
+			</span>
+		</Tooltip>
+	);
+}
+
 /** The crew bots on each model id, which is what a bot's `model` names. */
 export function useBotsByModel(): (modelId: string) => Agent[] {
 	const { agents } = useAgents();
-	return (modelId) =>
-		agents?.filter((agent) => agent.systemAgentKey === null && agent.model === modelId) ?? [];
+	return (modelId) => crewBotsOn(agents ?? [], modelId);
+}
+
+/** The crew bots among `agents` on `modelId`. */
+function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
+	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === modelId);
 }
 
 /**
  * What must keep running on each model id: new bots, which start on the
- * workspace's default, and the system bots. The server refuses to switch such
- * a model off, or its provider, until they are moved to another, so the page
- * says so before anybody tries.
+ * workspace's default, and the system bots. Switching such a model off, or its
+ * provider, moves them to another as it goes; the server refuses any other
+ * change that would stop offering it, such as removing its provider's key.
  */
 export function useModelHolders(): (modelId: string) => ModelHolders | undefined {
 	const defaultModel = useModels().data?.defaultModel ?? null;
@@ -161,7 +328,7 @@ export interface ModelHolders {
 }
 
 /** Why a model, or its provider, cannot be switched off. */
-function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
+export function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
 	const holders =
 		newBots && systemBots
 			? "New bots and system agents use"
@@ -210,24 +377,59 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	// every model it lists, including one held while the provider is off.
 	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
 	const heldOn = useHoldersOf(offeredModelsOf(provider));
-	const cannotTurnOff = provider.active && heldOn !== undefined;
+	const usage = useModelUsage();
+	const [checkingUsage, setCheckingUsage] = useState(false);
+	// Kept as they were when the dialog opened: once they move, the provider goes
+	// off and would strand none, emptying the dialog while it disconnects.
+	const [movingBots, setMovingBots] = useState<{
+		action: "switch off" | "disconnect";
+		stranded: StrandedModel[];
+		held: ModelHolders | undefined;
+	}>();
+	const disconnectWarning = seeded
+		? `${signsIn ? "It is signed out" : "Its key is removed"} and bots can no longer use its models. You can connect it again at any time.`
+		: "Bots can no longer use its models. Adding it again means entering its details again.";
+
+	/** The models switching the provider off would leave bots on, from fresh usage. */
+	async function latestStranded() {
+		setCheckingUsage(true);
+		const latest = await usage.latest().finally(() => setCheckingUsage(false));
+		return strandedModelsOf(provider, latest);
+	}
+
+	async function switchOff() {
+		const stranded = await latestStranded();
+		if (stranded.length > 0 || heldOn) {
+			setMovingBots({ action: "switch off", stranded, held: heldOn });
+			return;
+		}
+		actions.update.mutate({ providerId: provider.id, json: { active: false } });
+	}
+
+	async function disconnectProvider() {
+		if (!seeded) {
+			await actions.remove.mutateAsync({ providerId: provider.id });
+			return;
+		}
+		if (provider.signedIn) {
+			await actions.signOut.mutateAsync({ providerId: provider.id });
+		}
+		await actions.update.mutateAsync({
+			providerId: provider.id,
+			json: { active: false, ...(provider.hasApiKey ? { apiKey: null } : {}) },
+		});
+	}
 
 	async function confirmDisconnect() {
 		try {
-			if (seeded) {
-				if (provider.signedIn) {
-					await actions.signOut.mutateAsync({ providerId: provider.id });
-				}
-				await actions.update.mutateAsync({
-					providerId: provider.id,
-					json: { active: false, ...(provider.hasApiKey ? { apiKey: null } : {}) },
-				});
-			} else {
-				await actions.remove.mutateAsync({ providerId: provider.id });
-			}
+			await disconnectProvider();
 		} catch {
 			return;
 		}
+		leaveDisconnected();
+	}
+
+	function leaveDisconnected() {
 		setDisconnecting(false);
 		// Back to Models, or Models in the provider's place, so Back never returns to one
 		// no longer connected.
@@ -251,13 +453,11 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 		>
 			<SettingsGroup
 				note={
-					cannotTurnOff
-						? `${provider.name} can't be turned off while it's in use. ${heldReason(heldOn, "one of its models")}`
-						: actions.update.error
-							? failureMessage(actions.update.error)
-							: provider.active
-								? "Bots can use the models you switch on below."
-								: "Bots can't use its models while it's off."
+					actions.update.error
+						? failureMessage(actions.update.error)
+						: provider.active
+							? "Bots can use the models you switch on below."
+							: "Bots can't use its models while it's off."
 				}
 			>
 				<SettingsRow
@@ -265,10 +465,17 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 					trailing={
 						<Toggle
 							checked={provider.active}
-							disabled={cannotTurnOff || actions.update.isPending}
+							disabled={
+								actions.update.isPending ||
+								checkingUsage ||
+								// Until usage is known, switching off could leave bots on its models unasked.
+								(provider.active && !usage.known)
+							}
 							label={`Use ${provider.name}`}
 							onChange={(active) =>
-								actions.update.mutate({ providerId: provider.id, json: { active } })
+								active
+									? actions.update.mutate({ providerId: provider.id, json: { active } })
+									: switchOff()
 							}
 						/>
 					}
@@ -278,20 +485,42 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			<Models provider={provider} />
 			<SettingsDanger
 				label={`Disconnect ${provider.name}`}
-				description="Bots using these models stop working until you pick another."
+				description="Bots using these models move to the ones you pick."
 				action="Disconnect"
-				onClick={() => setDisconnecting(true)}
-				disabledReason={held && heldReason(held, "one of its models")}
+				onClick={async () => {
+					const stranded = await latestStranded();
+					if (stranded.length > 0 || held) setMovingBots({ action: "disconnect", stranded, held });
+					else setDisconnecting(true);
+				}}
+				disabledReason={!usage.known || checkingUsage ? "Loading bots…" : undefined}
 			/>
+			<Dialog
+				open={movingBots !== undefined}
+				onOpenChange={(open) => !open && setMovingBots(undefined)}
+			>
+				{movingBots && (
+					<MoveBotsOffProviderDialog
+						provider={provider}
+						stranded={movingBots.stranded}
+						held={movingBots.held}
+						then={movingBots.action}
+						warning={movingBots.action === "disconnect" ? disconnectWarning : undefined}
+						onMoved={async () => {
+							if (movingBots.action === "disconnect") {
+								await disconnectProvider();
+								leaveDisconnected();
+							}
+							setMovingBots(undefined);
+						}}
+						done={() => setMovingBots(undefined)}
+					/>
+				)}
+			</Dialog>
 			<DeleteDialog
 				open={disconnecting}
 				onOpenChange={setDisconnecting}
 				title={`Disconnect ${provider.name}?`}
-				description={
-					seeded
-						? `${signsIn ? "It is signed out" : "Its key is removed"} and bots can no longer use its models. You can connect it again at any time.`
-						: "Bots can no longer use its models. Adding it again means entering its details again."
-				}
+				description={disconnectWarning}
 				confirmLabel="Disconnect"
 				pending={disconnectPending}
 				error={disconnectError ? failureMessage(disconnectError) : undefined}
@@ -535,6 +764,291 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
 	};
 }
 
+/**
+ * The workspace's bots: `known` once they and the models they could move to
+ * have loaded, and `latest` to refetch both before acting, as the cached ones
+ * may predate another tab's changes.
+ */
+function useModelUsage() {
+	const agents = useAgents();
+	const models = useModels();
+	return {
+		agents: agents.agents ?? [],
+		known: agents.agents !== undefined && models.data !== undefined,
+		latest: async (): Promise<readonly Agent[]> => {
+			const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]);
+			return latestAgents.data ?? [];
+		},
+	};
+}
+
+type OfferedModel = WorkspaceModelsResponse["models"][number];
+
+type SettingMoves = Pick<ProviderSwitchOff, "newBotsTo" | "summariesTo">;
+
+/** The model to suggest moving to: the one new bots use, if it is among `candidates`, else the first. */
+function suggestedModel(
+	candidates: readonly OfferedModel[],
+	defaultModel: string | null | undefined,
+): string | undefined {
+	return candidates.some((candidate) => candidate.modelId === defaultModel)
+		? (defaultModel ?? undefined)
+		: candidates[0]?.modelId;
+}
+
+/**
+ * Where each of `held` moves: what was chosen for it while `candidates` still
+ * offers it, else `fallback`. Each moves only as it is chosen, never with the
+ * bots, so the default changes only when someone means it to.
+ */
+function settingMovesFor(
+	held: ModelHolders | undefined,
+	chosen: SettingMoves,
+	candidates: readonly OfferedModel[],
+	fallback: string | undefined,
+): SettingMoves {
+	const stillOffered = (modelId: string | undefined) =>
+		candidates.some((candidate) => candidate.modelId === modelId) ? modelId : fallback;
+	return {
+		newBotsTo: held?.newBots ? stillOffered(chosen.newBotsTo) : undefined,
+		summariesTo: held?.systemBots ? stillOffered(chosen.summariesTo) : undefined,
+	};
+}
+
+/** What `held` names, as a sentence would: new bots, summaries, or both. */
+function holderNames({ newBots, systemBots }: ModelHolders): string[] {
+	return [...(newBots ? ["new bots"] : []), ...(systemBots ? ["summaries"] : [])];
+}
+
+function capitalised(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A model to move something to, picked from `candidates` in a menu. */
+function MoveToMenu({
+	label,
+	candidates,
+	value,
+	onChange,
+}: {
+	/** What moves, as the menu button announces it: "Move new bots to". */
+	label: string;
+	candidates: readonly OfferedModel[];
+	value: string | undefined;
+	onChange: (modelId: string) => void;
+}) {
+	const name = candidates.find((candidate) => candidate.modelId === value)?.displayName ?? value;
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				aria-label={`${label}: ${name}`}
+				className="focus-ring flex h-8 min-w-0 max-w-48 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
+			>
+				<span className="truncate">{name}</span>
+				<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="max-h-80 min-w-48">
+				<DropdownMenuRadioGroup
+					value={value}
+					onValueChange={(modelId: string) => onChange(modelId)}
+				>
+					{candidates.map((candidate) => (
+						<DropdownMenuRadioItem
+							key={`${candidate.providerId}:${candidate.modelId}`}
+							value={candidate.modelId}
+						>
+							{candidate.displayName ?? candidate.modelId}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** A row for each workspace setting on a model being switched off, with the model it moves to. */
+function SettingMoveRows({
+	held,
+	candidates,
+	moves,
+	onChange,
+}: {
+	held: ModelHolders;
+	candidates: readonly OfferedModel[];
+	moves: SettingMoves;
+	onChange: (change: SettingMoves) => void;
+}) {
+	return (
+		<>
+			{held.newBots && (
+				<SettingsRow
+					label="New bots"
+					sub="The model new bots start on"
+					trailing={
+						<MoveToMenu
+							label="Move new bots to"
+							candidates={candidates}
+							value={moves.newBotsTo}
+							onChange={(newBotsTo) => onChange({ newBotsTo })}
+						/>
+					}
+				/>
+			)}
+			{held.systemBots && (
+				<SettingsRow
+					label="Summaries"
+					sub="Summaries, chat titles and compacting"
+					trailing={
+						<MoveToMenu
+							label="Move summaries to"
+							candidates={candidates}
+							value={moves.summariesTo}
+							onChange={(summariesTo) => onChange({ summariesTo })}
+						/>
+					}
+				/>
+			)}
+		</>
+	);
+}
+
+interface StrandedModel {
+	model: ProviderModel;
+	bots: Agent[];
+}
+
+/** The provider's offered models that bots would be left on if it went off. */
+function strandedModelsOf(provider: ModelProvider, agents: readonly Agent[]): StrandedModel[] {
+	return offeredModelsOf(provider).flatMap((model) => {
+		const bots = crewBotsOn(agents, model.modelId);
+		return bots.length > 0 ? [{ model, bots }] : [];
+	});
+}
+
+/**
+ * Switching off or disconnecting a provider whose models bots, new bots or
+ * summaries still run on: where each moves, from the models other providers
+ * offer, starting on the one new bots use. They move and the provider goes off
+ * together, so nothing is left on a model that is off.
+ */
+function MoveBotsOffProviderDialog({
+	provider,
+	stranded,
+	held,
+	then,
+	warning,
+	onMoved,
+	done,
+}: {
+	provider: ModelProvider;
+	stranded: readonly StrandedModel[];
+	held: ModelHolders | undefined;
+	then: "switch off" | "disconnect";
+	/** What else happens, said as the plain confirmation would. */
+	warning?: string;
+	/** After the bots have moved and the provider is off. */
+	onMoved: () => Promise<void>;
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.providerId !== provider.id,
+	);
+	const firstChoice = suggestedModel(candidates, models?.defaultModel);
+	const [chosen, setChosen] = useState<Record<string, string>>({});
+	// Follows the models as they change, so a pick switched off since falls back.
+	const destinationOf = (modelId: string) => {
+		const picked = chosen[modelId];
+		return candidates.some((candidate) => candidate.modelId === picked) ? picked : firstChoice;
+	};
+	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
+	const settingMoves = settingMovesFor(held, chosenSettings, candidates, firstChoice);
+	const moveBots = stranded.flatMap(({ model }) => {
+		const to = destinationOf(model.modelId);
+		return to ? [{ from: model.modelId, to }] : [];
+	});
+	const [error, setError] = useState<unknown>();
+	const [pending, setPending] = useState(false);
+	const botCount = stranded.reduce((total, { bots }) => total + bots.length, 0);
+	const verb = then === "disconnect" ? "disconnect" : "switch off";
+	const users = [
+		...(botCount > 0 ? [`${botCount} ${botCount === 1 ? "bot" : "bots"}`] : []),
+		...(held ? holderNames(held) : []),
+	];
+	const uses = users.length === 1 && botCount === 1 ? "uses" : "use";
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		setError(undefined);
+		setPending(true);
+		try {
+			await actions.switchOff.mutateAsync({ providerId: provider.id, moveBots, ...settingMoves });
+			await onMoved();
+		} catch (cause) {
+			setError(cause);
+		} finally {
+			setPending(false);
+		}
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader
+				title={
+					then === "disconnect" ? `Disconnect ${provider.name}` : `Switch off ${provider.name}`
+				}
+			/>
+			<DialogFormBody>
+				<DialogDescription>
+					{capitalised(LIST.format(users))} {uses} {provider.name}'s models. Choose the model each
+					moves to.
+				</DialogDescription>
+				{warning && <DialogDescription>{warning}</DialogDescription>}
+				{candidates.length === 0 ? (
+					<Alert>Switch on a model at another provider first, so there is one to move to.</Alert>
+				) : (
+					<SettingsGroup>
+						{stranded.map(({ model, bots }) => {
+							return (
+								<SettingsRow
+									key={model.id}
+									label={modelName(model)}
+									sub={
+										<NamedBotFaces bots={bots} label={`Bots on ${modelName(model)}`} layout="row" />
+									}
+									trailing={
+										<MoveToMenu
+											label={`Move ${modelName(model)} bots to`}
+											candidates={candidates}
+											value={destinationOf(model.modelId)}
+											onChange={(modelId) => setChosen({ ...chosen, [model.modelId]: modelId })}
+										/>
+									}
+								/>
+							);
+						})}
+						{held && (
+							<SettingMoveRows
+								held={held}
+								candidates={candidates}
+								moves={settingMoves}
+								onChange={(change) => setChosenSettings({ ...chosenSettings, ...change })}
+							/>
+						)}
+					</SettingsGroup>
+				)}
+				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={held ? `Move and ${verb}` : `Move bots and ${verb}`}
+				actionDisabled={candidates.length === 0 || pending}
+				onCancel={done}
+			/>
+		</DialogForm>
+	);
+}
+
 /** The models the provider offers agents: none while it is not connected. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
@@ -672,13 +1186,14 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 				.map((entry) => {
 					const Icon = capabilityIcons[entry.key];
 					return (
-						<Icon
-							key={entry.key}
-							role="img"
-							aria-label={entry.name}
-							className="size-3.25 shrink-0"
-							strokeWidth={2}
-						/>
+						<Tooltip key={entry.key} label={entry.name}>
+							<Icon
+								role="img"
+								aria-label={entry.name}
+								className="size-3.25 shrink-0"
+								strokeWidth={2}
+							/>
+						</Tooltip>
 					);
 				})}
 		</>
@@ -704,6 +1219,31 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 	);
 }
 
+/** A box to search a list of `count` models, for one too long to scan. */
+function ModelSearch({
+	value,
+	onChange,
+	count,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	count: number;
+}) {
+	return (
+		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
+			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+			<input
+				type="search"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={`Search ${count} models`}
+				aria-label="Search models"
+				className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
+			/>
+		</label>
+	);
+}
+
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
 function makerOf(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
@@ -717,11 +1257,14 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
+	const usage = useModelUsage();
 	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
+	const [checkingUsage, setCheckingUsage] = useState(false);
+	const [movingOff, setMovingOff] = useState<ProviderModel>();
 	const needle = useDeferredValue(search.trim().toLowerCase());
-	const large = provider.models.length > LARGE_MODEL_CATALOG;
+	const large = provider.models.length > MODEL_SEARCH_THRESHOLD;
 	// Switched-on models lead, as they were when the page opened, so a row never moves under the toggle just used.
 	const [onWhenOpened] = useState(
 		() => new Set(provider.models.filter((model) => model.enabled).map((model) => model.id)),
@@ -731,6 +1274,22 @@ function Models({ provider }: { provider: ModelProvider }) {
 	);
 	const error = actions.setModel.error ?? actions.fetchModels.error;
 	const custom = provider.preset === null;
+
+	/**
+	 * Switches the model off, or asks where its bots, new bots or summaries go
+	 * first. Decided on fresh bots and models, as the cached ones may predate
+	 * another tab's changes.
+	 */
+	async function switchOff(model: ProviderModel) {
+		setCheckingUsage(true);
+		const latest = await usage.latest().finally(() => setCheckingUsage(false));
+		const strandsBots = crewBotsOn(latest, model.modelId).length > 0;
+		if (strandsBots || holdersOf(model.modelId) !== undefined) {
+			setMovingOff(model);
+			return;
+		}
+		actions.setModel.mutate({ providerId: provider.id, modelId: model.id, enabled: false });
+	}
 
 	return (
 		<SettingsGroup
@@ -750,17 +1309,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-						<input
-							type="search"
-							value={search}
-							onChange={(event) => setSearch(event.target.value)}
-							placeholder={`Search ${provider.models.length} models`}
-							aria-label="Search models"
-							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-						/>
-					</label>
+					<ModelSearch value={search} onChange={setSearch} count={provider.models.length} />
 				</div>
 			)}
 			<ScrollingWhen large={large}>
@@ -795,15 +1344,22 @@ function Models({ provider }: { provider: ModelProvider }) {
 									{custom && <EditCapabilities provider={provider} model={model} />}
 									<Toggle
 										checked={model.enabled}
-										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
-										tooltip={held && heldReason(held, "this model")}
+										disabled={
+											!provider.active ||
+											actions.setModel.isPending ||
+											checkingUsage ||
+											// Until usage is known, switching off could leave bots on it unasked.
+											(model.enabled && !usage.known)
+										}
 										label={`Bots can use ${modelName(model)}`}
 										onChange={(enabled) =>
-											actions.setModel.mutate({
-												providerId: provider.id,
-												modelId: model.id,
-												enabled,
-											})
+											enabled
+												? actions.setModel.mutate({
+														providerId: provider.id,
+														modelId: model.id,
+														enabled,
+													})
+												: switchOff(model)
 										}
 									/>
 								</>
@@ -812,6 +1368,20 @@ function Models({ provider }: { provider: ModelProvider }) {
 					);
 				})}
 			</ScrollingWhen>
+			<Dialog
+				open={movingOff !== undefined}
+				onOpenChange={(open) => !open && setMovingOff(undefined)}
+			>
+				{movingOff && (
+					<MoveBotsDialog
+						provider={provider}
+						model={movingOff}
+						bots={crewBotsOn(usage.agents, movingOff.modelId)}
+						held={holdersOf(movingOff.modelId)}
+						done={() => setMovingOff(undefined)}
+					/>
+				)}
+			</Dialog>
 			{custom &&
 				(adding ? (
 					<AddModelRow provider={provider} done={() => setAdding(false)} />
@@ -824,6 +1394,123 @@ function Models({ provider }: { provider: ModelProvider }) {
 				</div>
 			)}
 		</SettingsGroup>
+	);
+}
+
+/**
+ * Switching off a model bots, new bots or summaries still run on: which of the
+ * other switched-on models each moves to, starting on the one new bots use.
+ * They move and the model goes off together, so nothing is left on a model
+ * that is off.
+ */
+function MoveBotsDialog({
+	provider,
+	model,
+	bots,
+	held,
+	done,
+}: {
+	provider: ModelProvider;
+	model: ProviderModel;
+	bots: readonly Agent[];
+	held: ModelHolders | undefined;
+	done: () => void;
+}) {
+	const actions = useProviderActions();
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter(
+		(candidate) => candidate.modelId !== model.modelId,
+	);
+	const [search, setSearch] = useState("");
+	const needle = useDeferredValue(search.trim().toLowerCase());
+	const [picked, setPicked] = useState<string>();
+	const suggested = suggestedModel(candidates, models?.defaultModel);
+	// Follows the models as they load or change, until someone picks one.
+	const chosen = candidates.some((candidate) => candidate.modelId === picked) ? picked : suggested;
+	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
+	const settingMoves = settingMovesFor(held, chosenSettings, candidates, suggested);
+	const shown = searchModels(candidates, needle);
+	const name = modelName(model);
+	const hasBots = bots.length > 0;
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!chosen) return;
+		try {
+			await actions.switchOffModel.mutateAsync({
+				providerId: provider.id,
+				modelId: model.id,
+				moveBotsTo: hasBots ? chosen : undefined,
+				...settingMoves,
+			});
+		} catch {
+			return;
+		}
+		done();
+	}
+
+	return (
+		<DialogForm width="compact" onSubmit={submit}>
+			<DialogFormHeader title={`Switch off ${name}`} />
+			<DialogFormBody>
+				<DialogDescription>
+					{hasBots
+						? `${bots.length === 1 ? "This bot uses" : "These bots use"} ${name}${held ? `, and so do ${LIST.format(holderNames(held))}` : ""}.`
+						: `${capitalised(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
+					{candidates.length > 0 &&
+						(hasBots
+							? ` Choose the model to move ${bots.length === 1 && !held ? "it" : "them"} to.`
+							: " Choose the model each moves to.")}
+				</DialogDescription>
+				{hasBots && <NamedBotFaces bots={bots} label={`Bots on ${name}`} />}
+				{candidates.length === 0 ? (
+					<Alert>
+						{name} is the only model switched on. Switch on another first, so there is one to move
+						to.
+					</Alert>
+				) : (
+					<>
+						{hasBots && candidates.length > MODEL_SEARCH_THRESHOLD && (
+							<ModelSearch value={search} onChange={setSearch} count={candidates.length} />
+						)}
+						{hasBots && (
+							<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+								<ModelChoiceList
+									models={shown}
+									chosen={chosen}
+									onChoose={setPicked}
+									empty="No models match."
+								/>
+							</div>
+						)}
+						{held && (
+							<SettingsGroup>
+								<SettingMoveRows
+									held={held}
+									candidates={candidates}
+									moves={settingMoves}
+									onChange={(change) => setChosenSettings({ ...chosenSettings, ...change })}
+								/>
+							</SettingsGroup>
+						)}
+					</>
+				)}
+				{actions.switchOffModel.error && (
+					<Alert>{failureMessage(actions.switchOffModel.error)}</Alert>
+				)}
+			</DialogFormBody>
+			<DialogFormFooter
+				action={
+					held
+						? "Move and switch off"
+						: bots.length === 1
+							? "Move bot and switch off"
+							: "Move bots and switch off"
+				}
+				actionDisabled={!chosen || actions.switchOffModel.isPending}
+				onCancel={done}
+			/>
+		</DialogForm>
 	);
 }
 

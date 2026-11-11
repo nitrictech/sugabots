@@ -1,4 +1,5 @@
 import type {
+	PodSandboxDisk,
 	SandboxNetworkSettings,
 	SandboxProvider,
 	SandboxProviderUpdate,
@@ -6,7 +7,7 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyBots, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyBots, storyPods, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Computers, as the app shows them in settings: the switch for whether bots
@@ -33,6 +34,7 @@ const openSandbox: SandboxProvider = {
 
 const providersUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-providers`);
 const networkUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-network`);
+const disksUrl = api(`/workspaces/${storyWorkspace.id}/sandbox-disks`);
 
 const network: SandboxNetworkSettings = {
 	mode: "open",
@@ -55,6 +57,7 @@ const meta = preview.meta({
 			...appHandlers(),
 			answers([]),
 			http.get(networkUrl, () => HttpResponse.json(network)),
+			http.get(disksUrl, () => HttpResponse.json([])),
 			http.get(`${providersUrl}/:providerId/template`, () => HttpResponse.json({ state: "ready" })),
 			http.all(`${providersUrl}*`, () =>
 				HttpResponse.json(
@@ -72,11 +75,7 @@ const meta = preview.meta({
  */
 export const Off = meta.story({
 	play: async ({ canvas }) => {
-		const power = await canvas.findByRole(
-			"switch",
-			{ name: "Bots can use a computer" },
-			{ timeout: 10_000 },
-		);
+		const power = await canvas.findByRole("switch", { name: "Bots can use a computer" });
 		await expect(power).toBeDisabled();
 		await expect(canvas.getByText(/Computers are experimental/)).toBeInTheDocument();
 		await expect(
@@ -104,11 +103,7 @@ export const BotsUsingAComputer = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const using = await canvas.findByRole(
-			"region",
-			{ name: "Bots using a computer" },
-			{ timeout: 10_000 },
-		);
+		const using = await canvas.findByRole("region", { name: "Bots using a computer" });
 		const [first] = storyBots;
 		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
 		await expect(row).toHaveAttribute(
@@ -269,6 +264,26 @@ export const E2bTemplateReady = meta.story({
 	},
 });
 
+/** OpenSandbox sized beyond its default. */
+export const OpenSandboxCustomSize = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			answers([
+				{
+					...openSandbox,
+					settings: { ...openSandbox.settings, preset: "opensandbox", cpuCount: 4, memoryGiB: 8 },
+					hasApiKey: true,
+					status: "connected",
+				},
+			]),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByLabelText("vCPUs")).toHaveValue("4");
+		await expect(canvas.getByLabelText("Memory")).toHaveValue("8 GiB");
+	},
+});
+
 /** E2B sized beyond its default; a size that isn't a whole number is refused before it's saved. */
 export const E2bCustomSize = meta.story({
 	beforeEach({ msw }) {
@@ -294,5 +309,44 @@ export const E2bCustomSize = meta.story({
 		await userEvent.clear(vcpus);
 		await userEvent.type(vcpus, "2.5{Enter}");
 		await expect(await canvas.findByText(/whole number of vCPUs/)).toBeVisible();
+	},
+});
+
+const GB = 1024 ** 3;
+
+/** A pod's 20 GB disk with `usedGB` of it used. */
+const podDisk = (podId: string, usedGB: number): PodSandboxDisk => ({
+	podId,
+	disk: {
+		usedBytes: Math.round(usedGB * GB),
+		totalBytes: 20 * GB,
+		measuredAt: "2026-10-02T05:38:00.000Z",
+		folders: null,
+	},
+});
+
+/** How full each pod's computer's disk is, fullest first, each opening the pod's Computer page. */
+export const DiskUseByPod = meta.story({
+	beforeEach({ msw }) {
+		const [first, second] = storyPods;
+		msw.use(
+			answers([{ ...openSandbox, enabled: true, hasApiKey: true, status: "connected" }]),
+			http.get(disksUrl, () =>
+				HttpResponse.json([podDisk(first?.id ?? "", 4.1), podDisk(second?.id ?? "", 18.6)]),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		const disks = await canvas.findByRole("region", { name: "Disk use by pod" });
+		const [first, second] = storyPods;
+		const rows = within(disks).getAllByRole("link");
+		await expect(rows).toHaveLength(2);
+		await expect(rows[0]).toHaveTextContent(second?.name ?? "");
+		await expect(rows[0]).toHaveTextContent("93%");
+		await expect(rows[1]).toHaveTextContent(first?.name ?? "");
+		await expect(rows[0]).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/pods\/.+\/computer$/),
+		);
 	},
 });

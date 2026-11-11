@@ -45,6 +45,7 @@ enum Lucide: String, CaseIterable {
 	case image
 	case inbox
 	case info
+	case keyboard
 	case library
 	case link2
 	case listFilter
@@ -133,6 +134,7 @@ enum Lucide: String, CaseIterable {
 		case .image: ["M5 3H19A2 2 0 0 1 21 5V19A2 2 0 0 1 19 21H5A2 2 0 0 1 3 19V5A2 2 0 0 1 5 3Z", "M7 9A2 2 0 1 0 11 9A2 2 0 1 0 7 9Z", "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"]
 		case .inbox: ["M22 12L16 12L14 15L10 15L8 12L2 12", "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"]
 		case .info: ["M2 12A10 10 0 1 0 22 12A10 10 0 1 0 2 12Z", "M12 16v-4", "M12 8h.01"]
+		case .keyboard: ["M10 8h.01", "M12 12h.01", "M14 8h.01", "M16 12h.01", "M18 8h.01", "M6 8h.01", "M7 16h10", "M8 12h.01", "M4 4H20A2 2 0 0 1 22 6V18A2 2 0 0 1 20 20H4A2 2 0 0 1 2 18V6A2 2 0 0 1 4 4Z"]
 		case .library: ["m16 6 4 14", "M12 6v14", "M8 8v12", "M4 4v16"]
 		case .link2: ["M9 17H7A5 5 0 0 1 7 7h2", "M15 7h2a5 5 0 1 1 0 10h-2", "M8 12L16 12"]
 		case .listFilter: ["M2 5h20", "M6 12h12", "M9 19h6"]

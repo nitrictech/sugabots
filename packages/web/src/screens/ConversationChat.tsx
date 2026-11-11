@@ -1,22 +1,30 @@
 import {
 	type Agent,
 	type AgentParticipant,
+	type BotStartedThread,
+	botStartedThreadSchema,
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
 	isAttached,
+	MESSAGE_MAX_LENGTH,
 	type Message,
 	mentionedHandles,
+	mentionPattern,
+	mentionsOnlyPeople,
 	messageAuthorName,
+	type PersonParticipant,
 	type Pod,
 	quotedPreview,
 	type SessionUser,
+	START_THREAD_TOOL,
 	type ThreadDetails,
 	type ThreadParticipant,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
+import { Option, Schema } from "effect";
 import { Pause } from "lucide-react";
 import {
 	type CSSProperties,
@@ -33,12 +41,11 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { useAgents, useModelName } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
+import { useChatDraft, useChatReplyDraft, useTakenOffRecipients } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
 	type ConversationKind,
 	chatItemCreatedAt,
-	THREAD_NOT_STARTED,
 	useChatHistory,
 	useChatList,
 	useChatMessages,
@@ -47,7 +54,6 @@ import {
 	useSendChatMessage,
 	useSetDone,
 	useThreadFrom,
-	useThreadStarter,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
@@ -84,6 +90,7 @@ import {
 } from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
+import { ConnectionsNotice } from "./ConnectionsNotice.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import {
 	ChannelDetails,
@@ -92,13 +99,8 @@ import {
 	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import {
-	firstBotNamed,
-	GROUP_MENTIONS,
-	mentionableIn,
-	textWithMentions,
-	withGroupMentions,
-} from "./mentions.tsx";
+import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
+import { botsNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
 import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
@@ -119,6 +121,8 @@ const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
 /** Shown when marking a thread done, or reopening it, did not save. */
 const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try again.";
+/** Names the bots a pod's chat message asks, as "Ada, Bea and Cy". */
+const BOT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 /**
  * What is open large beside a chat: an artifact, at its current version when
@@ -184,7 +188,6 @@ export function ConversationChat({
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, conversationId);
 	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, pod.id, conversationId);
 	const attachments = useComposerAttachments(conversationId);
-	const threads = useThreadStarter(conversationId, attachments);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
@@ -202,6 +205,9 @@ export function ConversationChat({
 			? conversation.agent
 			: null;
 	const isPodChat = conversation.kind === "podChat";
+	// Where people talk among themselves, the bots they name reply; elsewhere the
+	// chat's own bot does, asking any other bot named for its help.
+	const namedBotsReply = isPodChat || conversation.kind === "peopleThread";
 	const host = agent
 		? details?.participants.find(
 				(participant): participant is AgentParticipant =>
@@ -236,30 +242,64 @@ export function ConversationChat({
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	const threadWith = isPodChat && details ? firstBotNamed(draft, details.crew) : undefined;
+	// Where named bots reply, the bots the person's last message went to stay
+	// addressed until they take them off: talking to a bot is a conversation,
+	// not a mention every time. Taking one off lasts until they send again.
+	const crew = namedBotsReply ? (details?.crew ?? []) : [];
+	const lastOwnMessage = namedBotsReply
+		? shownMessages.findLast(
+				(message) => message.author.kind === "person" && message.author.id === user.id,
+			)
+		: undefined;
+	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, pod.id, conversationId);
+	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
+	const named = botsNamed(draft, crew);
+	const repliedToBot = crew.find(
+		(member): member is AgentParticipant =>
+			member.kind === "agent" &&
+			replyingTo?.author.kind === "agent" &&
+			member.id === replyingTo.author.id,
+	);
+	const addressedBots = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, crew) : []).filter(
+		(bot) =>
+			!takenOffIds.includes(bot.id) &&
+			bot.id !== repliedToBot?.id &&
+			!named.some((one) => one.id === bot.id),
+	);
+	function takeOff(botIds: readonly string[]) {
+		setTakenOff({ after: lastOwnMessage?.id, botIds: [...takenOffIds, ...botIds] });
+	}
+	// Taken off wherever it came from: named in the draft, or addressed by the last message.
+	function removeRecipient(bot: AgentParticipant) {
+		setDraft((current) => withoutMention(current, bot.handle));
+		takeOff([bot.id]);
+	}
+	const answeringBots = [...named, ...addressedBots, ...(repliedToBot ? [repliedToBot] : [])];
 	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
 	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
 	const { agents } = useAgents();
 	const answeringModel = useModelName(
-		(isPodChat ? agents?.find((one) => one.id === threadWith?.id)?.model : agent?.model) ?? null,
+		(namedBotsReply
+			? agents?.find((one) => one.id === answeringBots[0]?.id)?.model
+			: agent?.model) ?? null,
 	);
-	// The people here and this chat's own bot, not yourself; the pod's other bots are not
-	// offered, except in the pod's chat, where naming one starts a thread with it.
+	// Everyone here and the pod's bots, not yourself. Naming a bot has it reply where
+	// people talk among themselves, and asks this chat's own bot to bring it in elsewhere.
 	const composerMentionable = useMemo(
 		() =>
 			details
-				? withGroupMentions(
-						mentionableIn(details).filter(
-							(candidate) =>
-								candidate.id !== user.id &&
-								(candidate.kind === "person" || isPodChat || candidate.id === host?.id),
+				? [
+						...mentionableIn(details).filter((candidate) => candidate.id !== user.id),
+						...groupMentionsBy(
+							{ kind: "person", id: user.id },
+							details.members,
+							details.thread.type,
 						),
-						details.thread.type,
-					)
+					]
 				: [],
-		[details, user.id, isPodChat, host?.id],
+		[details, user.id],
 	);
 
 	useLayoutEffect(() => {
@@ -316,25 +356,34 @@ export function ConversationChat({
 	}, []);
 
 	async function submit() {
-		if (send.isPending || threads.isPending) return;
+		if (send.isPending) return;
 		setStartError(undefined);
-		if (threadWith) {
-			await startThreadWith(threadWith);
+		const message = draft.trim();
+		// The bots the message goes to but does not name are named at its start,
+		// so it shows who it was for, and they are asked as any named bot is.
+		const unnamed = answeringBots.filter((bot) => !named.includes(bot));
+		const addressedMessage =
+			unnamed.length > 0
+				? `${unnamed.map((bot) => `@${bot.handle}`).join(" ")} ${message}`
+				: message;
+		if (addressedMessage.length > MESSAGE_MAX_LENGTH) {
+			setStartError(
+				"With the bots it's sent to named, this message is too long. Shorten it a little.",
+			);
 			return;
 		}
 		const files = attachments.takeForSending(draft);
 		if (!files) return;
-		const message = draft.trim();
 		const submitted = draft;
-		const answering = replyingTo;
+		const answered = replyingTo;
 		setDraft("");
 		setReplyingTo(undefined);
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
 				id: uuidv4(),
-				message,
-				replyTo: answering,
+				message: addressedMessage,
+				replyTo: answered,
 				files: files.parts,
 			});
 			scrollToLatest();
@@ -342,25 +391,9 @@ export function ConversationChat({
 			scrollToLatest();
 		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));
-			setReplyingTo((current) => current ?? answering);
+			setReplyingTo((current) => current ?? answered);
 			files.putBack(failure);
 		}
-	}
-
-	/** Sends the draft as the first message of a thread with `bot`, staying in the pod's chat. */
-	async function startThreadWith(bot: AgentParticipant) {
-		const submitted = draft;
-		const answering = replyingTo;
-		setDraft("");
-		setReplyingTo(undefined);
-		const started = await threads.start(submitted, {
-			hostAgentId: bot.id,
-			replyTo: answering?.id,
-		});
-		if (started.outcome === "started") return;
-		setDraft((current) => (current === "" ? submitted : current));
-		setReplyingTo((current) => current ?? answering);
-		if (started.outcome === "refused") setStartError(THREAD_NOT_STARTED);
 	}
 
 	/** Opens a thread started from a message here in its own place. */
@@ -520,8 +553,10 @@ export function ConversationChat({
 	const draftMentions = mentionable.filter((member) => draftHandles.includes(member.handle));
 	const botStaysOut =
 		host !== undefined &&
-		draftHandles.length > 0 &&
-		!draftMentions.some((member) => member.kind === "agent");
+		mentionsOnlyPeople(draftHandles, {
+			botHandles: handlesOf(mentionable, "agent"),
+			peopleHandles: handlesOf(mentionable, "person"),
+		});
 	const composerLabel =
 		botStaysOut && draftMentions.length > 0
 			? `Message ${listNames(draftMentions.map((person) => person.name))}`
@@ -536,13 +571,18 @@ export function ConversationChat({
 		),
 		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
 	};
-	const hint = isPodChat
-		? threadWith
-			? `Sending starts a thread with ${threadWith.name}.`
-			: "Mention a bot to start a thread."
+	const askedForHelp = draftMentions.filter(
+		(member) => member.kind === "agent" && member.id !== host?.id,
+	);
+	const hint = namedBotsReply
+		? answeringBots.length > 0
+			? `${BOT_LIST.format(answeringBots.map((bot) => bot.name))} will reply here.`
+			: "Mention a bot to have it reply here."
 		: botStaysOut
 			? `${host.name} won't reply.`
-			: undefined;
+			: host && askedForHelp.length > 0
+				? `${host.name} will ask ${BOT_LIST.format(askedForHelp.map((bot) => bot.name))} for help.`
+				: undefined;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -651,6 +691,8 @@ export function ConversationChat({
 											host={host}
 											isRunning={false}
 											participants={mentionable}
+											members={details.members}
+											threadType={details.thread.type}
 											dividers={false}
 											onOpenThread={openThread}
 											onOpenArtifact={openArtifact}
@@ -674,18 +716,25 @@ export function ConversationChat({
 													: undefined
 											}
 											inRoutineThread={routineFeed}
-											threadLinesOf={(message) =>
-												startedThreads
-													.get(message.id)
-													?.map((thread) => (
-														<ThreadLine
-															key={thread.id}
-															item={thread}
-															startedBy={message.author}
-															onOpen={() => openPodThread(thread.threadId)}
-														/>
-													))
-											}
+											threadLinesOf={(message) => [
+												...(startedThreads.get(message.id) ?? []).map((thread) => (
+													<ThreadLine
+														key={thread.id}
+														item={thread}
+														startedBy={message.author}
+														onOpen={() => openPodThread(thread.threadId)}
+													/>
+												)),
+												...threadsStartedBy(message).map((started) => (
+													<BotStartedThreadLine
+														key={started.id}
+														started={started}
+														startedBy={message.author}
+														crew={details?.crew ?? []}
+														onOpen={() => openPodThread(started.id)}
+													/>
+												)),
+											]}
 											onJumpToMessage={jumpTo}
 											reacting={reacting}
 										/>
@@ -710,7 +759,12 @@ export function ConversationChat({
 											mentionable={mentionable}
 										/>
 									) : (
-										<ActivityLine item={group.item} entries={entries} onOpenThread={openThread} />
+										<ActivityLine
+											item={group.item}
+											host={host}
+											entries={entries}
+											onOpenThread={openThread}
+										/>
 									)}
 								</Fragment>
 							))}
@@ -737,7 +791,7 @@ export function ConversationChat({
 								onValueChange={setDraft}
 								onSubmit={submit}
 								submitLabel="Send message"
-								sending={send.isPending || threads.isPending}
+								sending={send.isPending}
 								error={
 									startError ??
 									(send.isError
@@ -751,7 +805,14 @@ export function ConversationChat({
 								replyingTo={
 									replyingTo && { message: replyingTo, onCancel: () => setReplyingTo(undefined) }
 								}
+								addressed={{
+									// Those the draft names too, so the row shows everyone the message goes to.
+									bots: [...addressedBots, ...named],
+									onRemove: removeRecipient,
+									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
+								}}
 								attachments={attachments}
+								notice={<ConnectionsNotice pod={pod} botName={agent?.name} />}
 							/>
 						)}
 						{/*
@@ -886,29 +947,48 @@ function sendFailureMessage(failure: unknown): string {
 	return "Message not sent. Your draft is still here.";
 }
 
-type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "thread" | "routine_paused" }>;
+type ChatActivityItem = Extract<
+	ChatMessageItem,
+	{ kind: "routine" | "collaboration" | "thread" | "routine_paused" }
+>;
 
-/** A routine run as a row among the messages. */
+/** A routine run, or another bot asking the chat's bot for help, as a row among the messages. */
 function ActivityLine({
 	item,
+	host,
 	entries,
 	onOpenThread,
 }: {
-	item: ChatActivityItem;
-	/** The threads opened beside the chat, where how its run stands is read. */
+	item: Extract<ChatMessageItem, { kind: "routine" | "collaboration" }>;
+	/** The chat's bot, which a collaboration in its chat asked for help. */
+	host: AgentParticipant | undefined;
+	/** The threads opened beside the chat, where how a run stands is read. */
 	entries: readonly ChatHistoryEntry[];
 	onOpenThread: (threadId: string) => void;
 }) {
-	if (item.kind !== "routine") return null;
-	const state = activityStateOf(entries.find((entry) => entry.threadId === item.threadId));
+	const onOpen = () => onOpenThread(item.threadId);
+	if (item.kind === "routine") {
+		return (
+			<ChatActivityRow
+				type="routine"
+				routineName={item.routineName}
+				triggerKind={item.triggerKind}
+				state={activityStateOf(entries.find((entry) => entry.threadId === item.threadId))}
+				at={item.createdAt}
+				onOpen={onOpen}
+			/>
+		);
+	}
+	if (!host) return null;
 	return (
 		<ChatActivityRow
-			type="routine"
-			routineName={item.routineName}
-			triggerKind={item.triggerKind}
-			state={state}
+			type="collaboration"
+			initiator={item.initiator}
+			recipient={host}
+			title={item.title}
+			state={item.state}
 			at={item.createdAt}
-			onOpen={() => onOpenThread(item.threadId)}
+			onOpen={onOpen}
 		/>
 	);
 }
@@ -936,7 +1016,7 @@ function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGr
 	)) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
 		// A routine's thread is marked where each run starts; any other, where each day does.
-		const separated = byRun ? startsRun(item) : startsNewDay(previousAt, at);
+		const separated = byRun ? startsRoutineRun(item) : startsNewDay(previousAt, at);
 		previousAt = at;
 		const last = groups.at(-1);
 		if (item.kind === "message") {
@@ -1157,6 +1237,52 @@ function ThreadLine({
 	);
 }
 
+/**
+ * A thread a bot started with `start_thread` in its reply. It hangs off no
+ * message, so it is shown from the call, under the reply that names it.
+ */
+function BotStartedThreadLine({
+	started,
+	startedBy,
+	crew,
+	onOpen,
+}: {
+	started: BotStartedThread;
+	startedBy: Message["author"];
+	crew: readonly ThreadParticipant[];
+	onOpen: () => void;
+}) {
+	const otherBot = started.withBotId && crew.find((member) => member.id === started.withBotId);
+	const faces = [
+		...(startedBy.kind === "routine_trigger" ? [] : [startedBy]),
+		...(otherBot ? [otherBot] : []),
+	];
+	return (
+		<SideThreadLine
+			faces={faces}
+			label={started.title}
+			description={`Open thread: ${started.title}`}
+			onOpen={onOpen}
+		/>
+	);
+}
+
+const decodeStartThreadOutput = Schema.decodeUnknownOption(
+	Schema.Struct({ thread: botStartedThreadSchema }),
+);
+
+/** The threads a bot's message started with `start_thread`, in the order it started them. */
+function threadsStartedBy(message: Message): BotStartedThread[] {
+	return message.parts.flatMap((part) => {
+		if (part.type !== "tool_call" || part.tool !== START_THREAD_TOOL) return [];
+		if (part.status !== "completed") return [];
+		return Option.match(decodeStartThreadOutput(part.output), {
+			onNone: () => [],
+			onSome: (output) => [output.thread],
+		});
+	});
+}
+
 type ChatThreadItem = Extract<ChatMessageItem, { kind: "thread" }>;
 
 /** The threads in `items` started from a message among them, by that message's id. */
@@ -1188,7 +1314,11 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 				{formatListTime(new Date(thread.createdAt), new Date())}
 			</p>
 			{details.startedFrom && (
-				<StartedFrom message={details.startedFrom} mentionable={mentionableIn(details)} />
+				<StartedFrom
+					message={details.startedFrom}
+					mentionable={mentionableIn(details)}
+					members={details.members}
+				/>
 			)}
 		</div>
 	);
@@ -1202,9 +1332,12 @@ function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
 function StartedFrom({
 	message,
 	mentionable,
+	members,
 }: {
 	message: Message;
 	mentionable: ThreadParticipant[];
+	/** The pod's people, whom its writer's `@here` or `@channel` would notify. */
+	members: readonly PersonParticipant[];
 }) {
 	const attached = message.parts
 		.filter(isAttached)
@@ -1215,12 +1348,17 @@ function StartedFrom({
 				{messageAuthorName(message.author)}
 			</span>
 			{message.content !== "" && (
-				<p className="m-0 whitespace-pre-wrap break-words text-sm text-soft-foreground leading-normal">
-					{textWithMentions(
-						message.content,
-						message.author.kind === "person" ? [...mentionable, ...GROUP_MENTIONS] : mentionable,
-					)}
-				</p>
+				<div className="min-w-0 text-sm text-soft-foreground leading-normal">
+					<MessageMarkdown
+						text={message.content}
+						mentionable={[
+							...mentionable,
+							// Written in a pod's chat or a bot's channel, as every message a thread starts from is.
+							...groupMentionsBy(message.author, members, "pod_chat"),
+						]}
+						writer={writerOf(message.author)}
+					/>
+				</div>
 			)}
 			{attached.length > 0 && (
 				<p className="m-0 truncate text-xs text-muted-foreground">{attached.join(", ")}</p>
@@ -1332,6 +1470,33 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 }
 
 /** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
-function startsRun(item: ChatMessageItem): boolean {
+function startsRoutineRun(item: ChatMessageItem): boolean {
 	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
+}
+
+/** The handles of those in `participants` who are bots (`"agent"`) or people (`"person"`). */
+function handlesOf(
+	participants: readonly ThreadParticipant[],
+	kind: ThreadParticipant["kind"],
+): Set<string> {
+	return new Set(participants.filter((one) => one.kind === kind).map((one) => one.handle));
+}
+
+/** The bots among `crew` that `message` went to: those it names, and the one it replied to. */
+function botsAddressedBy(message: Message, crew: readonly ThreadParticipant[]): AgentParticipant[] {
+	const named = botsNamed(message.content, crew);
+	const repliedTo = message.replyTo?.author;
+	const replied =
+		repliedTo?.kind === "agent" && !named.some((bot) => bot.id === repliedTo.id)
+			? crew.filter(
+					(member): member is AgentParticipant =>
+						member.kind === "agent" && member.id === repliedTo.id,
+				)
+			: [];
+	return [...named, ...replied];
+}
+
+/** `draft` with its mentions of `handle` taken out, each with the space after it. */
+function withoutMention(draft: string, handle: string): string {
+	return draft.replace(new RegExp(`${mentionPattern(handle)} ?`, "gi"), "");
 }

@@ -73,11 +73,10 @@
 	--border-dashed: light-dark(#d4d4d8, #3f3f46);
 	/*
 	 * The `glass` of a phone's floating controls, over whatever scrolls under
-	 * them. `glass-ring` cuts a count badge out of it.
+	 * them.
 	 */
 	--glass: light-dark(rgb(247 247 248 / 0.8), rgb(30 30 34 / 0.72));
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
-	--glass-ring: light-dark(#f1f1f3, #1e1e22);
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
 	/* A pod tile, and a slot in one with no bot in it. */
@@ -203,7 +202,6 @@
 	--color-scrim: var(--scrim);
 	--color-glass: var(--glass);
 	--color-glass-edge: var(--glass-edge);
-	--color-glass-ring: var(--glass-ring);
 	--color-foreground: var(--foreground);
 	--color-body-foreground: var(--body-foreground);
 	--color-muted-foreground: var(--muted-foreground);
@@ -437,6 +435,14 @@
 }
 
 /*
+ * Text whose box runs from its capitals to its baseline, leaving out the room
+ * a line keeps for descenders, so an icon centred beside it sits on the words.
+ */
+@utility text-box-cap {
+	text-box: trim-both cap alphabetic;
+}
+
+/*
  * A phone's floating controls, such as the tabs and a chat's Back: frosted
  * over whatever scrolls under them, with a hairline edge.
  */
@@ -553,15 +559,14 @@
 	}
 }
 
-/* A link in a bot's message wears the bot's accent, so it reads as a link against the words around it. */
-.message-markdown a,
-.message-markdown [data-streamdown="link"] {
+/* A link in a message is underlined, in its bot's accent where one is set, so it reads as a link against the words around it. */
+.message-markdown a {
 	color: var(--bot-mono, currentColor);
 	text-decoration: underline;
 	text-underline-offset: 2px;
 }
 
-/* An ID or a number inline in a bot's message, on the bot's own tint so it stands off the words around it. */
+/* An ID or a number inline in a message, on the chip colour, or its bot's tint where one is set, so it stands off the words around it. */
 .message-markdown :not(pre) > code {
 	padding: 1px 5px;
 	border-radius: 4px;
@@ -570,7 +575,7 @@
 	font: 500 13px var(--font-mono);
 }
 
-/* A block of code in a bot's message. Streamdown wraps the block in a themed card; the fill is set to --rail so the surface sinks below the bubble like Claude.ai's code pane, and --border-strong on the edge carries the separation when the background difference alone is subtle. */
+/* A block of code in a message. Streamdown wraps the block in a themed card; the fill is set to --rail so the surface sinks below the bubble like Claude.ai's code pane, and --border-strong on the edge carries the separation when the background difference alone is subtle. */
 .message-markdown [data-streamdown="code-block"] {
 	--code-line-height: calc(13px * 1.5);
 	background: var(--rail);

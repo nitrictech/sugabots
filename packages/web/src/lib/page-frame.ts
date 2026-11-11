@@ -1,6 +1,7 @@
 /*
  * How a bot-made page is framed in the app, as plain data, which the native
- * apps' copies are generated from.
+ * apps' copies are generated from. apps/codegen loads this module with Node,
+ * so it imports nothing but types.
  */
 
 /** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a conversation. */

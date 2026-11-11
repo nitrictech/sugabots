@@ -136,9 +136,7 @@ const opened = (search: string) =>
 export const MessageJumpedTo = meta.story({
 	render: () => <StoryApp path={opened(`message=${mention.id}`)} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("link", { name: "Open thread" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("link", { name: "Open thread" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 	},
 });
@@ -148,7 +146,7 @@ export const RunPage = meta.story({
 	render: () => <StoryApp path={opened(`threadPage=${RUN}`)} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
 		await expect(canvas.getByRole("link", { name: "Open thread" })).toBeInTheDocument();

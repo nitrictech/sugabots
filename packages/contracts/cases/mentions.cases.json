@@ -1,7 +1,13 @@
 {
 	"splitAroundMentions": [
-		{ "given": ["No mentions here."], "expect": ["No mentions here."] },
-		{ "given": ["@ada can you look?"], "expect": ["", "ada", " can you look?"] },
+		{
+			"given": ["No mentions here."],
+			"expect": ["No mentions here."]
+		},
+		{
+			"given": ["@ada can you look?"],
+			"expect": ["", "ada", " can you look?"]
+		},
 		{
 			"given": ["Ask @scout and @ops-bot, then @Ada."],
 			"expect": ["Ask ", "scout", " and ", "ops-bot", ", then ", "Ada", "."]
@@ -10,39 +16,114 @@
 			"given": ["mail ada@example.com or @ada"],
 			"expect": ["mail ada@example.com or ", "ada", ""]
 		},
-		{ "given": ["see example.@ada and @@ada"], "expect": ["see example.@ada and @@ada"] },
+		{
+			"given": ["see example.@ada and @@ada"],
+			"expect": ["see example.@ada and @@ada"]
+		},
 		{
 			"given": ["(@ada) [@grace] \"@scout\" @ada:"],
 			"expect": ["(", "ada", ") [", "grace", "] \"", "scout", "\" ", "ada", ":"]
 		},
-		{ "given": ["@ada-"], "expect": ["", "ada", "-"] },
-		{ "given": ["@ada--b @a-b-c @-ada"], "expect": ["", "ada", "--b ", "a-b-c", " @-ada"] },
-		{ "given": ["@ada_lovelace"], "expect": ["", "ada", "_lovelace"] },
-		{ "given": ["line\n@ada\n@grace"], "expect": ["line\n", "ada", "\n", "grace", ""] },
-		{ "given": ["café@ada é@ada"], "expect": ["café", "ada", " é", "ada", ""] },
-		{ "given": ["@zoé is here"], "expect": ["", "zoe", "́ is here"] },
-		{ "given": ["@Kelvin @ſam"], "expect": ["@Kelvin @ſam"] },
-		{ "given": ["@ here and @"], "expect": ["@ here and @"] },
-		{ "given": ["@here @channel please"], "expect": ["", "here", " ", "channel", " please"] }
+		{
+			"given": ["@ada-"],
+			"expect": ["", "ada", "-"]
+		},
+		{
+			"given": ["@ada--b @a-b-c @-ada"],
+			"expect": ["", "ada", "--b ", "a-b-c", " @-ada"]
+		},
+		{
+			"given": ["@ada_lovelace"],
+			"expect": ["", "ada", "_lovelace"]
+		},
+		{
+			"given": ["line\n@ada\n@grace"],
+			"expect": ["line\n", "ada", "\n", "grace", ""]
+		},
+		{
+			"given": ["café@ada é@ada"],
+			"expect": ["café", "ada", " é", "ada", ""]
+		},
+		{
+			"given": ["@zoé is here"],
+			"expect": ["", "zoe", "́ is here"]
+		},
+		{
+			"given": ["@Kelvin @ſam"],
+			"expect": ["@Kelvin @ſam"]
+		},
+		{
+			"given": ["@ here and @"],
+			"expect": ["@ here and @"]
+		},
+		{
+			"given": ["@here @channel please"],
+			"expect": ["", "here", " ", "channel", " please"]
+		}
 	],
 	"mentionedHandles": [
-		{ "given": ["Hi @Ada and @ada and @SCOUT"], "expect": ["ada", "scout"] },
-		{ "given": ["@scout @ops-bot @scout"], "expect": ["scout", "ops-bot"] },
-		{ "given": ["nobody@example.com"], "expect": [] },
-		{ "given": ["@here and @channel, @ada"], "expect": ["here", "channel", "ada"] },
-		{ "given": [""], "expect": [] }
+		{
+			"given": ["Hi @Ada and @ada and @SCOUT"],
+			"expect": ["ada", "scout"]
+		},
+		{
+			"given": ["@scout @ops-bot @scout"],
+			"expect": ["scout", "ops-bot"]
+		},
+		{
+			"given": ["nobody@example.com"],
+			"expect": []
+		},
+		{
+			"given": ["@here and @channel, @ada"],
+			"expect": ["here", "channel", "ada"]
+		},
+		{
+			"given": [""],
+			"expect": []
+		}
 	],
 	"canStartMention": [
-		{ "given": ["@ada", 0], "expect": true },
-		{ "given": ["hi @ada", 3], "expect": true },
-		{ "given": ["hi@ada", 2], "expect": false },
-		{ "given": ["a.@b", 2], "expect": false },
-		{ "given": ["@@b", 1], "expect": false },
-		{ "given": ["(@b", 1], "expect": true },
-		{ "given": ["é@b", 1], "expect": true },
-		{ "given": ["_@b", 1], "expect": false },
-		{ "given": ["hi ada", 2], "expect": false },
-		{ "given": ["hi", 5], "expect": false }
+		{
+			"given": ["@ada", 0],
+			"expect": true
+		},
+		{
+			"given": ["hi @ada", 3],
+			"expect": true
+		},
+		{
+			"given": ["hi@ada", 2],
+			"expect": false
+		},
+		{
+			"given": ["a.@b", 2],
+			"expect": false
+		},
+		{
+			"given": ["@@b", 1],
+			"expect": false
+		},
+		{
+			"given": ["(@b", 1],
+			"expect": true
+		},
+		{
+			"given": ["é@b", 1],
+			"expect": true
+		},
+		{
+			"given": ["_@b", 1],
+			"expect": false
+		},
+		{
+			"given": ["hi ada", 2],
+			"expect": false
+		},
+		{
+			"given": ["hi", 5],
+			"expect": false
+		}
 	],
 	"firstBotNamed": [
 		{
@@ -181,10 +262,22 @@
 			"expect": null
 		}
 	],
-	"withGroupMentions": [
+	"groupMentionsBy": [
 		{
 			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
 				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
 					{
 						"kind": "person",
 						"id": "u-ada",
@@ -192,24 +285,27 @@
 						"email": "ada@example.com",
 						"handle": "ada",
 						"image": null
-					},
-					{
-						"kind": "agent",
-						"id": "b-scout",
-						"name": "Scout",
-						"handle": "scout",
-						"color": "red",
-						"face": "pill",
-						"shape": "circle"
 					}
 				],
 				"conversation"
 			],
-			"expect": ["person-u-ada", "agent-b-scout", "here", "channel"]
+			"expect": ["here", "channel"]
 		},
 		{
 			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
 				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
 					{
 						"kind": "person",
 						"id": "u-ada",
@@ -217,24 +313,27 @@
 						"email": "ada@example.com",
 						"handle": "ada",
 						"image": null
-					},
-					{
-						"kind": "agent",
-						"id": "b-scout",
-						"name": "Scout",
-						"handle": "scout",
-						"color": "red",
-						"face": "pill",
-						"shape": "circle"
 					}
 				],
 				"pod_chat"
 			],
-			"expect": ["person-u-ada", "agent-b-scout", "here", "channel"]
+			"expect": ["here", "channel"]
 		},
 		{
 			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
 				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
 					{
 						"kind": "person",
 						"id": "u-ada",
@@ -246,37 +345,23 @@
 				],
 				"bot_channel"
 			],
-			"expect": ["person-u-ada", "here", "channel"]
+			"expect": ["here", "channel"]
 		},
 		{
 			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
 				[
 					{
-						"kind": "agent",
-						"id": "b-scout",
-						"name": "Scout",
-						"handle": "scout",
-						"color": "red",
-						"face": "pill",
-						"shape": "circle"
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
 					},
-					{
-						"kind": "agent",
-						"id": "b-ops",
-						"name": "Ops Bot",
-						"handle": "ops-bot",
-						"color": "amber",
-						"face": "dot",
-						"shape": "squircle"
-					}
-				],
-				"conversation"
-			],
-			"expect": ["agent-b-scout", "agent-b-ops"]
-		},
-		{
-			"given": [
-				[
 					{
 						"kind": "person",
 						"id": "u-ada",
@@ -284,24 +369,27 @@
 						"email": "ada@example.com",
 						"handle": "ada",
 						"image": null
-					},
-					{
-						"kind": "agent",
-						"id": "b-scout",
-						"name": "Scout",
-						"handle": "scout",
-						"color": "red",
-						"face": "pill",
-						"shape": "circle"
 					}
 				],
 				"routine"
 			],
-			"expect": ["person-u-ada", "agent-b-scout"]
+			"expect": []
 		},
 		{
 			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
 				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
 					{
 						"kind": "person",
 						"id": "u-ada",
@@ -313,9 +401,93 @@
 				],
 				"collaboration"
 			],
-			"expect": ["person-u-ada"]
+			"expect": []
 		},
-		{ "given": [[], "conversation"], "expect": [] }
+		{
+			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
+				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					}
+				],
+				"conversation"
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"kind": "person",
+					"id": "u-me"
+				},
+				[],
+				"conversation"
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"kind": "agent"
+				},
+				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
+					{
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					}
+				],
+				"pod_chat"
+			],
+			"expect": []
+		},
+		{
+			"given": [
+				{
+					"kind": "routine"
+				},
+				[
+					{
+						"kind": "person",
+						"id": "u-me",
+						"name": "Grace Hopper",
+						"email": "grace@example.com",
+						"handle": "grace",
+						"image": null
+					},
+					{
+						"kind": "person",
+						"id": "u-ada",
+						"name": "Ada Lovelace",
+						"email": "ada@example.com",
+						"handle": "ada",
+						"image": null
+					}
+				],
+				"conversation"
+			],
+			"expect": []
+		}
 	],
 	"targetWithHandle": [
 		{
@@ -338,8 +510,14 @@
 						"face": "pill",
 						"shape": "circle"
 					},
-					{ "kind": "group", "handle": "here" },
-					{ "kind": "group", "handle": "channel" }
+					{
+						"kind": "group",
+						"handle": "here"
+					},
+					{
+						"kind": "group",
+						"handle": "channel"
+					}
 				],
 				"ada"
 			],
@@ -365,8 +543,14 @@
 						"face": "pill",
 						"shape": "circle"
 					},
-					{ "kind": "group", "handle": "here" },
-					{ "kind": "group", "handle": "channel" }
+					{
+						"kind": "group",
+						"handle": "here"
+					},
+					{
+						"kind": "group",
+						"handle": "channel"
+					}
 				],
 				"SCOUT"
 			],
@@ -392,8 +576,14 @@
 						"face": "pill",
 						"shape": "circle"
 					},
-					{ "kind": "group", "handle": "here" },
-					{ "kind": "group", "handle": "channel" }
+					{
+						"kind": "group",
+						"handle": "here"
+					},
+					{
+						"kind": "group",
+						"handle": "channel"
+					}
 				],
 				"channel"
 			],
@@ -418,8 +608,14 @@
 						"handle": "ada",
 						"image": null
 					},
-					{ "kind": "group", "handle": "here" },
-					{ "kind": "group", "handle": "channel" }
+					{
+						"kind": "group",
+						"handle": "here"
+					},
+					{
+						"kind": "group",
+						"handle": "channel"
+					}
 				],
 				"here"
 			],

@@ -82,7 +82,9 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 
 async function toolsFor(connection: ConnectionTarget) {
 	const offered = ConnectionTools.from({
-		connections: { targetsForPod: () => Effect.succeed([connection]) },
+		connections: {
+			targetsForPod: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
+		},
 		httpClients: clients,
 	});
 	return (await run(offered.forPod("w", "p", NO_TURN))).tools;
@@ -180,4 +182,11 @@ describe("an HTTP connection's tools", () => {
 	});
 });
 
-const NO_TURN = { turnId: "t", agentId: "a", workspace: undefined, sandboxSignsIn: false };
+const NO_TURN = {
+	turnId: "t",
+	agentId: "a",
+	threadId: "0199a3a0-0000-7000-8000-000000000001",
+	files: { read: () => Effect.die(new Error("No thread files in this test")) },
+	workspace: undefined,
+	sandboxSignsIn: false,
+};
