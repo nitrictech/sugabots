@@ -355,6 +355,67 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		]);
 	});
 
+	it("ends rather than starts again a turn whose server died after an allowed mutating call ran", async () => {
+		const execute = vi.fn(async () => ({ removed: true }));
+		let reopened: Awaited<ReturnType<typeof execution.prepare>> | undefined;
+		// The model calls the tool, which finishes; then, while the reply is
+		// still streaming, the server dies and another one picks the turn up.
+		const model = Models.fromStream((input) =>
+			Effect.sync(() =>
+				streamed(
+					(async function* () {
+						yield "Wiping. ";
+						await input.tools?.[CALL_TOOL]?.execute?.(
+							{ tool: "wiki__wipe", arguments: {} } as never,
+							{ toolCallId: "sdk-1", messages: [] } as never,
+						);
+						reopened = await execution.prepare(prepared.run);
+						yield "Done.";
+					})(),
+				),
+			),
+		);
+
+		await segmentWith(model, {
+			connectionTools: {
+				forPod: () =>
+					Effect.succeed({
+						tools: {
+							wiki__wipe: {
+								tool: tool({
+									inputSchema: Schema.Struct({}).pipe(
+										Schema.toStandardSchemaV1,
+										Schema.toStandardJSONSchemaV1,
+									),
+									execute,
+								}),
+								mutating: true,
+								access: "allow",
+								connectionId,
+								handle: "wiki",
+								description: "",
+								inputSchema: { type: "object" as const },
+								connectionRevision: 1,
+								remoteToolName: "wipe",
+							},
+						},
+						unavailable: [],
+						signInExpired: [],
+						instructions: {},
+						addable: [],
+						close: async () => undefined,
+					}),
+			},
+		});
+
+		expect(execute).toHaveBeenCalledOnce();
+		expect(reopened).toMatchObject({ _tag: "NotRunnable", ended: { state: "failed" } });
+		expect(await storedTurn()).toMatchObject({
+			status: "failed",
+			error: expect.stringContaining("may have run"),
+		});
+	});
+
 	describe("saving its own instructions", () => {
 		beforeEach(async () => {
 			await onDatabase((db) =>

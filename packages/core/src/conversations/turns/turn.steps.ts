@@ -490,6 +490,7 @@ const streamReply = (
 				artifacts,
 				calls: toolCalls,
 				approvals,
+				turns,
 				approvalBoundTools,
 				builtIn,
 				sandbox,
@@ -515,10 +516,6 @@ const streamReply = (
 								? draft.toolCalls
 								: [...draft.toolCalls, { id, atOffset }],
 						})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
-					markActed: () =>
-						Ref.update(reply, (draft) => ({ ...draft, acted: true })).pipe(
-							Effect.andThen(Effect.provideContext(saveReply, context)),
-						),
 				},
 				signal,
 			});

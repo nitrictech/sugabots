@@ -174,12 +174,12 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 
 /**
  * runsAgainAfterFailure reports whether a turn in `state` runs again after
- * its run fails: not once it has a checkpoint or `acted` says a tool that
- * changes things ran, since running again could do it again, and not
- * once it has run `MAX_TURN_RUNS` times.
+ * its run fails: not once it has a checkpoint or a tool that changes things
+ * started, since running again could do it again, and not once it has run
+ * `MAX_TURN_RUNS` times.
  */
-export const runsAgainAfterFailure = (state: TurnState, acted: boolean): boolean =>
-	!state.checkpointed && !acted && !state.mutationStarted && state.runs < MAX_TURN_RUNS;
+export const runsAgainAfterFailure = (state: TurnState): boolean =>
+	!state.checkpointed && !state.mutationStarted && state.runs < MAX_TURN_RUNS;
 
 /** mayRunTools reports whether the turn may start a tool: it is running and nobody asked it to stop. */
 export const mayRunTools = (state: Pick<TurnState, "status" | "cancelRequested">): boolean =>

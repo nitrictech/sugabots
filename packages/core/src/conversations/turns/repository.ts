@@ -139,7 +139,8 @@ export interface Interface {
 	) => Effect.Effect<Ended | undefined>;
 	/**
 	 * Records that a mutating tool crossed its dispatch boundary, so the turn
-	 * is not run again after a failure from here on. A fact the
+	 * is not started again from here on, after a failure or after its server
+	 * stopped without saying how the run ended. A fact the
 	 * lifecycle reads rather than a transition, so it takes no lock.
 	 */
 	readonly markActed: (turnId: string) => Effect.Effect<void>;
@@ -553,8 +554,7 @@ export const make = Effect.gen(function* () {
 							TurnEvent.Fail({ userMessage }),
 						);
 						if (locked?.decided._tag !== "Next") return false;
-						const willRetry =
-							mayRunAgain && runsAgainAfterFailure(locked.state, draft.acted ?? false);
+						const willRetry = mayRunAgain && runsAgainAfterFailure(locked.state);
 						yield* writeReply(reply, draft, "failed");
 						yield* write(locked.id, locked.decided.state);
 						yield* toolCalls.abandonUnfinished([locked.id], userMessage);
@@ -842,11 +842,6 @@ export const ReplyDraft = Schema.Struct({
 	content: Schema.String,
 	collaborations: Schema.Array(PlacedPart),
 	toolCalls: Schema.Array(PlacedPart),
-	/**
-	 * A tool that may have changed something ran. A failed run is then not
-	 * retried, since the retry could do it again.
-	 */
-	acted: Schema.optional(Schema.Boolean),
 });
 export type ReplyDraft = typeof ReplyDraft.Type;
 

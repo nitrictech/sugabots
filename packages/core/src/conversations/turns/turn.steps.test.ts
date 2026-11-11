@@ -160,7 +160,7 @@ describe("runSegment", () => {
 		);
 	});
 
-	it("offers a connection's tools for the turn, notes when an allowed one acted, and closes the session after", async () => {
+	it("offers a connection's tools for the turn, records that the turn acted once one that changes things starts, and closes the session after", async () => {
 		const { execution, turns } = fakes();
 		const calls = toolCalls();
 		const close = vi.fn(async () => undefined);
@@ -236,9 +236,10 @@ describe("runSegment", () => {
 		expect(calls.open).toHaveBeenCalledWith(
 			expect.objectContaining({ tool: "wiki__wipe", mutating: true }),
 		);
+		expect(turns.markActed).toHaveBeenCalledWith(prepared.turnId);
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
-			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
+			expect.objectContaining({ content: "Clearing. Done." }),
 			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 		expect(close).toHaveBeenCalledOnce();
@@ -729,6 +730,7 @@ function fakes() {
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
 		abandon: vi.fn(() => Effect.undefined),
 		replyFiles: vi.fn(() => Effect.succeed([])),
+		markActed: vi.fn(() => Effect.void),
 	};
 	return { execution, turns };
 }
@@ -746,6 +748,7 @@ interface Given {
 		| "isCancellationRequested"
 		| "abandon"
 		| "replyFiles"
+		| "markActed"
 	>;
 	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	collaborations: Partial<Collaborations.Interface>;
