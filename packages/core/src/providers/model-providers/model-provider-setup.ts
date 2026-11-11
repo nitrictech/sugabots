@@ -29,7 +29,7 @@ import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Egress } from "../network/egress.ts";
-import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
+import { movesAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
 	holdingModel,
 	keepingHeldModelsOffered,
@@ -91,7 +91,9 @@ export interface Interface {
 	>;
 	/**
 	 * A new key sends the provider back through discovery, and switching it on
-	 * tests it first; either way it is on only once it has answered.
+	 * tests it first; either way it is on only once it has answered. A new
+	 * address without a new key takes away the key, headers and sign-in it
+	 * held, switching it off.
 	 */
 	readonly update: (
 		input: InProvider & { changes: ModelProviderUpdate },
@@ -455,7 +457,16 @@ export const make = Effect.gen(function* () {
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
-					if (changes.active === true && providerLacksCredential(current) && !changes.apiKey) {
+					// A new address takes away the key and sign-in, unless a key comes with it.
+					const losesCredential = movesAddress(changes.baseUrl, current.baseUrl) && !changes.apiKey;
+					const credentialAfter = losesCredential
+						? { ...current, hasApiKey: false, signedIn: false }
+						: current;
+					if (
+						changes.active === true &&
+						providerLacksCredential(credentialAfter) &&
+						!changes.apiKey
+					) {
 						return yield* new ProviderActivationRequiresCredential({
 							missing: missingCredential(current.preset),
 						});
@@ -463,7 +474,7 @@ export const make = Effect.gen(function* () {
 					const write = providers.update(workspaceId, providerId, changes, actor.userId);
 					// Switching it off and taking its key away both stop it answering. A
 					// new key does only until it is tried, just below.
-					const takesAway = changes.active === false || changes.apiKey === null;
+					const takesAway = changes.active === false || changes.apiKey === null || losesCredential;
 					const updated = yield* takesAway ? keepingHeldModelsOffered(workspaceId, write) : write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();

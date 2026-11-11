@@ -9,7 +9,7 @@ import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { stillConfiguredAs } from "../tested-configuration.ts";
+import { movesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchConnection } from "./search-connection.ts";
 
 /**
@@ -17,7 +17,7 @@ import type { SearchConnection } from "./search-connection.ts";
  *
  * Search is never on while the provider's preset needs a key it lacks:
  * switching it on without one is refused, and taking the key away switches
- * it off.
+ * it off. A new address takes the stored key away, unless a key comes with it.
  */
 export interface Interface {
 	/**
@@ -138,6 +138,7 @@ export const make = Effect.gen(function* () {
 							db
 								.select({
 									preset: searchProvider.preset,
+									baseUrl: searchProvider.baseUrl,
 									apiKeyEncrypted: searchProvider.apiKeyEncrypted,
 								})
 								.from(searchProvider)
@@ -145,10 +146,12 @@ export const make = Effect.gen(function* () {
 								.for("update"),
 						);
 						if (!current) return undefined;
+						const dropsKey =
+							changes.apiKey === undefined && movesAddress(changes.baseUrl, current.baseUrl);
 						const needsKey = searchProviderPreset(current.preset).requiresApiKey;
 						const hasKey =
 							changes.apiKey === undefined
-								? current.apiKeyEncrypted !== null
+								? current.apiKeyEncrypted !== null && !dropsKey
 								: changes.apiKey !== null;
 						if (changes.enabled === true && needsKey && !hasKey) {
 							return yield* new SearchProviderApiKeyRequired();
@@ -161,12 +164,11 @@ export const make = Effect.gen(function* () {
 								.set({
 									enabled: needsKey && !hasKey ? false : changes.enabled,
 									baseUrl: changes.baseUrl,
-									apiKeyEncrypted:
-										changes.apiKey === undefined
-											? undefined
-											: changes.apiKey === null
-												? null
-												: cipher.encrypt(changes.apiKey),
+									apiKeyEncrypted: changes.apiKey
+										? cipher.encrypt(changes.apiKey)
+										: changes.apiKey === null || dropsKey
+											? null
+											: undefined,
 									lastTestedAt: configurationChanged ? null : undefined,
 									lastTestError: configurationChanged ? null : undefined,
 								})

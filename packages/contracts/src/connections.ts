@@ -237,7 +237,10 @@ export const connectionUpdateSchema = Schema.Struct({
 	url: Schema.optional(providerUrlSchema),
 	/** Absent leaves the header alone; null means the server takes no secret. */
 	secretHeader: Schema.optional(Schema.NullOr(secretHeaderSchema)),
-	/** Absent leaves the stored secret alone; null removes it. */
+	/**
+	 * Absent leaves the stored secret alone, unless `url` moves the connection,
+	 * which takes away its secret and OAuth sign-in; null removes it.
+	 */
 	secret: Schema.optional(Schema.NullOr(secretSchema)),
 	/** Sets every tool the connection lists. */
 	access: Schema.optional(connectionAccessSchema),

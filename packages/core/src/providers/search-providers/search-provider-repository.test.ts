@@ -147,4 +147,51 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 		await providers.recordTest(workspaceId, connection.configurationUpdatedAt);
 		expect(await shown()).toMatchObject({ status: "untested" });
 	});
+
+	describe("moving the provider's address", () => {
+		const braveAt = "https://api.search.brave.com/res/v1";
+
+		it("drops the stored key, which would otherwise go to the new address, and switches search off", async () => {
+			await replace({ preset: "brave", apiKey: "brave-key", enabled: true });
+
+			await providers.update(workspaceId, { baseUrl: "https://elsewhere.example" });
+
+			expect(await providers.connection(workspaceId)).toBeUndefined();
+			expect(await shown()).toMatchObject({ hasApiKey: false, enabled: false });
+		});
+
+		it("refuses to keep search on at a new address without a key", async () => {
+			await replace({ preset: "brave", apiKey: "brave-key", enabled: true });
+
+			await expect(
+				providers.update(workspaceId, { baseUrl: "https://elsewhere.example", enabled: true }),
+			).rejects.toBeInstanceOf(SearchProviderRepository.SearchProviderApiKeyRequired);
+			expect(await providers.resolve(workspaceId)).toMatchObject({
+				baseUrl: braveAt,
+				apiKey: "brave-key",
+			});
+		});
+
+		it("keeps a key given with the new address", async () => {
+			await replace({ preset: "brave", apiKey: "brave-key", enabled: true });
+
+			await providers.update(workspaceId, {
+				baseUrl: "https://elsewhere.example",
+				apiKey: "new-key",
+			});
+
+			expect(await providers.resolve(workspaceId)).toMatchObject({
+				baseUrl: "https://elsewhere.example",
+				apiKey: "new-key",
+			});
+		});
+
+		it("keeps the key when the address given is the one it has", async () => {
+			await replace({ preset: "brave", apiKey: "brave-key", enabled: true });
+
+			await providers.update(workspaceId, { baseUrl: braveAt });
+
+			expect(await providers.resolve(workspaceId)).toMatchObject({ apiKey: "brave-key" });
+		});
+	});
 });

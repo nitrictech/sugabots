@@ -421,4 +421,68 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			tools: [{ name: "web_search_exa" }],
 		});
 	});
+
+	describe("moving a connection's address", () => {
+		const withSecret = () =>
+			create({
+				name: "Wiki",
+				url: "https://wiki.example.com/mcp",
+				secretHeader: "authorization",
+				secret: "Bearer abc",
+			});
+		const headersOf = async (connectionId: string) =>
+			(await connections.target(workspaceId, podId, connectionId))?.headers;
+
+		it("drops the stored secret, which would otherwise go to the new address", async () => {
+			const made = await withSecret();
+
+			await connections.update(workspaceId, podId, made.id, {
+				url: "https://elsewhere.example/mcp",
+			});
+
+			expect(await headersOf(made.id)).toEqual({});
+			expect((await shown(made.id))?.hasSecret).toBe(false);
+		});
+
+		it("keeps a secret given with the new address", async () => {
+			const made = await withSecret();
+
+			await connections.update(workspaceId, podId, made.id, {
+				url: "https://elsewhere.example/mcp",
+				secret: "Bearer new",
+			});
+
+			expect(await headersOf(made.id)).toEqual({ authorization: "Bearer new" });
+		});
+
+		it("keeps the secret when the address given is the one it has", async () => {
+			const made = await withSecret();
+
+			await connections.update(workspaceId, podId, made.id, {
+				url: "https://wiki.example.com/mcp",
+			});
+
+			expect(await headersOf(made.id)).toEqual({ authorization: "Bearer abc" });
+		});
+
+		it("drops an OAuth connection's tokens and client, so it must sign in again", async () => {
+			const made = await create({
+				name: "Linear",
+				url: "https://mcp.linear.app/mcp",
+				auth: "oauth",
+			});
+			await connections.saveOauthRecord(workspaceId, made.id, {
+				clientInformation: { client_id: "client-1" },
+				tokens: { access_token: "token-1", token_type: "Bearer" },
+				state: "",
+			});
+
+			await connections.update(workspaceId, podId, made.id, {
+				url: "https://elsewhere.example/mcp",
+			});
+
+			expect(await connections.oauthRecord(workspaceId, made.id)).toBeUndefined();
+			expect((await shown(made.id))?.signedIn).toBe(false);
+		});
+	});
 });
