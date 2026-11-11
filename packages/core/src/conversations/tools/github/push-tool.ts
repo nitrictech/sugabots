@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 import { BOT_BRANCH_PREFIX } from "../../../providers/connections/github/connected.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connections/github/push.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { inSandbox, type OpenSandbox, type Place } from "../sandbox/tools.ts";
+import { inSandbox, type Place, type TurnSandbox } from "../sandbox/tools.ts";
 import {
 	botBranchSchema,
 	commitSchema,
@@ -16,8 +16,7 @@ import {
 const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
 
 /** The pod's sandbox, while the turn may use it, for tools that work from a checkout there. */
-export interface Workspace {
-	readonly open: OpenSandbox;
+export interface Workspace extends TurnSandbox {
 	readonly place: Place;
 }
 
@@ -43,11 +42,14 @@ export function pushTool(
 						"Replace the branch even if it has commits this one doesn't, as after a rebase",
 				}),
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-			execute: async ({ repository, directory, commit, branch, force = false }) => {
+			execute: async (
+				{ repository, directory, commit, branch, force = false },
+				{ abortSignal },
+			) => {
 				const path = connected.repository(repository);
 				if (!path) return notConnectionRepository(repository, connected.repositories);
 				if (!workspace) return failed("This bot has no sandbox to push from in this turn.");
-				const bundled = await inSandbox(workspace.open, (sandbox) =>
+				const bundled = await inSandbox(workspace, abortSignal, (sandbox) =>
 					bundleCommit(sandbox, workspace.place, { turnId, directory, commit }),
 				);
 				if (!("bundle" in bundled)) return bundled;

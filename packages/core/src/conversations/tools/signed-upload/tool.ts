@@ -16,8 +16,8 @@ import { unreadableFileRefusal } from "../read-thread-file/tool.ts";
 import {
 	inSandbox,
 	MAX_SHARED_FILE_BYTES,
-	type OpenSandbox,
 	type Place,
+	type TurnSandbox,
 } from "../sandbox/tools.ts";
 
 /** Longer than a signed URL lives, which is a minute for Linear's. */
@@ -53,7 +53,7 @@ export interface UploadSide {
 	readonly threadId: string;
 	readonly files: Pick<ThreadFiles.Interface, "read">;
 	/** Undefined when the turn has no sandbox, so a path is refused. */
-	readonly sandbox: { readonly open: OpenSandbox; readonly place: Place } | undefined;
+	readonly sandbox: (TurnSandbox & { readonly place: Place }) | undefined;
 	readonly upload: EgressHttpClients;
 	readonly run: RunEffect<never>;
 }
@@ -106,8 +106,8 @@ export function signedUploadTool(
 			}
 			const content =
 				source.kind === "thread"
-					? await run(threadFileContent(files, threadId, source.fileId))
-					: await sandboxFileContent(sandbox, source.path);
+					? await run(threadFileContent(files, threadId, source.fileId), { signal: abortSignal })
+					: await sandboxFileContent(sandbox, source.path, abortSignal);
 			if (!(content instanceof Uint8Array)) return content;
 			return put(
 				upload.for({ baseUrl: service.destination }),
@@ -157,6 +157,7 @@ function threadFileContent(
 async function sandboxFileContent(
 	sandbox: UploadSide["sandbox"],
 	path: string,
+	abortSignal: AbortSignal | undefined,
 ): Promise<Uint8Array | Failed> {
 	if (!sandbox)
 		return failed(userText`This bot has no sandbox, so only files in the thread can be uploaded.`);
@@ -165,7 +166,7 @@ async function sandboxFileContent(
 			userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_SANDBOX_FILE_MEGABYTES} MB from the sandbox can be uploaded.`,
 		);
 	const absolutePath = posix.resolve(sandbox.place.folder, path);
-	const read = await inSandbox(sandbox.open, (opened) =>
+	const read = await inSandbox(sandbox, abortSignal, (opened) =>
 		Effect.gen(function* () {
 			// Its size alone first, so a file too large is never read.
 			const { sizeBytes } = yield* opened.readFile(absolutePath, 0);

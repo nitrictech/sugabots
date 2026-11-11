@@ -3,7 +3,7 @@ export * as BuiltInTools from "./built-in.ts";
 import { userText } from "@sugabots/errors";
 import type { ToolSet } from "ai";
 import { Context, Effect, Layer } from "effect";
-import type { Database } from "../../database/database.ts";
+import { type Database, effectRunner } from "../../database/database.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
 import { searchBackend, searchEndpoint } from "../../providers/search-providers/backends.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
@@ -82,7 +82,9 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 					};
 				}
 				// The tool runs searches as promises; they log through the turn's services.
-				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
+				const run = effectRunner<never>({
+					runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<never>()),
+				});
 				const search = searchBackend(
 					connection,
 					httpClients.for({ baseUrl: searchEndpoint(connection) }),
@@ -91,7 +93,7 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 					tools: {
 						[WEB_FETCH_TOOL]: webFetch,
 						[WEB_SEARCH_TOOL]: webSearchTool({
-							search: (request) => runPromise(search(request)),
+							search: (request) => run(search(request), { signal: request.signal }),
 							settingsPageUrl: searchSettingsPageUrl,
 						}),
 					},
