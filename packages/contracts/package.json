@@ -10,8 +10,7 @@
 		"./*": "./src/*.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit",
-		"generate": "node scripts/generate.ts"
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@sugabots/errors": "workspace:*",
