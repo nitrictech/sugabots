@@ -193,6 +193,8 @@ export const make = Effect.gen(function* () {
 						const addressMoved =
 							changes.settings !== undefined &&
 							addressesIn(changes.settings).join() !== addressesIn(current.settings).join();
+						const configurationChanged =
+							changes.settings !== undefined || changes.apiKey !== undefined;
 						const values = {
 							...(changes.enabled !== undefined ? { enabled: changes.enabled } : {}),
 							...(changes.settings ? { settings: changes.settings } : {}),
@@ -216,10 +218,11 @@ export const make = Effect.gen(function* () {
 								.set({
 									...values,
 									enabled: next.enabled,
-									// What Sugabots made for other settings or another account
-									// says nothing about the ones now configured.
-									...(changes.settings || changes.apiKey !== undefined
-										? { managedResources: null }
+									// What Sugabots made for, and how a test went with, other
+									// settings or another account says nothing about the ones
+									// now configured.
+									...(configurationChanged
+										? { managedResources: null, lastTestedAt: null, lastTestError: null }
 										: {}),
 								})
 								.where(eq(sandboxProvider.id, providerId))

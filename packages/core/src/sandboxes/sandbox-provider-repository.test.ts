@@ -127,6 +127,39 @@ describe.skipIf(!process.env.DATABASE_URL)("sandbox providers, against Postgres"
 		expect(updated?.enabled).toBe(false);
 	});
 
+	it("forgets how its test went once its key or settings change, not when it is switched on", async () => {
+		const provider = await create({ settings: { preset: "e2b" }, apiKey: "key" });
+		const passTest = async () => {
+			const configured = await runOnPostgres(providers.connection(workspaceId, provider.id));
+			if (!configured) throw new Error("not configured");
+			await runOnPostgres(
+				providers.recordTest(workspaceId, provider.id, configured.configurationUpdatedAt),
+			);
+		};
+		const statusOf = async () => {
+			const row = (await runOnPostgres(providers.list(workspaceId))).find(
+				({ id }) => id === provider.id,
+			);
+			return row && toSandboxProvider(row).status;
+		};
+
+		await passTest();
+		expect(await statusOf()).toBe("connected");
+		await runOnPostgres(providers.update(workspaceId, provider.id, { enabled: true }));
+		expect(await statusOf()).toBe("connected");
+
+		await runOnPostgres(providers.update(workspaceId, provider.id, { apiKey: "another-key" }));
+		expect(await statusOf()).toBe("untested");
+
+		await passTest();
+		await runOnPostgres(
+			providers.update(workspaceId, provider.id, {
+				settings: { preset: "e2b", template: "another-template" },
+			}),
+		);
+		expect(await statusOf()).toBe("untested");
+	});
+
 	it("forgets its template build once the template is another", async () => {
 		const provider = await create({ settings: { preset: "e2b" }, apiKey: "key" });
 		const build = { templateId: "template", buildId: "build" };
