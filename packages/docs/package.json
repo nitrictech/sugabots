@@ -6,6 +6,8 @@
 	"type": "module",
 	"exports": {
 		".": "./src/pages.ts",
+		"./page": "./src/page.ts",
+		"./pod-parts": "./src/pod-parts.ts",
 		"./roles": "./src/roles.ts"
 	},
 	"scripts": {

@@ -44,6 +44,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "docs",
+					root: "packages/docs",
+					environment: "node",
+					include: ["src/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "emoji",
 					root: "packages/emoji",
 					environment: "node",

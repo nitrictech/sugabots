@@ -1,18 +1,11 @@
 import type { BotLook } from "@sugabots/avatars";
+import { type DocHeading, parseDocPage } from "@sugabots/docs/page";
 import GithubSlugger from "github-slugger";
 import type { MDXContent } from "mdx/types";
 import { type DocGroup, docGroups } from "@/docs/nav";
 
-/** What each page's frontmatter must say. */
-interface Frontmatter {
-	title: string;
-	/** One sentence: the page's lede, its card on the docs home, and its meta description. */
-	description: string;
-}
-
 interface DocModule {
 	default: MDXContent;
-	frontmatter: Frontmatter;
 }
 
 /** A second-level heading, for the page's table of contents. */
@@ -22,13 +15,16 @@ export interface Heading {
 	text: string;
 }
 
-export interface DocPage extends Frontmatter {
+export interface DocPage {
 	slug: string;
+	title: string;
+	/** One sentence: the page's lede, its card on the docs home, and its meta description. */
+	description: string;
 	group: Pick<DocGroup, "title" | "tone">;
 	bot: BotLook;
 	Content: MDXContent;
 	headings: readonly Heading[];
-	/** The page as Markdown, headed by its title and description, for readers who want to paste it elsewhere. */
+	/** The page as Markdown, headed by its title and description, for agents and for readers who want to paste it elsewhere. */
 	markdown: string;
 }
 
@@ -46,32 +42,14 @@ function slugFromPath(path: string) {
 	return path.slice(CONTENT_DIRECTORY.length, -".mdx".length);
 }
 
-const FRONTMATTER = /^---\n[\s\S]*?\n---\n+/;
-const CODE_FENCE = /^(```|~~~)/;
-
-/** Inline Markdown reduced to the text rehype-slug sees: no code ticks, emphasis or link targets. */
-function plainText(markdown: string) {
-	return markdown
-		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-		.replace(/[`*_]/g, "")
-		.trim();
-}
-
 /** The page's `##` headings, with the ids rehype-slug gives them. */
-function secondLevelHeadings(markdown: string): Heading[] {
+function tableOfContents(headings: readonly DocHeading[]): Heading[] {
 	// rehype-slug numbers repeated headings across the whole page, so every level counts.
 	const slugger = new GithubSlugger();
-	const headings: Heading[] = [];
-	let inCodeFence = false;
-	for (const line of markdown.split("\n")) {
-		if (CODE_FENCE.test(line)) inCodeFence = !inCodeFence;
-		const match = inCodeFence ? null : /^(#{1,6})\s+(.+)$/.exec(line);
-		if (!match?.[1] || !match[2]) continue;
-		const text = plainText(match[2]);
-		const id = slugger.slug(text);
-		if (match[1].length === 2) headings.push({ id, text });
-	}
-	return headings;
+	return headings
+		.map(({ depth, text }) => ({ depth, id: slugger.slug(text), text }))
+		.filter(({ depth }) => depth === 2)
+		.map(({ id, text }) => ({ id, text }));
 }
 
 function loadPages(): DocPage[] {
@@ -82,8 +60,7 @@ function loadPages(): DocPage[] {
 			const source = sources[path];
 			if (!module || source === undefined)
 				throw new Error(`docs/nav.ts lists ${slug}, but ${path} is missing`);
-			const body = source.replace(FRONTMATTER, "");
-			const { title, description } = module.frontmatter;
+			const { title, description, headings, markdown } = parseDocPage(slug, source);
 			return {
 				title,
 				description,
@@ -91,8 +68,8 @@ function loadPages(): DocPage[] {
 				group: { title: group.title, tone: group.tone },
 				bot,
 				Content: module.default,
-				headings: secondLevelHeadings(body),
-				markdown: `# ${title}\n\n${description}\n\n${body}`,
+				headings: tableOfContents(headings),
+				markdown,
 			};
 		}),
 	);

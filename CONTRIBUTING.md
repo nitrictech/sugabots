@@ -214,7 +214,9 @@ sets its place and the bot beside it. Bots read the same files through their
 `read_docs` tool, a `##` section at a time, so give each section a heading
 that says what it covers. Pages can use the components in
 `packages/website/src/docs/components/mdx-components.ts` without importing
-them. Preview with `bun run --cwd packages/website dev`.
+them. Give a new one its Markdown form, or drop it on purpose, in
+`packages/docs/src/components-as-markdown.ts`, which writes the pages out for
+bots and for the website's Markdown versions. Preview with `bun run --cwd packages/website dev`.
 
 The website sends analytics to PostHog, through Suga's proxy at `p.suga.app`,
 only from a production build made with `VITE_POSTHOG_KEY` set to the project

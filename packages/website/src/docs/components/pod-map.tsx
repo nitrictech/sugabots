@@ -1,3 +1,4 @@
+import { type PodPart, podParts } from "@sugabots/docs/pod-parts";
 import { cn } from "cn";
 import { MessagesSquareIcon, PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -9,33 +10,16 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { cast } from "@/docs/cast";
 
-const parts = {
-	people: {
-		label: "People",
-		explanation:
-			"Everyone added to the pod sees the same chats, results and approvals. Admins can reach every shared pod.",
-	},
-	bots: {
-		label: "Bots",
-		explanation:
-			"Each bot lives in one pod, with its own instructions and model. Bots in a pod can ask each other for help.",
-	},
-	chats: {
-		label: "Chats",
-		explanation:
-			"Every bot has one chat in its pod, shared by everyone in it. Talk to a bot there, together.",
-	},
-	connections: {
-		label: "Connections",
-		explanation:
-			"Tools from apps like Linear or Notion, plugged in once for the whole pod. Every bot in it can use them, with your approval.",
-	},
-} as const;
-
-type Part = keyof typeof parts;
-
 /** One region of the map, dimmed while another is picked. */
-function Region({ part, picked, children }: { part: Part; picked: Part; children: ReactNode }) {
+function Region({
+	part,
+	picked,
+	children,
+}: {
+	part: PodPart;
+	picked: PodPart;
+	children: ReactNode;
+}) {
 	const isPicked = part === picked;
 	return (
 		<div
@@ -45,7 +29,7 @@ function Region({ part, picked, children }: { part: Part; picked: Part; children
 			)}
 		>
 			<p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
-				{parts[part].label}
+				{podParts[part].label}
 			</p>
 			{children}
 		</div>
@@ -64,7 +48,7 @@ function PersonFace({ initials }: { initials: string }) {
 
 /** A pod taken apart: pick a part to see what it is and how it fits. */
 export function PodMap() {
-	const [picked, setPicked] = useState<Part>("people");
+	const [picked, setPicked] = useState<PodPart>("people");
 	const bots = [cast.tripPlanner, cast.budgetKeeper];
 
 	return (
@@ -121,7 +105,7 @@ export function PodMap() {
 			</div>
 			<div className="flex flex-col gap-4 border-t px-5 py-4">
 				<div role="tablist" aria-label="Parts of a pod" className="flex flex-wrap gap-2">
-					{(Object.keys(parts) as Part[]).map((part) => (
+					{(Object.keys(podParts) as PodPart[]).map((part) => (
 						<button
 							key={part}
 							type="button"
@@ -135,7 +119,7 @@ export function PodMap() {
 									: "border-input text-muted-foreground hover:border-muted-foreground hover:text-foreground",
 							)}
 						>
-							{parts[part].label}
+							{podParts[part].label}
 						</button>
 					))}
 				</div>
@@ -149,7 +133,7 @@ export function PodMap() {
 							exit="hidden"
 							className="text-pretty"
 						>
-							{parts[picked].explanation}
+							{podParts[picked].explanation}
 						</motion.p>
 					</AnimatePresence>
 				</div>
