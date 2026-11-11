@@ -63,6 +63,8 @@ private struct ConversationContent: View {
 	@State private var sendError: String?
 	@State private var lastTypingSignal = Date.distantPast
 	@Environment(\.openPage) private var openPage
+	@Environment(\.isOpenTab) private var isOpenTab
+	@Environment(\.scenePhase) private var scenePhase
 	@State private var sideThread: SideThread?
 	@State private var showingComputer = false
 	@State private var highlighted: String?
@@ -115,6 +117,9 @@ private struct ConversationContent: View {
 					withAnimation { scroller.scrollTo(Self.foot, anchor: .bottom) }
 					markRead()
 				}
+				// What arrived while the tab was hidden or the app away is read once it is looked at.
+				.onChange(of: isOpenTab) { _, _ in if latestInView { markRead() } }
+				.onChange(of: scenePhase) { _, _ in if latestInView { markRead() } }
 			}
 			}
 			ConversationHeader(
@@ -430,7 +435,8 @@ private struct ConversationContent: View {
 		let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
 		let answering = replyingTo
 		let bot = threadWith
-		let files = attachments?.takeForSending() ?? []
+		let taken = attachments?.takeForSending() ?? []
+		let files = taken.compactMap(\.file)
 		let submitted = draft
 		draft = ""
 		replyingTo = nil
@@ -445,6 +451,7 @@ private struct ConversationContent: View {
 			} catch {
 				if draft.isEmpty { draft = submitted }
 				if replyingTo == nil { replyingTo = answering }
+				attachments?.putBack(taken)
 				if bot != nil {
 					sendError = "The thread was not started. Your message is still here."
 				} else if let failure = error as? APIFailure, failure.status == 400 {
@@ -515,7 +522,9 @@ private struct ConversationContent: View {
 		Task { await model.signalTyping() }
 	}
 
+	/// Marks the conversation read, only while somebody can see it: its tab is open and the app is in front.
 	private func markRead() {
+		guard isOpenTab, scenePhase == .active else { return }
 		Task { await model.markRead() }
 	}
 

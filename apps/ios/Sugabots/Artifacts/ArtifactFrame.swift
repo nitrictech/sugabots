@@ -162,9 +162,23 @@ struct PageWebView: UIViewRepresentable {
 			onPageHeight?(CGFloat(height))
 		}
 
-		/// Only the page itself loads here; a link it follows opens nothing.
+		private func withoutFragment(_ url: URL) -> URL? {
+			var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+			components?.fragment = nil
+			return components?.url
+		}
+
+		/// Only the page itself loads here: a link it follows, or a script sending it elsewhere, opens nothing.
+		/// Frames inside the page load as it asks.
 		func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-			action.navigationType == .other ? .allow : .cancel
+			guard action.navigationType == .other else { return .cancel }
+			guard action.targetFrame?.isMainFrame != false else { return .allow }
+			switch loaded {
+			// The fragment carries the theme, and the page may change it.
+			case let .url(url): return action.request.url.map(withoutFragment) == withoutFragment(url) ? .allow : .cancel
+			case .html: return action.request.url?.absoluteString == "about:blank" ? .allow : .cancel
+			case nil: return .cancel
+			}
 		}
 	}
 }

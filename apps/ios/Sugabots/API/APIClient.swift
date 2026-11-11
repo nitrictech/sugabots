@@ -94,6 +94,8 @@ struct APIClient {
 		var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
 		if !queryItems.isEmpty {
 			components.queryItems = queryItems
+			// URLComponents leaves `+` as it is, which the server reads as a space: `image/svg+xml` would arrive as `image/svg xml`.
+			components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
 		}
 		var request = URLRequest(url: components.url!)
 		request.httpMethod = method
@@ -122,9 +124,24 @@ struct APIClient {
 			throw APIFailure(status: 0, message: "The server sent something other than HTTP.")
 		}
 		guard (200..<300).contains(http.statusCode) else {
+			reportIfSignedOut(request, status: http.statusCode)
 			throw Self.failure(from: data, status: http.statusCode)
 		}
 		return (data, http)
+	}
+
+	/// Posted when the server refuses this app's token, as when it was signed
+	/// out from another device or its session ran out, with the API's
+	/// `baseURL` as the object, so the app returns to signing in.
+	static let signedOutNotification = Notification.Name("APIClientSignedOut")
+
+	/// Posts `signedOutNotification` for a 401 to a request that carried the
+	/// token; better-auth's own routes answer 401 for a wrong password too.
+	func reportIfSignedOut(_ request: URLRequest, status: Int) {
+		guard status == 401, request.value(forHTTPHeaderField: "Authorization") != nil,
+			request.url?.path().contains("/api/auth/") != true
+		else { return }
+		NotificationCenter.default.post(name: Self.signedOutNotification, object: baseURL)
 	}
 
 	/// The API answers failures as `{ "_tag": "NotFound", "message": "…" }`, and better-auth as `{ "message": "…" }`.

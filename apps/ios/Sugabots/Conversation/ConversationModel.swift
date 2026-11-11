@@ -127,11 +127,14 @@ final class ConversationModel {
 			for await event in EventStream.thread(threadId, client: client) {
 				self?.apply(event)
 			}
+			// Refused, so the next `start` listens again.
+			self?.listening = nil
 		}
 	}
 
 	func stop() {
 		listening?.cancel()
+		listening = nil
 		refetching?.cancel()
 		keep()
 	}

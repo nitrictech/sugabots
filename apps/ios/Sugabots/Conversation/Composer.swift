@@ -80,12 +80,17 @@ final class ComposerAttachments {
 		upload(attachment)
 	}
 
-	/// The files to send, taken out of the draft; put back if sending fails.
-	func takeForSending() -> [FilePart] {
-		let files = items.compactMap(\.file)
+	/// The attachments to send, taken out of the draft, for `putBack` if sending fails.
+	func takeForSending() -> [ComposerAttachment] {
+		let taken = items
 		items = []
 		leftOut = 0
-		return files
+		return taken
+	}
+
+	/// Returns attachments taken for a send that failed to the draft, ahead of any added since.
+	func putBack(_ taken: [ComposerAttachment]) {
+		items = Array((taken + items).prefix(Self.maximum))
 	}
 
 	private func upload(_ attachment: ComposerAttachment) {
@@ -94,6 +99,11 @@ final class ComposerAttachments {
 				let uploaded = try await client.chats.uploadFile(
 					conversationId: conversationId, name: attachment.name, type: attachment.contentType, data: attachment.data
 				)
+				// Removed while it uploaded, when there was nothing on the server yet to remove.
+				guard items.contains(where: { $0.id == attachment.id }) else {
+					try? await client.chats.removeFile(conversationId: conversationId, fileId: uploaded.id)
+					return
+				}
 				attachment.upload = .ready(FilePart(id: uploaded.id, name: uploaded.name, contentType: uploaded.contentType, size: uploaded.size))
 			} catch let failure as APIFailure {
 				attachment.upload = .failed(failure.status == 413 ? "Too big to attach" : failure.message, retryable: failure.status >= 500)

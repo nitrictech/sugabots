@@ -69,10 +69,10 @@ struct MainTabs: View {
 
 	var body: some View {
 		ZStack {
-			TabStack(path: path(.home)) { HomeScreen().debugOpen() }.opacity(tab == .home ? 1 : 0).allowsHitTesting(tab == .home)
-			TabStack(path: path(.inbox)) { InboxScreen() }.opacity(tab == .inbox ? 1 : 0).allowsHitTesting(tab == .inbox)
-			TabStack(path: path(.approvals)) { ApprovalsScreen() }.opacity(tab == .approvals ? 1 : 0).allowsHitTesting(tab == .approvals)
-			TabStack(path: path(.you)) { YouScreen() }.opacity(tab == .you ? 1 : 0).allowsHitTesting(tab == .you)
+			TabStack(path: path(.home)) { HomeScreen().debugOpen() }.shown(tab == .home)
+			TabStack(path: path(.inbox)) { InboxScreen() }.shown(tab == .inbox)
+			TabStack(path: path(.approvals)) { ApprovalsScreen() }.shown(tab == .approvals)
+			TabStack(path: path(.you)) { YouScreen() }.shown(tab == .you)
 		}
 		.task(id: store.agents.isEmpty) {
 			// Setup's Start chatting opens the first bot's channel.
@@ -105,7 +105,8 @@ struct MainTabs: View {
 		.onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
 		.onChange(of: scenePhase) { _, phase in
 			// The stream may have been dropped while the app was away; what it missed is fetched again.
-			if phase == .active { Task { await store.refreshAll() } }
+			// `start` listens again too, if the stream was refused while the app was away.
+			if phase == .active { Task { await store.start() } }
 		}
 	}
 
@@ -261,6 +262,25 @@ private struct TabBar: View {
 		.buttonStyle(.plain)
 		.accessibilityLabel(count > 0 ? "\(name), \(label)" : name)
 		.accessibilityAddTraits(open ? .isSelected : [])
+	}
+}
+
+private extension View {
+	/// One tab's stack, kept alive while hidden so its pages stay where they were, and told whether it is the open tab.
+	func shown(_ open: Bool) -> some View {
+		opacity(open ? 1 : 0).allowsHitTesting(open).environment(\.isOpenTab, open)
+	}
+}
+
+private struct IsOpenTabKey: EnvironmentKey {
+	static let defaultValue = true
+}
+
+extension EnvironmentValues {
+	/// Whether the tab a page is under is the open one. Hidden tabs keep their pages, which stay "appeared".
+	var isOpenTab: Bool {
+		get { self[IsOpenTabKey.self] }
+		set { self[IsOpenTabKey.self] = newValue }
 	}
 }
 

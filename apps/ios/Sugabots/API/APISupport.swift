@@ -157,7 +157,7 @@ enum JSONValue: Codable, Hashable, Sendable {
 	var prettyPrinted: String {
 		switch self {
 		case let .string(value): return value
-		case let .number(value): return value.rounded() == value ? String(Int(value)) : String(value)
+		case let .number(value): return Int(exactly: value).map(String.init) ?? String(value)
 		case let .bool(value): return String(value)
 		case .null: return "null"
 		case .array, .object:

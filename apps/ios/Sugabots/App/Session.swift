@@ -26,6 +26,28 @@ final class Session {
 
 	private(set) var state: State = .restoring
 
+	init() {
+		NotificationCenter.default.addObserver(forName: APIClient.signedOutNotification, object: nil, queue: .main) { [weak self] note in
+			guard let server = note.object as? URL else { return }
+			MainActor.assumeIsolated { self?.signedOutByServer(server) }
+		}
+	}
+
+	/// Returns to signing in once the server refuses the open account's token,
+	/// as when it signed out from another device. Nothing is sent: the server
+	/// has already ended the session.
+	private func signedOutByServer(_ server: URL) {
+		let client: APIClient? = switch state {
+		case let .signedIn(store): store.client
+		case let .settingUp(setup): setup.client
+		case .restoring, .signedOut: nil
+		}
+		guard let client, client.baseURL == server else { return }
+		if case let .signedIn(store) = state { store.stop() }
+		client.tokens.token = nil
+		state = .signedOut
+	}
+
 	/// The server as the person typed it, without the API's path.
 	var server: String {
 		UserDefaults.standard.string(forKey: Self.serverKey) ?? Self.defaultServer

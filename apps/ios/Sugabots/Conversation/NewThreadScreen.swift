@@ -150,13 +150,14 @@ struct NewThreadScreen: View {
 		failed = false
 		starting = true
 		let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-		let files = attachments?.takeForSending() ?? []
+		let taken = attachments?.takeForSending() ?? []
 		Task {
 			do {
-				let started = try await startsFrom.startThread(text, with: threadWith, replyTo: nil, files: files)
+				let started = try await startsFrom.startThread(text, with: threadWith, replyTo: nil, files: taken.compactMap(\.file))
 				draft = ""
 				openPage(.conversation(threadId: started.conversation.id, title: started.conversation.title))
 			} catch {
+				attachments?.putBack(taken)
 				failed = true
 			}
 			starting = false

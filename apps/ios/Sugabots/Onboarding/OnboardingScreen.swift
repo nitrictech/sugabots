@@ -160,7 +160,13 @@ struct OnboardingScreen: View {
 	/// Marks setup done and opens the workspace at the first bot's channel, as the web does.
 	private func finish(pod: Pod, bot: Agent) async {
 		guard let made = setup.made else { return }
-		try? await setup.client.onboarding.complete(workspaceId: made.id, podId: pod.id, agentId: bot.id)
+		do {
+			try await setup.client.onboarding.complete(workspaceId: made.id, podId: pod.id, agentId: bot.id)
+		} catch {
+			// Opening anyway would land back in setup, which a workspace not marked done reopens.
+			failure = "Setup couldn't be finished. \(error.localizedDescription)"
+			return
+		}
 		UserDefaults.standard.set(pod.id, forKey: "homePodId")
 		session.botToOpen = (pod.id, bot.id)
 		await session.finishWorkspaceSetup(opening: made)

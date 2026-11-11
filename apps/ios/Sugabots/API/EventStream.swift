@@ -42,6 +42,7 @@ enum EventStream {
 						}
 						let (bytes, response) = try await client.session.bytes(for: request)
 						let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+						client.reportIfSignedOut(request, status: status)
 						if status == 204 || isPermanent(status) { break }
 						guard (200..<300).contains(status) else { throw URLError(.badServerResponse) }
 

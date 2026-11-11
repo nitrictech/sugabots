@@ -126,11 +126,14 @@ final class WorkspaceStore {
 			for await _ in EventStream.workspace(workspace.id, client: client) {
 				self?.scheduleRefresh()
 			}
+			// Refused, so the next `start` listens again.
+			self?.listening = nil
 		}
 	}
 
 	func stop() {
 		listening?.cancel()
+		listening = nil
 		pendingRefresh?.cancel()
 	}
 
