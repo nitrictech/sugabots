@@ -28,7 +28,7 @@ import { SKIP, visit } from "unist-util-visit";
 import { visitParents } from "unist-util-visit-parents";
 import { Button } from "@/ui/button.tsx";
 import { codeHighlighter } from "./code-highlighter.ts";
-import { MarkdownLink } from "./MarkdownLink.tsx";
+import { MarkdownImageLink, MarkdownLink } from "./MarkdownLink.tsx";
 import {
 	MarkdownMention,
 	MENTION_TAG,
@@ -55,14 +55,13 @@ export function MessageMarkdown({
 	/** A bot, routine or artifact writes markdown on purpose; a person writes chat. See `WRITERS`. */
 	writer: MarkdownWriter;
 }) {
-	const { className, remarkPlugins, rehypePlugins, components, completesUnclosedMarkup } =
-		WRITERS[writer];
+	const { className, remarkPlugins, components, completesUnclosedMarkup } = WRITERS[writer];
 	return (
 		<MentionableContext value={mentionable}>
 			<Streamdown
 				className={cn(BREAK_LONG_WORDS, "message-markdown", className)}
 				remarkPlugins={remarkPlugins}
-				rehypePlugins={rehypePlugins}
+				rehypePlugins={REHYPE_PLUGINS}
 				components={components}
 				controls={CONTROLS}
 				plugins={PLUGINS}
@@ -127,9 +126,10 @@ const rehypeSoftBreaks: Plugin<[], Root> = () => (tree) => {
 };
 
 /*
- * A person's image is drawn as a link to it: loaded, it would tell whoever
- * serves it the address of everyone who reads the message, and when. Inside
- * a link already, it is only its words, since a link can't hold another.
+ * An image is drawn as a link to it, never loaded: a bot led by planted
+ * instructions could write one whose address carries the conversation, sent
+ * out as soon as anyone read the reply. Sugabots' own addresses are no
+ * exception. Inside a link already, an image is only its words.
  */
 const rehypeImagesAsLinks: Plugin<[], Root> = () => (tree) => {
 	visitParents(tree, "element", (node, ancestors) => {
@@ -142,9 +142,12 @@ const rehypeImagesAsLinks: Plugin<[], Root> = () => (tree) => {
 		);
 		parent.children[parent.children.indexOf(node)] = inLink
 			? words
-			: { type: "element", tagName: "a", properties: { href: src }, children: [words] };
+			: { type: "element", tagName: IMAGE_LINK_TAG, properties: { href: src }, children: [words] };
 	});
 };
+
+/** The element `rehypeImagesAsLinks` puts in an image's place; `MarkdownImageLink` draws it. */
+const IMAGE_LINK_TAG = "image-link";
 
 /* What a link in a person's message may lead to: a web page, or an email to write. */
 const PERSON_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
@@ -182,8 +185,14 @@ const remarkOnlyWebLinks: Plugin<[], MdastRoot> = () => (tree, file) => {
  * Without its `rehype-raw` either, HTML in a message is drawn as text, which
  * keeps anyone in a pod from putting markup in front of the others: never
  * add it. Nothing filters link addresses; React refuses `javascript:` ones.
+ * `rehypeImagesAsLinks` keeps every writer's images from loading, so never
+ * drop it either.
  */
-const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks, rehypeSoftBreaks];
+const REHYPE_PLUGINS: PluggableList = [
+	rehypeImagesAsLinks,
+	rehypeFocusableCodeBlocks,
+	rehypeSoftBreaks,
+];
 
 /*
  * Streamdown's own remark plugins, which give it tables and strikethrough and
@@ -210,11 +219,10 @@ const COMPLETIONS: StreamdownProps["remend"] = {
 	katex: false,
 };
 
-/* A copy button on code is worth its space in a bubble; image tooling is not. */
+/* A copy button on code is worth its space in a bubble. */
 const CONTROLS = {
 	code: { copy: true, download: false },
 	mermaid: false,
-	image: false,
 };
 
 /* Syntax highlighting for fenced code; see `code-highlighter.ts`. */
@@ -298,6 +306,7 @@ function FoldingCodeBlock({ node, children }: ExtraProps & { children?: ReactNod
 
 const COMPONENTS: Components = {
 	[MENTION_TAG]: MarkdownMention,
+	[IMAGE_LINK_TAG]: MarkdownImageLink,
 	pre: FoldingCodeBlock,
 	// Streamdown's headings are sized for a page; a bubble is 520px wide.
 	h1: heading("h1", "text-base"),
@@ -333,14 +342,12 @@ const WRITERS = {
 	bot: {
 		className: undefined,
 		remarkPlugins: remarkPluginsWith({}),
-		rehypePlugins: REHYPE_PLUGINS,
 		components: { ...COMPONENTS, a: (props) => <MarkdownLink {...props} asks="always" /> },
 		completesUnclosedMarkup: true,
 	},
 	person: {
 		className: "[--bot-mono:initial] [--bot-tint:initial]",
 		remarkPlugins: [...remarkPluginsWith({ singleTilde: false }), remarkOnlyWebLinks, remarkBreaks],
-		rehypePlugins: [rehypeImagesAsLinks, ...REHYPE_PLUGINS],
 		components: {
 			...COMPONENTS,
 			a: (props) => <MarkdownLink {...props} asks="unless-text-is-address" />,
@@ -352,7 +359,6 @@ const WRITERS = {
 	{
 		className: string | undefined;
 		remarkPlugins: PluggableList;
-		rehypePlugins: PluggableList;
 		components: Components;
 		completesUnclosedMarkup: boolean;
 	}

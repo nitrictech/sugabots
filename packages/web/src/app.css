@@ -566,6 +566,12 @@
 	text-underline-offset: 2px;
 }
 
+/* A link drawn in place of an image is a card, not underlined words. `MarkdownImageLink` sets the attribute; keep the two names in step. */
+.message-markdown a[data-image-link] {
+	color: inherit;
+	text-decoration: none;
+}
+
 /* An ID or a number inline in a message, on the chip colour, or its bot's tint where one is set, so it stands off the words around it. */
 .message-markdown :not(pre) > code {
 	padding: 1px 5px;
