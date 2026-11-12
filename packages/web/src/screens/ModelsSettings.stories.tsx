@@ -127,7 +127,7 @@ const openrouter = provider(
 			["tools", ...(index % 2 === 0 ? (["vision"] as const) : [])],
 		);
 	}),
-	{ connectedBy: "Tim Holm" },
+	{ connectedBy: "Theo Hart" },
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -156,14 +156,14 @@ const pausedDeepseek = provider(
 	"deepseek",
 	"DeepSeek",
 	[model("deepseek-chat", "DeepSeek Chat", true)],
-	{ active: false, connectedBy: "Tim Holm" },
+	{ active: false, connectedBy: "Theo Hart" },
 );
 /** A new key whose test failed: it holds the key, but stays off until a key passes. */
 const rejectedGroq = provider(8, "groq", "Groq", [], {
 	active: false,
 	status: "error",
 	lastTestError: "The provider rejected the API key",
-	connectedBy: "Tim Holm",
+	connectedBy: "Theo Hart",
 });
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
@@ -329,7 +329,7 @@ export const SwitchedOffProvider = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "DeepSeek" })).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Use DeepSeek" })).not.toBeChecked();
-		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
+		await expect(canvas.getByText("Connected by Theo Hart")).toBeInTheDocument();
 	},
 });
 
@@ -550,7 +550,7 @@ export const LargeCatalog = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
-		await expect(canvas.getByText("Connected by Tim Holm")).toBeInTheDocument();
+		await expect(canvas.getByText("Connected by Theo Hart")).toBeInTheDocument();
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
 		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);

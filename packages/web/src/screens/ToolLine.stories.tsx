@@ -116,7 +116,7 @@ export const Denied = meta.story({
 			call("linear__create_issue", {
 				mutating: true,
 				output: null,
-				approval: { status: "denied", decidedByName: "Ryan Eyes", decidedAt: null },
+				approval: { status: "denied", decidedByName: "Rowan Ellis", decidedAt: null },
 			}),
 		],
 	},

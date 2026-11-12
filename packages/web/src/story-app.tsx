@@ -44,8 +44,8 @@ const api = (path: string) => `${API}${path}`;
 
 export const storyUser: SessionUser = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
-	name: "Ryan Eyes",
-	email: "ryan@nitric.io",
+	name: "Rowan Ellis",
+	email: "rowan@example.com",
 	image: null,
 } as SessionUser;
 

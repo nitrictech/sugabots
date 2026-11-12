@@ -33,8 +33,8 @@ const host: AgentParticipant = {
 
 const user: SessionUser = {
 	id: "0199a3a0-0000-7000-8000-0000000000b4",
-	name: "Ryan Eyes",
-	email: "ryan@example.com",
+	name: "Rowan Ellis",
+	email: "rowan@example.com",
 	image: null,
 } as SessionUser;
 
@@ -148,7 +148,7 @@ afterEach(() => {
 describe("what people and bots write", () => {
 	it("renders Markdown from people and bots alike", async () => {
 		const asked = "Is **this** bold?";
-		const answered = "**Tim's bill** is high.\n\n- Look up plans\n- Draft a note";
+		const answered = "**Theo's bill** is high.\n\n- Look up plans\n- Draft a note";
 		show([
 			reply([{ type: "text", text: asked }], {
 				id: "0199a3a0-0000-7000-8000-0000000000c0",
@@ -158,7 +158,7 @@ describe("what people and bots write", () => {
 			reply([{ type: "text", text: answered }]),
 		]);
 
-		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
+		expect((await screen.findByText("Theo's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
 		expect(screen.getByText("this").getAttribute("data-streamdown")).toBe("strong");
 	});
@@ -169,7 +169,7 @@ describe("what people and bots write", () => {
 		onTestFinished(() => {
 			Reflect.deleteProperty(navigator, "clipboard");
 		});
-		const answered = "**Tim's bill** is high.\n\n- Look up plans";
+		const answered = "**Theo's bill** is high.\n\n- Look up plans";
 		show([reply([{ type: "text", text: answered }])]);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Copy text" }));
@@ -433,7 +433,7 @@ describe("a reply still being written", () => {
 						mutating: true,
 						approval: {
 							status: "allowed",
-							decidedByName: "Ryan Eyes",
+							decidedByName: "Rowan Ellis",
 							decidedAt: null,
 						},
 					}),
@@ -511,7 +511,7 @@ describe("a write that needs approving", () => {
 					mutating: true,
 					approval: {
 						status: "denied",
-						decidedByName: "Ryan Eyes",
+						decidedByName: "Rowan Ellis",
 						decidedAt: null,
 					},
 				}),
@@ -522,6 +522,6 @@ describe("a write that needs approving", () => {
 		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
 		expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
 		fireEvent.click(line);
-		expect(screen.getByText("Denied by Ryan Eyes")).toBeDefined();
+		expect(screen.getByText("Denied by Rowan Ellis")).toBeDefined();
 	});
 });

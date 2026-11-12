@@ -10,8 +10,8 @@ const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const THREAD = "0199a3a0-0000-7000-8000-000000000402";
 const user = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
-	name: "Ryan Eyes",
-	email: "ryan@nitric.io",
+	name: "Rowan Ellis",
+	email: "rowan@example.com",
 };
 
 const asker = {
@@ -80,7 +80,7 @@ const collaboration: ThreadDetails = {
 		message(
 			"1",
 			asker,
-			"Ryan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
+			"Rowan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
 		),
 		message(
 			"2",

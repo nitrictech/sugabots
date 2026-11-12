@@ -55,8 +55,8 @@ export const CheckYourEmail = meta.story({
 					token: null,
 					user: {
 						id: "0199a3a0-0000-7000-8000-000000000009",
-						name: "Ryan Eyes",
-						email: "ryan@nitric.io",
+						name: "Rowan Ellis",
+						email: "rowan@example.com",
 					},
 				}),
 			),
@@ -65,14 +65,14 @@ export const CheckYourEmail = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "Create an account" }));
-		await userEvent.type(await canvas.findByLabelText("Name"), "Ryan Eyes");
-		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.type(await canvas.findByLabelText("Name"), "Rowan Ellis");
+		await userEvent.type(canvas.getByLabelText("Email"), "rowan@example.com");
 		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse");
 		await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
 		await expect(
 			await canvas.findByRole("heading", { name: "Check your email" }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText(/ryan@nitric.io/)).toBeInTheDocument();
+		await expect(canvas.getByText(/rowan@example.com/)).toBeInTheDocument();
 	},
 });
 
@@ -98,8 +98,8 @@ export const FromAReferralLink = meta.story({
 							token: "session-token",
 							user: {
 								id: "0199a3a0-0000-7000-8000-000000000009",
-								name: "Ryan Eyes",
-								email: "ryan@nitric.io",
+								name: "Rowan Ellis",
+								email: "rowan@example.com",
 							},
 						})
 					: HttpResponse.json({ code: "SIGN_UP_CLOSED", message: "Closed" }, { status: 403 });
@@ -110,8 +110,8 @@ export const FromAReferralLink = meta.story({
 		await expect(canvas.getByRole("heading", { name: "Create an account" })).toBeInTheDocument();
 		await expect(canvas.getByText(/invited to Sugabots/)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Back" })).toBeNull();
-		await userEvent.type(canvas.getByLabelText("Name"), "Ryan Eyes");
-		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.type(canvas.getByLabelText("Name"), "Rowan Ellis");
+		await userEvent.type(canvas.getByLabelText("Email"), "rowan@example.com");
 		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse");
 		await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
 		await waitFor(() => expect(args.onSignedIn).toHaveBeenCalled());
@@ -122,12 +122,12 @@ export const FromAReferralLink = meta.story({
 export const ForgotPassword = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));
-		await userEvent.type(await canvas.findByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.type(await canvas.findByLabelText("Email"), "rowan@example.com");
 		await userEvent.click(canvas.getByRole("button", { name: "Forgot password?" }));
 		await expect(
 			await canvas.findByRole("heading", { name: "Reset your password" }),
 		).toBeInTheDocument();
-		await expect(canvas.getByLabelText("Email")).toHaveValue("ryan@nitric.io");
+		await expect(canvas.getByLabelText("Email")).toHaveValue("rowan@example.com");
 	},
 });
 

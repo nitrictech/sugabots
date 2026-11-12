@@ -56,7 +56,7 @@ describe("a reply's tool line", () => {
 
 	it("says which app was refused", () => {
 		const denied = {
-			approval: { status: "denied" as const, decidedByName: "Ryan", decidedAt: null },
+			approval: { status: "denied" as const, decidedByName: "Rowan", decidedAt: null },
 		};
 		expect(
 			toolLineText([call("sentry__search"), call("linear__create_issue", denied)], looks),

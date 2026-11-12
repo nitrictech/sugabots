@@ -23,7 +23,7 @@ import {
 	apiAnswers,
 	builtInAgents,
 	controlledEventStream,
-	jye,
+	juno,
 	linear,
 	mount,
 	pendingAnswer,
@@ -1262,10 +1262,10 @@ describe("a message opened from Activity", () => {
 });
 
 describe("people typing in the Chat", () => {
-	const jyeInThread = testPerson({ id: jye.id, name: jye.name });
-	const jyeTyping = streamEvent("person.typing", {
+	const junoInThread = testPerson({ id: juno.id, name: juno.name });
+	const junoTyping = streamEvent("person.typing", {
 		threadId: chat.id,
-		person: jyeInThread,
+		person: junoInThread,
 	});
 
 	async function watchMainThread() {
@@ -1283,8 +1283,8 @@ describe("people typing in the Chat", () => {
 	it("shows someone else typing until their message arrives", async () => {
 		const updates = await watchMainThread();
 
-		updates.emit(jyeTyping);
-		await screen.findByRole("status", { name: "Jye is typing" });
+		updates.emit(junoTyping);
+		await screen.findByRole("status", { name: "Juno is typing" });
 
 		updates.emit(
 			streamEvent("message.created", {
@@ -1292,7 +1292,7 @@ describe("people typing in the Chat", () => {
 				message: {
 					...mainMessage,
 					id: "0199a3a0-0000-7000-8000-0000000000fc",
-					author: jyeInThread,
+					author: junoInThread,
 					content: "Also, the deploy",
 					parts: [{ type: "text", text: "Also, the deploy" }],
 					createdAt: "2026-09-18T09:40:00.000Z",
@@ -1300,27 +1300,29 @@ describe("people typing in the Chat", () => {
 			}),
 		);
 		await screen.findByText("Also, the deploy");
-		expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull();
+		expect(screen.queryByRole("status", { name: "Juno is typing" })).toBeNull();
 	});
 
 	it("stops showing someone typing once they stop saying so", async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const updates = await watchMainThread();
 
-		updates.emit(jyeTyping);
-		await screen.findByRole("status", { name: "Jye is typing" });
+		updates.emit(junoTyping);
+		await screen.findByRole("status", { name: "Juno is typing" });
 
 		await vi.advanceTimersByTimeAsync(7_000);
-		await waitFor(() => expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull());
+		await waitFor(() =>
+			expect(screen.queryByRole("status", { name: "Juno is typing" })).toBeNull(),
+		);
 	});
 
 	it("does not show you your own typing", async () => {
 		const updates = await watchMainThread();
 
 		updates.emit(streamEvent("person.typing", { threadId: chat.id, person }));
-		updates.emit(jyeTyping);
+		updates.emit(junoTyping);
 
-		await screen.findByRole("status", { name: "Jye is typing" });
+		await screen.findByRole("status", { name: "Juno is typing" });
 		expect(screen.queryByRole("status", { name: /Sam/ })).toBeNull();
 	});
 

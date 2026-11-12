@@ -26,7 +26,7 @@ const feed: ActivityFeed = {
 			unread: true,
 			messageId: "0199a3a0-0000-7000-8000-000000000801",
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
-			preview: "@ryan-eyes can you sign off the Acme quote before 5?",
+			preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
 			podId: revenue.id,
 			conversationId: storyChannelFor(growthDesk).id,
@@ -104,7 +104,7 @@ const feed: ActivityFeed = {
 			unread: false,
 			messageId: "0199a3a0-0000-7000-8000-000000000803",
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Priya Kaur" }),
-			preview: "Thanks @ryan-eyes, that fixed it.",
+			preview: "Thanks @rowan-ellis, that fixed it.",
 			at: minutesAgo(26 * 60),
 			podId: revenue.id,
 			conversationId: storyChannelFor(growthDesk).id,
@@ -220,7 +220,7 @@ export const CaughtUp = meta.story({
 const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 	const text =
 		index === 4
-			? "@ryan-eyes can you sign off the Acme quote before 5?"
+			? "@rowan-ellis can you sign off the Acme quote before 5?"
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,

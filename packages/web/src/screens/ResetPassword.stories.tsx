@@ -82,11 +82,11 @@ export const LinkSent = meta.story({
 		);
 	},
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.type(canvas.getByLabelText("Email"), "rowan@example.com");
 		await userEvent.click(canvas.getByRole("button", { name: "Send reset link" }));
 		await expect(
 			await canvas.findByRole("heading", { name: "Check your email" }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText(/If ryan@nitric.io has an account/)).toBeInTheDocument();
+		await expect(canvas.getByText(/If rowan@example.com has an account/)).toBeInTheDocument();
 	},
 });

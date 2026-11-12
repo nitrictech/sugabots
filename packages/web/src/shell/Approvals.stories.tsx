@@ -72,12 +72,12 @@ const inbox: ApprovalInbox = {
 	answered: [
 		answered("02", "gmail__send_email", {
 			status: "allowed",
-			decidedByName: "Ryan Eyes",
+			decidedByName: "Rowan Ellis",
 			decidedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
 		}),
 		answered("03", "hubspot__delete_deal", {
 			status: "denied",
-			decidedByName: "Ryan Eyes",
+			decidedByName: "Rowan Ellis",
 			decidedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
 		}),
 	],

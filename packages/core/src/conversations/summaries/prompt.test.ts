@@ -6,7 +6,7 @@ const input: SummaryPromptInput = {
 	model: "model",
 	threadTitle: "Morning routine",
 	transcript: [
-		{ author: "Ryan", kind: "person", content: "Set up a daily 9am routine." },
+		{ author: "Rowan", kind: "person", content: "Set up a daily 9am routine." },
 		{ author: "Assistant", kind: "agent", content: "Choose an automation platform." },
 	],
 };
@@ -24,7 +24,7 @@ describe("threadSummaryPrompt", () => {
 	it("keeps the same size limit when updating a summary", () => {
 		const prompt = threadSummaryPrompt({
 			...input,
-			previousContent: "Ryan needs a morning routine.",
+			previousContent: "Rowan needs a morning routine.",
 		});
 
 		expect(prompt.system).toContain("no more than 50 words");
