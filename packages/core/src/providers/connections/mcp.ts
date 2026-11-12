@@ -127,7 +127,11 @@ export async function connectServer(
 				// The model is told why a server rejected a call, so it can correct it.
 				const said = isServerError(cause) ? cause.message : httpErrorAnswer(cause);
 				if (said === undefined) throw cause;
-				const text = upstreamErrorText(said, Object.values(target.headers));
+				const signedIn = await target.authProvider?.tokens();
+				const text = upstreamErrorText(said, [
+					...Object.values(target.headers),
+					signedIn?.access_token,
+				]);
 				return { isError: true, content: [{ type: "text", text }] };
 			}
 		},

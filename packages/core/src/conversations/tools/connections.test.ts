@@ -10,7 +10,7 @@ import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
 import { connectServer } from "../../providers/connections/mcp.ts";
-import { SignInRequired } from "../../providers/connections/oauth.ts";
+import { SignInRequired, storedOAuthProvider } from "../../providers/connections/oauth.ts";
 import { ConnectionTools } from "./connections.ts";
 
 /**
@@ -26,6 +26,9 @@ let requests = 0;
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
 const lookupInput = Schema.Struct({ q: Schema.String });
+
+/** What a connection signed in with OAuth holds, which the SDK sends as a bearer header. */
+const ACCESS_TOKEN = "oauth-access-token-0123456789";
 
 function fixtureServer(): McpProtocolServer {
 	const server = new McpProtocolServer(
@@ -66,17 +69,20 @@ async function jsonBody(request: IncomingMessage): Promise<{ method?: string } |
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
 		requests += 1;
-		if (request.headers["x-fixture-key"] !== "open-sesame") {
+		const key = request.headers["x-fixture-key"];
+		const bearer = request.headers.authorization;
+		if (key !== "open-sesame" && bearer !== `Bearer ${ACCESS_TOKEN}`) {
 			response.writeHead(401).end("who are you");
 			return;
 		}
 		const body = await jsonBody(request);
-		// A server over its rate limit, quoting the key it was sent.
+		// A server over its rate limit, quoting the credential it was sent.
 		if (request.url === "/limited" && body?.method === "tools/call") {
-			const key = request.headers["x-fixture-key"];
 			response
 				.writeHead(429)
-				.end(`Rate limit reached for key ${key}. Try again in an hour, or upgrade your plan.`);
+				.end(
+					`Rate limit reached for key ${key ?? bearer}. Try again in an hour, or upgrade your plan.`,
+				);
 			return;
 		}
 		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -355,6 +361,48 @@ describe("a turn's connection tools", () => {
 				],
 			});
 			expect(JSON.stringify(result)).not.toContain("open-sesame");
+		});
+
+		it("leaves out the access token of a connection signed in with OAuth when a server quotes it", async () => {
+			const signedIn = target({
+				url: url.replace(/\/mcp$/, "/limited"),
+				auth: "oauth",
+				headers: {},
+			});
+			const provider = storedOAuthProvider(
+				{
+					load: async () => ({ tokens: { access_token: ACCESS_TOKEN, token_type: "Bearer" } }),
+					save: async () => undefined,
+					now: async () => new Date("2026-11-13T00:00:00.000Z"),
+				},
+				{ redirectUrl: "http://localhost:3000/connections/oauth/callback", clientName: "Sugabots" },
+			);
+			const offered = ConnectionTools.from({
+				connections: {
+					targetsForPod: () => Effect.succeed({ targets: [signedIn], signInExpired: [] }),
+				},
+				httpClients: { for: () => fetch },
+				oauth: { clients: Effect.succeed({ for: () => provider }), fetch },
+			});
+
+			const result = await run(
+				turnOn(offered, async (set) =>
+					set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, callOptions),
+				),
+			);
+
+			expect(result).toMatchObject({
+				isError: true,
+				content: [
+					{
+						type: "text",
+						text: expect.stringMatching(
+							/^The call failed with HTTP 429\. The server said: Rate limit reached for key Bearer …\./,
+						),
+					},
+				],
+			});
+			expect(JSON.stringify(result)).not.toContain(ACCESS_TOKEN);
 		});
 
 		it("asks again once the connection has been edited", async () => {
