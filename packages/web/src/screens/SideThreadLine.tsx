@@ -4,8 +4,8 @@ import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 
-/** Where a thread stands, at the end of its line: settled, waiting on somebody, or dots while a bot works. */
-export type SideThreadStatus = "working" | { text: string; done?: boolean; urgent?: boolean };
+/** Where a thread stands, at the end of its line: settled, or dots while a bot works. */
+export type SideThreadStatus = "working" | { text: string; done?: boolean };
 
 /**
  * A thread opened from a message, hanging off it: a curve down from the
@@ -89,10 +89,6 @@ export function SideThreadLine({
 							<i />
 							<i />
 							<i />
-						</span>
-					) : status?.urgent ? (
-						<span className="shrink-0 rounded-xs bg-primary px-1.5 py-px font-semibold text-2xs text-primary-foreground">
-							{status.text}
 						</span>
 					) : (
 						status && (
