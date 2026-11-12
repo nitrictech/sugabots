@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { findPod, usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
+import { InboxNews } from "@/shell/InboxNews.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 
@@ -23,7 +24,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 	const tab = useMobileTab();
 	const typing = useTyping();
 	const homePod = useHomePodSlug();
-	const { unreadInInbox, waitingApprovals } = useAttentionCounts();
+	const { unreadMentions, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { user } = useSession();
 	if (typing) return null;
 	return (
@@ -67,9 +68,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 					icon={<Inbox />}
 					label="Inbox"
 					count={
-						unreadInInbox > 0 && (
-							<CountBadge count={unreadInInbox} size="sm" label={`${unreadInInbox} unread`} />
-						)
+						<InboxNews unreadMentions={unreadMentions} unreadInInbox={unreadInInbox} size="sm" />
 					}
 				/>
 				<TabLink
@@ -119,7 +118,7 @@ function TabLink({
 	current: boolean;
 	icon: ReactNode;
 	label: string;
-	/** A `CountBadge` over the icon's corner. */
+	/** A `CountBadge`, or a dot, over the icon's corner. */
 	count?: ReactNode;
 }) {
 	return useRender({

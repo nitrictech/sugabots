@@ -16,6 +16,7 @@ import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
 import { ConversationList, type ListSelection } from "@/shell/ConversationList.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
+import { InboxNews } from "@/shell/InboxNews.tsx";
 import { NewInPodMenu } from "@/shell/NewInPod.tsx";
 import { type PodStanding, SidebarPod } from "@/shell/SidebarPod.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
@@ -37,7 +38,7 @@ export type SidebarView = "inbox" | "approvals" | "settings" | "artifacts" | "ro
 export function Sidebar() {
 	const { data: pods } = usePods();
 	const { data: markers } = usePodChatMarkers();
-	const { unreadInInbox, waitingApprovals } = useAttentionCounts();
+	const { unreadMentions, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
@@ -61,6 +62,7 @@ export function Sidebar() {
 				}))}
 			currentPodId={current?.id}
 			view={place.view}
+			unreadMentions={unreadMentions}
 			unreadInInbox={unreadInInbox}
 			waitingApprovals={waitingApprovals}
 			workspace={workspace}
@@ -142,6 +144,7 @@ export function SidebarView({
 	pods,
 	currentPodId,
 	view,
+	unreadMentions = 0,
 	unreadInInbox = 0,
 	waitingApprovals = 0,
 	workspace,
@@ -159,7 +162,9 @@ export function SidebarView({
 	/** The pod the page open is in, while it is in one. */
 	currentPodId: string | undefined;
 	view: SidebarView | undefined;
-	/** How much in Inbox the viewer has not read, which Inbox counts. */
+	/** How many unread messages in Inbox mention the viewer, which Inbox counts. */
+	unreadMentions?: number;
+	/** How much in Inbox the viewer has not read, which marks Inbox with a dot while nothing mentions them. */
 	unreadInInbox?: number;
 	/** How many approvals wait on the viewer, which Approvals counts. */
 	waitingApprovals?: number;
@@ -205,9 +210,7 @@ export function SidebarView({
 					label="Inbox"
 					selected={view === "inbox"}
 					end={
-						unreadInInbox > 0 && (
-							<CountBadge count={unreadInInbox} size="md" label={`${unreadInInbox} unread`} />
-						)
+						<InboxNews unreadMentions={unreadMentions} unreadInInbox={unreadInInbox} size="md" />
 					}
 				/>
 				<SidebarLink

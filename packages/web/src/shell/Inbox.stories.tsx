@@ -136,7 +136,7 @@ export const Default = meta.story({
 		await expect(canvas.queryByText(/that fixed it/)).toBeNull();
 		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
 		await expect(inbox).toHaveAttribute("aria-current", "page");
-		await expect(inbox).toHaveTextContent("3 unread");
+		await expect(inbox).toHaveTextContent("1 unread mention");
 	},
 });
 
