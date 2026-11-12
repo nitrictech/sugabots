@@ -416,7 +416,10 @@ const streamReply = (
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
 			const now = yield* DateTime.nowAsDate;
-			const offeredBuiltIns = yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId);
+			const offeredBuiltIns = yield* builtInTools.forWorkspace(
+				prepared.context.thread.workspaceId,
+				`${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/search`,
+			);
 			const builtIn = {
 				tools: offeredBuiltIns.tools,
 				usable: offeredBuiltIns.usable.filter(

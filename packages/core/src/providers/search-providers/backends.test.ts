@@ -64,7 +64,7 @@ describe("the Brave backend", () => {
 				{ preset: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				unauthorised,
 			)({ query: "q", count: 1 }),
-		).toEqual({ ok: false, reason: "Brave Search answered HTTP 401" });
+		).toEqual({ ok: false, reason: "Brave Search answered HTTP 401", providerMessage: "no" });
 
 		const odd = vi.fn<FakeFetch>(async () => Response.json({ hello: "world" }));
 		expect(
@@ -87,6 +87,28 @@ describe("the Brave backend", () => {
 			ok: false,
 			reason: "Brave Search answered with something that is not a result list",
 		});
+	});
+
+	it("passes on what Brave said, cut short and without the key it was sent", async () => {
+		const fetch = vi.fn<FakeFetch>(
+			async () =>
+				new Response(`Unknown token brave-secret-key. ${"Upgrade your plan. ".repeat(100)}`, {
+					status: 401,
+				}),
+		);
+
+		const outcome = await backend(
+			{
+				preset: "brave",
+				baseUrl: "https://api.search.brave.com/res/v1",
+				apiKey: "brave-secret-key",
+			},
+			fetch,
+		)({ query: "q", count: 1 });
+
+		const said = outcome.ok ? undefined : outcome.providerMessage;
+		expect(said).toMatch(/^Unknown token …\. Upgrade your plan\./);
+		expect(said).toHaveLength(1_000);
 	});
 });
 
@@ -135,6 +157,34 @@ describe("the Exa backend", () => {
 		expect(String(url)).toBe("https://api.exa.ai/search");
 		expect(init).toMatchObject({ method: "POST", headers: { "x-api-key": "exa-key" } });
 		expect(JSON.parse(String(init?.body))).toMatchObject({ query: "open bots", numResults: 2 });
+	});
+
+	it("passes on what the free endpoint says when it rate limits a search", async () => {
+		const fetch = vi.fn<FakeFetch>(async () =>
+			Response.json(
+				{
+					jsonrpc: "2.0",
+					error: {
+						code: -32000,
+						message:
+							"You've hit Exa's free MCP rate limit. To continue using without limits, create your own Exa API key.",
+					},
+					id: null,
+				},
+				{ status: 429 },
+			),
+		);
+
+		const outcome = await backend(
+			{ preset: "exa", baseUrl: "https://api.exa.ai" },
+			fetch,
+		)({ query: "q", count: 1 });
+
+		expect(outcome).toEqual({
+			ok: false,
+			reason: "Exa answered HTTP 429",
+			providerMessage: expect.stringContaining("You've hit Exa's free MCP rate limit"),
+		});
 	});
 });
 
