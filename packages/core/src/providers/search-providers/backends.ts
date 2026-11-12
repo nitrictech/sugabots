@@ -1,10 +1,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+	StreamableHTTPClientTransport,
+	StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { EXA_FREE_SEARCH_URL } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { Data, Effect, Schema } from "effect";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
+import { upstreamErrorText } from "../upstream-error-text.ts";
 import type { SearchConnection } from "./search-connection.ts";
 
 /**
@@ -13,7 +17,8 @@ import type { SearchConnection } from "./search-connection.ts";
  * Every backend takes the same request and answers the same shape, so the
  * tool and the settings test are written once. A failure is an answer with a
  * reason, never a throw: the agent, or the admin testing the connection,
- * reads it as a sentence, and what the service said goes only to the logs.
+ * reads it as a sentence. When the service turned the search down, what it
+ * said goes to the agent too, which can work out the fix from it and the docs.
  */
 
 interface SearchResult {
@@ -24,7 +29,14 @@ interface SearchResult {
 	published: string | null;
 }
 
-export type SearchOutcome = { ok: true; results: SearchResult[] } | { ok: false; reason: UserText };
+export type SearchOutcome =
+	| { ok: true; results: SearchResult[] }
+	| {
+			ok: false;
+			reason: UserText;
+			/** The service's own words, such as how to lift a rate limit; not Sugabots'. */
+			providerMessage?: string;
+	  };
 
 export interface SearchRequest {
 	query: string;
@@ -97,7 +109,11 @@ function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): Sea
 				},
 			});
 			if (!response.ok) {
-				return refused(userText`Brave Search answered HTTP ${response.status}`);
+				return refusedSaying(
+					userText`Brave Search answered HTTP ${response.status}`,
+					await response.text().catch(() => ""),
+					connection.apiKey,
+				);
 			}
 			const parsed = Schema.decodeUnknownResult(braveResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -148,7 +164,11 @@ function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): Searc
 				}),
 			});
 			if (!response.ok) {
-				return refused(userText`Exa answered HTTP ${response.status}`);
+				return refusedSaying(
+					userText`Exa answered HTTP ${response.status}`,
+					await response.text().catch(() => ""),
+					connection.apiKey,
+				);
 			}
 			const parsed = Schema.decodeUnknownResult(exaResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -193,7 +213,11 @@ function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): Se
 				body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
 			});
 			if (!response.ok) {
-				return refused(userText`Tavily answered HTTP ${response.status}`);
+				return refusedSaying(
+					userText`Tavily answered HTTP ${response.status}`,
+					await response.text().catch(() => ""),
+					connection.apiKey,
+				);
 			}
 			const parsed = Schema.decodeUnknownResult(tavilyResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -243,14 +267,18 @@ function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
 					.filter((part) => part.type === "text")
 					.map((part) => part.text ?? "")
 					.join("\n");
-				if (result.isError) {
-					// Exa's text is its own and may say anything, so it goes to the logs.
-					throw new SearchRefused({
-						userMessage: userText`Exa refused the search`,
-						detail: text,
-					});
-				}
+				if (result.isError) return refusedSaying(userText`Exa refused the search`, text, undefined);
 				return { ok: true, results: parseExaText(text).slice(0, count) };
+			} catch (cause) {
+				// How the free endpoint answers a rate limit; a negative code is the SDK's own complaint.
+				if (
+					!(cause instanceof StreamableHTTPError) ||
+					cause.code === undefined ||
+					cause.code < 400
+				) {
+					throw cause;
+				}
+				return refusedSaying(userText`Exa answered HTTP ${cause.code}`, cause.message, undefined);
 			} finally {
 				await client.close().catch(() => undefined);
 			}
@@ -321,7 +349,11 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 				);
 			}
 			if (!response.ok) {
-				return refused(userText`SearXNG answered HTTP ${response.status}`);
+				return refusedSaying(
+					userText`SearXNG answered HTTP ${response.status}`,
+					await response.text().catch(() => ""),
+					connection.apiKey,
+				);
 			}
 			const parsed = Schema.decodeUnknownResult(searxngResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -344,14 +376,11 @@ function refused(reason: UserText): SearchOutcome {
 	return { ok: false, reason };
 }
 
-/**
- * A service's answer that it would not search, thrown from inside a call so
- * `answer` logs what it said and tells the caller only `userMessage`.
- */
-class SearchRefused extends Data.TaggedError("SearchRefused")<{
-	readonly userMessage: UserText;
-	readonly detail: string;
-}> {}
+/** A refusal with what the service said, when it said anything, without the key it was sent. */
+function refusedSaying(reason: UserText, said: string, apiKey: string | undefined): SearchOutcome {
+	const providerMessage = upstreamErrorText(said, [apiKey]);
+	return providerMessage ? { ok: false, reason, providerMessage } : refused(reason);
+}
 
 /** Whatever a call threw, to be turned into a reason. */
 class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
@@ -368,6 +397,11 @@ function answer(
 		try: () => call(stop),
 		catch: (cause) => new CallFailed({ cause }),
 	}).pipe(
+		Effect.tap((outcome) =>
+			outcome.ok || !outcome.providerMessage
+				? Effect.void
+				: Effect.logWarning(`${service} refused a search`, outcome.providerMessage),
+		),
 		Effect.catch(({ cause }) => {
 			if (signal?.aborted) {
 				return Effect.succeed(refused(userText`The turn was stopped before the search answered`));
@@ -378,12 +412,6 @@ function answer(
 				);
 			}
 			if (cause instanceof EgressRefused) return Effect.succeed(refused(cause.userMessage));
-			if (cause instanceof SearchRefused) {
-				return Effect.as(
-					Effect.logWarning(`${service} refused a search`, cause.detail),
-					refused(cause.userMessage),
-				);
-			}
 			// Anything else is a fault on our side or the service's: its details go to
 			// the logs, and the model is told only that the search did not answer.
 			return Effect.as(

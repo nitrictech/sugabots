@@ -20,10 +20,13 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
  * is the workspace's one setting for whether bots may use the web, and each
  * search is billed to the workspace. forWorkspace looks the provider
  * up on every call, so a provider enabled between turns applies from the next
- * turn without a restart.
+ * turn without a restart. A failed search points at `searchSettingsPageUrl`.
  */
 export interface Interface {
-	forWorkspace(workspaceId: string): Effect.Effect<Offered, never, Database>;
+	forWorkspace(
+		workspaceId: string,
+		searchSettingsPageUrl: string,
+	): Effect.Effect<Offered, never, Database>;
 }
 
 export interface Offered {
@@ -62,20 +65,22 @@ export interface Parts {
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
 export function from({ fetchPage, searchProviders, httpClients }: Parts): Interface {
 	const webFetch = webFetchTool({ fetchPage });
-	const offline: Offered = {
-		tools: {
-			[WEB_FETCH_TOOL]: webFetch,
-			[WEB_SEARCH_TOOL]: webSearchTool({
-				search: async () => ({ ok: false, reason: NO_SEARCH_PROVIDER }),
-			}),
-		},
-		usable: [],
-	};
 	return {
-		forWorkspace: (workspaceId) =>
+		forWorkspace: (workspaceId, searchSettingsPageUrl) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Database> {
 				const connection = yield* searchProviders.resolve(workspaceId);
-				if (!connection) return offline;
+				if (!connection) {
+					return {
+						tools: {
+							[WEB_FETCH_TOOL]: webFetch,
+							[WEB_SEARCH_TOOL]: webSearchTool({
+								search: async () => ({ ok: false, reason: NO_SEARCH_PROVIDER }),
+								settingsPageUrl: searchSettingsPageUrl,
+							}),
+						},
+						usable: [],
+					};
+				}
 				// The tool runs searches as promises; they log through the turn's services.
 				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
 				const search = searchBackend(
@@ -85,7 +90,10 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 				return {
 					tools: {
 						[WEB_FETCH_TOOL]: webFetch,
-						[WEB_SEARCH_TOOL]: webSearchTool({ search: (request) => runPromise(search(request)) }),
+						[WEB_SEARCH_TOOL]: webSearchTool({
+							search: (request) => runPromise(search(request)),
+							settingsPageUrl: searchSettingsPageUrl,
+						}),
 					},
 					usable: [WEB_FETCH_TOOL, WEB_SEARCH_TOOL],
 				};

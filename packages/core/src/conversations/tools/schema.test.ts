@@ -16,6 +16,7 @@ function unexpectedExecution(): never {
 	throw new Error("Schema validation must not execute the tool");
 }
 
+const SETTINGS_PAGE = "https://sugabots.example/acme/settings/search";
 const fetchTool = webFetchTool({ fetchPage: unexpectedExecution });
 const collaborate = collaborateTool({
 	from: { threadId: "thread", agentId: "agent", turnId: "turn", messageId: "message" },
@@ -97,7 +98,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		await generateText({
 			model,
 			prompt: "Search",
-			tools: { web_search: webSearchTool({ search }) },
+			tools: { web_search: webSearchTool({ search, settingsPageUrl: SETTINGS_PAGE }) },
 		});
 		expect(search).toHaveBeenCalledExactlyOnceWith({
 			query: "Effect Schema",
@@ -133,7 +134,9 @@ describe("native Effect tool schemas through the AI SDK", () => {
 	});
 
 	it("rejects invalid search input", async () => {
-		const schema = asSchema(webSearchTool({ search: unexpectedExecution }).inputSchema);
+		const schema = asSchema(
+			webSearchTool({ search: unexpectedExecution, settingsPageUrl: SETTINGS_PAGE }).inputSchema,
+		);
 		expect(await schema.validate?.({ query: "x", count: 0 })).toMatchObject({ success: false });
 	});
 

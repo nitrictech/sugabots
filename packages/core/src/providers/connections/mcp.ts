@@ -4,6 +4,7 @@ import { type UserText, userText } from "@sugabots/errors";
 import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
+import { upstreamErrorText } from "../upstream-error-text.ts";
 import { needsSignIn } from "./oauth.ts";
 
 /**
@@ -123,9 +124,12 @@ export async function connectServer(
 			try {
 				return await execute(input, options);
 			} catch (cause) {
-				// The model is told why a server rejected a call, so it can correct it.
-				if (!isServerError(cause)) throw cause;
-				return { isError: true, content: [{ type: "text", text: cause.message }] };
+				// The model is told why a server rejected a call, so it can correct it
+				// or tell the person how, such as a rate limit's way out.
+				const said = isServerError(cause) ? cause.message : httpErrorAnswer(cause);
+				if (said === undefined) throw cause;
+				const text = upstreamErrorText(said, Object.values(target.headers));
+				return { isError: true, content: [{ type: "text", text }] };
 			}
 		},
 		close: () => client.close().catch(() => undefined),
@@ -186,4 +190,19 @@ function isServerError(cause: unknown): cause is Error & { code: number } {
 		cause.name === "MCPClientError" &&
 		typeof (cause as { code?: unknown }).code === "number"
 	);
+}
+
+/**
+ * httpErrorAnswer returns what a server said with an HTTP error status, or
+ * undefined when `cause` is anything else. The SDK's own message is not used,
+ * because it adds advice meant for whoever writes the client.
+ */
+function httpErrorAnswer(cause: unknown): string | undefined {
+	if (!(cause instanceof Error) || cause.name !== "MCPClientError") return undefined;
+	const { statusCode, responseBody } = cause as { statusCode?: unknown; responseBody?: unknown };
+	if (typeof statusCode !== "number" || statusCode < 400) return undefined;
+	const body = typeof responseBody === "string" ? responseBody.trim() : "";
+	return body
+		? `The server answered HTTP ${statusCode}: ${body}`
+		: `The server answered HTTP ${statusCode}`;
 }

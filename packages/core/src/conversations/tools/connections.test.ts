@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -57,6 +57,12 @@ function fixtureServer(): McpProtocolServer {
 	return server;
 }
 
+async function jsonBody(request: IncomingMessage): Promise<{ method?: string } | undefined> {
+	let raw = "";
+	for await (const chunk of request) raw += chunk;
+	return raw ? JSON.parse(raw) : undefined;
+}
+
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
 		requests += 1;
@@ -64,9 +70,19 @@ beforeAll(async () => {
 			response.writeHead(401).end("who are you");
 			return;
 		}
+		const body = await jsonBody(request);
+		// A server over its rate limit, turning calls away before MCP sees them,
+		// and quoting the key it was sent as some do.
+		if (request.url === "/limited" && body?.method === "tools/call") {
+			const key = request.headers["x-fixture-key"];
+			response
+				.writeHead(429)
+				.end(`Rate limit reached for key ${key}. Try again in an hour, or upgrade your plan.`);
+			return;
+		}
 		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 		await fixtureServer().connect(transport);
-		await transport.handleRequest(request, response);
+		await transport.handleRequest(request, response, body);
 		response.on("close", () => void transport.close());
 	});
 	await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
@@ -317,6 +333,29 @@ describe("a turn's connection tools", () => {
 				isError: true,
 				content: [{ type: "text", text: expect.any(String) }],
 			});
+		});
+
+		it("tells the model what a server said when it turned a call away with an HTTP error, without the key it was sent", async () => {
+			const limited = target({ url: url.replace(/\/mcp$/, "/limited") });
+
+			const result = await run(
+				turnOn(toolsFor(limited), async (set) =>
+					set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, callOptions),
+				),
+			);
+
+			expect(result).toMatchObject({
+				isError: true,
+				content: [
+					{
+						type: "text",
+						text: expect.stringMatching(
+							/HTTP 429: Rate limit reached for key …\. Try again in an hour/,
+						),
+					},
+				],
+			});
+			expect(JSON.stringify(result)).not.toContain("open-sesame");
 		});
 
 		it("asks again once the connection has been edited", async () => {
