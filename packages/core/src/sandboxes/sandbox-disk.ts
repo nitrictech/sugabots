@@ -43,7 +43,7 @@ export function measureDisk(
 		// Run as the agents' user, du skips what it may not read, such as
 		// root's files in /tmp; everything under the workspace is theirs.
 		const sized = yield* sandbox.exec(
-			`shopt -s nullglob; du -sxB1 -- ${Sandboxes.WORKSPACE_DIRECTORY}/agents/* ${Sandboxes.THREADS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
+			`shopt -s nullglob; du -sxB1 -- ${Sandboxes.AGENTS_DIRECTORY}/* ${Sandboxes.THREADS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
 			FOLDERS_OPTIONS,
 		);
 		const timedOut = sized.exitCode === null;
@@ -86,7 +86,7 @@ function fullestOf(listing: string) {
 		);
 }
 
-const AGENT_HOME = new RegExp(`^${Sandboxes.WORKSPACE_DIRECTORY}/agents/([0-9a-f-]{36})$`);
+const AGENT_HOME = new RegExp(`^${Sandboxes.AGENTS_DIRECTORY}/([0-9a-f-]{36})$`);
 
 /** The folders `du -sB1` sized, as `<bytes>\t<path>` lines, largest first. */
 function foldersOf(listing: string): SandboxDiskFolder[] {

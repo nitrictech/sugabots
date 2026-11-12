@@ -15,6 +15,7 @@ import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { Ids } from "../../../ids/ids.ts";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
+import { AGENT_CACHES } from "../../../sandboxes/sandbox-disk-clearing.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import type { ThreadFiles } from "../../thread-files/thread-files.ts";
@@ -71,7 +72,7 @@ export interface Place {
 export function placeOf(turn: { threadId: string; agentId: string }): Place {
 	return {
 		folder: `${Sandboxes.THREADS_DIRECTORY}/${turn.threadId}`,
-		home: `${Sandboxes.WORKSPACE_DIRECTORY}/agents/${turn.agentId}`,
+		home: `${Sandboxes.AGENTS_DIRECTORY}/${turn.agentId}`,
 	};
 }
 
@@ -169,7 +170,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	return tool({
-		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. When the sandbox's disk runs short, the folders of finished threads, such as ended routine runs and conversations marked done, are cleared, so push or keep in your home anything that must outlast its thread. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
+		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. When the sandbox's disk runs short, the folders of finished threads, such as ended routine runs and conversations marked done, are cleared, and so are the caches in your home (${AGENT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its thread, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",

@@ -185,6 +185,9 @@ export const WORKSPACE_DIRECTORY = "/workspace";
 /** Where each thread's folder is, named by the thread's id. */
 export const THREADS_DIRECTORY = `${WORKSPACE_DIRECTORY}/threads`;
 
+/** Where each agent's home is, named by the agent's id. */
+export const AGENTS_DIRECTORY = `${WORKSPACE_DIRECTORY}/agents`;
+
 export interface Sandbox {
 	readonly id: SandboxId;
 	/**

@@ -1,5 +1,6 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
+import { posix } from "node:path";
 import { SANDBOX_DISK_WARNING_SHARE, sandboxDiskShare } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
@@ -13,7 +14,7 @@ import { reachOf } from "./allowed-hosts.ts";
 import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { type DiskUsage, measureDisk } from "./sandbox-disk.ts";
-import { clearFinishedThreadFolders } from "./sandbox-disk-clearing.ts";
+import { freeDiskSpace, SET_ASIDE_DIRECTORY } from "./sandbox-disk-clearing.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 import type { SandboxLeaseHolderKind } from "./sql.ts";
@@ -71,10 +72,8 @@ export interface Interface {
 	/** Ends `holder`'s leases, starting the idle time of the sandboxes it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
 	/**
-	 * Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. One
-	 * whose disk was last measured close to full first has its finished
-	 * threads' folders cleared, until its workspace is less than
-	 * {@link CLEARED_BELOW_SHARE} full.
+	 * Pauses every sandbox idle for {@link IDLE_BEFORE_PAUSE}, first clearing
+	 * any last measured close to full to below {@link CLEARED_BELOW_SHARE}.
 	 */
 	readonly pauseIdle: Effect.Effect<void>;
 	/**
@@ -463,17 +462,15 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Clears finished threads' folders from an idle sandbox whose disk was
-	 * last measured close to full, then measures it again, since a paused
-	 * sandbox keeps its last measurement. It runs under the pod's lock, so a
-	 * turn arriving meanwhile waits rather than finding its folder half gone.
-	 * Whatever happens, the sandbox is paused after.
+	 * Re-measures after clearing, since a paused sandbox keeps its last
+	 * measurement. Runs under the pod's lock, so a turn arriving meanwhile
+	 * waits instead of finding its folder half gone.
 	 */
 	const clearDiskIfFilling = (row: SandboxRow, at: Sandboxes.Provider) =>
 		Effect.gen(function* () {
 			if (!row.diskUsage || sandboxDiskShare(row.diskUsage) < SANDBOX_DISK_WARNING_SHARE) return;
 			const { sandbox } = yield* at.open(row.providerSandboxId);
-			const { cleared, stoppedAtTimeout } = yield* clearFinishedThreadFolders(
+			const { cleared, stoppedAtTimeout } = yield* freeDiskSpace(
 				sandbox,
 				row.workspaceId,
 				CLEARED_BELOW_SHARE,
@@ -485,7 +482,7 @@ export const make = Effect.gen(function* () {
 					([reason, folders]) => [reason, folders.length],
 				),
 			);
-			yield* Effect.logInfo("Cleared finished threads' folders to free a sandbox's disk", {
+			yield* Effect.logInfo("Cleared folders to free a sandbox's disk", {
 				cleared: clearedByReason,
 				stoppedAtTimeout,
 			});
@@ -674,7 +671,7 @@ export const make = Effect.gen(function* () {
 			);
 			const archivePath = `/tmp/sugabots-workspace-${yield* ids.random}.tgz`;
 			const packed = yield* old.exec(
-				`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores -czf ${archivePath} .`,
+				`cd ${Sandboxes.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores --exclude=./${posix.basename(SET_ASIDE_DIRECTORY)} -czf ${archivePath} .`,
 				COPY_STEP,
 			);
 			if (packed.exitCode !== 0) {
