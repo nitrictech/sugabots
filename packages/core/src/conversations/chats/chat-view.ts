@@ -690,6 +690,24 @@ function unreadBy(
 }
 
 /**
+ * Whether `userId` has yet to catch up with a routine run or collaboration
+ * that began at `at`: neither the conversation it is in, `conversationId`,
+ * nor its own thread, `itemThreadId`, read past when it began. Opening the
+ * item from Inbox reads its own thread, so it reads that item alone.
+ */
+function itemUnreadBy(
+	db: Executor,
+	userId: string,
+	{
+		conversationId,
+		itemThreadId,
+		at,
+	}: { conversationId: SQLWrapper; itemThreadId: SQLWrapper; at: SQLWrapper },
+): SQL<boolean> {
+	return sql<boolean>`(${unreadBy(db, userId, { threadId: conversationId, at })} and ${unreadBy(db, userId, { threadId: itemThreadId, at })})`;
+}
+
+/**
  * When `userId` last caught up with `threadId`: the later of how far they
  * have read it and the last message they wrote there, or null when neither.
  *
@@ -885,8 +903,9 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 			},
 			podId: conversation.podId,
 			conversationId: conversation.id,
-			unread: unreadBy(db, input.userId, {
-				threadId: conversation.id,
+			unread: itemUnreadBy(db, input.userId, {
+				conversationId: conversation.id,
+				itemThreadId: routineExecution.threadId,
 				at: routineExecution.acceptedAt,
 			}),
 			lastReply: lastReplyIn(db, routineExecution.threadId),
@@ -943,8 +962,9 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 			},
 			podId: conversation.podId,
 			conversationId: conversation.id,
-			unread: unreadBy(db, input.userId, {
-				threadId: conversation.id,
+			unread: itemUnreadBy(db, input.userId, {
+				conversationId: conversation.id,
+				itemThreadId: collaboration.childThreadId,
 				at: collaboration.createdAt,
 			}),
 		})

@@ -231,13 +231,13 @@ export interface Interface {
 	 */
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 	/**
-	 * Records that `userId` has read the conversation a routine run or
-	 * collaboration is in up to when it began, by the item's own thread
-	 * `itemThreadId`: that item and everything before it, not what came after.
-	 * Tells the conversation's watchers when that moved them on. Never moves
-	 * anyone back, and does nothing for any other thread.
+	 * Records that `userId` has read a routine run or collaboration as an item,
+	 * by its own thread `itemThreadId`: that thread up to when the item began.
+	 * The conversation it is in, and what was written in the item since, stay
+	 * as they were. Tells the item's watchers when that moved them on. Never
+	 * moves anyone back, and does nothing for any other thread.
 	 */
-	readonly markReadThroughItem: (userId: string, itemThreadId: string) => Effect.Effect<void>;
+	readonly markItemRead: (userId: string, itemThreadId: string) => Effect.Effect<void>;
 	/**
 	 * Adds the person's reaction to a finished message, and announces what the
 	 * message has now. A reaction already there changes nothing and is not
@@ -1126,9 +1126,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		markReadThroughItem: (userId, itemThreadId) =>
+		markItemRead: (userId, itemThreadId) =>
 			operation(
-				"markReadThroughItem",
+				"markItemRead",
 				transaction(
 					Effect.gen(function* () {
 						// As text, which keeps the microseconds a `Date` would drop.
@@ -1143,15 +1143,14 @@ export const make = Effect.gen(function* () {
 								.where(eq(collaboration.childThreadId, itemThreadId));
 							return db
 								.select({
-									conversationId: thread.conversationId,
 									at: sql<string | null>`coalesce((${runStart}), (${collaborationStart}))::text`,
 								})
 								.from(thread)
 								.where(eq(thread.id, itemThreadId))
 								.limit(1);
 						});
-						if (!item?.conversationId || !item.at) return;
-						yield* readThrough(userId, item.conversationId, item.at);
+						if (!item?.at) return;
+						yield* readThrough(userId, itemThreadId, item.at);
 					}),
 				),
 			),

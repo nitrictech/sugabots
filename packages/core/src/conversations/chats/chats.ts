@@ -171,10 +171,10 @@ export interface Interface {
 		conversationId: string,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
-	 * Records that the actor has read the conversation a routine run or
-	 * collaboration is in up to that item, by its thread `threadId`: the item
-	 * and everything before it, leaving what came after unread. Other threads
-	 * are hidden from this.
+	 * Records that the actor has read one routine run or collaboration as an
+	 * Inbox item, by its thread `threadId`, leaving the rest of its
+	 * conversation, and what was written in the item since it began, unread.
+	 * Other threads are hidden from this.
 	 */
 	readonly markItemRead: (
 		threadId: string,
@@ -520,7 +520,7 @@ export const make = Effect.gen(function* () {
 							return yield* new ResourceHidden({ resource: "thread" });
 						}
 						const { userId } = yield* CurrentActor.Service;
-						yield* threads.markReadThroughItem(userId, thread.id);
+						yield* threads.markItemRead(userId, thread.id);
 					}),
 				),
 			),
@@ -540,6 +540,7 @@ export const layer = layerNoDeps.pipe(
 
 /** The threads that are an item of their own in Inbox: a routine run's and a collaboration's. */
 const ITEM_THREAD_TYPES: ReadonlySet<ThreadType> = new Set(["routine", "collaboration"]);
+
 /** The bot asked to host the conversation is not crew in its pod, or the pod is out of reach. */
 export class HostNotCrew extends Data.TaggedError("HostNotCrew") implements UserFacing {
 	get userMessage() {

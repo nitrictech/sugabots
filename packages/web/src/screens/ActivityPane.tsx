@@ -1,8 +1,8 @@
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { type ReactNode, useEffect } from "react";
-import { type ConversationKind, useChatHistory, useMarkItemRead } from "@/lib/chats.ts";
+import type { ReactNode } from "react";
+import { type ConversationKind, useChatHistory, useMarkItemReadWhileSeen } from "@/lib/chats.ts";
 import { conversationLink, routineThreadLink } from "@/lib/links.ts";
 import { useThread } from "@/lib/threads.ts";
 import { buttonStyles } from "@/ui/button.tsx";
@@ -91,7 +91,7 @@ export function ActivityPane({
 	);
 }
 
-/** A run or collaboration in `agent`'s chat, as a page of its own, read as it opens. */
+/** A run or collaboration in `agent`'s chat, as a page of its own, read while it is seen. */
 function ActivityThread({
 	agent,
 	conversationId,
@@ -106,10 +106,7 @@ function ActivityThread({
 	onOpenThread: (threadId: string) => void;
 }) {
 	const history = useChatHistory(conversationId);
-	const { mutate: markItemRead } = useMarkItemRead();
-	useEffect(() => {
-		markItemRead(threadId);
-	}, [threadId, markItemRead]);
+	useMarkItemReadWhileSeen(threadId);
 	return (
 		<ChatThreadPanel
 			frame={{ kind: "page", back: BACK_TO_ACTIVITY, trailing }}
