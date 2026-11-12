@@ -997,7 +997,7 @@ const collaboration: ThreadDetails = {
 		collabMessage(
 			"93",
 			asker,
-			"Ryan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
+			"Rowan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
 			"2026-09-18T06:03:00.000Z",
 		),
 		collabMessage(

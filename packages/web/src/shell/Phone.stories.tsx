@@ -121,7 +121,7 @@ function unreadMention(index: number): ActivityItem {
 		unread: true,
 		messageId: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
 		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
-		preview: "@ryan-eyes can you sign off the Acme quote before 5?",
+		preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 		at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
 		podId: revenue.id,
 		conversationId: storyChannelFor(growthDesk).id,

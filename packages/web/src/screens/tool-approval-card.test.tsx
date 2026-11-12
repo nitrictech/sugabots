@@ -144,7 +144,7 @@ describe("an approval request", () => {
 		show(
 			asking({
 				...Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`field${index + 1}`, "x"])),
-				assignee: { id: "u_123", name: "Tim Holm" },
+				assignee: { id: "u_123", name: "Theo Hart" },
 				subscribers: [{ id: "u_1" }, { id: "u_2" }],
 			}),
 		);
@@ -152,7 +152,7 @@ describe("an approval request", () => {
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
 		expect(within(card).getByText("Field7")).toBeDefined();
 		expect(within(card).getByText("Name")).toBeDefined();
-		expect(within(card).getByText("Tim Holm")).toBeDefined();
+		expect(within(card).getByText("Theo Hart")).toBeDefined();
 		expect(within(card).getAllByRole("columnheader", { name: "Id" })).toHaveLength(1);
 		expect(within(card).getAllByRole("row")).toHaveLength(3);
 		expect(within(card).queryByText(/"name"/)).toBeNull();

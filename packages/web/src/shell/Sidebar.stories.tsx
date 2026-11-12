@@ -85,7 +85,7 @@ const meta = preview.meta({
 		waitingApprovals: 2,
 		workspace: suga,
 		workspaces: [suga, nitric],
-		user: { name: "Ryan Eyes", email: "ryan@example.com" },
+		user: { name: "Rowan Ellis", email: "rowan@example.com" },
 		onSignOut: fn(),
 		conversationsOf: (pod) =>
 			pod.id === revenue.id ? (
@@ -315,9 +315,9 @@ export const BotWithAFailedRoutine = meta.story({
  */
 export const AccountMenu = meta.story({
 	play: async ({ canvas, userEvent, args }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Account: Ryan Eyes" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Account: Rowan Ellis" }));
 		const menu = await screen.findByRole("menu");
-		await expect(within(menu).getByText("ryan@example.com")).toBeVisible();
+		await expect(within(menu).getByText("rowan@example.com")).toBeVisible();
 		await expect(within(menu).getByRole("menuitem", { name: "Preferences" })).toHaveAttribute(
 			"href",
 			"/suga/settings/profile",

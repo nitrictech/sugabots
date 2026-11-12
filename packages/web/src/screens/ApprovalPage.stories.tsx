@@ -58,7 +58,7 @@ function request(
 const pending = { status: "pending", decidedByName: null, decidedAt: null } as const;
 const denied = {
 	status: "denied",
-	decidedByName: "Ryan Eyes",
+	decidedByName: "Rowan Ellis",
 	decidedAt: "2026-09-18T09:04:00.000Z",
 } as const;
 const answerable = request("01", "awaiting_approval", pending);
@@ -96,7 +96,7 @@ export const Answerable = meta.story({
 export const Answered = meta.story({
 	render: at(answered.call.id),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText(/Denied by Ryan Eyes/, undefined)).toBeInTheDocument();
+		await expect(await canvas.findByText(/Denied by Rowan Ellis/, undefined)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},
 });

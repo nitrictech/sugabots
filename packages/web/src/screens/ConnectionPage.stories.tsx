@@ -44,7 +44,7 @@ function connection(
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
-		connectedBy: "Ryan Eyes",
+		connectedBy: "Rowan Ellis",
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -198,7 +198,7 @@ const appRepositories = (account: string | null) =>
 					? []
 					: ["acme/web", "acme/infra"].map((repository) => ({
 							repository,
-							addedByName: "Ryan Eyes",
+							addedByName: "Rowan Ellis",
 							addedAt: "2026-10-05T09:30:00.000Z",
 						})),
 		}),
@@ -261,7 +261,7 @@ export const Opened = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
 		).toBeInTheDocument();
-		await expect(canvas.getAllByText("Connected by Ryan Eyes")[0]).toBeInTheDocument();
+		await expect(canvas.getAllByText("Connected by Rowan Ellis")[0]).toBeInTheDocument();
 		await expect(canvas.queryByText("https://mcp.linear.app/mcp")).toBeNull();
 		await expect(canvas.getByRole("button", { name: "Disconnect Linear" })).toBeInTheDocument();
 		const reading = await canvas.findByRole("region", { name: "Tools that read" });

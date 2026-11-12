@@ -33,7 +33,7 @@ function asking(over: Partial<ToolCallPart> = {}): ToolCallPart {
 			calendar: "Family",
 			title: "Flights to Lisbon",
 			when: "Fri 14 Nov, 07:40 to 10:15",
-			guests: "ryan@nitric.io, mia@nitric.io, sam@nitric.io",
+			guests: "rowan@example.com, mia@nitric.io, sam@nitric.io",
 			where: "TAP 1351, London Heathrow T2 to Lisbon T1",
 			notes: "Booking ref QX7R2P. Seats 14A to 14C. Check in opens 24 hours before.",
 			reminder: "3 hours before",
@@ -136,7 +136,7 @@ export const ViewerCantAnswer = meta.story({
 
 /** Answered keeps the request readable after the answer, and says under it how it went and who answered. */
 export const Answered = meta.story({
-	args: { call: decided("allowed", "Ryan") },
+	args: { call: decided("allowed", "Rowan") },
 	play: async ({ canvas }) => {
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},

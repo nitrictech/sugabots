@@ -59,10 +59,10 @@ export const sam: SessionUser = {
 };
 
 /** A second person in the workspace, so the roster has somebody who is not you. */
-export const jye: SessionUser = {
+export const juno: SessionUser = {
 	id: "0199a3a0-0000-7000-8000-00000000000a",
-	email: "jye@example.com",
-	name: "Jye",
+	email: "juno@example.com",
+	name: "Juno",
 	image: null,
 };
 
@@ -443,7 +443,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d2",
 				role: "member",
-				user: jye,
+				user: juno,
 				joinedAt: "2026-09-10T00:00:00.000Z",
 			},
 		]),

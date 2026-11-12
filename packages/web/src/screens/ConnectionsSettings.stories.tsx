@@ -47,7 +47,7 @@ function connection(
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
-		connectedBy: "Ryan Eyes",
+		connectedBy: "Rowan Ellis",
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};

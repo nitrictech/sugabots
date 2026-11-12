@@ -22,7 +22,7 @@ import {
 	channelWith,
 	compaction,
 	controlledEventStream,
-	jye,
+	juno,
 	linear,
 	MODELS,
 	modelProviders,
@@ -1936,7 +1936,7 @@ describe("workspace settings", () => {
 		expect(dialog.ownerDocument.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
 	});
 
-	const jyePage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
+	const junoPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
 	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
 
 	it("invites every address typed, with the role chosen", async () => {
@@ -1945,7 +1945,7 @@ describe("workspace settings", () => {
 		const panel = await openInvitePanel();
 
 		fireEvent.change(within(panel).getByLabelText("Email addresses"), {
-			target: { value: "jye@example.com, kim@example.com" },
+			target: { value: "juno@example.com, kim@example.com" },
 		});
 		expect(within(panel).getByText("Builds agents in the pods they are added to.")).toBeDefined();
 		fireEvent.click(within(panel).getByRole("radio", { name: "Viewer" }));
@@ -1957,7 +1957,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(client.api.workspaces.invite).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				payload: { email: "jye@example.com", role: "viewer", resend: undefined },
+				payload: { email: "juno@example.com", role: "viewer", resend: undefined },
 			});
 			expect(client.api.workspaces.invite).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1978,7 +1978,7 @@ describe("workspace settings", () => {
 		mount("/suga/settings/members");
 		const panel = await openInvitePanel();
 		const emails = within(panel).getByLabelText("Email addresses");
-		fireEvent.change(emails, { target: { value: "jye@example.com kim@example.com" } });
+		fireEvent.change(emails, { target: { value: "juno@example.com kim@example.com" } });
 
 		fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
 
@@ -1989,17 +1989,17 @@ describe("workspace settings", () => {
 	it("lists each person with their role, and opens their page", async () => {
 		const router = mount("/suga/settings/members");
 
-		const row = await screen.findByRole("link", { name: new RegExp(jye.name) });
+		const row = await screen.findByRole("link", { name: new RegExp(juno.name) });
 		expect(row.textContent).toContain("Member");
 		expect(screen.getByRole("link", { name: new RegExp(sam.name) }).textContent).toContain("(you)");
 		fireEvent.click(row);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(jyePage));
-		expect(await screen.findByRole("heading", { name: jye.name })).toBeDefined();
+		await waitFor(() => expect(router.state.location.pathname).toBe(junoPage));
+		expect(await screen.findByRole("heading", { name: juno.name })).toBeDefined();
 	});
 
 	it("changes what somebody may do from their page", async () => {
-		mount(jyePage);
+		mount(junoPage);
 
 		fireEvent.click(await screen.findByRole("radio", { name: "Viewer" }));
 
@@ -2013,9 +2013,9 @@ describe("workspace settings", () => {
 
 	it("puts somebody in a pod from their page", async () => {
 		client.api.pods.addMember.mockReturnValue(Effect.void);
-		mount(jyePage);
+		mount(junoPage);
 
-		const toggle = await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` });
+		const toggle = await screen.findByRole("switch", { name: `${juno.name} is in Suga-Team` });
 		// Disabled until the pod's people have loaded.
 		await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
 		fireEvent.click(toggle);
@@ -2023,17 +2023,17 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(client.api.pods.addMember).toHaveBeenCalledWith({
 				params: { podId: pods[0]?.id },
-				payload: { userId: jye.id },
+				payload: { userId: juno.id },
 			}),
 		);
 	});
 
 	it("asks before removing somebody, says what goes with them, and returns to the list", async () => {
-		const router = mount(jyePage);
+		const router = mount(junoPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
 
-		expect(await screen.findByRole("heading", { name: `Remove ${jye.name}?` })).toBeDefined();
+		expect(await screen.findByRole("heading", { name: `Remove ${juno.name}?` })).toBeDefined();
 		expect(screen.getByText(/their Personal pod and its conversations are deleted/)).toBeDefined();
 		expect(client.api.workspaces.removeMember).not.toHaveBeenCalled();
 
@@ -2101,19 +2101,19 @@ describe("workspace settings", () => {
 		apiAnswers({ role: "member" });
 		mount("/suga/settings/members");
 
-		expect((await screen.findByRole("link", { name: new RegExp(jye.name) })).textContent).toContain(
-			"Member",
-		);
+		expect(
+			(await screen.findByRole("link", { name: new RegExp(juno.name) })).textContent,
+		).toContain("Member");
 		expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
 		cleanup();
 
-		mount(jyePage);
-		expect(await screen.findByRole("heading", { name: jye.name })).toBeDefined();
+		mount(junoPage);
+		expect(await screen.findByRole("heading", { name: juno.name })).toBeDefined();
 		expect(screen.queryByRole("radio", { name: "Viewer" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
 		expect(
-			(await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` })).hasAttribute(
+			(await screen.findByRole("switch", { name: `${juno.name} is in Suga-Team` })).hasAttribute(
 				"disabled",
 			),
 		).toBe(true);
@@ -2361,11 +2361,11 @@ describe("pod settings", () => {
 		// Sam administers the workspace, so is in every shared pod for good.
 		removable: false,
 	};
-	const jyeInPod = {
+	const junoInPod = {
 		...samInPod,
-		userId: jye.id,
-		name: jye.name,
-		email: jye.email,
+		userId: juno.id,
+		name: juno.name,
+		email: juno.email,
 		removable: true,
 	};
 	it("lists only crew in a pod, with nothing to say about built-in agents", async () => {
@@ -2398,14 +2398,14 @@ describe("pod settings", () => {
 	});
 
 	it("asks before removing somebody from the pod", async () => {
-		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, junoInPod]));
 		client.api.pods.removeMember.mockReturnValue(Effect.void);
 		mount(peoplePage);
 
-		fireEvent.click(await screen.findByRole("button", { name: `Remove ${jye.name}` }));
+		fireEvent.click(await screen.findByRole("button", { name: `Remove ${juno.name}` }));
 
 		expect(
-			await screen.findByRole("dialog", { name: `Remove ${jye.name} from ${suga.name}?` }),
+			await screen.findByRole("dialog", { name: `Remove ${juno.name} from ${suga.name}?` }),
 		).toBeDefined();
 		expect(client.api.pods.removeMember).not.toHaveBeenCalled();
 
@@ -2413,29 +2413,29 @@ describe("pod settings", () => {
 
 		await waitFor(() =>
 			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
-				params: { podId: suga.id, userId: jye.id },
+				params: { podId: suga.id, userId: juno.id },
 			}),
 		);
 	});
 
 	// Sam is signed in, and an administrator unless a case says otherwise.
 	it("gives an administrator no way off a shared pod", async () => {
-		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, junoInPod]));
 		mount(peoplePage);
 
-		expect(await screen.findByRole("button", { name: `Remove ${jye.name}` })).toBeDefined();
+		expect(await screen.findByRole("button", { name: `Remove ${juno.name}` })).toBeDefined();
 		expect(screen.queryByRole("button", { name: `Leave ${suga.name}` })).toBeNull();
 		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
 	});
 
 	it("lets a member leave a pod, and nothing more", async () => {
 		apiAnswers({ role: "member" });
-		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, junoInPod]));
 		client.api.pods.leave.mockReturnValue(Effect.void);
 		mount(peoplePage);
 
 		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
-		expect(screen.queryByRole("button", { name: `Remove ${jye.name}` })).toBeNull();
+		expect(screen.queryByRole("button", { name: `Remove ${juno.name}` })).toBeNull();
 
 		expect(await screen.findByRole("dialog", { name: `Leave ${suga.name}?` })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
@@ -2446,7 +2446,7 @@ describe("pod settings", () => {
 	});
 
 	it("says when everyone in the workspace is already in", async () => {
-		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, junoInPod]));
 		mount(peoplePage);
 
 		open(await screen.findByRole("button", { name: "Add people" }));

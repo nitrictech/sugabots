@@ -19,14 +19,14 @@ const WORKSPACE = growthDesk.workspaceId;
 
 const user: SessionUser = {
 	id: "0199a3a0-0000-7000-8000-000000000501",
-	name: "Ryan Eyes",
-	email: "ryan@example.com",
+	name: "Rowan Ellis",
+	email: "rowan@example.com",
 	image: null,
 } as SessionUser;
 
 const people: ThreadParticipant[] = [
 	["Jay Young", "0199a3a0-0000-7000-8000-000000000502"],
-	["Ryan Eyes", user.id],
+	["Rowan Ellis", user.id],
 	["Mara Kent", "0199a3a0-0000-7000-8000-000000000503"],
 	["Sam Park", "0199a3a0-0000-7000-8000-000000000504"],
 	["Alex Lee", "0199a3a0-0000-7000-8000-000000000505"],

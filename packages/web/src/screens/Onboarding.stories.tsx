@@ -20,8 +20,8 @@ const workspace = {
 };
 const user = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
-	name: "Ryan Eyes",
-	email: "ryan@nitric.io",
+	name: "Rowan Ellis",
+	email: "rowan@example.com",
 };
 const session: Session = {
 	user: user as SessionUser,
@@ -130,7 +130,7 @@ export const Workspace = meta.story({
 		await expect(canvas.queryByRole("button", { name: "Cancel" })).toBeNull();
 		await expect(canvas.getByLabelText("Workspace name")).toHaveAttribute(
 			"placeholder",
-			"e.g. Ryan's bots",
+			"e.g. Rowan's bots",
 		);
 	},
 });

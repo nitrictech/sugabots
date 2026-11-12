@@ -43,38 +43,40 @@ describe("IconButton", () => {
 
 describe("PersonAvatar", () => {
 	it("falls back to initials until there is a photo", () => {
-		render(<PersonAvatar person={{ name: "Ryan Eyes", email: "ryan@example.com" }} />);
+		render(<PersonAvatar person={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
 
-		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
+		expect(screen.getByTitle("Rowan Ellis").textContent).toBe("RE");
 	});
 
 	it("gives two letters for a single name, so a stack stays even", () => {
-		render(<PersonAvatar person={{ name: "Jye", email: "jye@example.com" }} />);
+		render(<PersonAvatar person={{ name: "Juno", email: "juno@example.com" }} />);
 
-		expect(screen.getByTitle("Jye").textContent).toBe("JY");
+		expect(screen.getByTitle("Juno").textContent).toBe("JU");
 	});
 
 	it("shows the Gravatar for the normalized email", async () => {
-		render(<PersonAvatar person={{ name: "Ryan Eyes", email: " RYAN@Example.com" }} size={32} />);
+		render(
+			<PersonAvatar person={{ name: "Rowan Ellis", email: " ROWAN@Example.com" }} size={32} />,
+		);
 
 		await vi.waitFor(() =>
-			expect(screen.getByTitle("Ryan Eyes").querySelector("img")?.getAttribute("src")).toBe(
-				"https://gravatar.com/avatar/5f58da4a1a2d0c8052a9827dec9389a285c3d60f07477e117fefb09da54fc894?s=64&d=404",
+			expect(screen.getByTitle("Rowan Ellis").querySelector("img")?.getAttribute("src")).toBe(
+				"https://gravatar.com/avatar/d9d745372fba31973b3ba22d208479cdbb4d80fe62434ab86e1e93fb87fefde0?s=64&d=404",
 			),
 		);
 	});
 
 	it("keeps the initials when there is no Gravatar", async () => {
-		render(<PersonAvatar person={{ name: "Ryan Eyes", email: "ryan@example.com" }} />);
+		render(<PersonAvatar person={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
 		const gravatar = await vi.waitFor(() => {
-			const img = screen.getByTitle("Ryan Eyes").querySelector("img");
+			const img = screen.getByTitle("Rowan Ellis").querySelector("img");
 			if (!img) throw new Error("No Gravatar yet");
 			return img;
 		});
 
 		fireEvent.error(gravatar);
 
-		expect(screen.getByTitle("Ryan Eyes").querySelector("img")).toBeNull();
-		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
+		expect(screen.getByTitle("Rowan Ellis").querySelector("img")).toBeNull();
+		expect(screen.getByTitle("Rowan Ellis").textContent).toBe("RE");
 	});
 });

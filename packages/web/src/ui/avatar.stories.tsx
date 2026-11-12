@@ -11,7 +11,7 @@ const meta = preview.meta({
 	title: "Controls/PersonAvatar",
 	component: PersonAvatar,
 	tags: ["ai-generated"],
-	args: { person: { name: "Ryan Eyes", email: "ryan@example.com" } },
+	args: { person: { name: "Rowan Ellis", email: "rowan@example.com" } },
 });
 
 /** Initials on a grey disc at each size the app uses: rows, lists, the sidebar, a page's hero. */
@@ -45,8 +45,8 @@ export const Initials = meta.story({
 
 /** A photo fills the disc in place of the initials. */
 export const WithPhoto = meta.story({
-	args: { person: { name: "Ryan Eyes", email: "ryan@example.com", image: PHOTO }, size: 46 },
+	args: { person: { name: "Rowan Ellis", email: "rowan@example.com", image: PHOTO }, size: 46 },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByTitle("Ryan Eyes").querySelector("img")).not.toBeNull();
+		await expect(canvas.getByTitle("Rowan Ellis").querySelector("img")).not.toBeNull();
 	},
 });

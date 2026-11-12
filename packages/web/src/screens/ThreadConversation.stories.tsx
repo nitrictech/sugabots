@@ -555,7 +555,7 @@ export const InTheSidebar = meta.story({
 			message(
 				"0199a3a0-0000-7000-8000-000000000301",
 				host,
-				"Ryan is seeing billing timeouts on checkout. Can you check Sentry and open an issue if nothing's tracked?",
+				"Rowan is seeing billing timeouts on checkout. Can you check Sentry and open an issue if nothing's tracked?",
 			),
 			message(
 				"0199a3a0-0000-7000-8000-000000000302",

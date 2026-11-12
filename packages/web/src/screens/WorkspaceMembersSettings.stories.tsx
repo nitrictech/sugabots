@@ -34,12 +34,12 @@ function person(n: number, name: string, email: string, role: string) {
 	};
 }
 
-const ryan = person(1, "Ryan Eyes", "ryan@nitric.io", "owner");
+const rowan = person(1, "Rowan Ellis", "rowan@example.com", "owner");
 const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
 const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
 const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
 
-const inPod = (member: typeof ryan) => ({
+const inPod = (member: typeof rowan) => ({
 	userId: member.user.id,
 	name: member.user.name,
 	email: member.user.email,
@@ -79,8 +79,8 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 			["agents", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
 		);
-		client.setQueryData(["pod-members", revenue.id], [inPod(ryan), inPod(jay), inPod(mara)]);
-		client.setQueryData(["pod-members", engineering.id], [inPod(ryan), inPod(sam)]);
+		client.setQueryData(["pod-members", revenue.id], [inPod(rowan), inPod(jay), inPod(mara)]);
+		client.setQueryData(["pod-members", engineering.id], [inPod(rowan), inPod(sam)]);
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -100,7 +100,7 @@ const meta = preview.meta({
 		canManage: true,
 		canManageAdmins: true,
 		canTransferOwnership: true,
-		currentUserId: ryan.user.id,
+		currentUserId: rowan.user.id,
 	},
 	parameters: {
 		layout: "fullscreen",
@@ -116,7 +116,7 @@ const meta = preview.meta({
 	],
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${roster}/members`, () => HttpResponse.json([ryan, jay, mara, sam])),
+			http.get(`${roster}/members`, () => HttpResponse.json([rowan, jay, mara, sam])),
 			http.get(`${roster}/invitations`, () => HttpResponse.json([alex])),
 			http.patch(`${roster}/members/:memberId`, () =>
 				refuses("This preview does not save role changes."),
@@ -135,7 +135,7 @@ export const Managing = meta.story({
 	play: async ({ canvas }) => {
 		const mara = await canvas.findByRole("link", { name: /Mara Kent/ });
 		await expect(mara).toHaveTextContent("Member");
-		await expect(canvas.getByRole("link", { name: /Ryan Eyes/ })).toHaveTextContent("(you)");
+		await expect(canvas.getByRole("link", { name: /Rowan Ellis/ })).toHaveTextContent("(you)");
 		// People and invitations are two requests, so the invitation is awaited.
 		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
 		await expect(canvas.getByText(/^Sent .+, expires in \d+ hours$/)).toBeInTheDocument();
@@ -191,9 +191,9 @@ export const TransferringOwnership = meta.story({
 
 /** The owner's own page: their role stated, and no way out until they hand the workspace on. */
 export const You = meta.story({
-	args: { selectedMemberId: ryan.id },
+	args: { selectedMemberId: rowan.id },
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Ryan Eyes" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Rowan Ellis" })).toBeInTheDocument();
 		await expect(canvas.getByText("Owner")).toBeInTheDocument();
 		await expect(canvas.queryByRole("radio", { name: "Member" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Leave workspace" })).toBeNull();
@@ -226,10 +226,10 @@ export const AdminOnOwner = meta.story({
 		canManageAdmins: false,
 		canTransferOwnership: false,
 		currentUserId: jay.user.id,
-		selectedMemberId: ryan.id,
+		selectedMemberId: rowan.id,
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Ryan Eyes" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Rowan Ellis" })).toBeInTheDocument();
 		await expect(canvas.getByText("Owner")).toBeInTheDocument();
 		await expect(canvas.queryByRole("radio")).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Remove from workspace" })).toBeNull();

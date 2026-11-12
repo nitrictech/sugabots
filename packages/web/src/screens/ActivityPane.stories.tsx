@@ -35,7 +35,7 @@ const bot = {
 const messages: ChatMessage[] = Array.from({ length: 24 }, (_, index) => {
 	const text =
 		index === 3
-			? "@ryan-eyes can you sign off the Acme quote before 5?"
+			? "@rowan-ellis can you sign off the Acme quote before 5?"
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-000000000a${String(index).padStart(2, "0")}`,
