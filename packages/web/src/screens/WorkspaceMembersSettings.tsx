@@ -12,7 +12,7 @@ import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatClockTime } from "@/lib/list-time.ts";
+import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -269,24 +269,8 @@ const DAY_MS = 24 * HOUR_MS;
 
 /** When the invitation went out and how long it has left, as one sentence: "Sent yesterday, expires in 8 hours". */
 function invitationTimes(invitation: { sentAt: string; expiresAt: string }, now: Date): string {
-	const sent = sentText(new Date(invitation.sentAt), now);
+	const sent = `Sent ${formatTimeAfterVerb(new Date(invitation.sentAt), now)}`;
 	return `${sent}, ${expiryText(new Date(invitation.expiresAt).getTime() - now.getTime())}`;
-}
-
-const WEEK_DAYS = 7;
-
-/** "Sent at 9:06 PM" today, "Sent yesterday", "Sent on Sunday" within the week, then "Sent on 2 Oct". */
-function sentText(sentAt: Date, now: Date): string {
-	const daysAgo = Math.round((startOfDay(now) - startOfDay(sentAt)) / DAY_MS);
-	if (daysAgo <= 0) return `Sent at ${formatClockTime(sentAt)}`;
-	if (daysAgo === 1) return "Sent yesterday";
-	if (daysAgo < WEEK_DAYS)
-		return `Sent on ${sentAt.toLocaleDateString(undefined, { weekday: "long" })}`;
-	return `Sent on ${sentAt.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
-}
-
-function startOfDay(date: Date): number {
-	return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
 /** Hours on its last day, then whole days, so a link with a day and a half to go says one day rather than two. */

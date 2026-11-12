@@ -208,6 +208,8 @@ export const modelProviderSchema = Schema.Struct({
 	lastTestError: Schema.NullOr(Schema.String),
 	/** The name of whoever connected it, while it is connected and they still have an account. */
 	connectedBy: Schema.NullOr(Schema.String),
+	/** When somebody added it, or, for a preset every workspace starts with, when it was seeded. */
+	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 

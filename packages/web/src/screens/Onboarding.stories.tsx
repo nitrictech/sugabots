@@ -192,6 +192,7 @@ const anthropic = {
 	lastTestedAt: null,
 	lastTestError: null,
 	connectedBy: null,
+	createdAt: "2026-09-11T00:00:00.000Z",
 	models: [
 		["claude-3-5-haiku-20241022", "Claude 3.5 Haiku"],
 		["claude-opus-4", "Claude Opus 4.1"],

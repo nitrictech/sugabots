@@ -82,6 +82,7 @@ function provider(
 		lastTestedAt: null,
 		lastTestError: null,
 		connectedBy: null,
+		createdAt: "2026-09-11T00:00:00.000Z",
 		models,
 		...over,
 	};
@@ -329,7 +330,7 @@ export const SwitchedOffProvider = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "DeepSeek" })).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Use DeepSeek" })).not.toBeChecked();
-		await expect(canvas.getByText("Connected by Theo Hart")).toBeInTheDocument();
+		await expect(canvas.getByText(/Connected by Theo Hart$/)).toBeInTheDocument();
 	},
 });
 
@@ -550,7 +551,7 @@ export const LargeCatalog = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
-		await expect(canvas.getByText("Connected by Theo Hart")).toBeInTheDocument();
+		await expect(canvas.getByText(/^Added .+ · Connected by Theo Hart$/)).toBeInTheDocument();
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
 		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);
