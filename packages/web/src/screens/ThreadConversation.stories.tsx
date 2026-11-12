@@ -1042,6 +1042,36 @@ export const Links = meta.story({
 });
 
 /**
+ * An image in a bot's reply is a card naming it and the site it is on, linking
+ * to it, and is never loaded: its address could carry words from the
+ * conversation out to whoever serves it. Following the link asks first
+ * whether to open the image.
+ */
+export const ImagesInAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000502",
+				host,
+				"Here is the latency since the deploy: ![Checkout latency chart](https://charts.example.com/latency.png?since=deploy)",
+			),
+		],
+	},
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		const image = canvas.getByRole("link", { name: /^Checkout latency chart/ });
+		await expect(image).toHaveAttribute(
+			"href",
+			"https://charts.example.com/latency.png?since=deploy",
+		);
+		await expect(canvasElement.querySelector('[src*="charts.example.com"]')).toBeNull();
+		await userEvent.click(image);
+		await expect(await screen.findByRole("dialog", { name: "Open image?" })).toBeInTheDocument();
+	},
+});
+
+/**
  * A reply a model left a `**` open in is closed for it, but nothing it wrote
  * is lost: a `<` that isn't the start of HTML stays, words after it included.
  */
@@ -1112,7 +1142,7 @@ export const PeoplesMarkdown = meta.story({
 		await expect(closing.querySelectorAll("br")).toHaveLength(2);
 		await expect(closing).toHaveTextContent("<b>not bold</b>");
 		await expect(canvas.getAllByRole("deletion")).toHaveLength(1);
-		await expect(canvas.getByRole("link", { name: "The deploy dashboard" })).toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: /^The deploy dashboard/ })).toHaveAttribute(
 			"href",
 			"https://example.com/deploys.png",
 		);
