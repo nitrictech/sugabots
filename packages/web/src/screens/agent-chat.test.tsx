@@ -1235,6 +1235,24 @@ describe("a message opened from Activity", () => {
 		);
 	});
 
+	it("reads the routine run chosen in Inbox once the window has focus, and not the rest of its chat", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		onTestFinished(() => hasFocus.mockRestore());
+		mount(`/suga/activity/suga-team/${chat.id}?threadPage=${routineId}`);
+		await screen.findByRole("heading", { name: routineExecution.routineName });
+		expect(client.api.chats.markItemRead).not.toHaveBeenCalled();
+
+		hasFocus.mockReturnValue(true);
+		fireEvent.focus(window);
+
+		await waitFor(() =>
+			expect(client.api.chats.markItemRead).toHaveBeenCalledWith({
+				params: { threadId: routineId },
+			}),
+		);
+		expect(client.api.chats.markRead).not.toHaveBeenCalled();
+	});
+
 	it("ignores an address naming something other than a message", async () => {
 		mount(`/suga/activity/suga-team/${chat.id}?message=a%22b`);
 

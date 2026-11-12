@@ -222,7 +222,10 @@ const activityPlaceFields = {
 	/** The conversation it is in, which opens it. */
 	conversationId: uuidSchema,
 	at: isoTimestampSchema,
-	/** It happened after the person last read the conversation or last wrote in it. */
+	/**
+	 * It happened after the person last read the conversation or last wrote in
+	 * it, and, for a routine run or collaboration, they have not opened it.
+	 */
 	unread: Schema.Boolean,
 };
 

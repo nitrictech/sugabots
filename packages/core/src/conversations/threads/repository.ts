@@ -231,6 +231,14 @@ export interface Interface {
 	 */
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 	/**
+	 * Records that `userId` has read a routine run or collaboration as an item,
+	 * by its own thread `itemThreadId`: that thread up to when the item began.
+	 * The conversation it is in, and what was written in the item since, stay
+	 * as they were. Tells the item's watchers when that moved them on. Never
+	 * moves anyone back, and does nothing for any other thread.
+	 */
+	readonly markItemRead: (userId: string, itemThreadId: string) => Effect.Effect<void>;
+	/**
 	 * Adds the person's reaction to a finished message, and announces what the
 	 * message has now. A reaction already there changes nothing and is not
 	 * announced. A new emoji past `MAX_REACTION_EMOJI_PER_MESSAGE` fails.
@@ -367,6 +375,42 @@ export const make = Effect.gen(function* () {
 			]);
 			return created;
 		});
+
+	/**
+	 * Moves how far `userId` has read `threadId` on to `at`, a timestamp as
+	 * text, and tells the thread's watchers. Never moves anyone back.
+	 */
+	const readThrough = Effect.fn("ThreadRepository.readThrough")(function* (
+		userId: string,
+		threadId: string,
+		at: string,
+	) {
+		const through = sql`${at}::timestamptz`;
+		const [moved] = yield* query((db) =>
+			db
+				.insert(threadRead)
+				.values({ userId, threadId, readThrough: through })
+				.onConflictDoUpdate({
+					target: [threadRead.userId, threadRead.threadId],
+					set: { readThrough: through },
+					setWhere: lt(threadRead.readThrough, through),
+				})
+				.returning({ readThrough: threadRead.readThrough, readAt: threadRead.updatedAt }),
+		);
+		if (!moved) return;
+		const reader = yield* query((db) =>
+			db.query.user.findFirst({ where: { id: userId }, ...personColumns }),
+		);
+		if (!reader) return;
+		yield* emit([
+			ConversationEvent.ThreadRead({
+				threadId,
+				person: toPerson(reader),
+				readThrough: moved.readThrough,
+				readAt: moved.readAt,
+			}),
+		]);
+	});
 
 	return Service.of({
 		openBotChannel: (placement) =>
@@ -1077,31 +1121,36 @@ export const make = Effect.gen(function* () {
 								);
 						});
 						if (!newest?.at) return;
-						const readThrough = sql`${newest.at}::timestamptz`;
-						const [moved] = yield* query((db) =>
-							db
-								.insert(threadRead)
-								.values({ userId, threadId, readThrough })
-								.onConflictDoUpdate({
-									target: [threadRead.userId, threadRead.threadId],
-									set: { readThrough },
-									setWhere: lt(threadRead.readThrough, readThrough),
+						yield* readThrough(userId, threadId, newest.at);
+					}),
+				),
+			),
+
+		markItemRead: (userId, itemThreadId) =>
+			operation(
+				"markItemRead",
+				transaction(
+					Effect.gen(function* () {
+						// As text, which keeps the microseconds a `Date` would drop.
+						const [item] = yield* query((db) => {
+							const runStart = db
+								.select({ at: sql`${routineExecution.acceptedAt}` })
+								.from(routineExecution)
+								.where(eq(routineExecution.threadId, itemThreadId));
+							const collaborationStart = db
+								.select({ at: sql`${collaboration.createdAt}` })
+								.from(collaboration)
+								.where(eq(collaboration.childThreadId, itemThreadId));
+							return db
+								.select({
+									at: sql<string | null>`coalesce((${runStart}), (${collaborationStart}))::text`,
 								})
-								.returning({ readThrough: threadRead.readThrough, readAt: threadRead.updatedAt }),
-						);
-						if (!moved) return;
-						const reader = yield* query((db) =>
-							db.query.user.findFirst({ where: { id: userId }, ...personColumns }),
-						);
-						if (!reader) return;
-						yield* emit([
-							ConversationEvent.ThreadRead({
-								threadId,
-								person: toPerson(reader),
-								readThrough: moved.readThrough,
-								readAt: moved.readAt,
-							}),
-						]);
+								.from(thread)
+								.where(eq(thread.id, itemThreadId))
+								.limit(1);
+						});
+						if (!item?.at) return;
+						yield* readThrough(userId, itemThreadId, item.at);
 					}),
 				),
 			),

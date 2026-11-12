@@ -2490,6 +2490,82 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 		});
 
+		/** Whether each routine run and collaboration in activity is unread, by its thread. */
+		const itemsUnread = async () =>
+			new Map(
+				(await view.activity(workspaceId)).items.flatMap((item) =>
+					item.kind === "routine" || item.kind === "collaboration"
+						? [[item.threadId, item.unread] as const]
+						: [],
+				),
+			);
+
+		it("reads only the routine run opened, leaving the routine's other runs unread", async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+			);
+			const runRoutine = () =>
+				routines.run({ agentId, routineId: created.routine.id, requestId: crypto.randomUUID() });
+			const earlier = await runRoutine();
+			const opened = await runRoutine();
+			const later = await runRoutine();
+
+			await chats.markItemRead(opened.threadId);
+
+			const unread = await itemsUnread();
+			expect(unread.get(earlier.threadId)).toBe(true);
+			expect(unread.get(opened.threadId)).toBe(false);
+			expect(unread.get(later.threadId)).toBe(true);
+		});
+
+		it("reads only the collaboration opened, leaving the conversation's others unread", async () => {
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			const earlier = await collaborate(current.id, current.id);
+			const opened = await collaborate(current.id, current.id);
+			const later = await collaborate(current.id, current.id);
+
+			await chats.markItemRead(opened);
+
+			const unread = await itemsUnread();
+			expect(unread.get(earlier)).toBe(true);
+			expect(unread.get(opened)).toBe(false);
+			expect(unread.get(later)).toBe(true);
+		});
+
+		it("leaves what was written in the conversation before the item unread", async () => {
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+			const before = await botWrites(current.id, "The launch plan is ready", -60);
+			const opened = await collaborate(current.id, current.id);
+
+			await chats.markItemRead(opened);
+
+			const { items } = await view.activity(workspaceId);
+			expect(items).toContainEqual(
+				expect.objectContaining({ kind: "message", messageId: before.id, unread: true }),
+			);
+		});
+
+		it("refuses a thread that is not a routine run or collaboration", async () => {
+			const current = await chats.openBotChannel({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: agentId,
+			});
+
+			await expect(chats.markItemRead(current.id)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
+		});
+
 		it("counts a routine run and a collaboration caught up with once the person writes after them", async () => {
 			const current = await chats.openBotChannel({
 				workspace: workspaceId,

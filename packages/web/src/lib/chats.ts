@@ -177,6 +177,29 @@ export function useMarkChatsRead() {
 	});
 }
 
+/**
+ * Marks one routine run or collaboration read, by its thread, while the
+ * window has focus, without reading the rest of the conversation it is in.
+ * Checks when the item opens and when the window gains focus.
+ */
+export function useMarkItemReadWhileSeen(threadId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	const { mutate } = useMutation({
+		mutationFn: (itemThreadId: string) =>
+			Effect.runPromise(client.api.chats.markItemRead({ params: { threadId: itemThreadId } })),
+		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+	});
+	useEffect(() => {
+		const markIfFocused = () => {
+			if (document.hasFocus()) mutate(threadId);
+		};
+		markIfFocused();
+		window.addEventListener("focus", markIfFocused);
+		return () => window.removeEventListener("focus", markIfFocused);
+	}, [threadId, mutate]);
+}
+
 /** How many conversations Mark all as read marks at once. */
 const MARK_READ_CONCURRENCY = 4;
 
