@@ -21,7 +21,7 @@ import {
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { hasMovedAddress, stillConfiguredAs } from "../tested-configuration.ts";
+import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 import { OAuthTokens } from "./sign-in/sign-in.ts";
 
@@ -317,7 +317,7 @@ export const make = Effect.gen(function* () {
 								.for("update"),
 						);
 						if (!current) return undefined;
-						const moved = hasMovedAddress(changes.baseUrl, current.baseUrl);
+						const moved = changesAddress(changes.baseUrl, current.baseUrl);
 						const configurationChanged =
 							changes.baseUrl !== undefined ||
 							changes.apiFormat !== undefined ||

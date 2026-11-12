@@ -9,7 +9,7 @@ import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { hasMovedAddress, stillConfiguredAs } from "../tested-configuration.ts";
+import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchConnection } from "./search-connection.ts";
 
 /**
@@ -147,7 +147,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (!current) return undefined;
 						const dropsKey =
-							changes.apiKey === undefined && hasMovedAddress(changes.baseUrl, current.baseUrl);
+							changes.apiKey === undefined && changesAddress(changes.baseUrl, current.baseUrl);
 						const needsKey = searchProviderPreset(current.preset).requiresApiKey;
 						const hasKey =
 							changes.apiKey === undefined

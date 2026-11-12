@@ -29,7 +29,7 @@ import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Egress } from "../network/egress.ts";
-import { hasMovedAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
+import { changesAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
 	holdingModel,
 	keepingHeldModelsOffered,
@@ -459,7 +459,7 @@ export const make = Effect.gen(function* () {
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
-					const moved = hasMovedAddress(changes.baseUrl, current.baseUrl);
+					const moved = changesAddress(changes.baseUrl, current.baseUrl);
 					// A new address takes away the key and sign-in, unless a key comes with it.
 					const losesCredential = moved && !changes.apiKey;
 					const credentialAfter = losesCredential
