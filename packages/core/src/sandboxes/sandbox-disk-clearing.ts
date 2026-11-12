@@ -6,7 +6,7 @@ import { type Database, query } from "../database/database.ts";
 import { ACTIVE_TURN_STATUSES, agent, routineExecution, thread, turn } from "../database/schema.ts";
 import { Sandboxes } from "./sandboxes.ts";
 
-/** The caches in each agent's home, relative to it, that clearing may remove. */
+/** Caches in each agent's home that clearing may remove. */
 export const AGENT_CACHES = [".cache", ".npm", ".bun/install/cache"] as const;
 
 type AgentCache = (typeof AGENT_CACHES)[number];
@@ -24,33 +24,26 @@ type ClearingReason = Clearable["reason"];
 
 export interface Clearing {
 	readonly cleared: readonly Clearable[];
-	/**
-	 * Whether it was stopped at its timeout, which loses everything it
-	 * printed: it may have cleared folders `cleared` doesn't list.
-	 */
+	/** Whether it hit its timeout, losing its output, so `cleared` may be missing some. */
 	readonly stoppedAtTimeout: boolean;
 }
 
-/** The threads' folders and agents' homes in a sandbox's workspace, by id. */
+/** Ids of the thread folders and agent homes in a sandbox. */
 export interface WorkspaceFolders {
 	readonly threadIds: readonly string[];
 	readonly agentIds: readonly string[];
 }
 
 /**
- * The most folders one clearing takes on. Its script is a single argument
- * to bash, which Linux caps at 128 KiB, and each folder adds at most 85
- * bytes to it. Folders past these are cleared the next time.
+ * Linux caps the script, a single bash argument, at 128 KiB, and each
+ * folder adds up to 85 bytes. The rest wait for the next clearing.
  */
 export const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
 
 /**
- * Frees the sandbox's disk by removing, in {@link clearingOrder}, the
- * folders nobody will work in again and the caches in agents' homes, until
- * its workspace's filesystem is less than `belowShare` full.
- *
- * Only while no lease is held on the sandbox: a command running meanwhile
- * could lose the folder or cache it is using.
+ * Removes folders in {@link clearingOrder} until the workspace is less than
+ * `belowShare` full. Only call it while no lease is held, or a running
+ * command could lose its folder.
  */
 export function freeDiskSpace(
 	sandbox: Sandboxes.Sandbox,
@@ -70,14 +63,10 @@ export function freeDiskSpace(
 }
 
 /**
- * What in `folders` may be cleared, in the order it should be: the folders
- * of threads that no longer exist, then the homes of agents that no longer
- * exist, then the folders of routine runs that have ended, then the caches
- * in the remaining agents' homes, then the folders of conversations marked
- * done. Threads go oldest last turn first. A run's thread takes no turns
- * once it ends, and marking a conversation done is undone by anything new
- * in it, so its folder may still hold work and goes last. A thread with a
- * turn still running, or waiting for a person, is never cleared.
+ * What in `folders` may be cleared, in order: deleted threads, deleted
+ * agents' homes, ended routine runs, remaining agents' caches, then done
+ * conversations, last because anything new reopens them. Threads go oldest
+ * last turn first. A thread with an active turn is never cleared.
  */
 export function clearingOrder(
 	workspaceId: string,
@@ -86,7 +75,7 @@ export function clearingOrder(
 	return Effect.gen(function* () {
 		const threads = yield* clearableThreads(workspaceId, folders.threadIds);
 		const agents = yield* clearableAgentFolders(workspaceId, folders.agentIds);
-		// Stable, so each reason's folders keep their order.
+		// Stable, keeping threads oldest first within each reason.
 		return [...threads, ...agents].toSorted(
 			(a, b) => REASON_ORDER[a.reason] - REASON_ORDER[b.reason],
 		);
@@ -101,7 +90,6 @@ const REASON_ORDER: Record<ClearingReason, number> = {
 	conversation_done: 4,
 };
 
-/** Which of the threads `threadIds` may have their folders cleared, oldest last turn first. */
 function clearableThreads(workspaceId: string, threadIds: readonly string[]) {
 	return Effect.gen(function* () {
 		if (threadIds.length === 0) return [];
@@ -149,9 +137,8 @@ const ENDED_RUN_STATES: ReadonlySet<RoutineExecutionState> = new Set([
 ]);
 
 /**
- * The homes in `agentIds` of agents that no longer exist, and the caches
- * in the rest. Agents never move between pods, so one that still exists
- * may still work in this sandbox.
+ * Deleted agents' homes among `agentIds`, and the caches of the rest.
+ * Agents never change pods, so an existing one keeps its home.
  */
 function clearableAgentFolders(workspaceId: string, agentIds: readonly string[]) {
 	return Effect.gen(function* () {
@@ -185,12 +172,11 @@ function pathOf(clearable: Clearable) {
 }
 
 const LISTING_OPTIONS = { timeout: "30 seconds", maxOutputCharacters: 200_000 } as const;
-/** Removing trees of many small files, such as dependencies, unlinks every one of them. */
+/** Generous, since deleting dependency trees unlinks every file. */
 const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } as const;
 /**
- * When a clearing starts no more removals, well inside its timeout. A
- * provider may stop only the command it started at the timeout, and a
- * script left running would go on removing once a turn uses the sandbox.
+ * Well inside the timeout, which may kill only the outer command and leave
+ * the script deleting while a turn uses the sandbox.
  */
 const STOP_REMOVING_AFTER_SECONDS = 90;
 
@@ -198,10 +184,6 @@ const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const THREAD_FOLDER = new RegExp(`^${Sandboxes.THREADS_DIRECTORY}/(${ID})$`);
 const AGENT_HOME = new RegExp(`^${Sandboxes.AGENTS_DIRECTORY}/(${ID})$`);
 
-/**
- * The threads' folders and agents' homes in the sandbox. A name that isn't
- * an id is no thread's or agent's, and is left alone.
- */
 function workspaceFoldersIn(sandbox: Sandboxes.Sandbox) {
 	return Effect.map(
 		sandbox.exec(
@@ -219,26 +201,21 @@ function workspaceFoldersIn(sandbox: Sandboxes.Sandbox) {
 }
 
 /**
- * Where a clearing moves each path before removing it. A removal cut short,
- * such as at the clearing's timeout, then leaves nothing half-removed where
- * an agent would trust it, like a cache missing some of a package's files.
- * The next clearing removes whatever is left here.
+ * Where clearing moves each path before deleting it, so an interrupted
+ * delete never leaves a half-deleted cache in place. The next clearing
+ * empties it.
  */
 export const SET_ASIDE_DIRECTORY = `${Sandboxes.WORKSPACE_DIRECTORY}/.sugabots-clearing`;
 
 /**
- * Removes what an earlier clearing set aside, then the paths of
- * `clearables` in order, checking before each whether the workspace's
- * filesystem is still at least `belowShare` full, and prints each path it
- * removed. A path that isn't there is skipped. If `df` fails, or
- * {@link STOP_REMOVING_AFTER_SECONDS} have passed, it removes nothing more.
- * A path that can't be set aside, such as when the disk is too full for
- * {@link SET_ASIDE_DIRECTORY}, is removed where it is.
+ * Empties {@link SET_ASIDE_DIRECTORY}, then deletes each path while the
+ * workspace is at least `belowShare` full, printing each one deleted.
+ * Missing paths are skipped, and one that can't be set aside is deleted in
+ * place. Stops if `df` fails or after {@link STOP_REMOVING_AFTER_SECONDS}.
  */
 function clearingScript(clearables: readonly Clearable[], belowShare: number) {
 	return [
-		// Folders without write permission, such as Go's module cache, can't
-		// have what's in them removed until they're given it.
+		// Read-only folders, like Go's module cache, need write permission to be emptied.
 		`delete() { rm -rf -- "$1" 2>/dev/null || { chmod -R u+w -- "$1" && rm -rf -- "$1"; }; }`,
 		`set_aside=${SET_ASIDE_DIRECTORY}`,
 		`delete "$set_aside"`,

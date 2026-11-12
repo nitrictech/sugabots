@@ -72,10 +72,8 @@ export interface Interface {
 	/** Ends `holder`'s leases, starting the idle time of the sandboxes it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
 	/**
-	 * Pauses every sandbox nobody has used for {@link IDLE_BEFORE_PAUSE}. One
-	 * whose disk was last measured close to full first has the folders
-	 * nobody will work in again and agents' caches cleared, until its
-	 * workspace is less than {@link CLEARED_BELOW_SHARE} full.
+	 * Pauses every sandbox idle for {@link IDLE_BEFORE_PAUSE}, first clearing
+	 * any last measured close to full to below {@link CLEARED_BELOW_SHARE}.
 	 */
 	readonly pauseIdle: Effect.Effect<void>;
 	/**
@@ -464,11 +462,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Frees space on an idle sandbox whose disk was last measured close to
-	 * full, then measures it again, since a paused sandbox keeps its last
-	 * measurement. It runs under the pod's lock, so a turn arriving meanwhile
-	 * waits rather than finding its folder or caches half gone.
-	 * Whatever happens, the sandbox is paused after.
+	 * Re-measures after clearing, since a paused sandbox keeps its last
+	 * measurement. Runs under the pod's lock, so a turn arriving meanwhile
+	 * waits instead of finding its folder half gone.
 	 */
 	const clearDiskIfFilling = (row: SandboxRow, at: Sandboxes.Provider) =>
 		Effect.gen(function* () {
