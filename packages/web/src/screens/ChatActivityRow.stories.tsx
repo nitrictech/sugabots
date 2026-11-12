@@ -52,11 +52,6 @@ const routine = (state: ActivityState, triggerKind: RoutineExecutionTriggerKind 
 /** CollaborationRunning is the asked bot still helping the bot that asked it. */
 export const CollaborationRunning = meta.story({ render: () => collaboration("running") });
 
-/** CollaborationWaitingOnYou is a collaboration stopped on an approval. */
-export const CollaborationWaitingOnYou = meta.story({
-	render: () => collaboration("waiting_on_you"),
-});
-
 const opened = fn();
 
 /** CollaborationDone opens the collaboration when clicked. */

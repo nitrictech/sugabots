@@ -17,7 +17,7 @@ const threadTypeLabel = { collaboration: "Collaboration", routine: "Routine run"
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
 /** How a collaboration or routine run stands, as its line says it. */
-export type ActivityState = "running" | "waiting_on_you" | "done" | "failed";
+export type ActivityState = "running" | "done" | "failed";
 
 /** A history entry's status in the terms of the line. */
 export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivityState {
@@ -130,8 +130,6 @@ export function collaborationText(host: string, other: string, state: ActivitySt
 	switch (state) {
 		case "running":
 			return `${host} is talking to ${other}`;
-		case "waiting_on_you":
-			return `${host} is waiting on your approval`;
 		case "done":
 			return `${host} collaborated with ${other}`;
 		case "failed":
@@ -144,8 +142,6 @@ function helpedText(helper: string, asker: string, state: ActivityState): string
 	switch (state) {
 		case "running":
 			return `${helper} is helping ${asker}`;
-		case "waiting_on_you":
-			return `${helper} is waiting on your approval`;
 		case "done":
 			return `${helper} helped ${asker}`;
 		case "failed":
@@ -157,8 +153,6 @@ export function routineText(name: string, state: ActivityState): string {
 	switch (state) {
 		case "running":
 			return `${name} is running`;
-		case "waiting_on_you":
-			return `${name} is waiting on your approval`;
 		case "done":
 			return `${name} ran`;
 		case "failed":

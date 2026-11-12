@@ -305,7 +305,9 @@ describe("a reply that opens by asking another bot", () => {
 				answer,
 				atOffset: 0,
 			},
-			{ type: "text", text: "Sentry Scout found 41 events." },
+			...(answer === null
+				? []
+				: [{ type: "text" as const, text: `Sentry Scout found ${answer}.` }]),
 		]);
 
 	it("puts the collaboration under the words that led to it, as a thread line", async () => {
@@ -318,14 +320,12 @@ describe("a reply that opens by asking another bot", () => {
 		expect(name.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
-	// `pending` is the asking bot having moved on to be resumed by the answer; nobody has anything to approve.
 	it.each(["waiting", "pending"] as const)("says it is working while %s", async (status) => {
 		show([asked(status)], { participants: [host, helper] });
 
-		const line = await screen.findByRole("button", {
+		await screen.findByRole("button", {
 			name: `Open Collaboration: ${host.name} and ${helper.name}, Working`,
 		});
-		expect(line.textContent).not.toContain("Needs approval");
 	});
 });
 

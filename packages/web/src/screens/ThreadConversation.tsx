@@ -26,6 +26,7 @@ import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
+import type { ActivityState } from "./ChatActivityRow.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
@@ -762,13 +763,23 @@ function RoutineResultLink({
 	);
 }
 
-/**
- * How a collaboration's line says where it stands once it has settled. Until
- * then it is working: `pending` means the asking bot moved on to be resumed
- * by the answer, which waits on nobody's approval.
- */
-const COLLABORATION_STATUS: Partial<Record<CollaborationPart["status"], SideThreadStatus>> = {
-	answered: { text: "Done", done: true },
+/** Where a collaboration stands, as its line here and its row in Inbox both say it. */
+export function collaborationActivityState(status: CollaborationPart["status"]): ActivityState {
+	switch (status) {
+		case "waiting":
+		case "pending":
+			return "running";
+		case "answered":
+			return "done";
+		case "failed":
+			return "failed";
+	}
+}
+
+/** How a collaboration's line shows where it stands. */
+const COLLABORATION_LINE_STATUS: Record<ActivityState, SideThreadStatus> = {
+	running: "working",
+	done: { text: "Done", done: true },
 	failed: { text: "Stopped" },
 };
 
@@ -795,7 +806,7 @@ function CollaborationLine({
 			label={`Asked ${recipient.name}`}
 			description={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
 			lastActivityAt={lastActivityAt}
-			status={COLLABORATION_STATUS[status] ?? "working"}
+			status={COLLABORATION_LINE_STATUS[collaborationActivityState(status)]}
 			onOpen={onOpen}
 		/>
 	);

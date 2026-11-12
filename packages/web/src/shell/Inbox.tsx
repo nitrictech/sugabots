@@ -14,6 +14,7 @@ import {
 	RoutineTriggerIcon,
 	routineText,
 } from "@/screens/ChatActivityRow.tsx";
+import { collaborationActivityState } from "@/screens/ThreadConversation.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { PodInitial } from "@/shell/SidebarPod.tsx";
@@ -286,21 +287,6 @@ function runState(state: Extract<ActivityItem, { kind: "routine" }>["state"]): A
 	return "running";
 }
 
-/** How a collaboration's status reads in its row, as its line in the chat says it. */
-function collaborationState(
-	status: Extract<ActivityItem, { kind: "collaboration" }>["status"],
-): ActivityState {
-	switch (status) {
-		case "waiting":
-		case "pending":
-			return "running";
-		case "answered":
-			return "done";
-		default:
-			return "failed";
-	}
-}
-
 /** What a row says happened, and the line under it. */
 function wordsOf(item: ActivityItem): { title: string; detail: string } {
 	switch (item.kind) {
@@ -324,7 +310,7 @@ function wordsOf(item: ActivityItem): { title: string; detail: string } {
 				title: collaborationText(
 					item.initiator.name,
 					item.recipient.name,
-					collaborationState(item.status),
+					collaborationActivityState(item.status),
 				),
 				detail: item.brief,
 			};
