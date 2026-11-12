@@ -71,8 +71,7 @@ beforeAll(async () => {
 			return;
 		}
 		const body = await jsonBody(request);
-		// A server over its rate limit, turning calls away before MCP sees them,
-		// and quoting the key it was sent as some do.
+		// A server over its rate limit, quoting the key it was sent.
 		if (request.url === "/limited" && body?.method === "tools/call") {
 			const key = request.headers["x-fixture-key"];
 			response
@@ -350,7 +349,7 @@ describe("a turn's connection tools", () => {
 					{
 						type: "text",
 						text: expect.stringMatching(
-							/HTTP 429: Rate limit reached for key …\. Try again in an hour/,
+							/^The call failed with HTTP 429\. The server said: Rate limit reached for key …\. Try again in an hour/,
 						),
 					},
 				],

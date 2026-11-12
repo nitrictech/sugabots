@@ -17,8 +17,7 @@ import type { SearchConnection } from "./search-connection.ts";
  * Every backend takes the same request and answers the same shape, so the
  * tool and the settings test are written once. A failure is an answer with a
  * reason, never a throw: the agent, or the admin testing the connection,
- * reads it as a sentence. When the service turned the search down, what it
- * said goes to the agent too, which can work out the fix from it and the docs.
+ * reads it as a sentence, and the agent also gets what the service said.
  */
 
 interface SearchResult {
@@ -34,7 +33,6 @@ export type SearchOutcome =
 	| {
 			ok: false;
 			reason: UserText;
-			/** The service's own words, such as how to lift a rate limit; not Sugabots'. */
 			providerMessage?: string;
 	  };
 
@@ -109,11 +107,7 @@ function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): Sea
 				},
 			});
 			if (!response.ok) {
-				return refusedSaying(
-					userText`Brave Search answered HTTP ${response.status}`,
-					await response.text().catch(() => ""),
-					connection.apiKey,
-				);
+				return httpRefusal("Brave Search", response, connection.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(braveResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -164,11 +158,7 @@ function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): Searc
 				}),
 			});
 			if (!response.ok) {
-				return refusedSaying(
-					userText`Exa answered HTTP ${response.status}`,
-					await response.text().catch(() => ""),
-					connection.apiKey,
-				);
+				return httpRefusal("Exa", response, connection.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(exaResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -213,11 +203,7 @@ function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): Se
 				body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
 			});
 			if (!response.ok) {
-				return refusedSaying(
-					userText`Tavily answered HTTP ${response.status}`,
-					await response.text().catch(() => ""),
-					connection.apiKey,
-				);
+				return httpRefusal("Tavily", response, connection.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(tavilyResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -271,13 +257,7 @@ function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
 				return { ok: true, results: parseExaText(text).slice(0, count) };
 			} catch (cause) {
 				// How the free endpoint answers a rate limit; a negative code is the SDK's own complaint.
-				if (
-					!(cause instanceof StreamableHTTPError) ||
-					cause.code === undefined ||
-					cause.code < 400
-				) {
-					throw cause;
-				}
+				if (!(cause instanceof StreamableHTTPError) || !cause.code || cause.code < 400) throw cause;
 				return refusedSaying(userText`Exa answered HTTP ${cause.code}`, cause.message, undefined);
 			} finally {
 				await client.close().catch(() => undefined);
@@ -349,11 +329,7 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 				);
 			}
 			if (!response.ok) {
-				return refusedSaying(
-					userText`SearXNG answered HTTP ${response.status}`,
-					await response.text().catch(() => ""),
-					connection.apiKey,
-				);
+				return httpRefusal("SearXNG", response, connection.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(searxngResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -376,18 +352,28 @@ function refused(reason: UserText): SearchOutcome {
 	return { ok: false, reason };
 }
 
-/** A refusal with what the service said, when it said anything, without the key it was sent. */
 function refusedSaying(reason: UserText, said: string, apiKey: string | undefined): SearchOutcome {
 	const providerMessage = upstreamErrorText(said, [apiKey]);
 	return providerMessage ? { ok: false, reason, providerMessage } : refused(reason);
 }
+
+async function httpRefusal(
+	service: Service,
+	response: Response,
+	apiKey: string | undefined,
+): Promise<SearchOutcome> {
+	const said = await response.text().catch(() => "");
+	return refusedSaying(userText`${service} answered HTTP ${response.status}`, said, apiKey);
+}
+
+type Service = "Brave Search" | "Exa" | "Tavily" | "SearXNG";
 
 /** Whatever a call threw, to be turned into a reason. */
 class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
 
 /** Runs one call under the time budget, turning whatever goes wrong into a reason. */
 function answer(
-	service: "Brave Search" | "Exa" | "Tavily" | "SearXNG",
+	service: Service,
 	signal: AbortSignal | undefined,
 	call: (stop: AbortSignal) => Promise<SearchOutcome>,
 ): Effect.Effect<SearchOutcome> {

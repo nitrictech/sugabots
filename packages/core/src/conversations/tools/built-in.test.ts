@@ -53,10 +53,9 @@ describe("the built-in tools for a workspace", () => {
 		});
 		const { tools } = await run(rateLimited.forWorkspace("w1", SETTINGS_PAGE));
 
-		const callOptions = { toolCallId: "1", messages: [] } as never;
 		const result = await tools.web_search?.execute?.(
 			{ query: "open bots", count: 1 } as never,
-			callOptions,
+			{ toolCallId: "1", messages: [] } as never,
 		);
 
 		expect(result).toEqual({

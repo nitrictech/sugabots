@@ -124,8 +124,7 @@ export async function connectServer(
 			try {
 				return await execute(input, options);
 			} catch (cause) {
-				// The model is told why a server rejected a call, so it can correct it
-				// or tell the person how, such as a rate limit's way out.
+				// The model is told why a server rejected a call, so it can correct it.
 				const said = isServerError(cause) ? cause.message : httpErrorAnswer(cause);
 				if (said === undefined) throw cause;
 				const text = upstreamErrorText(said, Object.values(target.headers));
@@ -203,6 +202,6 @@ function httpErrorAnswer(cause: unknown): string | undefined {
 	if (typeof statusCode !== "number" || statusCode < 400) return undefined;
 	const body = typeof responseBody === "string" ? responseBody.trim() : "";
 	return body
-		? `The server answered HTTP ${statusCode}: ${body}`
-		: `The server answered HTTP ${statusCode}`;
+		? `The call failed with HTTP ${statusCode}. The server said: ${body}`
+		: `The call failed with HTTP ${statusCode}.`;
 }

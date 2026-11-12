@@ -416,10 +416,9 @@ const streamReply = (
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
 			const now = yield* DateTime.nowAsDate;
-			const settingsUrl = `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings`;
 			const offeredBuiltIns = yield* builtInTools.forWorkspace(
 				prepared.context.thread.workspaceId,
-				`${settingsUrl}/search`,
+				`${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/search`,
 			);
 			const builtIn = {
 				tools: offeredBuiltIns.tools,
@@ -539,7 +538,7 @@ const streamReply = (
 					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
-					connectionsPageUrl: `${settingsUrl}/pods/${prepared.context.podSlug}/connections`,
+					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/connections`,
 				}),
 				sandbox: sandbox.note,
 			};

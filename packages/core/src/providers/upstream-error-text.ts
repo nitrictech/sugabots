@@ -1,17 +1,15 @@
 /** Enough for a service's explanation, short of an error page it may answer with. */
 const UPSTREAM_ERROR_CHARACTERS = 1_000;
 
-/** Real keys are longer; anything shorter could be part of ordinary words, which blanking would garble. */
+/** Shorter values could be parts of ordinary words, which blanking would garble. */
 const SHORTEST_CREDENTIAL_CHARACTERS = 8;
 
-/** The scheme an Authorization value starts with, such as `Bearer `; a service echoes the token alone. */
+/** Such as `Bearer `: a service quoting a rejected credential quotes the token alone. */
 const AUTHORIZATION_SCHEME = /^[A-Za-z]+\s+/;
 
 /**
- * upstreamErrorText returns what a service said with an error, fit to pass on
- * to a bot and the people in its chat: trimmed, cut short, and with each of
- * `credentials` (what the service was sent to authenticate) blanked, because
- * a service may quote a key it rejected.
+ * upstreamErrorText returns what a service said with an error, trimmed, cut
+ * short, and with `credentials` blanked in case it quotes one back.
  */
 export function upstreamErrorText(
 	said: string,
