@@ -31,6 +31,23 @@ export function formatListTimeInSentence(at: Date, now: Date, locale?: string): 
 }
 
 /**
+ * When something happened, to follow a verb such as "Sent": "at 6:12" today,
+ * "yesterday", "on Sunday" within the week, then "on 2 Oct", with the year
+ * only when it is not this one.
+ */
+export function formatTimeAfterVerb(at: Date, now: Date, locale?: string): string {
+	const daysAgo = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
+	if (daysAgo <= 0) return `at ${formatClockTime(at, locale)}`;
+	if (daysAgo === 1) return "yesterday";
+	if (daysAgo < WEEK_DAYS) return `on ${at.toLocaleDateString(locale, { weekday: "long" })}`;
+	return `on ${at.toLocaleDateString(locale, {
+		day: "numeric",
+		month: "short",
+		year: at.getFullYear() === now.getFullYear() ? undefined : "numeric",
+	})}`;
+}
+
+/**
  * How long ago something happened, as a list's time column shows it: the time
  * for today, then whole days ("5d"), then whole months once a calendar month
  * has passed ("1m"), then whole years ("1y").

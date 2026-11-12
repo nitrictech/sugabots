@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatAge, formatListTime, formatListTimeInSentence } from "./list-time.ts";
+import {
+	formatAge,
+	formatListTime,
+	formatListTimeInSentence,
+	formatTimeAfterVerb,
+} from "./list-time.ts";
 
 const now = new Date(2026, 8, 25, 18, 30);
 
@@ -26,6 +31,21 @@ describe("a conversation list's times", () => {
 		expect(inSentence(new Date(2026, 8, 24, 9, 0))).toBe("yesterday");
 		expect(inSentence(new Date(2026, 8, 22, 9, 0))).toBe("Tue");
 		expect(inSentence(new Date(2026, 8, 12, 9, 0))).toBe("12 Sept");
+	});
+});
+
+describe("a time after a verb", () => {
+	const afterVerb = (at: Date) => formatTimeAfterVerb(at, now, "en-AU");
+
+	it("says the time for today, the weekday within the week, then the date", () => {
+		expect(afterVerb(new Date(2026, 8, 25, 6, 12))).toBe("at 6:12");
+		expect(afterVerb(new Date(2026, 8, 24, 23, 59))).toBe("yesterday");
+		expect(afterVerb(new Date(2026, 8, 22, 9, 0))).toBe("on Tuesday");
+		expect(afterVerb(new Date(2026, 8, 12, 9, 0))).toBe("on 12 Sept");
+	});
+
+	it("adds the year only for another year", () => {
+		expect(afterVerb(new Date(2025, 11, 3, 9, 0))).toBe("on 3 Dec 2025");
 	});
 });
 

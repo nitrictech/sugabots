@@ -31,6 +31,32 @@ describe("a provider's API key", () => {
 	});
 });
 
+describe("when a provider was added", () => {
+	it("is said beside who connected it", async () => {
+		const gateway = {
+			...openai,
+			id: "0199a3a0-0000-7000-8000-0000000000cf",
+			preset: null,
+			name: "Company gateway",
+			connectedBy: "Sam",
+		};
+		client.api.modelProviders.list.mockReturnValue(Effect.succeed([gateway]));
+		mount(`/suga/settings/providers/${gateway.id}`);
+
+		expect(await screen.findByText(/^Added .+ · Connected by Sam$/)).toBeDefined();
+	});
+
+	it("is not said for a preset every workspace starts with, which nobody added", async () => {
+		client.api.modelProviders.list.mockReturnValue(
+			Effect.succeed([{ ...openai, connectedBy: "Sam" }]),
+		);
+		mount(`/suga/settings/providers/${openai.id}`);
+
+		expect(await screen.findByText("Connected by Sam")).toBeDefined();
+		expect(screen.queryByText(/^Added /)).toBeNull();
+	});
+});
+
 describe("switching a provider on", () => {
 	it("switches it on and nothing else", async () => {
 		const off = { ...openai, active: false };

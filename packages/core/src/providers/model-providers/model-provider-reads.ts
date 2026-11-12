@@ -162,6 +162,7 @@ function toProvider(
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		connectedBy: connected ? connectedBy : null,
+		createdAt: row.createdAt.toISOString(),
 		models: models.map((model) => ({
 			id: model.id,
 			modelId: model.modelId,

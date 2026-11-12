@@ -46,6 +46,7 @@ const groq: ModelProvider = {
 	lastTestedAt: null,
 	lastTestError: null,
 	connectedBy: null,
+	createdAt: "2026-09-09T00:00:00.000Z",
 	models: [],
 };
 
