@@ -215,14 +215,13 @@ describe("cancelling", () => {
 
 describe("running a failed turn again", () => {
 	it("happens while no checkpoint or change stands in the way and runs are left", () => {
-		expect(runsAgainAfterFailure(turn(), false)).toBe(true);
-		expect(runsAgainAfterFailure(turn({ runs: MAX_TURN_RUNS }), false)).toBe(false);
+		expect(runsAgainAfterFailure(turn())).toBe(true);
+		expect(runsAgainAfterFailure(turn({ runs: MAX_TURN_RUNS }))).toBe(false);
 	});
 
 	// Running it again could make the change a second time.
-	it("does not happen once the turn has a checkpoint or a tool that changes things ran", () => {
-		expect(runsAgainAfterFailure(turn({ checkpointed: true }), false)).toBe(false);
-		expect(runsAgainAfterFailure(turn(), true)).toBe(false);
-		expect(runsAgainAfterFailure(turn({ mutationStarted: true }), false)).toBe(false);
+	it("does not happen once the turn has a checkpoint or a tool that changes things started", () => {
+		expect(runsAgainAfterFailure(turn({ checkpointed: true }))).toBe(false);
+		expect(runsAgainAfterFailure(turn({ mutationStarted: true }))).toBe(false);
 	});
 });

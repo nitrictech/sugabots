@@ -36,6 +36,7 @@ import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/t
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn, TurnContext } from "./execution.ts";
+import type { TurnRepository } from "./repository.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
 import type { ToolCallRepository } from "./tool-calls/repository.ts";
 
@@ -65,6 +66,8 @@ export interface ToolDependencies {
 	/** Where a built-in tool's calls are written down. */
 	calls: Pick<ToolCallRepository.Interface, "open" | "close" | "completedOutputs">;
 	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
+	/** Where the turn records that a tool which may change something started. */
+	turns: Pick<TurnRepository.Interface, "markActed">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
@@ -98,7 +101,6 @@ export interface ToolDependencies {
 			atOffset: number;
 			mutating: boolean;
 		}) => Effect.Effect<void>;
-		markActed: () => Effect.Effect<void>;
 	};
 	/** The turn's own abort signal, so a cancelled turn stops its tools too. */
 	signal: AbortSignal;
@@ -138,7 +140,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		},
 		replyLength: deps.reply.length,
 		noteToolCall: deps.reply.noteToolCall,
-		markActed: deps.reply.markActed,
+		markActed: () => deps.turns.markActed(prepared.turnId),
 	};
 	for (const [key, tool] of Object.entries(deps.builtIn.tools)) {
 		tools[key] = deps.builtIn.usable.includes(key)

@@ -449,9 +449,10 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			const { opened, threadId } = await aPendingCollaboration();
 			const collaborator = await openReply(threadId, helper.id);
 
+			await turnRecords.markActed(collaborator.prepared.turnId);
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
-				{ content: "", collaborations: [], toolCalls: [], acted: true },
+				{ content: "", collaborations: [], toolCalls: [] },
 				{ userMessage: userText`The model could not be reached`, mayRunAgain: true },
 			);
 

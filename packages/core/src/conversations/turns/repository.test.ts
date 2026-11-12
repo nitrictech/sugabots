@@ -102,15 +102,12 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(await turns.replyFiles(replyTurnOf(second))).toEqual([]);
 		expect(await blobsInThread()).toEqual([]);
 		// Running again could act again, so the turn stops here for a person.
+		await turns.markActed(second.turnId);
 		expect(
-			await turns.fail(
-				replyTurnOf(second),
-				{ ...emptyReply, acted: true },
-				{
-					userMessage: providerDown,
-					mayRunAgain: true,
-				},
-			),
+			await turns.fail(replyTurnOf(second), emptyReply, {
+				userMessage: providerDown,
+				mayRunAgain: true,
+			}),
 		).toBe(false);
 	});
 
