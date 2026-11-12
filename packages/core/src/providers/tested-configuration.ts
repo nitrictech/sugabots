@@ -13,6 +13,17 @@ import type { Egress, EgressRefused } from "./network/egress.ts";
  */
 
 /**
+ * Whether an update's address, `next` (absent when the update leaves the
+ * address alone), differs from `stored`. A row whose address changes loses
+ * every secret the update does not give it anew: a secret goes only where it
+ * was given for, and one kept would be sent to the new address, which whoever
+ * changed it may own.
+ */
+export function changesAddress(next: string | undefined, stored: string): boolean {
+	return next !== undefined && next !== stored;
+}
+
+/**
  * SQL that is true while a row still has the configuration `testedAt` was read
  * from, `testedAt` being the row's `updatedAt` as the test loaded it. Postgres
  * stamps `updatedAt` to the microsecond and a `Date` holds only milliseconds,

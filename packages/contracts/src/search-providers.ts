@@ -114,7 +114,7 @@ export type NewSearchProvider = typeof newSearchProviderSchema.Type;
 export const searchProviderUpdateSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
 	baseUrl: Schema.optional(providerUrlSchema),
-	/** Absent leaves the stored key alone; null removes it. */
+	/** Absent leaves the stored key alone, unless `baseUrl` moves the provider; null removes it. */
 	apiKey: Schema.optional(Schema.NullOr(apiKeySchema)),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),

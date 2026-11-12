@@ -29,7 +29,7 @@ import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Egress } from "../network/egress.ts";
-import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
+import { changesAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
 	holdingModel,
 	keepingHeldModelsOffered,
@@ -91,7 +91,11 @@ export interface Interface {
 	>;
 	/**
 	 * A new key sends the provider back through discovery, and switching it on
-	 * tests it first; either way it is on only once it has answered.
+	 * tests it first; either way it is on only once it has answered. A new
+	 * address does the same, and without a new key also takes away the key,
+	 * headers and sign-in it held. Switching it off, removing its key or moving
+	 * it fails with `ModelInUse` rather than stop offering a model the workspace
+	 * depends on.
 	 */
 	readonly update: (
 		input: InProvider & { changes: ModelProviderUpdate },
@@ -455,21 +459,34 @@ export const make = Effect.gen(function* () {
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
-					if (changes.active === true && providerLacksCredential(current) && !changes.apiKey) {
+					const moved = changesAddress(changes.baseUrl, current.baseUrl);
+					// A new address takes away the key and sign-in, unless a key comes with it.
+					const losesCredential = moved && !changes.apiKey;
+					const credentialAfter = losesCredential
+						? { ...current, hasApiKey: false, signedIn: false }
+						: current;
+					if (
+						changes.active === true &&
+						providerLacksCredential(credentialAfter) &&
+						!changes.apiKey
+					) {
 						return yield* new ProviderActivationRequiresCredential({
 							missing: missingCredential(current.preset),
 						});
 					}
 					const write = providers.update(workspaceId, providerId, changes, actor.userId);
-					// Switching it off and taking its key away both stop it answering. A
-					// new key does only until it is tried, just below.
-					const takesAway = changes.active === false || changes.apiKey === null;
+					// Switching it off, taking its key away and moving it all stop it
+					// answering. A new key or address does only until it is tried, just below.
+					const takesAway = changes.active === false || changes.apiKey === null || moved;
 					const updated = yield* takesAway ? keepingHeldModelsOffered(workspaceId, write) : write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
 					}
-					if (changes.apiKey) {
-						yield* discoverModelsQuietly(workspaceId, providerId, changes.active !== false);
+					if (changes.apiKey || moved) {
+						// A new key comes on unless switched off with it; a new address
+						// comes back on only if the provider was on.
+						const activateOnSuccess = changes.active ?? (changes.apiKey ? true : current.active);
+						yield* discoverModelsQuietly(workspaceId, providerId, activateOnSuccess);
 					}
 					yield* adoptFirstModel(workspaceId);
 					return yield* requireProvider(workspaceId, providerId);

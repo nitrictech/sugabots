@@ -397,6 +397,128 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		).rejects.toBeInstanceOf(ActionForbidden);
 	});
 
+	describe("moving a provider's address", () => {
+		const elsewhere = "https://elsewhere.example/v1";
+		const withHeaders = async () => {
+			const made = await create({
+				name: "Headed gateway",
+				baseUrl: "https://headed.example/v1",
+				apiFormat: "openai",
+				apiKey: "secret",
+				customHeaders: [{ name: "x-team-token", value: "team-secret" }],
+			});
+			await switchOn(made.id);
+			return made.id;
+		};
+
+		it("drops the key and headers, which would otherwise go to the new address, and switches it off", async () => {
+			const headed = await withHeaders();
+
+			await repository.update(workspaceId, headed, { baseUrl: elsewhere }, userId);
+
+			expect(await view(headed)).toMatchObject({
+				baseUrl: elsewhere,
+				hasApiKey: false,
+				customHeaders: [],
+				active: false,
+			});
+			expect(await repository.endpoint(workspaceId, headed)).toBeUndefined();
+		});
+
+		it("keeps a key and headers given with the new address, off until tried", async () => {
+			const headed = await withHeaders();
+
+			await repository.update(
+				workspaceId,
+				headed,
+				{
+					baseUrl: elsewhere,
+					apiKey: "new-secret",
+					customHeaders: [{ name: "x-team-token", value: "new-team-secret" }],
+				},
+				userId,
+			);
+
+			expect(await view(headed)).toMatchObject({ active: false });
+			expect(await repository.endpoint(workspaceId, headed)).toMatchObject({
+				baseUrl: elsewhere,
+				apiKey: "new-secret",
+				headers: { "x-team-token": "new-team-secret" },
+			});
+		});
+
+		it("keeps the key and headers when the address given is the one it has", async () => {
+			const headed = await withHeaders();
+
+			await repository.update(
+				workspaceId,
+				headed,
+				{ baseUrl: "https://headed.example/v1" },
+				userId,
+			);
+
+			expect(await view(headed)).toMatchObject({ active: true });
+			expect(await repository.endpoint(workspaceId, headed)).toMatchObject({
+				apiKey: "secret",
+				headers: { "x-team-token": "team-secret" },
+			});
+		});
+
+		it("signs a subscription provider out", async () => {
+			const chatgpt = (await list(workspaceId)).find(({ preset }) => preset === "chatgpt");
+			if (!chatgpt) throw new Error("fixture");
+			await repository.saveOAuthTokens(workspaceId, chatgpt.id, {
+				tokens: {
+					access: "token",
+					refresh: "refresh",
+					expiresAt: Date.now() + 60_000,
+					accountId: null,
+				},
+				signedInById: userId,
+			});
+
+			await repository.update(workspaceId, chatgpt.id, { baseUrl: elsewhere }, userId);
+
+			expect(await view(chatgpt.id)).toMatchObject({ signedIn: false });
+			expect(await repository.endpoint(workspaceId, chatgpt.id)).toBeUndefined();
+		});
+
+		it("refuses to switch on at a new address without a key", async () => {
+			const headed = await withHeaders();
+			const setup = await setupWith(() => Response.json({ data: [] }));
+
+			await expect(
+				setup.update({
+					workspace: workspaceId,
+					providerId: headed,
+					changes: { baseUrl: elsewhere, active: true },
+				}),
+			).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
+			expect(await repository.endpoint(workspaceId, headed)).toMatchObject({ apiKey: "secret" });
+		});
+
+		it.each([
+			{ httpStatus: 200, active: true },
+			{ httpStatus: 503, active: false },
+		])(
+			"has a keyless provider on at its new address only once it answers there: $httpStatus",
+			async ({ httpStatus, active }) => {
+				const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
+				if (!ollama) throw new Error("fixture");
+				await switchOn(ollama.id);
+				const setup = await setupWith(() => Response.json({ models: [] }, { status: httpStatus }));
+
+				await setup.update({
+					workspace: workspaceId,
+					providerId: ollama.id,
+					changes: { baseUrl: "http://other-host:11434/v1" },
+				});
+
+				expect(await view(ollama.id)).toMatchObject({ active });
+			},
+		);
+	});
+
 	describe("under an egress policy that forbids private addresses", () => {
 		const forbidding = () =>
 			setupWith(() => Response.json({ data: [] }), { allowPrivateNetwork: false });
@@ -705,6 +827,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			).rejects.toBeInstanceOf(ModelInUse);
 			await expect(
 				setup.update({ workspace: workspaceId, providerId, changes: { apiKey: null } }),
+			).rejects.toBeInstanceOf(ModelInUse);
+			await expect(
+				setup.update({
+					workspace: workspaceId,
+					providerId,
+					changes: { baseUrl: "https://elsewhere.example/v1" },
+				}),
 			).rejects.toBeInstanceOf(ModelInUse);
 			expect(await view(providerId)).toMatchObject({ active: true });
 

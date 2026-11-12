@@ -21,7 +21,7 @@ import {
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { stillConfiguredAs } from "../tested-configuration.ts";
+import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 import { OAuthTokens } from "./sign-in/sign-in.ts";
 
@@ -32,7 +32,9 @@ import { OAuthTokens } from "./sign-in/sign-in.ts";
  *
  * A provider is switched on only by a successful test of its current
  * configuration, through `recordTest`; `update` can only switch it off, and a
- * new key switches it off until it has been tried.
+ * new key or a new address switches it off until it has been tried. A new
+ * address also takes away the key, headers and sign-in the provider held,
+ * other than a key or headers given with it.
  */
 export interface Interface {
 	/**
@@ -301,38 +303,51 @@ export const make = Effect.gen(function* () {
 		update: (workspaceId, providerId, changes, changedById) =>
 			operation(
 				"update",
-				Effect.gen(function* () {
-					const configurationChanged =
-						changes.baseUrl !== undefined ||
-						changes.apiFormat !== undefined ||
-						changes.apiKey !== undefined ||
-						changes.customHeaders !== undefined;
-					const values = {
-						// A new key is on only once a test of it has succeeded.
-						active: changes.apiKey !== undefined ? false : changes.active,
-						connectedById: connectedByAfter(changes, changedById),
-						baseUrl: changes.baseUrl,
-						apiFormat: changes.apiFormat,
-						apiKeyEncrypted: storedApiKey(changes.apiKey, cipher),
-						customHeadersEncrypted: changes.customHeaders?.map(({ name, value }) => ({
-							name,
-							value: cipher.encrypt(value),
-						})),
-						lastTestedAt: configurationChanged ? null : undefined,
-						lastTestError: configurationChanged ? null : undefined,
-					};
-					const inProvider = and(
-						eq(modelProvider.id, providerId),
-						eq(modelProvider.workspaceId, workspaceId),
-					);
-					// An UPDATE must set something, and a change may name nothing this writes.
-					const [row] = Object.values(values).some((value) => value !== undefined)
-						? yield* query((db) =>
-								db.update(modelProvider).set(values).where(inProvider).returning(),
-							)
-						: yield* query((db) => db.select().from(modelProvider).where(inProvider));
-					return row;
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const inProvider = and(
+							eq(modelProvider.id, providerId),
+							eq(modelProvider.workspaceId, workspaceId),
+						);
+						const [current] = yield* query((db) =>
+							db
+								.select({ baseUrl: modelProvider.baseUrl })
+								.from(modelProvider)
+								.where(inProvider)
+								.for("update"),
+						);
+						if (!current) return undefined;
+						const moved = changesAddress(changes.baseUrl, current.baseUrl);
+						const configurationChanged =
+							changes.baseUrl !== undefined ||
+							changes.apiFormat !== undefined ||
+							changes.apiKey !== undefined ||
+							changes.customHeaders !== undefined;
+						const values = {
+							// A new key or a new address is on only once a test of it has succeeded.
+							active: changes.apiKey !== undefined || moved ? false : changes.active,
+							connectedById: connectedByAfter(changes, changedById),
+							baseUrl: changes.baseUrl,
+							apiFormat: changes.apiFormat,
+							apiKeyEncrypted: storedApiKey(changes.apiKey, moved, cipher),
+							customHeadersEncrypted:
+								changes.customHeaders?.map(({ name, value }) => ({
+									name,
+									value: cipher.encrypt(value),
+								})) ?? (moved ? [] : undefined),
+							oauthTokensEncrypted: moved ? null : undefined,
+							lastTestedAt: configurationChanged ? null : undefined,
+							lastTestError: configurationChanged ? null : undefined,
+						};
+						// An UPDATE must set something, and a change may name nothing this writes.
+						const [row] = Object.values(values).some((value) => value !== undefined)
+							? yield* query((db) =>
+									db.update(modelProvider).set(values).where(inProvider).returning(),
+								)
+							: yield* query((db) => db.select().from(modelProvider).where(inProvider));
+						return row;
+					}),
+				),
 			),
 
 		remove: (workspaceId, providerId) =>
@@ -768,9 +783,16 @@ function connectedByAfter(changes: ModelProviderUpdate, changedById: string) {
 	return sql<string>`case when ${modelProvider.active} or ${modelProvider.apiKeyEncrypted} is not null or ${modelProvider.oauthTokensEncrypted} is not null then ${modelProvider.connectedById} else ${changedById}::uuid end`;
 }
 
-/** What an update writes to the key column: absent leaves it, null clears it. */
-function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: Credentials.Interface) {
-	if (apiKey === undefined) return undefined;
+/**
+ * What an update writes to the key column: absent leaves it, unless the
+ * address `moved`, and null clears it.
+ */
+function storedApiKey(
+	apiKey: ModelProviderUpdate["apiKey"],
+	moved: boolean,
+	cipher: Credentials.Interface,
+) {
+	if (apiKey === undefined) return moved ? null : undefined;
 	return apiKey === null ? null : cipher.encrypt(apiKey);
 }
 

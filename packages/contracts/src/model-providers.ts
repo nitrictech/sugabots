@@ -311,7 +311,10 @@ export const modelProviderUpdateSchema = Schema.Struct({
 	active: Schema.optional(Schema.Boolean),
 	baseUrl: Schema.optional(providerUrlSchema),
 	apiFormat: Schema.optional(providerApiFormatSchema),
-	/** Absent leaves the stored key alone; null removes it. */
+	/**
+	 * Absent leaves the stored key alone, unless `baseUrl` moves the provider,
+	 * which takes away its key, headers and sign-in; null removes it.
+	 */
 	apiKey: Schema.optional(Schema.NullOr(apiKeySchema)),
 	customHeaders: Schema.optional(providerHeadersSchema),
 }).check(

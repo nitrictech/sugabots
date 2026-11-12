@@ -16,7 +16,7 @@ import {
 	type ToolAccess,
 } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { stillConfiguredAs } from "../tested-configuration.ts";
+import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import { type AugmentationTool, augmentConnectionTools } from "./augmentations.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import { GITHUB_CONNECTION_TOOLS } from "./github/github-tools.ts";
@@ -36,6 +36,9 @@ import { toolAccessOf } from "./tool-access.ts";
  * What a person chooses for a tool is not a change of configuration: it
  * leaves `configurationRevision`, and the approvals made under it, alone.
  * An approved call to a tool turned off since is refused when it would run.
+ *
+ * A new address takes away the stored secret, unless one comes with it, and
+ * the OAuth record, so a connection signed in through OAuth must sign in again.
  */
 export interface Interface {
 	readonly create: (
@@ -336,8 +339,10 @@ export const make = Effect.gen(function* () {
 							changes.secretHeader !== undefined ||
 							changes.secret !== undefined;
 						const configurationChanged = changes.name !== undefined || connectionChanged;
+						const choosesAccess = changes.access !== undefined || changes.toolAccess !== undefined;
 						let chosen: ToolAccess | undefined;
-						if (changes.access !== undefined || changes.toolAccess !== undefined) {
+						let moved = false;
+						if (changes.url !== undefined || choosesAccess) {
 							const [current] = yield* query((db) =>
 								db
 									.select({ kind: connection.kind, url: connection.url, names: listedToolNames })
@@ -347,12 +352,15 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!current) return undefined;
-							const names = toolsOf({
-								kind: current.kind,
-								url: current.url,
-								tools: current.names.map((name) => ({ name })),
-							}).map((tool) => tool.name);
-							chosen = yield* choicesFor(names, changes);
+							moved = changesAddress(changes.url, current.url);
+							if (choosesAccess) {
+								const names = toolsOf({
+									kind: current.kind,
+									url: current.url,
+									tools: current.names.map((name) => ({ name })),
+								}).map((tool) => tool.name);
+								chosen = yield* choicesFor(names, changes);
+							}
 						}
 						const [row] = yield* queryCatching(
 							(db) =>
@@ -363,12 +371,15 @@ export const make = Effect.gen(function* () {
 										handle: changes.name === undefined ? undefined : handleFromName(changes.name),
 										url: changes.url,
 										secretHeader: changes.secretHeader,
-										secretEncrypted:
-											changes.secret === undefined
-												? undefined
-												: changes.secret === null
-													? null
-													: cipher.encrypt(changes.secret),
+										secretEncrypted: changes.secret
+											? cipher.encrypt(changes.secret)
+											: changes.secret === null || moved
+												? null
+												: undefined,
+										// The OAuth client was registered with, and its tokens issued
+										// by, the old address's authorization server.
+										oauthEncrypted: moved ? null : undefined,
+										oauthState: moved ? null : undefined,
 										toolAccess: chosen
 											? sql`${connection.toolAccess} || ${JSON.stringify(chosen)}::jsonb`
 											: undefined,
