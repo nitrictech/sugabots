@@ -18,10 +18,10 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { FAILED_DOT_LABEL, FailedDot } from "@/shell/FailedDot.tsx";
+import { InboxNews } from "@/shell/InboxNews.tsx";
 import { LockGlyph, ONLY_YOU, OnlyYou } from "@/shell/PersonalPrivacy.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
-import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DropdownMenu,
@@ -544,23 +544,21 @@ export const HEADER_ICON_CLASS_NAME = cn(
 
 /**
  * The round Back a phone shows at the left of a page's header, to the list
- * the page covers, with how much is unread in Inbox beside its chevron.
+ * the page covers, with what is new in Inbox beside its chevron.
  */
 export function HeaderBack({ back }: { back: BackTo }) {
-	const { unreadInInbox } = useAttentionCounts();
+	const { unreadMentions, unreadInInbox } = useAttentionCounts();
 	const { label: backLabel } = useLeave();
 	const className = cn(BACK_BUTTON, "md:hidden", unreadInInbox > 0 && "px-2");
 	const content = (
 		<>
 			<BackChevron />
-			{unreadInInbox > 0 && (
-				<CountBadge
-					count={unreadInInbox}
-					size="md"
-					label={`${unreadInInbox} unread in Inbox`}
-					className="h-5 min-w-5 text-xs"
-				/>
-			)}
+			<InboxNews
+				unreadMentions={unreadMentions}
+				unreadInInbox={unreadInInbox}
+				size="md"
+				countClassName="h-5 min-w-5 text-xs"
+			/>
 		</>
 	);
 	const place = useBackPlace(back);

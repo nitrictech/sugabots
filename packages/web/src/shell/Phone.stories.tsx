@@ -89,7 +89,7 @@ export const Inbox = meta.story({
 });
 
 /**
- * Unread messages and waiting approvals counted on the Inbox and Approvals
+ * Unread mentions and waiting approvals counted on the Inbox and Approvals
  * tabs, each at its icon's corner: one tab open beneath its count, one not,
  * and a count of two digits.
  */
@@ -110,7 +110,7 @@ export const TabCounts = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
 	play: async ({ canvas }) => {
 		const tabs = await canvas.findByRole("navigation", { name: "Tabs" }, { timeout: 10_000 });
-		await expect(await within(tabs).findByText("7 unread")).toBeInTheDocument();
+		await expect(await within(tabs).findByText("7 unread mentions")).toBeInTheDocument();
 		await expect(await within(tabs).findByText("12 waiting on you")).toBeInTheDocument();
 	},
 });

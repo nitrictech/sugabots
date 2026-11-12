@@ -81,6 +81,7 @@ const meta = preview.meta({
 		],
 		currentPodId: revenue.id,
 		view: undefined,
+		unreadMentions: 1,
 		unreadInInbox: 3,
 		waitingApprovals: 2,
 		workspace: suga,
@@ -115,12 +116,15 @@ const meta = preview.meta({
 const API = import.meta.env.VITE_API_URL as string;
 
 /**
- * Default is a pod open on one of its threads: Inbox counting what is unread
- * and Approvals what waits on you, the pod by name, and its chats and bots.
+ * Default is a pod open on one of its threads: Inbox counting its unread
+ * mentions and Approvals what waits on you, the pod by name, and its chats
+ * and bots.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("link", { name: /^Inbox/ })).toHaveTextContent("3 unread");
+		await expect(canvas.getByRole("link", { name: /^Inbox/ })).toHaveTextContent(
+			"1 unread mention",
+		);
 		await expect(canvas.getByRole("link", { name: /^Approvals/ })).toHaveTextContent(
 			"2 waiting on you",
 		);
@@ -137,7 +141,7 @@ export const Default = meta.story({
 
 /** Inbox open, with nothing new in it or waiting: neither counts anything. */
 export const InboxOpen = meta.story({
-	args: { view: "inbox", unreadInInbox: 0, waitingApprovals: 0 },
+	args: { view: "inbox", unreadMentions: 0, unreadInInbox: 0, waitingApprovals: 0 },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: "Inbox" })).toHaveAttribute(
 			"aria-current",
@@ -146,6 +150,19 @@ export const InboxOpen = meta.story({
 		await expect(canvas.getByRole("link", { name: "Approvals" })).not.toHaveAttribute(
 			"aria-current",
 		);
+	},
+});
+
+/**
+ * Inbox with things unread but none mentioning you, such as routine runs: a
+ * dot where the count would be, since nothing in it needs you.
+ */
+export const InboxUnreadWithoutMentions = meta.story({
+	args: { unreadMentions: 0, unreadInInbox: 3 },
+	play: async ({ canvas }) => {
+		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
+		await expect(inbox).toHaveTextContent("3 unread items");
+		await expect(inbox).not.toHaveTextContent(/\d+ unread mention/);
 	},
 });
 
