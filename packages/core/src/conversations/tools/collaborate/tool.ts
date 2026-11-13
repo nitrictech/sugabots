@@ -104,7 +104,7 @@ export function collaborateTool({
 			return {
 				status: "pending",
 				threadId: collaboration.threadId,
-				note: `${collaborator.name} has not answered yet. Tell the person you have asked and will follow up when the answer arrives.`,
+				note: `${collaborator.name} is still working on it. When they answer, or it turns out they cannot, you get a new turn to tell the person. For now, tell the person you have asked ${collaborator.name} and will follow up.`,
 			};
 		},
 	});

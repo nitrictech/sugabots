@@ -441,7 +441,7 @@ function whyYou(context: TurnContext): string {
 		case "collaboration":
 			return "It is your turn because another agent asked you to collaborate.";
 		case "resume":
-			return "It is your turn because an answer you were waiting on has arrived.";
+			return "It is your turn because a collaboration you were waiting on has ended. Tell the person what came of it.";
 		case "brief":
 			// With no other bot named, the bot briefs itself, so the brief reads as its own reply.
 			return context.messages[0] && isOwnMessage(context.messages[0], context.agent.id)

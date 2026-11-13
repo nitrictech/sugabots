@@ -730,8 +730,7 @@ const collaborate = <E, R>(
 						parentThreadId: reply.thread.id,
 						parentMessageId: reply.messageId,
 						collaboration: toCollaborationPart(row, collaborator.name),
-						askingAgentId: reply.bot.id,
-						askerMovedOn: false,
+						askerToResume: null,
 					}),
 				]);
 			}),

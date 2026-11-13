@@ -146,16 +146,12 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** The asking turn stopped waiting; the answer will resume it instead. */
 	CollaborationStoppedWaiting: CollaborationChange;
 	/** The collaborator's reply was recorded as the answer. */
-	CollaborationAnswered: CollaborationChange & {
-		readonly askingAgentId: string;
-		/** The asking turn had stopped waiting, so nothing is reading the answer yet. */
-		readonly askerMovedOn: boolean;
-	};
+	CollaborationAnswered: CollaborationChange & AskerResume;
 	/**
 	 * The collaboration ended unanswered: the routine run it worked for ended,
 	 * or the collaborator's turn ended without an answer.
 	 */
-	CollaborationFailed: CollaborationChange;
+	CollaborationFailed: CollaborationChange & AskerResume;
 	/** `person` read further into the thread, at `readAt`: every message created up to `readThrough`. */
 	ThreadRead: {
 		readonly threadId: string;
@@ -247,4 +243,15 @@ export interface CollaborationChange {
 	readonly parentThreadId: string;
 	readonly parentMessageId: string;
 	readonly collaboration: CollaborationPart;
+}
+
+/** Whether a collaboration's end is owed to the agent that asked, in a turn of its own. */
+export interface AskerResume {
+	/**
+	 * The asking agent, when its turn stopped waiting and so nothing is reading
+	 * how the collaboration ended. Null while the asking tool still waits, and
+	 * when the routine run the collaboration worked for ended, which takes no
+	 * more turns.
+	 */
+	readonly askerToResume: string | null;
 }

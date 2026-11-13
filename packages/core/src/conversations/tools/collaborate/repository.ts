@@ -51,9 +51,9 @@ export interface Records {
 	readonly stopWaiting: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
 	 * Records `answer` as the reply to the collaboration whose thread is
-	 * `childThreadId`. `undefined` when there is none outstanding.
+	 * `childThreadId`, if one is outstanding.
 	 */
-	readonly answer: (childThreadId: string, answer: string) => Effect.Effect<Answered | undefined>;
+	readonly answer: (childThreadId: string, answer: string) => Effect.Effect<void>;
 	/**
 	 * Fails the collaborations asked for in these threads that are still
 	 * waiting or pending, because the routine run they work for ended. One
@@ -165,21 +165,15 @@ export const makeRecords = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const current = yield* locked(eq(collaboration.childThreadId, childThreadId));
 						if (!current || current.row.status === "answered" || current.row.status === "failed") {
-							return undefined;
+							return;
 						}
 						const updated = yield* writeStatus(current.row.id, { status: "answered", answer });
 						yield* emit([
 							ConversationEvent.CollaborationAnswered({
 								...collaborationChange(updated, current.collaboratorName),
-								askingAgentId: current.askingAgentId,
-								askerMovedOn: current.row.status === "pending",
+								askerToResume: askerToResume(current),
 							}),
 						]);
-						return {
-							collaboration: updated,
-							askingAgentId: current.askingAgentId,
-							askerMovedOn: current.row.status === "pending",
-						};
 					}),
 				),
 			),
@@ -206,9 +200,10 @@ export const makeRecords = Effect.gen(function* () {
 						);
 						const failed = yield* Effect.forEach(unanswered, (row) =>
 							Effect.map(writeStatus(row.collaboration.id, { status: "failed" }), (updated) =>
-								ConversationEvent.CollaborationFailed(
-									collaborationChange(updated, row.collaboratorName),
-								),
+								ConversationEvent.CollaborationFailed({
+									...collaborationChange(updated, row.collaboratorName),
+									askerToResume: null,
+								}),
 							),
 						);
 						yield* emit(failed);
@@ -245,9 +240,10 @@ export const makeRecords = Effect.gen(function* () {
 						if (stillAnswering) return;
 						const updated = yield* writeStatus(current.row.id, { status: "failed" });
 						yield* emit([
-							ConversationEvent.CollaborationFailed(
-								collaborationChange(updated, current.collaboratorName),
-							),
+							ConversationEvent.CollaborationFailed({
+								...collaborationChange(updated, current.collaboratorName),
+								askerToResume: askerToResume(current),
+							}),
 						]);
 					}),
 				),
@@ -264,14 +260,6 @@ export type WaitOutcome =
 	| { readonly _tag: "Answered"; readonly answer: string }
 	| { readonly _tag: "MovedOn" }
 	| { readonly _tag: "Failed" };
-
-/** A collaboration answered, and who asked for it. */
-export interface Answered {
-	readonly collaboration: schema.CollaborationRow;
-	readonly askingAgentId: string;
-	/** The asking turn had stopped waiting, so nothing is reading the answer yet. */
-	readonly askerMovedOn: boolean;
-}
 
 /**
  * The collaboration, locked for update so a transition is serialised, with
@@ -302,6 +290,14 @@ const locked = (by: SQL | undefined) =>
 					}
 				: undefined,
 	);
+
+/** The asking agent, if it stopped waiting for the collaboration about to end. */
+function askerToResume(current: {
+	row: schema.CollaborationRow;
+	askingAgentId: string;
+}): string | null {
+	return current.row.status === "pending" ? current.askingAgentId : null;
+}
 
 const writeStatus = (
 	collaborationId: string,
