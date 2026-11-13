@@ -47,14 +47,22 @@ export function PersonAvatar({
 const GRAVATAR_PIXEL_RATIO = 2;
 
 /**
- * gravatarUrl returns the address of `email`'s Gravatar image, sized for `size`
- * CSS pixels. The address answers 404 when `email` has no Gravatar, rather than
- * serving a generated placeholder.
+ * Avatars up to this many CSS pixels all ask Gravatar for the same image, so a
+ * person's image is downloaded once however many sizes the page shows it at.
+ */
+const LARGEST_SHARED_GRAVATAR_PX = 64;
+
+/**
+ * gravatarUrl returns the address of `email`'s Gravatar image, sharp when shown
+ * at `size` CSS pixels. The address is the same for every `size` up to
+ * `LARGEST_SHARED_GRAVATAR_PX`. It answers 404 when `email` has no Gravatar,
+ * rather than serving a generated placeholder.
  */
 function gravatarUrl(email: string, size: number): string {
 	// Not `crypto.subtle`: browsers leave it undefined on pages served over plain HTTP.
 	const hash = bytesToHex(sha256(utf8ToBytes(email.trim().toLowerCase())));
-	return `https://gravatar.com/avatar/${hash}?s=${size * GRAVATAR_PIXEL_RATIO}&d=404`;
+	const requestedPx = Math.max(size, LARGEST_SHARED_GRAVATAR_PX) * GRAVATAR_PIXEL_RATIO;
+	return `https://gravatar.com/avatar/${hash}?s=${requestedPx}&d=404`;
 }
 
 function initials(name: string): string {

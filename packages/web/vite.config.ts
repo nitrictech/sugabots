@@ -10,6 +10,7 @@ export default defineConfig({
 		react(),
 		tailwindcss(),
 		preloadMe(),
+		preloadRubik(),
 		// The logo and icons belong to `@sugabots/avatars`. `index.html` cannot
 		// import from a package, so they are copied to the root instead.
 		viteStaticCopy({
@@ -83,6 +84,38 @@ function preloadMe(): Plugin {
 						},
 					]
 				: undefined,
+	};
+}
+
+/** Rubik's Latin file, which every page's text uses. Its other scripts load as text needs them. */
+const RUBIK_LATIN_FILE = "@fontsource-variable/rubik/files/rubik-latin-wght-normal.woff2";
+
+/**
+ * Starts Rubik, the app's text font, as the page arrives rather than once the
+ * stylesheet has loaded and the app has drawn text. Its name is hashed, so only
+ * a build can find it; the dev server and Storybook's iframe are left alone.
+ */
+function preloadRubik(): Plugin {
+	return {
+		name: "preload-rubik",
+		transformIndexHtml: (_html, { path, bundle }) => {
+			if (path !== "/index.html" || !bundle) return undefined;
+			const rubik = Object.values(bundle).find(
+				(file) =>
+					file.type === "asset" &&
+					file.originalFileNames.some((name) => name.endsWith(RUBIK_LATIN_FILE)),
+			);
+			// Fails the build rather than quietly dropping the preload if the package renames it.
+			if (!rubik) throw new Error(`The build has no ${RUBIK_LATIN_FILE} to preload`);
+			const href = `/${rubik.fileName}`;
+			return [
+				{
+					tag: "link",
+					attrs: { rel: "preload", as: "font", type: "font/woff2", crossorigin: true, href },
+					injectTo: "head",
+				},
+			];
+		},
 	};
 }
 
