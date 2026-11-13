@@ -55,15 +55,31 @@ describe("PersonAvatar", () => {
 	});
 
 	it("shows the Gravatar for the normalized email", async () => {
-		render(
-			<PersonAvatar person={{ name: "Rowan Ellis", email: " ROWAN@Example.com" }} size={32} />,
-		);
+		render(<PersonAvatar person={{ name: "Rowan Ellis", email: " ROWAN@Example.com" }} />);
 
 		await vi.waitFor(() =>
 			expect(screen.getByTitle("Rowan Ellis").querySelector("img")?.getAttribute("src")).toBe(
-				"https://gravatar.com/avatar/d9d745372fba31973b3ba22d208479cdbb4d80fe62434ab86e1e93fb87fefde0?s=64&d=404",
+				"https://gravatar.com/avatar/d9d745372fba31973b3ba22d208479cdbb4d80fe62434ab86e1e93fb87fefde0?s=128&d=404",
 			),
 		);
+	});
+
+	it("asks for the same Gravatar image for avatars up to 64 pixels", async () => {
+		const rowan = { name: "Rowan Ellis", email: "rowan@example.com" };
+		render(
+			<>
+				<PersonAvatar person={rowan} size={20} />
+				<PersonAvatar person={rowan} size={64} />
+			</>,
+		);
+
+		await vi.waitFor(() => {
+			const [small, large] = screen
+				.getAllByTitle("Rowan Ellis")
+				.map((avatar) => avatar.querySelector("img")?.getAttribute("src"));
+			expect(small).toBeDefined();
+			expect(small).toBe(large);
+		});
 	});
 
 	it("keeps the initials when there is no Gravatar", async () => {
