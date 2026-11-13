@@ -8,7 +8,13 @@ import * as schema from "./schema.ts";
 export const relations = defineRelations(schema, (r) => ({
 	thread: {
 		workspace: r.one.workspace({ from: r.thread.workspaceId, to: r.workspace.id, optional: false }),
-		pod: r.one.pod({ from: r.thread.podId, to: r.pod.id, optional: false }),
+		// None on a direct message between people, which is in no pod.
+		pod: r.one.pod({ from: r.thread.podId, to: r.pod.id }),
+		// On a direct message between people: everybody in it.
+		directMembers: r.many.user({
+			from: r.thread.id.through(r.directMember.threadId),
+			to: r.user.id.through(r.directMember.userId),
+		}),
 		messages: r.many.message({ from: r.thread.id, to: r.message.threadId }),
 		participants: r.many.threadParticipant({ from: r.thread.id, to: r.threadParticipant.threadId }),
 		reads: r.many.threadRead({ from: r.thread.id, to: r.threadRead.threadId }),

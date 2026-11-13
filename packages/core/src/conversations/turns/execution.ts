@@ -113,12 +113,20 @@ export const make = Effect.gen(function* () {
 						const request = run.request;
 						const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
 						if (!loaded) return yield* refuseRun(run, "The thread is gone", CANCELLED);
+						// A direct message between people is in no pod, so no bot is crew in it.
+						const { pod } = loaded;
+						if (!pod) {
+							return yield* refuseRun(run, "The thread is in no pod, so no bot answers in it", {
+								status: "failed",
+								userMessage: NOT_IN_POD,
+							});
+						}
 						// The agent has to be crew placed in the thread's pod, not the
 						// thread's host. A shared thread gives the floor to whoever a
 						// mention picks, and that is rarely the host.
 						// Pod membership is still a real check: it is what stops a turn
 						// request naming an agent from another pod or another workspace.
-						const speaker = loaded.pod.agents.find(({ id }) => id === request.agentId);
+						const speaker = pod.agents.find(({ id }) => id === request.agentId);
 						if (!speaker) {
 							return yield* refuseRun(run, "The agent is not a crew agent in the thread's pod", {
 								status: "failed",
@@ -206,17 +214,17 @@ export const make = Effect.gen(function* () {
 									usesSandbox: speaker.usesSandbox,
 									naturalBrowsing: speaker.naturalBrowsing,
 									color: speaker.color,
-									podId: loaded.podId,
+									podId: pod.id,
 								},
 								reason: request.reason,
-								podName: loaded.pod.name,
-								podSlug: loaded.pod.slug,
+								podName: pod.name,
+								podSlug: pod.slug,
 								workspaceName: loaded.workspace.name,
 								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
 								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
 								startedFor: request.reason === "brief" ? loaded.initiatorUserId : null,
-								crew: loaded.pod.agents
+								crew: pod.agents
 									.filter(({ id }) => id !== speaker.id)
 									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
 								participants: loaded.participants.map(({ user, agent }) =>
@@ -445,7 +453,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },
 			pod: {
-				columns: { name: true, slug: true },
+				columns: { id: true, name: true, slug: true },
 				with: {
 					// Every agent placed in a pod is crew: system agents are placed in none.
 					agents: {

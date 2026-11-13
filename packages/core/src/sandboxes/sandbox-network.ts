@@ -11,6 +11,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
+import { threadPodId } from "../conversations/threads/rooms.ts";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
 	sandboxAllowedHost,
@@ -332,6 +333,7 @@ export const make = Effect.gen(function* () {
 					const [call] = yield* query((db) =>
 						db
 							.select({
+								threadId: thread.id,
 								workspaceId: thread.workspaceId,
 								podId: thread.podId,
 								approvalStatus: toolCall.approvalStatus,
@@ -349,7 +351,7 @@ export const make = Effect.gen(function* () {
 					if (!TRUSTED_HOSTS.includes(host)) {
 						yield* addToPod({
 							workspaceId: call.workspaceId,
-							podId: call.podId,
+							podId: threadPodId(call.threadId, call.podId),
 							host,
 							addedById: call.decidedById,
 						});

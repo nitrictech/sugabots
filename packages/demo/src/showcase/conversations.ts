@@ -3,6 +3,7 @@ import type { ArtifactKind, ConnectionTool, JsonValue } from "@sugabots/contract
 import { CONNECTION_TOOL_SEPARATOR, FIRST_CHAT_NAME } from "@sugabots/contracts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
+import { threadPodId } from "@sugabots/core/conversations/threads/rooms";
 import { ARTIFACT_WRITE_TOOL } from "@sugabots/core/conversations/tools/artifacts/tool";
 import { query } from "@sugabots/core/database/database";
 import {
@@ -468,7 +469,7 @@ const writeMessages = <Person extends string>(
 					: yield* writeBotReply(cast, day, {
 							threadId,
 							conversationId: input.inThread.conversationId ?? threadId,
-							podId: input.inThread.podId,
+							podId: threadPodId(input.inThread.id, input.inThread.podId),
 							bot: scripted.from.bot,
 							triggerMessageId: lastPersonMessage,
 							parts: scripted.parts,

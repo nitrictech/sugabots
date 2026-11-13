@@ -26,7 +26,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 	MessagePosted: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		readonly podId: string;
+		/** Null in a direct message between people, which is in no pod. */
+		readonly podId: string | null;
 		readonly message: Message;
 	};
 	/** Somebody reacted to a message or took a reaction back. `reactions` is all it has now. */

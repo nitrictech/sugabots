@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { refreshArtifactsAfter } from "@/lib/artifacts.ts";
-import { refreshAfterThreadChange } from "@/lib/chats.ts";
+import { refreshAfterThreadChange, refreshChatMarkers } from "@/lib/chats.ts";
 import { changeReactions } from "@/lib/reactions.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
@@ -157,9 +157,9 @@ export function useWorkspaceEvents(): void {
 			return;
 		}
 		const stream = client.events.workspace(workspaceId);
-		// A stream that drops may have missed a new message, so the list is fetched afresh.
+		// A stream that drops may have missed a new message, so the lists are fetched afresh.
 		void consume(stream, (event) => applyWorkspaceEvent(queries, workspaceId, event)).catch(() => {
-			void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] });
+			void refreshChatMarkers(queries, workspaceId);
 		});
 		return () => stream.close();
 	}, [queries, workspaceId]);

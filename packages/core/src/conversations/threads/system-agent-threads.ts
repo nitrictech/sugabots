@@ -12,6 +12,7 @@ import {
 	withReplyTo,
 } from "./participants.ts";
 import { loadPlacedParts } from "./placed-parts.ts";
+import { threadPodId } from "./rooms.ts";
 
 /**
  * What the system agents that work on a thread after a reply (the Scribe and
@@ -71,7 +72,9 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 		)
 		.where(eq(thread.id, request.threadId))
 		.limit(1);
-	return row satisfies SystemAgentScope | undefined;
+	return (
+		row && ({ ...row, podId: threadPodId(row.threadId, row.podId) } satisfies SystemAgentScope)
+	);
 });
 
 /**

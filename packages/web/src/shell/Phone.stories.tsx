@@ -44,7 +44,7 @@ const meta = preview.meta({
 export const Home = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		const pods = await canvas.findByRole("navigation", { name: "Pods" });
+		const pods = await canvas.findByRole("navigation", { name: "Direct messages and pods" });
 		await expect(within(pods).getByRole("link", { name: revenue.name })).toHaveAttribute(
 			"aria-current",
 			"page",
@@ -59,6 +59,24 @@ export const Home = meta.story({
 		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
 			"aria-current",
 			"page",
+		);
+	},
+});
+
+/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a pod. */
+export const DirectMessagesHome = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/dm`} />,
+	play: async ({ canvas, userEvent }) => {
+		const tabs = await canvas.findByRole("navigation", { name: "Tabs" });
+		const home = within(tabs).getByRole("link", { name: "Home" });
+		await expect(home).toHaveAttribute("aria-current", "page");
+		await expect(home).toHaveAttribute("href", `/${storyWorkspace.slug}/dm`);
+
+		await userEvent.click(within(tabs).getByRole("link", { name: /^Inbox/ }));
+
+		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
+			"href",
+			`/${storyWorkspace.slug}/dm`,
 		);
 	},
 });
@@ -110,7 +128,7 @@ export const TabCounts = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
 	play: async ({ canvas }) => {
 		const tabs = await canvas.findByRole("navigation", { name: "Tabs" }, { timeout: 10_000 });
-		await expect(await within(tabs).findByText("7 unread mentions")).toBeInTheDocument();
+		await expect(await within(tabs).findByText("7 unread messages for you")).toBeInTheDocument();
 		await expect(await within(tabs).findByText("12 waiting on you")).toBeInTheDocument();
 	},
 });

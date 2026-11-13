@@ -13,6 +13,9 @@ import type {
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
+	DirectMessageList,
+	DirectMessageListItem,
+	PersonParticipant,
 	PodChatMarkers,
 	ToolApprovalDeciders,
 } from "@sugabots/contracts";
@@ -22,6 +25,7 @@ import {
 	handleFromName,
 	mentionPattern,
 	messagePreview,
+	NOTIFYING_THREAD_TYPES,
 	PERSONAL_POD_SLUG,
 	textWithoutNarration,
 } from "@sugabots/contracts";
@@ -60,15 +64,18 @@ import {
 	agent,
 	CONVERSATION_TYPES,
 	collaboration,
+	directMember,
 	message,
 	pod,
 	routine,
 	routineExecution,
+	type ThreadRow,
 	thread,
 	threadRead,
 	toolCall,
 	turn,
 	user,
+	workspaceMember,
 } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
@@ -83,11 +90,20 @@ import {
 	personColumns,
 	recentParticipantsOf,
 	toParticipant,
+	toPerson,
 } from "../threads/participants.ts";
+import { membersOfDirectKey } from "../threads/repository.ts";
+import { threadPodId } from "../threads/rooms.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
 import { Turns } from "../turns/turns.ts";
-import { toBotChannel, toConversationThread, toPodChat, toRoutineFeed } from "./conversation.ts";
+import {
+	toBotChannel,
+	toConversationThread,
+	toDirect,
+	toPodChat,
+	toRoutineFeed,
+} from "./conversation.ts";
 
 /**
  * What the chat screens show, of the conversations the current actor can see:
@@ -106,6 +122,17 @@ export interface Interface {
 	readonly podMarkers: (
 		workspace: string,
 	) => Effect.Effect<PodChatMarkers, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The actor's direct messages in the workspace, with one other person or a
+	 * group, the most recent message first.
+	 */
+	readonly directMessages: (
+		workspace: string,
+	) => Effect.Effect<DirectMessageList, AuthorizationDenied, CurrentActor.Service>;
+	/** One of the actor's direct messages, as their list shows it. Hidden unless they are in it. */
+	readonly directMessage: (
+		conversationId: string,
+	) => Effect.Effect<DirectMessageListItem, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * The approvals across the workspace for the actor: those waiting on a
 	 * decision they may make, and the latest answered in the pods they reach.
@@ -285,7 +312,9 @@ export const make = Effect.gen(function* () {
 					const failed = yield* query((db) => failedRoutinesByPod(db, listing, userId));
 					const pods: Record<string, PodChatMarkers["pods"][string]> = {};
 					const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
-					for (const { id, podId } of counted) {
+					for (const counts of counted) {
+						const { id } = counts;
+						const podId = threadPodId(id, counts.podId);
 						const { unreadMessages, needsApproval } = marksOf(id);
 						if (unreadMessages === 0 && !needsApproval) continue;
 						const marked = pods[podId] ?? nothing;
@@ -299,6 +328,37 @@ export const make = Effect.gen(function* () {
 						pods[podId] = { ...(pods[podId] ?? nothing), failedRoutines };
 					}
 					return { pods };
+				}),
+			),
+
+		directMessages: (workspace) =>
+			operation(
+				"directMessages",
+				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.read",
+					);
+					const rows = yield* query((db) => directThreadsOf(db, workspaceId, actor.userId));
+					const items = yield* directMessageItems(workspaceId, actor.userId, rows);
+					return { items: items.sort(byLatestMessage) };
+				}),
+			),
+
+		directMessage: (conversationId) =>
+			operation(
+				"directMessage",
+				Effect.gen(function* () {
+					const reached = yield* visibility.thread(conversationId);
+					if (reached.kind !== "direct") {
+						return yield* new ResourceHidden({ resource: "conversation" });
+					}
+					const { userId } = yield* CurrentActor.Service;
+					const [item] = yield* directMessageItems(reached.thread.workspaceId, userId, [
+						reached.thread,
+					]);
+					if (!item) return yield* new ResourceHidden({ resource: "conversation" });
+					return item;
 				}),
 			),
 
@@ -326,14 +386,14 @@ export const make = Effect.gen(function* () {
 				"activity",
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const reachesPod = yield* visibility.reachesPod;
 					const { userId } = yield* CurrentActor.Service;
 					const since = DateTime.toDate(
 						DateTime.subtract(yield* DateTime.now, { days: ACTIVITY_WINDOW_DAYS }),
 					);
-					const scope = {
+					const scope: ActivityScope = {
 						workspaceId,
-						reachesPod,
+						reachesPod: yield* visibility.reachesPod,
+						reachesThread: yield* visibility.reachesThread,
 						userId,
 						since,
 					};
@@ -362,7 +422,7 @@ export const make = Effect.gen(function* () {
 								triggerKind: row.triggerKind,
 								agent: { kind: "agent", ...row.agent },
 								preview: row.lastReply && runReportPreview(row.lastReply),
-								podId: row.podId,
+								podId: threadPodId(row.threadId, row.podId),
 								conversationId: row.conversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
@@ -376,7 +436,7 @@ export const make = Effect.gen(function* () {
 								recipient: { kind: "agent", ...row.recipient },
 								status: row.status,
 								brief: row.brief,
-								podId: row.podId,
+								podId: threadPodId(row.threadId, row.podId),
 								conversationId: row.conversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
@@ -402,9 +462,9 @@ export const make = Effect.gen(function* () {
 					// Before the query, and whether or not the conversation is there, so a
 					// bad cursor says nothing about the conversation.
 					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
-					const reachesPod = yield* visibility.reachesPod;
+					const reachesThread = yield* visibility.reachesThread;
 					const row = yield* query((db) =>
-						loadMainPage(db, conversationId, reachesPod, page.limit, before),
+						loadMainPage(db, conversationId, reachesThread, page.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toMainPage(row, page.limit);
@@ -420,9 +480,9 @@ export const make = Effect.gen(function* () {
 						return yield* new ResourceHidden({ resource: "conversation" });
 					}
 					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
-					const reachesPod = yield* visibility.reachesPod;
+					const reachesThread = yield* visibility.reachesThread;
 					const row = yield* query((db) =>
-						loadHistory(db, conversationId, reachesPod, page.limit, before),
+						loadHistory(db, conversationId, reachesThread, page.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toHistoryPage(row, page.limit);
@@ -733,10 +793,11 @@ function caughtUpAt(db: Executor, userId: string, threadId: SQLWrapper): SQL<Dat
 
 /**
  * Whether a `message` mentions `handle`, or is a person's `@here` or
- * `@channel`. A bot's or a routine's notifies nobody, so it mentions nobody.
+ * `@channel` where `groupsMention` holds. A bot's or a routine's notifies
+ * nobody, so it mentions nobody.
  */
-function mentions(handle: string): SQL {
-	return sql`(${message.content} ~* ${mentionPattern(handle)} or (${message.authorUserId} is not null and ${message.content} ~* ${mentionPattern(...GROUP_MENTION_HANDLES)}))`;
+function mentions(handle: string, groupsMention: SQL = sql`true`): SQL {
+	return sql`(${message.content} ~* ${mentionPattern(handle)} or (${message.authorUserId} is not null and ${groupsMention} and ${message.content} ~* ${mentionPattern(...GROUP_MENTION_HANDLES)}))`;
 }
 
 /** How far back the activity feed looks: past this, a conversation is old news, read or not. */
@@ -759,7 +820,8 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 		.where(eq(user.id, input.userId))
 		.limit(1);
 	if (!person) return [];
-	const mentionsYou = mentions(handleFromName(person.name));
+	// `@here` and `@channel` are text in a direct message, where everybody is told of every message.
+	const mentionsYou = mentions(handleFromName(person.name), sql`${thread.type} <> 'direct'`);
 	const unread = unreadBy(db, input.userId, {
 		threadId: message.threadId,
 		at: message.createdAt,
@@ -790,7 +852,8 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 			thread,
 			and(
 				eq(thread.id, message.threadId),
-				inArray(thread.type, ["conversation", "pod_chat", "bot_channel"]),
+				// The threads whose messages notify people are the ones Inbox shows.
+				inArray(thread.type, [...NOTIFYING_THREAD_TYPES]),
 			),
 		)
 		.leftJoin(user, eq(user.id, message.authorUserId))
@@ -798,7 +861,7 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 		.where(
 			and(
 				eq(thread.workspaceId, input.workspaceId),
-				input.reachesPod(thread.podId),
+				input.reachesThread(thread),
 				gt(message.createdAt, input.since),
 				finishedWordsFromOthers(input.userId),
 				or(mentionsYou, unread),
@@ -811,6 +874,7 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 interface ActivityScope {
 	workspaceId: string;
 	reachesPod: Visibility.ReachesPod;
+	reachesThread: Visibility.ReachesThread;
 	userId: string;
 	since: Date;
 }
@@ -1115,7 +1179,7 @@ function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 	return {
 		call: toToolCallPart(row.call, row.decidedByName),
 		agent: { kind: "agent", ...row.agent },
-		podId: row.podId,
+		podId: threadPodId(row.call.threadId, row.podId),
 		threadId: row.call.threadId,
 		conversationId: row.conversationId,
 	};
@@ -1152,6 +1216,7 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 		const asking = alias(thread, "asking_thread");
 		const pending = yield* db
 			.selectDistinct({
+				threadId: asking.id,
 				conversationId: asking.conversationId,
 				podId: asking.podId,
 				routineExecutionId: routineExecutionIdOf(asking.id),
@@ -1168,8 +1233,10 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 		if (pending.length === 0) return new Set<string>();
 		const { mayDecide } = yield* approvalDecidersIn(db, workspaceId, userId);
 		return new Set(
-			pending.flatMap(({ conversationId, podId, routineExecutionId, tool }) =>
-				conversationId && mayDecide(podId, routineExecutionId !== null, decidersOf(tool))
+			// Only a thread in a pod asks for approvals: a direct message has no bots.
+			pending.flatMap(({ threadId, conversationId, podId, routineExecutionId, tool }) =>
+				conversationId &&
+				mayDecide(threadPodId(threadId, podId), routineExecutionId !== null, decidersOf(tool))
 					? [conversationId]
 					: [],
 			),
@@ -1177,8 +1244,107 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 	},
 );
 
-/** Newest message first; a thread nothing is written in yet by when it began. */
-function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
+/** The direct messages `userId` is in, in the workspace. */
+const directThreadsOf = Effect.fn("ChatView.directThreadsOf")(function* (
+	db: Executor,
+	workspaceId: string,
+	userId: string,
+) {
+	const rows = yield* db
+		.select({ conversation: thread })
+		.from(directMember)
+		.innerJoin(thread, eq(thread.id, directMember.threadId))
+		.where(
+			and(
+				eq(directMember.userId, userId),
+				eq(thread.workspaceId, workspaceId),
+				eq(thread.type, "direct"),
+			),
+		);
+	return rows.map((row) => row.conversation);
+});
+
+/**
+ * `conversations`, direct messages `userId` is in, as their list shows each:
+ * the others in it still in the workspace, by name, how many have left, its
+ * newest message and how much of it they have not read.
+ */
+const directMessageItems = (
+	workspaceId: string,
+	userId: string,
+	conversations: readonly ThreadRow[],
+) =>
+	Effect.gen(function* () {
+		const othersIn = new Map(
+			conversations.map((conversation) => [
+				conversation.id,
+				conversation.directKey === null
+					? []
+					: membersOfDirectKey(conversation.directKey).filter((id) => id !== userId),
+			]),
+		);
+		const threadIds = conversations.map((conversation) => conversation.id);
+		const { latest, unread, present } = yield* Effect.all(
+			{
+				latest: query((db) => latestMessages(db, threadIds)),
+				unread: query((db) => unreadMessageCounts(db, userId, threadIds)),
+				present: query((db) =>
+					workspaceMembersById(db, workspaceId, [...othersIn.values()].flat()),
+				),
+			},
+			{ concurrency: "unbounded" },
+		);
+		return conversations.map((conversation): DirectMessageListItem => {
+			const others = othersIn.get(conversation.id) ?? [];
+			const people = others.flatMap((id) => {
+				const person = present.get(id);
+				return person ? [person] : [];
+			});
+			const last = latest.get(conversation.id);
+			return {
+				conversation: toDirect(conversation),
+				people: people.sort((left, right) => left.name.localeCompare(right.name)),
+				formerMembers: others.length - people.length,
+				lastMessage: last
+					? {
+							preview: replyPreview(last),
+							authorUserId: last.authorUserId,
+							at: last.createdAt.toISOString(),
+						}
+					: null,
+				unreadMessages: unread.get(conversation.id) ?? 0,
+			};
+		});
+	});
+
+/** The people of `userIds` still in the workspace, by id, as participants. */
+const workspaceMembersById = Effect.fn("ChatView.workspaceMembersById")(function* (
+	db: Executor,
+	workspaceId: string,
+	userIds: readonly string[],
+) {
+	if (userIds.length === 0) return new Map<string, PersonParticipant>();
+	const rows = yield* db
+		.select({ id: user.id, name: user.name, email: user.email, image: user.image })
+		.from(workspaceMember)
+		.innerJoin(user, eq(user.id, workspaceMember.userId))
+		.where(
+			and(
+				eq(workspaceMember.workspaceId, workspaceId),
+				inArray(workspaceMember.userId, [...new Set(userIds)]),
+			),
+		);
+	return new Map(rows.map((row): [string, PersonParticipant] => [row.id, toPerson(row)]));
+});
+
+/** A chat or direct message as a list sorts it: by its newest message, or by when it began. */
+interface ListedByLatest {
+	readonly lastMessage: { readonly at: string } | null;
+	readonly conversation: { readonly createdAt: string };
+}
+
+/** Newest message first; one nothing is written in yet by when it began. */
+function byLatestMessage(left: ListedByLatest, right: ListedByLatest): number {
 	const leftAt = left.lastMessage?.at ?? left.conversation.createdAt;
 	const rightAt = right.lastMessage?.at ?? right.conversation.createdAt;
 	return rightAt.localeCompare(leftAt);
@@ -1188,13 +1354,13 @@ function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
  * A page of the conversation: its messages with their authors and parts, the
  * threads started from them, its routine runs, and on a bot's channel the
  * collaborations other bots asked of its bot, each newest first and one more
- * than the page. Nothing when `reachesPod` does not reach the conversation's
- * pod.
+ * than the page. Nothing when `reachesThread` does not reach the
+ * conversation.
  */
 const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	db: Executor,
 	conversationId: string,
-	reachesPod: Visibility.ReachesPod,
+	reachesThread: Visibility.ReachesThread,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
@@ -1202,7 +1368,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 		where: {
 			id: conversationId,
 			type: { in: [...CONVERSATION_TYPES] },
-			RAW: (row) => reachesPod(row.podId),
+			RAW: (row) => reachesThread(row),
 		},
 		columns: { id: true, type: true, podId: true, hostAgentId: true },
 		with: {
@@ -1274,10 +1440,13 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 
 /** On a bot's channel: its bot, and the pod the channel is in. */
 function channelBotOf(
-	conversation: Pick<schema.ThreadRow, "type" | "podId" | "hostAgentId">,
+	conversation: Pick<schema.ThreadRow, "id" | "type" | "podId" | "hostAgentId">,
 ): ChannelBot | undefined {
 	if (conversation.type !== "bot_channel" || !conversation.hostAgentId) return undefined;
-	return { agentId: conversation.hostAgentId, podId: conversation.podId };
+	return {
+		agentId: conversation.hostAgentId,
+		podId: threadPodId(conversation.id, conversation.podId),
+	};
 }
 
 interface ChannelBot {
@@ -1449,13 +1618,13 @@ function toMainPage(row: MainPage, limit: number) {
 /**
  * A page of the threads opened beside the conversation, one statement: its
  * routine runs and collaborations, each newest activity first and one more
- * than the page. Nothing when `reachesPod` does not reach the conversation's
- * pod.
+ * than the page. Nothing when `reachesThread` does not reach the
+ * conversation.
  */
 const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	db: Executor,
 	conversationId: string,
-	reachesPod: Visibility.ReachesPod,
+	reachesThread: Visibility.ReachesThread,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
@@ -1485,7 +1654,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 		where: {
 			id: conversationId,
 			type: { in: [...CONVERSATION_TYPES] },
-			RAW: (row) => reachesPod(row.podId),
+			RAW: (row) => reachesThread(row),
 		},
 		columns: { id: true },
 		with: { conversationThreads: sideThreads },

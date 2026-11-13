@@ -81,7 +81,8 @@ export const make = Effect.gen(function* () {
 						// A channel goes on and on, and keeps the name people gave it: only a
 						// thread, one piece of work, is summarised and titled from its summary.
 						const served = { id: scope.threadId, type: scope.threadType };
-						if (!isThread(served)) return skipped("Channels are not summarised");
+						if (!isThread(served))
+							return skipped("Channels and direct messages are not summarised");
 						const summariser = yield* query((db) =>
 							findRunnableSystemAgent(db, scope.workspaceId, SUMMARISE_SYSTEM_AGENT),
 						);

@@ -11,12 +11,16 @@ import {
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
 	conversationThreadSchema,
+	directMessageListItemSchema,
+	directMessageListSchema,
 	newChatSchema,
+	newDirectMessageSchema,
 	newThreadSchema,
 	openBotChannelSchema,
 	podChatMarkersSchema,
 	podChatSchema,
 	routineFeedSchema,
+	sentDirectMessageSchema,
 	startedThreadSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
@@ -52,6 +56,28 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			params: { workspace: workspaceIdOrSlugSchema },
 			payload: openBotChannelSchema,
 			success: botChannelSchema,
+			error: refused,
+		}),
+		/** The caller's direct messages with other people, the most recent first. */
+		HttpApiEndpoint.get("directMessages", "/workspaces/:workspace/direct-messages", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: directMessageListSchema,
+			error: refused,
+		}),
+		/**
+		 * Sends a message to other people in the workspace, in the caller's direct
+		 * message with them, which is opened if they have none.
+		 */
+		HttpApiEndpoint.post("sendDirectMessage", "/workspaces/:workspace/direct-messages", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			payload: newDirectMessageSchema,
+			success: sentDirectMessageSchema.pipe(HttpApiSchema.status(201)),
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		/** One of the caller's direct messages, as their list shows it. */
+		HttpApiEndpoint.get("directMessage", "/direct-messages/:conversationId", {
+			params: { conversationId: Schema.String },
+			success: directMessageListItemSchema,
 			error: refused,
 		}),
 		/** The routine's own thread, where its runs post, opened on first use. */

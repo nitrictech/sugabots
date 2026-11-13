@@ -147,14 +147,15 @@ export const routineTrigger = pgTable(
 /**
  * The thread types people open and post in, each one a conversation of its
  * own: a thread with a bot or between people (`conversation`), a pod's chat,
- * a bot's channel, and a routine's thread. The others are opened under one of
- * these.
+ * a bot's channel, a routine's thread, and a direct message between people.
+ * The others are opened under one of these.
  */
 export const CONVERSATION_TYPES = [
 	"conversation",
 	"pod_chat",
 	"bot_channel",
 	"routine_feed",
+	"direct",
 ] as const satisfies readonly ThreadType[];
 
 /**
@@ -168,7 +169,11 @@ export const thread = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").notNull(),
+		/**
+		 * The pod it is in. Null on a direct message between people, which is
+		 * in no pod: its members alone reach it (see `directMember`).
+		 */
+		podId: uuid("pod_id"),
 		/**
 		 * The bot the thread is with. Null on a pod's chat, which is the pod's
 		 * people's, and on a thread between people started from one.
@@ -214,19 +219,25 @@ export const thread = pgTable(
 		main: boolean("main").notNull().default(false),
 		/** When somebody archived the pod's chat, which hides it from the pod's list. */
 		archivedAt: timestamp("archived_at", { withTimezone: true }),
+		/**
+		 * On a direct message: the ids of everybody in it, sorted and joined by
+		 * `:`, so each set of people has one. It still names somebody after they
+		 * have left, which `directMember` does not once their account is gone.
+		 */
+		directKey: text("direct_key"),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'pod_chat', 'bot_channel', 'collaboration', 'routine', 'routine_feed', 'system_agent')`,
+			sql`${table.type} in ('conversation', 'pod_chat', 'bot_channel', 'collaboration', 'routine', 'routine_feed', 'system_agent', 'direct')`,
 		),
-		// A pod's chat is its people's, a conversation may be with a bot or only
-		// people, and every other thread is some bot's.
+		// A pod's chat and a direct message are people's, a conversation may be
+		// with a bot or only people, and every other thread is some bot's.
 		check(
 			"thread_host_valid",
-			sql`case ${table.type} when 'pod_chat' then ${table.hostAgentId} is null when 'conversation' then true else ${table.hostAgentId} is not null end`,
+			sql`case ${table.type} when 'pod_chat' then ${table.hostAgentId} is null when 'direct' then ${table.hostAgentId} is null when 'conversation' then true else ${table.hostAgentId} is not null end`,
 		),
 		foreignKey({
 			columns: [table.podId, table.workspaceId],
@@ -254,6 +265,15 @@ export const thread = pgTable(
 		uniqueIndex("thread_bot_channel_idx")
 			.on(table.podId, table.hostAgentId)
 			.where(sql`${table.type} = 'bot_channel'`),
+		// A direct message is in no pod and named by its key; every other thread is in a pod.
+		check(
+			"thread_direct_valid",
+			sql`case when ${table.type} = 'direct' then ${table.podId} is null and ${table.directKey} is not null else ${table.podId} is not null and ${table.directKey} is null end`,
+		),
+		// One direct message per set of people in a workspace.
+		uniqueIndex("thread_direct_key_idx")
+			.on(table.workspaceId, table.directKey)
+			.where(sql`${table.type} = 'direct'`),
 		// One thread per message in a pod's chat.
 		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
 		check("thread_main_valid", sql`not ${table.main} or ${table.type} = 'pod_chat'`),
@@ -354,6 +374,30 @@ export const routineExecution = pgTable(
 			.on(table.routineId)
 			.where(sql`${table.state} = 'running'`),
 		index("routine_execution_list_idx").on(table.routineId, table.acceptedAt, table.id),
+	],
+);
+
+/**
+ * Who is in a direct message, and so alone reaches it while they are in its
+ * workspace. Unlike `threadParticipant`, which records who has taken part,
+ * this is the whole set from the start, and it never changes: a different
+ * set of people is a different direct message. A row outlives its person
+ * leaving the workspace, so rejoining gives the conversation back.
+ */
+export const directMember = pgTable(
+	"direct_member",
+	{
+		threadId: uuid("thread_id")
+			.notNull()
+			.references(() => thread.id, { onDelete: "cascade" }),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		uniqueIndex("direct_member_thread_user_idx").on(table.threadId, table.userId),
+		index("direct_member_user_idx").on(table.userId),
 	],
 );
 

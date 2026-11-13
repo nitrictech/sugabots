@@ -13,8 +13,10 @@ import type { UserText } from "@sugabots/errors";
 import { type AnyColumn, and, eq, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { mayDecideApprovals, podStandingFor, reachesPodFor } from "../authorization/access.ts";
+import { mayDecideApprovals, podStandingFor, reachesThreadFor } from "../authorization/access.ts";
 import { findRoutineExecutionId } from "../conversations/routines/execution.ts";
+import { membersOfDirectKey } from "../conversations/threads/repository.ts";
+import { threadPodId } from "../conversations/threads/rooms.ts";
 import { decidersOf } from "../conversations/tools/approval-deciders.ts";
 import type { Executor } from "../database/database.ts";
 import {
@@ -52,6 +54,8 @@ export interface Addressed {
 /** Why a person would want to hear of something. */
 export type Reason =
 	| "mention"
+	/** It is a direct message to them, which Slack's "mentions" level lets through. */
+	| "direct"
 	| "reply"
 	| "failure"
 	| "participant"
@@ -122,8 +126,10 @@ export interface WrittenMessage {
 
 /**
  * The notifications a finished message sends. Only conversations, pods'
- * chats and bots' channels notify: routine runs, collaborations and system agents' threads are
- * bots' work, which reaches people through what they post in those.
+ * chats, bots' channels and direct messages notify: routine runs,
+ * collaborations and system agents' threads are bots' work, which reaches
+ * people through what they post in those. A direct message notifies the
+ * person it is to as a mention would.
  */
 export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	db: Executor,
@@ -147,19 +153,17 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	return audience.flatMap((person): Addressed[] => {
 		if (author.kind === "person" && person.id === author.userId) return [];
 		const reason: Reason =
-			addressesEveryone || mentioned.has(handleFromName(person.name))
-				? "mention"
-				: person.id === written.repliesTo
-					? "reply"
-					: person.participant && place.type === "conversation"
-						? "participant"
-						: "activity";
+			place.type === "direct"
+				? "direct"
+				: addressesEveryone || mentioned.has(handleFromName(person.name))
+					? "mention"
+					: person.id === written.repliesTo
+						? "reply"
+						: person.participant && place.type === "conversation"
+							? "participant"
+							: "activity";
 		if (!wants(person, reason, now)) return [];
-		// A bot's channel is named for it, so what the bot says there needs no "in".
-		const where =
-			place.type === "bot_channel" && author.kind === "bot" && author.agentId === place.hostAgentId
-				? ""
-				: ` in ${place.title}`;
+		const where = whereFrom(place, author);
 		return [
 			{
 				userId: person.id,
@@ -233,7 +237,11 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	const addressed: Addressed[] = [];
 	for (const person of audience) {
 		if (!wants(person, "approval", now)) continue;
-		const standing = yield* podStandingFor(db, place.podId, person.id);
+		const standing = yield* podStandingFor(
+			db,
+			threadPodId(waiting.threadId, place.podId),
+			person.id,
+		);
 		const decides =
 			standing !== undefined &&
 			calls.some((call) => mayDecideApprovals(standing, inRoutine, decidersOf(call.tool)));
@@ -346,6 +354,26 @@ export const forRoutineRun = Effect.fn("Notifications.forRoutineRun")(function* 
 		);
 });
 
+/**
+ * Where a message was written, after its author's name in a notification's
+ * title: nothing in a direct message with one person, or where a bot speaks
+ * in its own channel, which are named for who wrote it; else the place.
+ */
+function whereFrom(place: Place, author: WrittenMessage["author"]): string {
+	if (place.type === "direct") {
+		const group = place.directKey && membersOfDirectKey(place.directKey).length > 2;
+		return group ? " in a group message" : "";
+	}
+	if (
+		place.type === "bot_channel" &&
+		author.kind === "bot" &&
+		author.agentId === place.hostAgentId
+	) {
+		return "";
+	}
+	return ` in ${place.title}`;
+}
+
 /** The most of a message a notification shows. */
 const PREVIEW_CHARACTERS = 180;
 
@@ -371,10 +399,13 @@ function activityPath(
 	conversationId: string,
 	search: Record<string, string>,
 ): string {
+	if (place.type === "direct") {
+		return `/${place.workspaceSlug}/dm/${conversationId}?${new URLSearchParams(search)}`;
+	}
 	return `/${place.workspaceSlug}/activity/${place.podSlug}/${conversationId}?${new URLSearchParams(search)}`;
 }
 
-/** The thread, the conversation it belongs to, and the addresses of its workspace and pod. */
+/** The thread, the conversation it belongs to, and the addresses of its workspace and pod, if it has one. */
 const placeOf = Effect.fn("Notifications.placeOf")(function* (db: Executor, threadId: string) {
 	const conversation = alias(thread, "conversation");
 	const [row] = yield* db
@@ -385,11 +416,14 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (db: Executor, thre
 			workspaceId: thread.workspaceId,
 			conversationId: sql<string>`coalesce(${thread.conversationId}, ${thread.id})`,
 			title: sql<string>`coalesce(${conversation.title}, ${thread.title})`,
+			/** Null on a direct message between people, which is in no pod. */
 			podSlug: pod.slug,
 			workspaceSlug: workspace.slug,
+			/** On a direct message between people: the key naming everybody in it. */
+			directKey: thread.directKey,
 		})
 		.from(thread)
-		.innerJoin(pod, eq(pod.id, thread.podId))
+		.leftJoin(pod, eq(pod.id, thread.podId))
 		.innerJoin(workspace, eq(workspace.id, thread.workspaceId))
 		.leftJoin(conversation, eq(conversation.id, thread.conversationId))
 		.where(eq(thread.id, threadId))
@@ -400,8 +434,9 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (db: Executor, thre
 type Person = Effect.Success<ReturnType<typeof audienceOf>>[number];
 
 /**
- * Everybody who reaches the place's pod, with the level they chose for
- * `botId`, the bot it is about, else for the pod, else their own.
+ * Everybody who reaches the place, with the level they chose for `botId`, the
+ * bot it is about, else for the pod, else their own: the people in a direct
+ * message, or who reach the pod of anything else.
  */
 const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 	db: Executor,
@@ -432,11 +467,24 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 			botLevel,
 			and(eq(botLevel.userId, user.id), botId === null ? sql`false` : eq(botLevel.agentId, botId)),
 		)
-		.leftJoin(podLevel, and(eq(podLevel.userId, user.id), eq(podLevel.podId, place.podId)))
+		.leftJoin(
+			podLevel,
+			and(
+				eq(podLevel.userId, user.id),
+				place.podId === null ? sql`false` : eq(podLevel.podId, place.podId),
+			),
+		)
 		.where(
 			and(
 				eq(workspaceMember.workspaceId, place.workspaceId),
-				reachesPodFor(sql`${place.podId}::uuid`, user.id),
+				reachesThreadFor(
+					{
+						id: sql`${place.conversationId}::uuid`,
+						workspaceId: sql`${place.workspaceId}::uuid`,
+						podId: sql`${place.podId}::uuid`,
+					},
+					user.id,
+				),
 			),
 		);
 });

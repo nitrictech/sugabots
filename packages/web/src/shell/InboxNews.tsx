@@ -4,28 +4,29 @@ import { COUNT_BADGE_SIZES, CountBadge, type CountBadgeSize } from "@/ui/count-b
 
 /**
  * What is new in Inbox, where a place leads to it: how many unread messages
- * mention the viewer, or a dot while only other things are unread. Only what
- * needs the viewer is counted, as the app's badge counts it.
+ * are written to the viewer, mentioning them or in their direct messages, or
+ * a dot while only other things are unread. Only what needs the viewer is
+ * counted, as the app's badge counts it.
  */
 export function InboxNews({
-	unreadMentions,
+	unreadForYou,
 	unreadInInbox,
 	size,
 	countClassName,
 }: {
-	unreadMentions: number;
+	unreadForYou: number;
 	unreadInInbox: number;
 	/** The count's size, whose box the dot is centred in. */
 	size: CountBadgeSize;
 	/** Merged over the count's own; the dot keeps its own. */
 	countClassName?: string;
 }) {
-	if (unreadMentions > 0) {
+	if (unreadForYou > 0) {
 		return (
 			<CountBadge
-				count={unreadMentions}
+				count={unreadForYou}
 				size={size}
-				label={countOf(unreadMentions, "unread mention", "unread mentions")}
+				label={countOf(unreadForYou, "unread message for you", "unread messages for you")}
 				className={countClassName}
 			/>
 		);

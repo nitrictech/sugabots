@@ -9,8 +9,8 @@ import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
+import { Audience } from "../database/events/audience.ts";
 import type { PendingEvent } from "../database/events/outbox.ts";
-import { PodAudience } from "../database/events/pod-audience.ts";
 import { noDatabase } from "../database/testing.ts";
 import { ConversationEvent } from "./events.ts";
 import { ThreadFeed } from "./thread-feed.ts";
@@ -173,12 +173,10 @@ describe("the thread feed", () => {
 			}),
 		);
 
-		expect(
-			told.map(({ channel, event }) => [channel, PodAudience.audienceOf(event).podId]),
-		).toEqual([
+		expect(told.map(({ channel, event }) => [channel, Audience.read(event).audience])).toEqual([
 			[threadChannel(threadId), undefined],
 			[threadChannel(threadId), undefined],
-			[workspaceChannel(workspaceId), podId],
+			[workspaceChannel(workspaceId), { kind: "pod", podId }],
 		]);
 	});
 

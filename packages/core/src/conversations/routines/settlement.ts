@@ -304,7 +304,7 @@ const placementOf = (threadId: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ workspaceId: thread.workspaceId, podId: thread.podId, podKind: pod.kind })
+				.select({ workspaceId: thread.workspaceId, podId: pod.id, podKind: pod.kind })
 				.from(thread)
 				.innerJoin(pod, eq(pod.id, thread.podId))
 				.where(eq(thread.id, threadId))

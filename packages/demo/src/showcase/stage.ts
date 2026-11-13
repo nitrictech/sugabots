@@ -21,6 +21,7 @@ import {
 	toPerson,
 	toReactions,
 } from "@sugabots/core/conversations/threads/participants";
+import { threadPodId } from "@sugabots/core/conversations/threads/rooms";
 import { toToolCallPart } from "@sugabots/core/conversations/threads/tool-calls";
 import { ARTIFACT_WRITE_TOOL } from "@sugabots/core/conversations/tools/artifacts/tool";
 import { Credentials } from "@sugabots/core/credentials/credentials";
@@ -260,6 +261,8 @@ function agentAuthor(bot: AgentRow): ParticipantRow {
 interface Reply {
 	readonly bot: AgentRow;
 	readonly thread: ThreadRow;
+	/** The thread's pod: the showcase's bots only ever reply in one. */
+	readonly podId: string;
 	readonly turnId: string;
 	readonly messageId: string;
 	readonly parts: StoredMessagePart[];
@@ -434,6 +437,7 @@ const startReply = (bot: AgentRow, inThread: ThreadRow, triggerMessageId: string
 				const reply: Reply = {
 					bot,
 					thread: inThread,
+					podId: threadPodId(inThread.id, inThread.podId),
 					turnId: started.id,
 					messageId: replyRow.id,
 					parts: [],
@@ -600,7 +604,7 @@ const finishReply = (reply: Reply, text: string) =>
 					ConversationEvent.TurnCompleted({
 						threadId: reply.thread.id,
 						workspaceId: reply.thread.workspaceId,
-						podId: reply.thread.podId,
+						podId: reply.podId,
 						turnId: reply.turnId,
 						agentId: reply.bot.id,
 						messageId: reply.messageId,
@@ -635,7 +639,7 @@ const collaborate = <E, R>(
 						.insert(thread)
 						.values({
 							workspaceId: reply.thread.workspaceId,
-							podId: reply.thread.podId,
+							podId: reply.podId,
 							hostAgentId: collaborator.id,
 							conversationId: reply.thread.conversationId,
 							type: "collaboration",
@@ -691,7 +695,7 @@ const collaborate = <E, R>(
 						.where(
 							and(
 								eq(thread.type, "bot_channel"),
-								eq(thread.podId, reply.thread.podId),
+								eq(thread.podId, reply.podId),
 								eq(thread.hostAgentId, collaborator.id),
 							),
 						)
@@ -703,7 +707,7 @@ const collaborate = <E, R>(
 						parentMessageId: reply.messageId,
 						collaboration: toCollaborationPart(row, collaborator.name),
 						workspaceId: reply.thread.workspaceId,
-						podId: reply.thread.podId,
+						podId: reply.podId,
 						collaboratorAgentId: collaborator.id,
 						collaboratorChannelId: collaboratorChannel?.id ?? null,
 						briefMessageId: briefRow.id,
@@ -758,7 +762,12 @@ const playTicketDeskWork = (bot: AgentRow, inThread: ThreadRow, triggerId: strin
 			db
 				.select({ id: connection.id })
 				.from(connection)
-				.where(and(eq(connection.podId, inThread.podId), eq(connection.handle, STRIPE))),
+				.where(
+					and(
+						eq(connection.podId, threadPodId(inThread.id, inThread.podId)),
+						eq(connection.handle, STRIPE),
+					),
+				),
 		);
 		if (!stripe) return yield* Effect.die(new Error("Support has no Stripe connection"));
 		const stripeCall = (name: string) => ({
@@ -802,7 +811,7 @@ const playTicketDeskWork = (bot: AgentRow, inThread: ThreadRow, triggerId: strin
 					ConversationEvent.TurnSuspended({
 						threadId: inThread.id,
 						workspaceId: inThread.workspaceId,
-						podId: inThread.podId,
+						podId: threadPodId(inThread.id, inThread.podId),
 						turnId: reply.turnId,
 					}),
 				]);
@@ -849,7 +858,7 @@ const writeIncident = (reply: Reply) =>
 			.create(
 				{
 					workspaceId: reply.thread.workspaceId,
-					podId: reply.thread.podId,
+					podId: reply.podId,
 					agentId: reply.bot.id,
 					threadId: reply.thread.id,
 				},
@@ -942,7 +951,7 @@ const start = (podChatId: string, messageId: string, botId: string, text: string
 				yield* emit([
 					ConversationEvent.ThreadOpened({
 						workspaceId: row.workspaceId,
-						podId: row.podId,
+						podId: threadPodId(row.id, row.podId),
 						parentThreadId: podChat.id,
 						threadId: row.id,
 					}),
@@ -996,6 +1005,7 @@ const allow = (toolCallId: string) =>
 		const reply: Reply = {
 			bot: found.bot,
 			thread: found.thread,
+			podId: threadPodId(found.thread.id, found.thread.podId),
 			turnId: found.turn.id,
 			messageId: found.reply.id,
 			parts: [...found.reply.parts],
@@ -1007,7 +1017,7 @@ const allow = (toolCallId: string) =>
 				ConversationEvent.ToolCallDecided({
 					...change,
 					workspaceId: found.thread.workspaceId,
-					podId: found.thread.podId,
+					podId: reply.podId,
 				}),
 			owner.name,
 		);

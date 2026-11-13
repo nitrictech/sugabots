@@ -140,7 +140,8 @@ export function ThreadConversation({
 	 * desktop live. Off while one is open large beside the conversation.
 	 */
 	previews?: boolean;
-	podId: string;
+	/** The pod the conversation is in; null in a direct message between people, which has no bots. */
+	podId: string | null;
 	/** What the person may decide of the approvals the thread raises. */
 	approvalCapabilities?: ApprovalCapabilities;
 	/** The sidebar's narrower thread: smaller faces and words. */
@@ -397,7 +398,7 @@ function MessageRow({
 	looks: ReturnType<typeof useConnectionLooks>;
 	/** The thread's files by id, for the tool line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
-	podId: string;
+	podId: string | null;
 	approvalCapabilities: ApprovalCapabilities | undefined;
 	compact: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
@@ -545,7 +546,7 @@ function MessageRow({
 					}
 					if (segment.type === "tool_call") {
 						const call = segment.toolCall;
-						if (!agent) return null;
+						if (!agent || podId === null) return null;
 						return (
 							<div key={segment.key} className="w-full max-w-115 pt-1.5 pb-1">
 								<ToolApprovalCard
@@ -602,7 +603,7 @@ function MessageRow({
 							/>
 						</div>
 					)}
-				{agent && previews && onOpenArtifact && (
+				{agent && podId !== null && previews && onOpenArtifact && (
 					<ArtifactCards
 						parts={message.parts}
 						podId={podId}

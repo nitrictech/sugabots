@@ -37,6 +37,22 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.openBotChannel({ ...payload, workspace: params.workspace })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("directMessages", ({ params }) =>
+				view.directMessages(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("sendDirectMessage", ({ params, payload }) =>
+				chats
+					.sendDirectMessage({
+						workspace: params.workspace,
+						userIds: payload.userIds,
+						messageId: payload.id,
+						content: payload.message,
+					})
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("directMessage", ({ params }) =>
+				view.directMessage(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("openRoutineFeed", ({ params }) =>
 				chats
 					.openRoutineFeed({ workspace: params.workspace, routineId: params.routineId })
@@ -160,6 +176,8 @@ const storeOutagesAsDefects = {
 const chatErrors = {
 	...refusals,
 	HostNotCrew: BadRequest,
+	DirectToSelf: BadRequest,
+	TooManyInDirect: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
 	HostHasNoModel: Conflict,

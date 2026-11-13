@@ -260,7 +260,7 @@ function NoBots({ onNewBot }: { onNewBot?: () => void }) {
 }
 
 /** A row of the sidebar: a link or button 32px tall, or 44px for a thumb on a phone, shaded while it is the one open. */
-function sidebarRowClassName(selected: boolean): string {
+export function sidebarRowClassName(selected: boolean): string {
 	return cn(
 		"focus-ring flex h-8 min-w-0 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-sm transition-colors",
 		PHONE_ROW,
@@ -685,7 +685,7 @@ export const NESTED_INDENT = "pl-1.5 @[248px]/sidebar:pl-3";
  * The end of a sidebar row, as wide as the + beside a section's name, so a
  * row's dot, its +, and the section's + all line up.
  */
-const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
+export const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /**
  * At a row's end: a dot while it waits on the viewer, as a decision or a

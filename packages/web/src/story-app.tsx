@@ -3,6 +3,7 @@ import type {
 	BotChannel,
 	ChatMessageItem,
 	ConversationThread,
+	DirectMessageListItem,
 	Message,
 	ModelProvider,
 	NotificationSettings,
@@ -299,6 +300,12 @@ export interface StoryAppData {
 	referralLink?: string;
 	/** What the person chose to be notified about; nothing chosen when absent. */
 	notifications?: NotificationSettings;
+	/** The viewer's direct messages, most recent first; none when absent. */
+	directMessages?: DirectMessageListItem[];
+	/** Messages in each direct message, by its conversation's id. */
+	directMessageMessages?: Record<string, Message[]>;
+	/** Everybody in the workspace besides the viewer. */
+	otherMembers?: SessionUser[];
 }
 
 const noNotificationChoices: NotificationSettings = {
@@ -326,8 +333,21 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		bots.find((bot) => storyChannelFor(bot).id === threadId);
 	const podForChat = (threadId: string) =>
 		pods.find((pod) => pod.kind === "shared" && storyPodChatFor(pod).id === threadId);
+	const directMessages = data.directMessages ?? [];
+	// A copy, so what a story sends stays in that story.
+	const directMessageMessages = { ...data.directMessageMessages };
+	const directMessageOf = (conversationId: string) =>
+		directMessages.find((item) => item.conversation.id === conversationId);
 
 	return [
+		...directMessageHandlers(directMessages, directMessageMessages),
+		http.get(api("/threads/:threadId"), ({ params }) => {
+			const item = directMessageOf(String(params.threadId));
+			if (!item) return undefined;
+			return HttpResponse.json(
+				storyDirectMessageDetails(item, directMessageMessages[item.conversation.id]),
+			);
+		}),
 		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
 		http.get(api("/workspaces/:workspace/members"), () =>
 			HttpResponse.json([
@@ -337,6 +357,12 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					user: storyUser,
 					joinedAt: "2026-09-01T00:00:00.000Z",
 				},
+				...(data.otherMembers ?? []).map((user, index) => ({
+					id: `0199a3a0-0000-7000-8000-0000000000e${index}`,
+					role: "member",
+					user,
+					joinedAt: "2026-09-02T00:00:00.000Z",
+				})),
 			]),
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
@@ -368,6 +394,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/routines"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
+		http.get(api("/me/events"), quietStream),
 		http.get(api("/workspaces/:workspace/chats/activity"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/chats/approvals"), () =>
 			HttpResponse.json({ waiting: [], answered: [] }),
@@ -505,6 +532,105 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 	];
+}
+
+/**
+ * The API's answers about the viewer's direct messages: the list of them,
+ * each one, sending to people they have one with, and the messages in each.
+ */
+function directMessageHandlers(
+	items: readonly DirectMessageListItem[],
+	messages: Record<string, Message[]>,
+): RequestHandler[] {
+	/** Keeps `content`, the viewer's, as the newest message in the direct message `id`. */
+	const post = (id: string, messageId: string, content: string): Message => {
+		const sent: Message = {
+			id: messageId,
+			threadId: id,
+			author: testPerson({ id: storyUser.id, name: storyUser.name, email: storyUser.email }),
+			kind: "text",
+			status: "complete",
+			parts: [{ type: "text", text: content }],
+			content,
+			createdAt: new Date().toISOString(),
+		};
+		messages[id] = [...(messages[id] ?? []), sent];
+		return sent;
+	};
+	return [
+		http.get(api("/workspaces/:workspace/direct-messages"), () => HttpResponse.json({ items })),
+		http.get(api("/direct-messages/:conversationId"), ({ params }) => {
+			const found = items.find((item) => item.conversation.id === params.conversationId);
+			return found ? HttpResponse.json(found) : new HttpResponse(null, { status: 404 });
+		}),
+		// Only to people the viewer already has one with: the stories make no new ones.
+		http.post(api("/workspaces/:workspace/direct-messages"), async ({ request }) => {
+			const body = (await request.json()) as { userIds: string[]; id: string; message: string };
+			const wanted = new Set(body.userIds);
+			const found = items.find(
+				(item) =>
+					item.formerMembers === 0 &&
+					item.people.length === wanted.size &&
+					item.people.every((person) => wanted.has(person.id)),
+			);
+			if (!found) return new HttpResponse(null, { status: 404 });
+			const message = post(found.conversation.id, body.id, body.message);
+			return HttpResponse.json({ conversation: found.conversation, message }, { status: 201 });
+		}),
+		http.post(api("/conversations/:conversationId/messages"), async ({ params, request }) => {
+			const id = String(params.conversationId);
+			if (!items.some((item) => item.conversation.id === id)) return undefined;
+			const body = (await request.json()) as { id: string; message: string };
+			return HttpResponse.json(post(id, body.id, body.message), { status: 201 });
+		}),
+		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
+			const id = String(params.conversationId);
+			if (!items.some((item) => item.conversation.id === id)) return undefined;
+			return HttpResponse.json({
+				items: (messages[id] ?? []).map(
+					(message): ChatMessageItem => ({ kind: "message", message }),
+				),
+				nextCursor: null,
+			});
+		}),
+	];
+}
+
+/** What a direct message holds: its messages, and the viewer and whom it is with. */
+export function storyDirectMessageDetails(
+	item: DirectMessageListItem,
+	messages: Message[] = [],
+): ThreadDetails {
+	const viewer = testPerson({ id: storyUser.id, name: storyUser.name });
+	const people = [viewer, ...item.people];
+	const { conversation } = item;
+	return {
+		thread: {
+			id: conversation.id,
+			workspaceId: conversation.workspaceId,
+			podId: null,
+			hostAgentId: null,
+			conversationId: conversation.id,
+			type: conversation.kind,
+			title: conversation.title,
+			status: "done",
+			parentThreadId: null,
+			initiatorUserId: storyUser.id,
+			doneAt: null,
+			createdAt: conversation.createdAt,
+			updatedAt: conversation.updatedAt,
+		},
+		capabilities: { approveToolCalls: true },
+		routineExecution: null,
+		startedFrom: null,
+		participants: people,
+		crew: [],
+		members: people,
+		olderMessagesCursor: null,
+		queuedSince: null,
+		reads: [],
+		messages,
+	};
 }
 
 /**

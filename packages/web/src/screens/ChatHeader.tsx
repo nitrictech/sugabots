@@ -13,7 +13,13 @@ import {
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useAttentionCounts, useChatList } from "@/lib/chats.ts";
-import { activityLink, agentChatLink, conversationLink, podLink } from "@/lib/links.ts";
+import {
+	activityLink,
+	agentChatLink,
+	conversationLink,
+	directMessagesLink,
+	podLink,
+} from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -41,7 +47,9 @@ export type BackTo =
 	/** A thread with a bot goes back to the bot's chat. */
 	| { to: "bot"; pod: Pod; agent: Agent }
 	/** A thread started from one of a pod's channels goes back to it. */
-	| { to: "channel"; pod: Pod; conversationId: string; name: string };
+	| { to: "channel"; pod: Pod; conversationId: string; name: string }
+	/** A direct message goes back to the list of them. */
+	| { to: "directMessages" };
 
 /**
  * Where a chat is shown. On its own page it has Details, opened and closed
@@ -261,7 +269,7 @@ const TITLE_CLASS_NAME =
 	"m-0 min-w-0 flex-1 truncate font-medium text-sm text-foreground max-md:sr-only";
 
 /** How big a chat's face is beside its name in a phone's header, in pixels. */
-const PHONE_FACE_SIZE_PX = 32;
+export const PHONE_FACE_SIZE_PX = 32;
 
 /**
  * The bar across the top of a chat: the same height and inset as a page's.
@@ -467,6 +475,8 @@ export function PeopleChatHeader({
 	done,
 	within,
 	mark = "channel",
+	face,
+	detail,
 	back,
 	parent,
 	trailing,
@@ -481,6 +491,10 @@ export function PeopleChatHeader({
 	within?: string;
 	/** What a phone shows over the name of a chat that is not a thread. */
 	mark?: ChatMark;
+	/** Whose the chat is, as a face, such as a direct message's people, which a phone shows in place of `mark`. */
+	face?: ReactNode;
+	/** At the right of the title, before its Details, such as who is in a group direct message. */
+	detail?: ReactNode;
 }) {
 	const openDetails = details && (() => details.onChange(!details.open));
 	return (
@@ -492,11 +506,16 @@ export function PeopleChatHeader({
 				done ? (
 					<ThreadBadge title={title} within={within} onClick={openDetails} />
 				) : (
-					<FaceBadge face={<ChannelFace mark={mark} />} name={title} onClick={openDetails} />
+					<FaceBadge
+						face={face ?? <ChannelFace mark={mark} />}
+						name={title}
+						onClick={openDetails}
+					/>
 				)
 			}
 		>
 			<h1 className={TITLE_CLASS_NAME}>{title}</h1>
+			{detail}
 			{done && <DoneButton {...done} />}
 			{details && <DetailsButton {...details} />}
 			{menu}
@@ -547,14 +566,14 @@ export const HEADER_ICON_CLASS_NAME = cn(
  * the page covers, with what is new in Inbox beside its chevron.
  */
 export function HeaderBack({ back }: { back: BackTo }) {
-	const { unreadMentions, unreadInInbox } = useAttentionCounts();
+	const { unreadForYou, unreadInInbox } = useAttentionCounts();
 	const { label: backLabel } = useLeave();
 	const className = cn(BACK_BUTTON, "md:hidden", unreadInInbox > 0 && "px-2");
 	const content = (
 		<>
 			<BackChevron />
 			<InboxNews
-				unreadMentions={unreadMentions}
+				unreadForYou={unreadForYou}
 				unreadInInbox={unreadInInbox}
 				size="md"
 				countClassName="h-5 min-w-5 text-xs"
@@ -613,5 +632,7 @@ function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 			};
 		case "activity":
 			return { href: router.buildLocation(activityLink()).href, name: "Inbox" };
+		case "directMessages":
+			return { href: router.buildLocation(directMessagesLink()).href, name: "Direct messages" };
 	}
 }

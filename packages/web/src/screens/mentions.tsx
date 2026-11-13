@@ -83,7 +83,8 @@ type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["ki
  * `@here` and `@channel` as `writer` can use them in a thread of `threadType`,
  * each notifying `members`, the pod's people, but the writer. None where they
  * would notify nobody, so they stay text: written by a bot or a routine, in a
- * thread that notifies nobody, or in a pod with nobody else in it.
+ * thread that notifies nobody, or in a pod with nobody else in it. None in a
+ * direct message either, where everybody in it is told of every message.
  */
 export function groupMentionsBy(
 	writer: Writer,
@@ -91,6 +92,7 @@ export function groupMentionsBy(
 	threadType: ThreadType,
 ): GroupMention[] {
 	if (writer.kind !== "person" || !NOTIFYING_THREAD_TYPES.has(threadType)) return [];
+	if (threadType === "direct") return [];
 	const notifies = members.filter((member) => member.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
