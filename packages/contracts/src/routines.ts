@@ -482,6 +482,11 @@ export const routineExecutionSchema = Schema.Struct({
 	trigger: routineExecutionTriggerSchema,
 	state: routineExecutionStateSchema,
 	error: Schema.NullOr(Schema.String),
+	/**
+	 * Whether it posted a result for people to read. A run that completed
+	 * without posting one had nothing to report.
+	 */
+	posted: Schema.Boolean,
 	acceptedAt: isoTimestampSchema,
 	startedAt: Schema.NullOr(isoTimestampSchema),
 	finishedAt: Schema.NullOr(isoTimestampSchema),

@@ -1,10 +1,17 @@
 import { isDeepStrictEqual } from "node:util";
 import type { RoutineExecutionTrigger } from "@sugabots/contracts";
-import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { handleFromName, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import { agent, pod, routine, routineExecution, routineTrigger } from "../../database/schema.ts";
+import {
+	agent,
+	pod,
+	routine,
+	routineExecution,
+	routineTrigger,
+	user,
+} from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { RoutineRepository } from "./repository.ts";
 import {
@@ -124,6 +131,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					content: triggerMessageContent(
 						definition.routine.instructions,
 						resultGoesToPodChat(definition.routine.results, definition.podKind),
+						yield* runOwnersOf(definition.routine.createdById, input.trigger),
 						input.trigger,
 					),
 				});
@@ -169,22 +177,67 @@ const acceptedAs = (input: Trigger, identity: string) =>
 function triggerMessageContent(
 	instructions: string,
 	postedToPodChat: boolean,
+	owners: RunOwners,
 	trigger: RoutineExecutionTrigger,
 ) {
-	const delivery = postedToPodChat ? POSTED_TO_POD_CHAT_NOTE : POSTED_RESULT_NOTE;
-	return `Routine instructions:\n${instructions}\n\n${delivery}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
+	return `Routine instructions:\n${instructions}\n\n${resultNote(postedToPodChat, owners)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
 
 /**
- * Tells the agent of a run that its last reply is what people will read in
- * the routine's thread, so it writes that reply to them.
+ * Tells the agent of a run that its last reply is what people will read, so
+ * it writes that reply to them; that it may post nothing when there is nothing
+ * to report; and that mentioning somebody is how it asks for them, by default
+ * the run's `owners`.
  */
-const POSTED_RESULT_NOTE =
-	"When you finish, your last reply is posted in this routine's thread for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.";
+function resultNote(postedToPodChat: boolean, owners: RunOwners): string {
+	const where = postedToPodChat
+		? "in this routine's thread and in the pod's chat"
+		: "in this routine's thread";
+	return [
+		`When you finish, your last reply is posted ${where} for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.`,
+		"If there is nothing worth telling them, end without a last reply, writing nothing after your last tool call: nothing is posted, and the run shows it had nothing to report.",
+		`When something needs a person to act or decide, @mention them in your reply, which notifies them.${ownersToMention(owners)}`,
+	].join(" ");
+}
 
-/** As `POSTED_RESULT_NOTE`, for a routine whose result is posted in its pod's chat too. */
-const POSTED_TO_POD_CHAT_NOTE =
-	"When you finish, your last reply is posted in this routine's thread and in the pod's chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.";
+/** The handles of the people a run asks for when its instructions name nobody. */
+interface RunOwners {
+	/** Who made the routine, when they still have an account. */
+	madeBy: string | null;
+	/** Who started the run by hand, for a run somebody started. */
+	startedBy: string | null;
+}
+
+function ownersToMention({ madeBy, startedBy }: RunOwners): string {
+	if (madeBy && madeBy === startedBy) {
+		return ` Unless the instructions say who, mention @${madeBy}, who made this routine and started this run.`;
+	}
+	const named = [
+		madeBy && `@${madeBy}, who made this routine`,
+		startedBy && `@${startedBy}, who started this run`,
+	].filter((owner) => owner !== null);
+	return named.length === 0
+		? ""
+		: ` Unless the instructions say who, mention ${named.join(", and ")}.`;
+}
+
+/** The handles of who made the routine `createdById` names and who started a run by hand. */
+const runOwnersOf = (createdById: string | null, trigger: RoutineExecutionTrigger) =>
+	Effect.gen(function* () {
+		const startedById = trigger.kind === "manual" ? trigger.requestedByUserId : null;
+		const ids = [createdById, startedById].filter((id) => id !== null);
+		const people =
+			ids.length === 0
+				? []
+				: yield* query((db) =>
+						db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids)),
+					);
+		const handleOf = (id: string | null) => {
+			const person = people.find((candidate) => candidate.id === id);
+			return person ? handleFromName(person.name) : null;
+		};
+		return { madeBy: handleOf(createdById), startedBy: handleOf(startedById) } satisfies RunOwners;
+	});
 
 function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigger) {
 	if (left.kind !== right.kind) return false;

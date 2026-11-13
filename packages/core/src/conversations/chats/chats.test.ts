@@ -2151,6 +2151,38 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			return written;
 		};
 
+		/** The run completes, posting `content` as its result in the routine's thread. */
+		const runPosts = async (run: { executionId: string; threadId: string }, content: string) => {
+			await onDatabase((db) =>
+				db
+					.update(routineExecution)
+					.set({
+						state: "completed",
+						startedAt: sql`${routineExecution.acceptedAt}`,
+						finishedAt: sql`${routineExecution.acceptedAt} + interval '1 minute'`,
+					})
+					.where(eq(routineExecution.id, run.executionId)),
+			);
+			const [runThread] = await onDatabase((db) =>
+				db
+					.select({ conversationId: thread.conversationId })
+					.from(thread)
+					.where(eq(thread.id, run.threadId)),
+			);
+			if (!runThread?.conversationId) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(message).values({
+					threadId: runThread.conversationId as string,
+					authorAgentId: agentId,
+					routineExecutionId: run.executionId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: content }],
+					content,
+				}),
+			);
+		};
+
 		/** A reply in the chat that called `tool` and stopped for someone to approve it. */
 		const askForApproval = async (threadId: string, tool = "linear__create_issue") => {
 			const reply = await botWrites(threadId, "", 1);
@@ -2414,6 +2446,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				requestId: crypto.randomUUID(),
 			});
 			await botWrites(accepted.threadId, "Two PRs merged.\nThe release branch is green.", 1);
+			await runPosts(accepted, "Two PRs merged.\nThe release branch is green.");
 
 			expect((await view.activity(workspaceId)).items).toContainEqual(
 				expect.objectContaining({
@@ -2425,9 +2458,39 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					preview: "Two PRs merged. The release branch is green.",
 					conversationId: (await view.list({ workspace: workspaceId, pod: podId }))?.routines[0]
 						?.conversation?.id,
+					mentionsYou: false,
 					unread: true,
 				}),
 			);
+		});
+
+		it("counts a routine run unread only once it posted a result or failed", async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+			);
+			const runRoutine = () =>
+				routines.run({ agentId, routineId: created.routine.id, requestId: crypto.randomUUID() });
+			const running = await runRoutine();
+			const quiet = await runRoutine();
+			await onDatabase((db) =>
+				db
+					.update(routineExecution)
+					.set({ state: "completed", startedAt: new Date(), finishedAt: new Date() })
+					.where(eq(routineExecution.id, quiet.executionId)),
+			);
+			const asking = await runRoutine();
+			await runPosts(asking, "@chat-member the deploy needs your sign-off.");
+
+			const runs = (await view.activity(workspaceId)).items.flatMap((item) =>
+				item.kind === "routine"
+					? [{ threadId: item.threadId, unread: item.unread, mentionsYou: item.mentionsYou }]
+					: [],
+			);
+			expect(runs).toEqual([
+				{ threadId: asking.threadId, unread: true, mentionsYou: true },
+				{ threadId: running.threadId, unread: false, mentionsYou: false },
+			]);
 		});
 
 		it("shows what a routine run said in the routine's thread", async () => {
@@ -2451,6 +2514,62 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					report: "Two PRs merged.\nThe release branch is green.",
 				}),
 			]);
+		});
+
+		it("makes a run opened while it ran news again once it posts its result", async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+			);
+			const run = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			await chats.markItemRead(run.threadId);
+
+			await runPosts(run, "@chat-member the deploy needs your sign-off.");
+
+			expect((await view.activity(workspaceId)).items).toContainEqual(
+				expect.objectContaining({ threadId: run.threadId, unread: true, mentionsYou: true }),
+			);
+		});
+
+		it("leaves a result posted in a pod's chat as well to mention the person there", async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
+			);
+			const run = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			const content = "@chat-member the deploy needs your sign-off.";
+			await runPosts(run, content);
+			const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
+			const [inChat] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: podChat.id,
+						authorAgentId: agentId,
+						routineExecutionId: run.executionId,
+						kind: "text",
+						status: "complete",
+						parts: [{ type: "text", text: content }],
+						content,
+					})
+					.returning(),
+			);
+
+			const { items } = await view.activity(workspaceId);
+			expect(items).toContainEqual(
+				expect.objectContaining({ kind: "mention", messageId: inChat?.id }),
+			);
+			expect(items).toContainEqual(
+				expect.objectContaining({ threadId: run.threadId, mentionsYou: false }),
+			);
 		});
 
 		it("lists a collaboration in the person's chats", async () => {
@@ -2510,6 +2629,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			const earlier = await runRoutine();
 			const opened = await runRoutine();
 			const later = await runRoutine();
+			for (const run of [earlier, opened, later]) await runPosts(run, "All green.");
 
 			await chats.markItemRead(opened.threadId);
 
@@ -2581,6 +2701,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				routineId: created.routine.id,
 				requestId: crypto.randomUUID(),
 			});
+			await runPosts(run, "All green.");
 			const childThreadId = await collaborate(current.id, current.id);
 			const unreadOf = async () =>
 				(await view.activity(workspaceId)).items.flatMap((item) =>

@@ -11,7 +11,7 @@ import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { crewOf } from "../threads/participants.ts";
-import { toRoutineExecution } from "./execution.ts";
+import { resultPosted, toRoutineExecution } from "./execution.ts";
 import {
 	inScope,
 	RoutineNotFound,
@@ -125,7 +125,11 @@ export const makeView = Effect.gen(function* () {
 					if (!definition) return yield* new RoutineNotFound();
 					const rows = yield* query((db) =>
 						db
-							.select({ run: routineExecution, conversationId: thread.conversationId })
+							.select({
+								run: routineExecution,
+								conversationId: thread.conversationId,
+								posted: resultPosted(routineExecution.id),
+							})
 							.from(routineExecution)
 							.innerJoin(thread, eq(thread.id, routineExecution.threadId))
 							.where(
@@ -142,9 +146,9 @@ export const makeView = Effect.gen(function* () {
 					const items = rows.slice(0, page.limit);
 					const oldest = items.at(-1)?.run;
 					return {
-						items: items.map(({ run, conversationId }) => {
+						items: items.map(({ run, conversationId, posted }) => {
 							if (!conversationId) throw new Error(`Routine run ${run.id} is in no conversation`);
-							return toRoutineExecution(run, conversationId);
+							return toRoutineExecution(run, conversationId, posted);
 						}),
 						nextCursor:
 							rows.length > page.limit && oldest
