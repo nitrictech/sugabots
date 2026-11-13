@@ -458,6 +458,10 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 			expect(willRetry).toBe(false);
 			expect(await statusOf(opened.collaboration.id)).toBe("failed");
+			// It told the person it would follow up, so it gets a turn to say what happened.
+			expect(
+				await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
+			).toMatchObject([{ agentId: host.id, triggerMessageId: reply.messageId, reason: "resume" }]);
 		});
 
 		it("keeps the collaboration open while the failed turn runs again", async () => {
@@ -498,6 +502,17 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			expect(await turns.prepare(run)).toMatchObject({ _tag: "NotRunnable" });
 			expect(await statusOf(opened.collaboration.id)).toBe("failed");
 		});
+	});
+
+	it("gives the asker no turn when the routine run its collaboration worked for ends", async () => {
+		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
+		await collaborations.collectAnswer(opened.collaboration.id);
+
+		await collaborations.failUnder([rootThreadId]);
+
+		expect(await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id }))).toEqual(
+			[],
+		);
 	});
 
 	it("tells the asking model a collaboration failed while it waited, rather than that an answer is coming", async () => {

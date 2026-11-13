@@ -61,8 +61,8 @@ export interface Interface {
 	/**
 	 * Fails a collaboration once its collaborator's turn in its thread ends for
 	 * good without answering: failed with no retry, cancelled, or given up
-	 * on. Otherwise the asking agent, told the answer would follow, waits for
-	 * one that never comes.
+	 * on. An asking agent that stopped waiting gets a turn to say so, as it
+	 * told the person it would follow up.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 	/**
@@ -148,7 +148,7 @@ export const make = Effect.gen(function* () {
 			operation("collectAnswer", repository.stopWaiting(collaborationId)),
 
 		answer: ({ threadId, answer }) =>
-			operation("answer", transaction(repository.answer(threadId, answer)).pipe(Effect.asVoid)),
+			operation("answer", transaction(repository.answer(threadId, answer))),
 
 		handler: (events) =>
 			Effect.forEach(events.flatMap(unansweredBy), (ended) => repository.failUnanswered(ended), {

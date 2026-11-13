@@ -19,8 +19,8 @@ export interface Interface {
 	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void>;
 	/**
 	 * Asks for the collaborator's turn when a collaboration opens, for the
-	 * asking agent's when an answer arrives after it stopped waiting, and for
-	 * the bot's in a thread another bot started and briefed it in.
+	 * asking agent's when a collaboration ends after it stopped waiting, and
+	 * for the bot's in a thread another bot started and briefed it in.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
@@ -79,11 +79,11 @@ export const make = Effect.gen(function* () {
 								reason: "brief",
 							});
 						case "CollaborationAnswered":
-							// While it was still waiting, the asking tool reads the answer itself.
-							return event.askerMovedOn
+						case "CollaborationFailed":
+							return event.askerToResume
 								? turns.ask({
 										threadId: event.parentThreadId,
-										agentId: event.askingAgentId,
+										agentId: event.askerToResume,
 										triggerMessageId: event.parentMessageId,
 										reason: "resume",
 									})
