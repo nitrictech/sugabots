@@ -74,7 +74,7 @@ import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { latestRunFailedUnseen, routineExecutionIdOf } from "../routines/routines.ts";
+import { latestRunFailedUnseen, resultPosted, routineExecutionIdOf } from "../routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -116,7 +116,8 @@ export interface Interface {
 	/**
 	 * What is new for the actor across the workspace's conversations, newest first:
 	 * messages that mention them, read or not, and those they have not read;
-	 * and every routine run and collaboration, read or not.
+	 * every routine run, read or not, but those that completed with nothing to
+	 * report; and every collaboration, read or not.
 	 */
 	readonly activity: (
 		workspace: string,
@@ -328,6 +329,10 @@ export const make = Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 					const reachesPod = yield* visibility.reachesPod;
 					const { userId } = yield* CurrentActor.Service;
+					const [person] = yield* query((db) =>
+						db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
+					);
+					if (!person) return { items: [] };
 					const since = DateTime.toDate(
 						DateTime.subtract(yield* DateTime.now, { days: ACTIVITY_WINDOW_DAYS }),
 					);
@@ -335,6 +340,7 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						reachesPod,
 						userId,
+						handle: handleFromName(person.name),
 						since,
 					};
 					const messages = yield* query((db) => activityRows(db, scope));
@@ -362,6 +368,7 @@ export const make = Effect.gen(function* () {
 								triggerKind: row.triggerKind,
 								agent: { kind: "agent", ...row.agent },
 								preview: row.lastReply && runReportPreview(row.lastReply),
+								mentionsYou: row.mentionsYou,
 								podId: row.podId,
 								conversationId: row.conversationId,
 								at: row.at.toISOString(),
@@ -753,13 +760,7 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 	db: Executor,
 	input: ActivityScope,
 ) {
-	const [person] = yield* db
-		.select({ name: user.name })
-		.from(user)
-		.where(eq(user.id, input.userId))
-		.limit(1);
-	if (!person) return [];
-	const mentionsYou = mentions(handleFromName(person.name));
+	const mentionsYou = mentions(input.handle);
 	const unread = unreadBy(db, input.userId, {
 		threadId: message.threadId,
 		at: message.createdAt,
@@ -812,6 +813,8 @@ interface ActivityScope {
 	workspaceId: string;
 	reachesPod: Visibility.ReachesPod;
 	userId: string;
+	/** The person's handle, which mentions of them use. */
+	handle: string;
 	since: Date;
 }
 
@@ -880,12 +883,40 @@ const failedRoutinesByPod = Effect.fn("ChatView.failedRoutinesByPod")(function* 
 	return new Map(rows.flatMap((row) => (row.podId ? [[row.podId, row.count] as const] : [])));
 });
 
-/** The routine runs in the conversations `userId` reaches since `since`, newest first, with their last replies. */
+/**
+ * The routine runs in the conversations `userId` reaches since `since`, newest
+ * first, with their last replies, but not those that completed with nothing to
+ * report. A run is unread news only once it posted a result or failed, from
+ * when it ended. It mentions the person when its result, posted only in the
+ * routine's thread, does: one also in a pod's chat mentions them there.
+ */
 const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 	db: Executor,
 	input: ActivityScope,
 ) {
 	const conversation = alias(thread, "conversation");
+	const posted = resultPosted(routineExecution.id);
+	const elsewhere = alias(message, "result_elsewhere");
+	const resultMentioningYou = db
+		.select({ id: message.id })
+		.from(message)
+		.where(
+			and(
+				eq(message.routineExecutionId, routineExecution.id),
+				eq(message.threadId, conversation.id),
+				mentions(input.handle),
+				sql`not exists (${db
+					.select({ id: elsewhere.id })
+					.from(elsewhere)
+					.where(
+						and(
+							eq(elsewhere.routineExecutionId, routineExecution.id),
+							ne(elsewhere.threadId, conversation.id),
+						),
+					)})`,
+			),
+		);
+	const isNews = or(eq(routineExecution.state, "failed"), posted);
 	return yield* db
 		.select({
 			threadId: routineExecution.threadId,
@@ -903,11 +934,12 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 			},
 			podId: conversation.podId,
 			conversationId: conversation.id,
-			unread: itemUnreadBy(db, input.userId, {
+			unread: sql<boolean>`(${isNews} and ${itemUnreadBy(db, input.userId, {
 				conversationId: conversation.id,
 				itemThreadId: routineExecution.threadId,
-				at: routineExecution.acceptedAt,
-			}),
+				at: sql`coalesce(${routineExecution.finishedAt}, ${routineExecution.acceptedAt})`,
+			})})`,
+			mentionsYou: sql<boolean>`exists (${resultMentioningYou})`,
 			lastReply: lastReplyIn(db, routineExecution.threadId),
 		})
 		.from(routineExecution)
@@ -919,6 +951,7 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
 				eq(conversation.workspaceId, input.workspaceId),
 				input.reachesPod(conversation.podId),
 				gt(routineExecution.acceptedAt, input.since),
+				or(ne(routineExecution.state, "completed"), posted),
 			),
 		)
 		.orderBy(desc(routineExecution.acceptedAt))
@@ -1254,7 +1287,10 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 			state: true,
 			error: true,
 		},
-		extras: { report: (row) => lastReplyIn(db, row.threadId) },
+		extras: {
+			report: (row) => lastReplyIn(db, row.threadId),
+			posted: (row) => resultPosted(sql`${row.id}`),
+		},
 	});
 	const [paused] = yield* db
 		.select({ routineId: routine.id, at: routine.pausedAfterFailuresAt })
@@ -1373,7 +1409,6 @@ function pausedCandidate(routineId: string, at: Date) {
 
 /** The sources merged newest first, cut to the page, and put back in reading order. */
 function toMainPage(row: MainPage, limit: number) {
-	const posted = new Set(row.messages.flatMap((stored) => stored.routineExecutionId ?? []));
 	const candidates = [
 		...row.messages.map((stored) => ({
 			id: stored.id,
@@ -1414,7 +1449,7 @@ function toMainPage(row: MainPage, limit: number) {
 		})),
 		// A run that posted its result is shown by the post, which opens the run.
 		...row.routineExecutions
-			.filter((execution) => !posted.has(execution.id))
+			.filter((execution) => !execution.posted)
 			.map((execution) => ({
 				id: execution.id,
 				createdAt: execution.acceptedAt,
@@ -1426,7 +1461,8 @@ function toMainPage(row: MainPage, limit: number) {
 					triggerKind: execution.triggerKind,
 					state: execution.state,
 					error: execution.error,
-					report: execution.report && spokenText(execution.report),
+					// Only what the bot said after its last tool call, as a posted result would be.
+					report: execution.report && (textWithoutNarration(execution.report.parts) || null),
 					createdAt: execution.acceptedAt.toISOString(),
 				}),
 			})),

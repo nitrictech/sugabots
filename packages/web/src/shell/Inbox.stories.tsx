@@ -57,6 +57,7 @@ const feed: ActivityFeed = {
 			triggerKind: "cron",
 			preview:
 				"Queued 38 leads overnight and six have already replied. The two Northwind accounts both asked for pricing.",
+			mentionsYou: false,
 			agent: {
 				kind: "agent",
 				id: growthDesk.id,

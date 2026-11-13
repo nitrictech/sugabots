@@ -626,6 +626,7 @@ export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnecti
 export {
 	latestRunFailed,
 	latestRunFailedUnseen,
+	resultPosted,
 	routineExecutionIdOf,
 	toRoutineExecution,
 } from "./execution.ts";

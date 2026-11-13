@@ -29,7 +29,8 @@ type RunItem = Extract<ChatMessageItem, { kind: "routine" }>;
 
 /** How a run went, or that its routine is paused, as the dot beside it says it. */
 export type RunOutcome =
-	| "passed"
+	| "posted"
+	| "nothingToReport"
 	| "failed"
 	| "running"
 	| "cancelled"
@@ -37,7 +38,8 @@ export type RunOutcome =
 	| "pausedAfterFailures";
 
 const OUTCOME_LABEL: Record<RunOutcome, string> = {
-	passed: "Passed",
+	posted: "Posted",
+	nothingToReport: "Nothing to report",
 	failed: "Failed",
 	running: "Running",
 	cancelled: "Cancelled",
@@ -46,7 +48,8 @@ const OUTCOME_LABEL: Record<RunOutcome, string> = {
 };
 
 const OUTCOME_DOT: Record<RunOutcome, string> = {
-	passed: "bg-success",
+	posted: "bg-success",
+	nothingToReport: "bg-disabled-foreground",
 	failed: "bg-destructive-text",
 	running: "bg-subtle-foreground",
 	cancelled: "bg-disabled-foreground",
@@ -54,11 +57,15 @@ const OUTCOME_DOT: Record<RunOutcome, string> = {
 	pausedAfterFailures: "bg-destructive-text",
 };
 
-/** A run's state, as the dot beside it says it. */
+/**
+ * How a run in `state` went, as the dot beside it says it. One that completed
+ * without having `posted` a result had nothing to report.
+ */
 export function outcomeOf(
 	state: RunItem["state"],
+	posted: boolean,
 ): Exclude<RunOutcome, "paused" | "pausedAfterFailures"> {
-	if (state === "completed") return "passed";
+	if (state === "completed") return posted ? "posted" : "nothingToReport";
 	if (state === "failed") return "failed";
 	if (state === "cancelled") return "cancelled";
 	return "running";
@@ -118,9 +125,10 @@ function Divider({ children }: { children: string }) {
 /**
  * A run that posted no result, drawn as its bot's message: what the bot last
  * said in it, or, when it said nothing, how it went and, when it failed, why.
- * A run that passed and said something needs no word on how it went. The
- * latest failure, while the routine is still failing, offers to run it again
- * or to see to the connection it needs. One still running says so with dots.
+ * A run that completed and said something needs no word on how it went, and
+ * one that completed saying nothing had nothing to report. The latest
+ * failure, while the routine is still failing, offers to run it again or to
+ * see to the connection it needs. One still running says so with dots.
  */
 export function RunMessage({
 	item,
@@ -142,8 +150,8 @@ export function RunMessage({
 	mentionable: ThreadParticipant[];
 }) {
 	const controls = useRoutineControls(conversationId, routine);
-	const outcome = outcomeOf(item.state);
-	const report = outcome === "passed" ? item.report : null;
+	const outcome = outcomeOf(item.state, false);
+	const report = item.state === "completed" ? item.report : null;
 	return (
 		<article
 			aria-label={`${item.routineName}: ${OUTCOME_LABEL[outcome]}`}
@@ -167,7 +175,7 @@ export function RunMessage({
 					<div className="min-w-0 self-stretch break-words text-sm text-body-foreground leading-normal">
 						<MessageMarkdown text={report} mentionable={mentionable} writer="bot" />
 					</div>
-				) : outcome === "running" ? (
+				) : outcome === "nothingToReport" ? null : outcome === "running" ? (
 					<span aria-hidden className="typing-dots typing-dots-small mt-2 text-muted-foreground">
 						<i />
 						<i />

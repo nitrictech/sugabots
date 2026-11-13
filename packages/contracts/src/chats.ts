@@ -231,8 +231,9 @@ const activityPlaceFields = {
 
 /**
  * Something in one of the person's conversations worth their attention: a message
- * that mentions them or that they have not read, a routine run, or a
- * collaboration one bot opened with another.
+ * that mentions them or that they have not read, a routine run that did not
+ * end with nothing to report, or a collaboration one bot opened with another.
+ * A run is unread only once it posted a result or failed.
  */
 export const activityItemSchema = Schema.Union([
 	Schema.Struct({
@@ -256,6 +257,8 @@ export const activityItemSchema = Schema.Union([
 		agent: agentParticipantSchema,
 		/** The start of the run's last reply, or null while it has written nothing. */
 		preview: Schema.NullOr(Schema.String),
+		/** Whether the result it posted mentions the person, asking something of them. */
+		mentionsYou: Schema.Boolean,
 		...activityPlaceFields,
 	}),
 	Schema.Struct({

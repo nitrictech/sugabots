@@ -1,5 +1,6 @@
 import {
 	type Channel,
+	conversationNotificationTag,
 	handleFromName,
 	type Message,
 	type NotificationPreferences,
@@ -7,6 +8,7 @@ import {
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
+import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
@@ -744,6 +746,95 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect.objectContaining({ title: "Digest finished", body: "Scout finished the run." }),
 		]);
 		expect(sentTo(people.ada.id)).toEqual([]);
+	});
+
+	it("tells those a routine's result mentions in its routine's thread, unless it went to a pod's chat as well", async () => {
+		const runThread = await routineRunElsewhere({ state: "completed" }, people.bob.id);
+		const [run] = await onDatabase((db) =>
+			db
+				.select({ id: routineExecution.id, routineId: routineExecution.routineId })
+				.from(routineExecution)
+				.where(eq(routineExecution.threadId, runThread)),
+		);
+		if (!run) throw new Error("fixture");
+		const feed = crypto.randomUUID();
+		await onDatabase((db) =>
+			db.insert(thread).values({
+				id: feed,
+				workspaceId,
+				podId,
+				hostAgentId: botId,
+				routineId: run.routineId,
+				type: "routine_feed",
+				title: "Digest",
+			}),
+		);
+		await chooseLevel(people.cy.id, "all");
+		const content = `@${handleFromName(people.ada.name)} the calendar needs reconnecting.`;
+		const resultPosted = async (threadId: string) => {
+			const id = crypto.randomUUID();
+			await onDatabase((db) =>
+				db.insert(message).values({
+					id,
+					threadId,
+					authorAgentId: botId,
+					routineExecutionId: run.id,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: content }],
+					content,
+				}),
+			);
+			return ConversationEvent.MessagePosted({
+				threadId,
+				workspaceId,
+				podId,
+				message: {
+					id,
+					content,
+					parts: [{ type: "text", text: content }],
+					author: {
+						kind: "agent",
+						id: botId,
+						name: "Scout",
+						handle: "scout",
+						color: "green",
+						face: "pill",
+						shape: "circle",
+					},
+					routineResultOf: {
+						executionId: run.id,
+						threadId: runThread,
+						routineId: run.routineId,
+						routineName: "Digest",
+					},
+				} as Message,
+			});
+		};
+
+		const inFeed = await resultPosted(feed);
+		await emit(inFeed);
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			{
+				title: "Scout mentioned you in Digest",
+				body: content,
+				tag: conversationNotificationTag(feed),
+				path: `/${workspaceSlug}/activity/${podSlug}/${feed}?threadPage=${runThread}`,
+				conversationId: feed,
+			},
+		]);
+		// Everything is what is said in chats; a routine's thread speaks up only for those it mentions.
+		expect(sentTo(people.cy.id)).toEqual([]);
+
+		published.length = 0;
+		const chat = await podChat();
+		const inChat = await resultPosted(chat);
+		await emit(inFeed, inChat);
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			expect.objectContaining({ tag: conversationNotificationTag(chat) }),
+		]);
 	});
 
 	it("tells the person a bot was answering that its reply failed, unless they turned that off", async () => {

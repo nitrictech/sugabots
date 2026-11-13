@@ -323,6 +323,7 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 						event.message.replyTo?.author.kind === "person"
 							? event.message.replyTo.author.id
 							: null,
+					resultOf: event.message.routineResultOf ?? null,
 				},
 				now,
 			);

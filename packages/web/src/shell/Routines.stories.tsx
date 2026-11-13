@@ -131,6 +131,7 @@ const outboundFailure: RoutineExecution = {
 	finishedAt: "2026-09-18T06:00:12.000Z",
 	state: "failed",
 	error: "Gmail refused the connection: the token has expired.",
+	posted: false,
 };
 
 const chatList: ChatList = {
@@ -234,7 +235,7 @@ function routineHandlers() {
 						triggerKind: "cron",
 						state: "completed",
 						error: null,
-						report: "Queued 38 leads. Nobody replied overnight.",
+						report: null,
 						createdAt: "2026-09-16T06:00:00.000Z",
 					},
 					posted(
@@ -303,9 +304,8 @@ export const Default = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
 		await expect(await canvas.findByRole("button", { name: "Run now" })).toBeVisible();
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
-		const quiet = await within(log).findByRole("article", { name: /: Passed$/ });
-		await expect(quiet).toHaveTextContent("Queued 38 leads. Nobody replied overnight.");
-		await expect(quiet).not.toHaveTextContent("Passed");
+		const quiet = await within(log).findByRole("article", { name: /: Nothing to report$/ });
+		await expect(quiet).toHaveTextContent("Nothing to report");
 		await expect(within(log).getByRole("article", { name: /: Failed$/ })).toHaveTextContent(
 			"Gmail refused the connection",
 		);
@@ -451,7 +451,7 @@ export const BesideTheBotsChat = meta.story({
 			expect(
 				canvas
 					.getAllByRole("log", { name: "Chat messages" })
-					.some((log) => log.textContent?.includes("Queued 38 leads. Nobody replied overnight.")),
+					.some((log) => log.textContent?.includes("Queued 41 leads. Three replied overnight")),
 			).toBe(true),
 		);
 		await userEvent.click(
