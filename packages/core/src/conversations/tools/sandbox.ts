@@ -3,8 +3,8 @@ export * as SandboxTools from "./sandbox.ts";
 import type { AgentColor } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
-import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
-import { type RunEffect, serviceOperations } from "../../database/database.ts";
+import { Context, Effect, Layer, type Scope } from "effect";
+import { effectRunner, type RunEffect, serviceOperations } from "../../database/database.ts";
 import { Ids } from "../../ids/ids.ts";
 import { blockedHostsOf, reachOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
@@ -30,6 +30,7 @@ import {
 	runCommandTool,
 	SHARE_FILE_TOOL,
 	shareFileTool,
+	type TurnSandbox,
 	WRITE_FILE_TOOL,
 	writeFileTool,
 } from "./sandbox/tools.ts";
@@ -64,7 +65,7 @@ export interface Offered {
 	/** What the model is told of the sandbox with the turn, as it may change between turns. */
 	readonly note: string | undefined;
 	/** The sandbox and the agent's place in it, while the tools are usable, for other tools that work there. */
-	readonly workspace: { readonly open: OpenSandbox; readonly place: Place } | undefined;
+	readonly workspace: (TurnSandbox & { readonly place: Place }) | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */
 	readonly signsIn: boolean;
 }
@@ -99,26 +100,28 @@ export const make = Effect.gen(function* () {
 		blocked,
 		allowlisted,
 		attach,
-	}: Behind): Pick<Offered, "tools" | "requests"> => ({
-		tools: {
-			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
-			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
-			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
-			[COPY_FILE_TO_SANDBOX_TOOL]: copyFileToSandboxTool({
-				openSandbox,
-				place,
-				threadId,
-				files,
-				ids,
-				run,
-			}),
-			...(attach ? { [SHARE_FILE_TOOL]: shareFileTool(openSandbox, place, attach) } : {}),
-			...browserTools(browser, acceptsImages),
-		},
-		requests: allowlisted
-			? { [REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }) }
-			: {},
-	});
+	}: Behind): Pick<Offered, "tools" | "requests"> => {
+		const sandbox: TurnSandbox = { open: openSandbox, run };
+		return {
+			tools: {
+				[RUN_COMMAND_TOOL]: runCommandTool(sandbox, place),
+				[READ_FILE_TOOL]: readFileTool(sandbox, place, acceptsImages),
+				[WRITE_FILE_TOOL]: writeFileTool(sandbox, place),
+				[COPY_FILE_TO_SANDBOX_TOOL]: copyFileToSandboxTool({
+					sandbox,
+					place,
+					threadId,
+					files,
+					ids,
+				}),
+				...(attach ? { [SHARE_FILE_TOOL]: shareFileTool(sandbox, place, attach) } : {}),
+				...browserTools(browser, acceptsImages),
+			},
+			requests: allowlisted
+				? { [REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }) }
+				: {},
+		};
+	};
 	return Service.of({
 		forTurn: (turn) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
@@ -134,7 +137,7 @@ export const make = Effect.gen(function* () {
 							acceptsImages,
 							attach,
 							openSandbox: NEVER_OPENED,
-							browser: browserSession(NEVER_OPENED, place, turn),
+							browser: browserSession({ open: NEVER_OPENED, run: NEVER_RUN }, place, turn),
 							run: NEVER_RUN,
 							blocked: [],
 							allowlisted: true,
@@ -158,8 +161,13 @@ export const make = Effect.gen(function* () {
 				yield* Effect.forkScoped(
 					podSandboxes.renew(holder).pipe(Effect.delay(PodSandboxes.LEASE_RENEWAL), Effect.forever),
 				);
-				// The tools run as promises; the opening logs through the turn's services.
-				const runPromiseExit = Effect.runPromiseExitWith(yield* Effect.context<never>());
+				// The tools run as promises, with the turn's services.
+				const run = effectRunner<never>({
+					runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<never>()),
+				});
+				// Opening the sandbox serves every call in the turn, so it stops when
+				// the turn ends rather than with the call that started it.
+				const turnEnded = yield* Effect.abortSignal;
 				const prepared = podSandboxes.open(pod, provider, holder).pipe(
 					// The folders are made on first use, so any sandbox gains them.
 					Effect.tap(({ sandbox }) =>
@@ -169,19 +177,9 @@ export const make = Effect.gen(function* () {
 						}),
 					),
 				);
-				const openSandbox = openOncePerTurn(() =>
-					runPromiseExit(prepared).then((exit) => {
-						if (Exit.isSuccess(exit)) return exit.value;
-						throw Cause.squash(exit.cause);
-					}),
-				);
-				const browser = browserSession(openSandbox, place, turn);
+				const openSandbox = openOncePerTurn(() => run(prepared, { signal: turnEnded }));
+				const browser = browserSession({ open: openSandbox, run }, place, turn);
 				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
-				const run = <A, E>(effect: Effect.Effect<A, E>) =>
-					runPromiseExit(effect).then((exit) => {
-						if (Exit.isSuccess(exit)) return exit.value;
-						throw Cause.squash(exit.cause);
-					});
 				return {
 					...offeredIn({
 						turnId,
@@ -199,7 +197,7 @@ export const make = Effect.gen(function* () {
 					note: [networkNote(reach), diskNote(disk)]
 						.filter((line) => line !== undefined)
 						.join("\n\n"),
-					workspace: { open: openSandbox, place },
+					workspace: { open: openSandbox, run, place },
 					signsIn: sandboxes.forConnection(provider.connection).capabilities.credentials !== "none",
 				};
 			}),

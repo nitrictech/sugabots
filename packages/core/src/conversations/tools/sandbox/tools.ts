@@ -82,6 +82,13 @@ export function placeOf(turn: { threadId: string; agentId: string }): Place {
  */
 export type OpenSandbox = () => Promise<PodSandboxes.Opened>;
 
+/** The pod's sandbox as a turn's tools reach it. */
+export interface TurnSandbox {
+	readonly open: OpenSandbox;
+	/** Runs work in the sandbox with the turn's services, such as its tracing and logging. */
+	readonly run: RunEffect<never>;
+}
+
 /**
  * The pod's sandbox, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
@@ -108,23 +115,28 @@ interface Failed {
 	error: UserText;
 }
 
-/** Runs `work` in the pod's sandbox, turning a refusal it can act on into a result. */
+/**
+ * Runs `work` in the pod's sandbox, turning a refusal it can act on into a
+ * result. The work is interrupted when `abortSignal`, the tool call's, aborts,
+ * as it does when the turn is cancelled.
+ */
 export async function inSandbox<A>(
-	openSandbox: OpenSandbox,
+	sandbox: TurnSandbox,
+	abortSignal: AbortSignal | undefined,
 	work: (
 		sandbox: Sandboxes.Sandbox,
 	) => Effect.Effect<A, Sandboxes.Unavailable | Sandboxes.FileFailed>,
 ): Promise<(A & { note?: UserText }) | Failed> {
 	let opened: PodSandboxes.Opened;
 	try {
-		opened = await openSandbox();
+		opened = await sandbox.open();
 	} catch (cause) {
 		if (cause instanceof Sandboxes.Unavailable)
 			return { status: "failed", error: cause.userMessage };
 		throw cause;
 	}
 	const note = arrivalNote(opened.arrival);
-	return Effect.runPromise(
+	return sandbox.run(
 		work(opened.sandbox).pipe(
 			Effect.map((result) => ({ ...result, ...(note ? { note } : {}) })),
 			Effect.catchTags({
@@ -137,6 +149,7 @@ export async function inSandbox<A>(
 					}),
 			}),
 		),
+		{ signal: abortSignal },
 	);
 }
 
@@ -168,7 +181,7 @@ const pathIn = (place: Place) =>
 		description: `A path in the sandbox, relative to ${place.folder} unless it starts with /`,
 	});
 
-export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
+export function runCommandTool(sandbox: TurnSandbox, place: Place) {
 	return tool({
 		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. When the sandbox's disk runs short, the folders of finished threads, such as ended routine runs and conversations marked done, are cleared, and so are the caches in your home (${AGENT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its thread, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
@@ -184,9 +197,9 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 				})
 				.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_TIMEOUT_SECONDS))),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: ({ command, timeout_seconds }) =>
-			inSandbox(openSandbox, (sandbox) =>
-				sandbox
+		execute: ({ command, timeout_seconds }, { abortSignal }) =>
+			inSandbox(sandbox, abortSignal, (opened) =>
+				opened
 					.exec(`bash -lc ${Sandboxes.shellQuoted(command)}`, {
 						cwd: place.folder,
 						env: { HOME: place.home },
@@ -209,7 +222,7 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 /** The extensions of images read_file shows the model. */
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
-export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImages: boolean) {
+export function readFileTool(sandbox: TurnSandbox, place: Place, acceptsImages: boolean) {
 	return tool({
 		description: acceptsImages
 			? `Read a file in the pod's sandbox: a text file as text, or an image (${SHOWN_IMAGE_FORMATS}) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
@@ -218,11 +231,11 @@ export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImag
 			Schema.toStandardSchemaV1,
 			Schema.toStandardJSONSchemaV1,
 		),
-		execute: ({ path }) => {
+		execute: ({ path }, { abortSignal }) => {
 			const asImage =
 				acceptsImages && IMAGE_EXTENSIONS.has(posix.extname(path).slice(1).toLowerCase());
-			return inSandbox(openSandbox, (sandbox) =>
-				sandbox.readFile(absolute(place, path), asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES).pipe(
+			return inSandbox(sandbox, abortSignal, (opened) =>
+				opened.readFile(absolute(place, path), asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES).pipe(
 					Effect.map(({ content, sizeBytes }): Record<string, unknown> => {
 						if (asImage) {
 							if (sizeBytes > MAX_IMAGE_BYTES) {
@@ -263,19 +276,17 @@ export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImag
  * is looked up first, so an id that names none never starts the sandbox.
  */
 export function copyFileToSandboxTool({
-	openSandbox,
+	sandbox,
 	place,
 	threadId,
 	files,
 	ids,
-	run,
 }: {
-	openSandbox: OpenSandbox;
+	sandbox: TurnSandbox;
 	place: Place;
 	threadId: string;
 	files: Pick<ThreadFiles.Interface, "read">;
 	ids: Ids.Interface;
-	run: RunEffect<never>;
 }) {
 	return tool({
 		description: `Copy a file in this thread, such as one a person attached, into the thread's folder in the pod's sandbox, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the thread's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the thread, remove the copy and copy the file again.`,
@@ -284,16 +295,19 @@ export function copyFileToSandboxTool({
 				description: "The file's id, from the line that names it",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: ({ file }) =>
-			run(
+		execute: ({ file }, { abortSignal }) =>
+			sandbox.run(
 				files.read({ threadId, fileId: file }).pipe(
 					Effect.flatMap((found) =>
-						Effect.promise(() =>
-							inSandbox(openSandbox, (sandbox) => copyThreadFile(sandbox, place, found, ids)),
+						Effect.promise((interrupted) =>
+							inSandbox(sandbox, interrupted, (opened) =>
+								copyThreadFile(opened, place, found, ids),
+							),
 						),
 					),
 					Effect.catch(refusedRead),
 				),
+				{ signal: abortSignal },
 			),
 	});
 }
@@ -328,7 +342,7 @@ function refusedRead(failure: ThreadFiles.FileNotFound | BlobStore.Failure) {
  * where people see it as soon as it is. One file at a time, since each is
  * held whole on its way out.
  */
-export function shareFileTool(openSandbox: OpenSandbox, place: Place, attach: AttachToReply) {
+export function shareFileTool(sandbox: TurnSandbox, place: Place, attach: AttachToReply) {
 	const oneAtATime = Semaphore.makeUnsafe(1);
 	return tool({
 		description: `Share a file from the pod's sandbox with the people in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
@@ -340,9 +354,9 @@ export function shareFileTool(openSandbox: OpenSandbox, place: Place, attach: At
 				}),
 			),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: ({ path, name }) =>
-			inSandbox(openSandbox, (sandbox) =>
-				oneAtATime.withPermits(1)(shareFrom(sandbox, absolute(place, path), name, attach)),
+		execute: ({ path, name }, { abortSignal }) =>
+			inSandbox(sandbox, abortSignal, (opened) =>
+				oneAtATime.withPermits(1)(shareFrom(opened, absolute(place, path), name, attach)),
 			),
 	});
 }
@@ -400,7 +414,7 @@ function notKept(failure: BlobStore.Failure, error: UserText) {
 	);
 }
 
-export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
+export function writeFileTool(sandbox: TurnSandbox, place: Place) {
 	return tool({
 		description: `Write a text file in the pod's sandbox, replacing it if it exists and making its directories.`,
 		inputSchema: Schema.Struct({
@@ -409,9 +423,9 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
 				description: "The whole of the file's new content",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: ({ path, content }) =>
-			inSandbox(openSandbox, (sandbox) =>
-				sandbox
+		execute: ({ path, content }, { abortSignal }) =>
+			inSandbox(sandbox, abortSignal, (opened) =>
+				opened
 					.writeFile(absolute(place, path), new TextEncoder().encode(content))
 					.pipe(Effect.as({ written: absolute(place, path) })),
 			),

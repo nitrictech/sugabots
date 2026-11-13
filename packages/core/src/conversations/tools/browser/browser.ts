@@ -8,7 +8,7 @@ import { Data, Effect } from "effect";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import { type Image, withImages } from "../images.ts";
-import type { OpenSandbox, Place } from "../sandbox/tools.ts";
+import type { Place, TurnSandbox } from "../sandbox/tools.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**
@@ -33,7 +33,12 @@ interface Failed {
 export interface BrowserSession {
 	/** The session's name in the sandbox, which the viewer finds its desktop by. */
 	readonly name: string;
-	readonly call: (tool: string, input: unknown) => Promise<BrowserResult | Failed>;
+	/** Calls `tool` in the browser, giving up on it when `abortSignal` aborts. */
+	readonly call: (
+		tool: string,
+		input: unknown,
+		abortSignal: AbortSignal | undefined,
+	) => Promise<BrowserResult | Failed>;
 	/** Lets go of the connection to the browser. The browser carries on for later turns. */
 	readonly close: () => Promise<void>;
 }
@@ -170,7 +175,7 @@ export class DesktopUnavailable
 }
 
 export function browserSession(
-	openSandbox: OpenSandbox,
+	turnSandbox: TurnSandbox,
 	place: Place,
 	turn: AgentBrowsing,
 ): BrowserSession {
@@ -179,8 +184,8 @@ export function browserSession(
 	let told = false;
 
 	const connect = async (): Promise<{ client: Client; note?: UserText } | Failed> => {
-		const { sandbox } = await openSandbox();
-		const browser = await Effect.runPromise(
+		const { sandbox } = await turnSandbox.open();
+		const browser = await turnSandbox.run(
 			startBrowser(sandbox, place, turn).pipe(
 				Effect.catchTag("DesktopUnavailable", (unavailable) =>
 					Effect.succeed({ status: "failed" as const, error: unavailable.reason }),
@@ -188,7 +193,7 @@ export function browserSession(
 			),
 		);
 		if ("status" in browser) return browser;
-		const endpoint = await Effect.runPromise(sandbox.endpoint(browser.browserPort));
+		const endpoint = await turnSandbox.run(sandbox.endpoint(browser.browserPort));
 		const client = new Client({ name: "sugabots", version: "1" });
 		await client.connect(
 			new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
@@ -206,7 +211,7 @@ export function browserSession(
 
 	return {
 		name,
-		call: async (toolName, input) => {
+		call: async (toolName, input, abortSignal) => {
 			connecting ??= connect().catch((cause: unknown) => {
 				connecting = undefined;
 				if (cause instanceof Sandboxes.Unavailable)
@@ -218,10 +223,11 @@ export function browserSession(
 				connecting = undefined;
 				return connected;
 			}
-			const result = await connected.client.callTool({
-				name: toolName,
-				arguments: input as Record<string, unknown>,
-			});
+			const result = await connected.client.callTool(
+				{ name: toolName, arguments: input as Record<string, unknown> },
+				undefined,
+				{ signal: abortSignal },
+			);
 			const note = told ? undefined : connected.note;
 			told = true;
 			return toBrowserResult(result.content, note);
@@ -361,7 +367,7 @@ export function browserTools(session: BrowserSession, acceptsImages: boolean): T
 		tools[entry.name] = tool({
 			description: entry.description,
 			inputSchema: jsonSchema(entry.inputSchema as Parameters<typeof jsonSchema>[0]),
-			execute: (input) => session.call(entry.name, input),
+			execute: (input, { abortSignal }) => session.call(entry.name, input, abortSignal),
 			toModelOutput: ({ output }) => withImages(output, acceptsImages),
 		});
 	}

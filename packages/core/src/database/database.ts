@@ -346,8 +346,15 @@ export const serviceOperations = <Methods>(service: string) =>
 				),
 	);
 
-/** Runs an Effect on a runtime that has the database, resolving with its value. */
-export type RunEffect<R = Database> = <A, E>(effect: Effect.Effect<A, E, R>) => Promise<A>;
+/**
+ * Runs an Effect on a runtime that has the database, resolving with its
+ * value. When `signal` aborts, the Effect is interrupted, so its finalizers
+ * run, and the promise rejects.
+ */
+export type RunEffect<R = Database> = <A, E>(
+	effect: Effect.Effect<A, E, R>,
+	options?: Pick<Effect.RunOptions, "signal">,
+) => Promise<A>;
 
 /**
  * A failure rejects with the failure value itself, not Effect's wrapper, so a
@@ -357,8 +364,8 @@ export type RunEffect<R = Database> = <A, E>(effect: Effect.Effect<A, E, R>) => 
 export function effectRunner<R = Database>(
 	runtime: Pick<ManagedRuntime.ManagedRuntime<R, never>, "runPromiseExit">,
 ): RunEffect<R> {
-	return async (effect) => {
-		const exit = await runtime.runPromiseExit(effect);
+	return async (effect, options) => {
+		const exit = await runtime.runPromiseExit(effect, options);
 		if (Exit.isSuccess(exit)) {
 			return exit.value;
 		}
