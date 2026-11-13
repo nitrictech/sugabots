@@ -232,7 +232,8 @@ export interface Interface {
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 	/**
 	 * Records that `userId` has read a routine run or collaboration as an item,
-	 * by its own thread `itemThreadId`: that thread up to when the item began.
+	 * by its own thread `itemThreadId`: that thread up to when the item began,
+	 * or up to when a run ended once it has.
 	 * The conversation it is in, and what was written in the item since, stay
 	 * as they were. Tells the item's watchers when that moved them on. Never
 	 * moves anyone back, and does nothing for any other thread.
@@ -1133,8 +1134,11 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						// As text, which keeps the microseconds a `Date` would drop.
 						const [item] = yield* query((db) => {
-							const runStart = db
-								.select({ at: sql`${routineExecution.acceptedAt}` })
+							// Through when a run ended, so one opened while it ran is news again once it ends.
+							const runEnd = db
+								.select({
+									at: sql`coalesce(${routineExecution.finishedAt}, ${routineExecution.acceptedAt})`,
+								})
 								.from(routineExecution)
 								.where(eq(routineExecution.threadId, itemThreadId));
 							const collaborationStart = db
@@ -1143,7 +1147,7 @@ export const make = Effect.gen(function* () {
 								.where(eq(collaboration.childThreadId, itemThreadId));
 							return db
 								.select({
-									at: sql<string | null>`coalesce((${runStart}), (${collaborationStart}))::text`,
+									at: sql<string | null>`coalesce((${runEnd}), (${collaborationStart}))::text`,
 								})
 								.from(thread)
 								.where(eq(thread.id, itemThreadId))

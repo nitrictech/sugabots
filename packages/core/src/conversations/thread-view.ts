@@ -29,7 +29,12 @@ import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
-import { latestRunFailed, routineExecutionIdOf, toRoutineExecution } from "./routines/routines.ts";
+import {
+	latestRunFailed,
+	resultPosted,
+	routineExecutionIdOf,
+	toRoutineExecution,
+} from "./routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -217,7 +222,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 				columns: { readThrough: true, updatedAt: true },
 				with: { user: personColumns },
 			},
-			routineExecution: true,
+			routineExecution: { extras: { posted: (row) => resultPosted(sql`${row.id}`) } },
 			origin: { with: messageRelations },
 			messages: {
 				// One more than the page, so an older page is known to exist without a count.
@@ -262,7 +267,7 @@ function toThreadDetails(
 		// A run's thread is always opened in a conversation.
 		routineExecution:
 			row.routineExecution && row.conversationId
-				? toRoutineExecution(row.routineExecution, row.conversationId)
+				? toRoutineExecution(row.routineExecution, row.conversationId, row.routineExecution.posted)
 				: null,
 		startedFrom: row.origin && messageFromRelations(row.origin),
 		participants: row.participants.map(({ user: person, agent: participant }) =>

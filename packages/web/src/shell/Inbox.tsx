@@ -302,7 +302,9 @@ function wordsOf(item: ActivityItem): { title: string; detail: string } {
 			};
 		case "routine":
 			return {
-				title: routineText(item.routineName, runState(item.state)),
+				title: item.mentionsYou
+					? `${item.routineName} needs you`
+					: routineText(item.routineName, runState(item.state)),
 				detail: item.preview ?? item.agent.name,
 			};
 		case "collaboration":

@@ -10,7 +10,7 @@ import {
 	type RoutineRunNotifications,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { type AnyColumn, and, eq, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, ne, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { mayDecideApprovals, podStandingFor, reachesPodFor } from "../authorization/access.ts";
@@ -118,12 +118,17 @@ export interface WrittenMessage {
 	artifactTitles: readonly string[];
 	/** The person whose message it answers, who hears of it as of a reply in Slack. */
 	repliesTo: string | null;
+	/** The routine run it is the result of, and that run's own thread, when it is one. */
+	resultOf: { executionId: string; threadId: string } | null;
 }
 
 /**
  * The notifications a finished message sends. Only conversations, pods'
  * chats and bots' channels notify: routine runs, collaborations and system agents' threads are
- * bots' work, which reaches people through what they post in those.
+ * bots' work, which reaches people through what they post in those. A
+ * routine's result in its routine's thread notifies those it mentions, which is
+ * how its bot asks for somebody, unless the result went to a pod's chat as
+ * well, which notifies instead.
  */
 export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	db: Executor,
@@ -136,7 +141,12 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 		sharedPreview(written.artifactTitles, "artifacts");
 	if (!preview) return [];
 	const place = yield* placeOf(db, written.threadId);
-	if (!place || !NOTIFYING_THREAD_TYPES.has(place.type)) return [];
+	if (!place) return [];
+	const routineResult = place.type === "routine_feed" ? written.resultOf : null;
+	if (!routineResult && !NOTIFYING_THREAD_TYPES.has(place.type)) return [];
+	if (routineResult && (yield* postedElsewhere(db, routineResult.executionId, written.threadId))) {
+		return [];
+	}
 	const mentioned = new Set(mentionedHandles(written.content));
 	const { author, authorName } = written;
 	// Only a person's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole pod.
@@ -154,6 +164,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 					: person.participant && place.type === "conversation"
 						? "participant"
 						: "activity";
+		if (routineResult && reason !== "mention") return [];
 		if (!wants(person, reason, now)) return [];
 		// A bot's channel is named for it, so what the bot says there needs no "in".
 		const where =
@@ -168,12 +179,30 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 						reason === "mention" ? `${authorName} mentioned you${where}` : `${authorName}${where}`,
 					body: preview,
 					tag: conversationNotificationTag(place.conversationId),
-					path: activityPath(place, place.conversationId, { message: written.messageId }),
+					path: activityPath(
+						place,
+						place.conversationId,
+						routineResult ? { threadPage: routineResult.threadId } : { message: written.messageId },
+					),
 					conversationId: place.conversationId,
 				},
 			},
 		];
 	});
+});
+
+/** Whether the run `executionId` posted its result in a thread besides `threadId`. */
+const postedElsewhere = Effect.fn("Notifications.postedElsewhere")(function* (
+	db: Executor,
+	executionId: string,
+	threadId: string,
+) {
+	const [elsewhere] = yield* db
+		.select({ id: message.id })
+		.from(message)
+		.where(and(eq(message.routineExecutionId, executionId), ne(message.threadId, threadId)))
+		.limit(1);
+	return elsewhere !== undefined;
 });
 
 /** The notifications a bot's finished reply sends, as a reply to the person whose message it answers. */
@@ -195,6 +224,7 @@ export const forReply = Effect.fn("Notifications.forReply")(function* (
 			fileNames: [],
 			artifactTitles: [],
 			repliesTo: answering.userId,
+			resultOf: null,
 		},
 		now,
 	);
