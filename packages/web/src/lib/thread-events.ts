@@ -330,29 +330,42 @@ async function applyWorkspaceEvent(
 		return;
 	}
 	const update = parsed.success;
-	if (update.type === "conversation.thread_changed") {
-		await Promise.all([
-			queries.invalidateQueries({ queryKey: ["chat-messages", update.conversationId] }),
-			queries.invalidateQueries({ queryKey: ["chat-history", update.conversationId] }),
-			// A pod's chat links the threads started from it, with how many replies each has.
-			queries.invalidateQueries({
-				queryKey: ["chat-messages"],
-				predicate: (query) => linksThread(query.state.data, update.conversationId),
-			}),
-			// A new message moves its conversation up the list, changes its preview, and may leave it unread.
-			refreshAfterThreadChange(queries, workspaceId),
-		]);
-	} else if (update.type === "thread.changed") {
-		await Promise.all([
-			queries.invalidateQueries({ queryKey: ["chat-history"] }),
-			// A reply, or its bot starting or stopping, changes how the thread's line in a chat reads.
-			queries.invalidateQueries({
-				queryKey: ["chat-messages"],
-				predicate: (query) => linksThread(query.state.data, update.threadId),
-			}),
-			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
-			refreshAfterThreadChange(queries, workspaceId),
-		]);
+	switch (update.type) {
+		case "conversation.thread_changed":
+			await Promise.all([
+				queries.invalidateQueries({ queryKey: ["chat-messages", update.conversationId] }),
+				queries.invalidateQueries({ queryKey: ["chat-history", update.conversationId] }),
+				// A pod's chat links the threads started from it, with how many replies each has.
+				queries.invalidateQueries({
+					queryKey: ["chat-messages"],
+					predicate: (query) => linksThread(query.state.data, update.conversationId),
+				}),
+				// A new message moves its conversation up the list, changes its preview, and may leave it unread.
+				refreshAfterThreadChange(queries, workspaceId),
+			]);
+			return;
+		case "thread.changed":
+			await Promise.all([
+				queries.invalidateQueries({ queryKey: ["chat-history"] }),
+				// A reply, or its bot starting or stopping, changes how the thread's line in a chat reads.
+				queries.invalidateQueries({
+					queryKey: ["chat-messages"],
+					predicate: (query) => linksThread(query.state.data, update.threadId),
+				}),
+				// A message, a reply, or an approval asked for may change how a chat stands in the lists.
+				refreshAfterThreadChange(queries, workspaceId),
+			]);
+			return;
+		case "reset":
+			// Any number of the events above may have been missed, so everything they keep fresh is fetched again.
+			await Promise.all([
+				queries.invalidateQueries({ queryKey: ["chat-messages"] }),
+				queries.invalidateQueries({ queryKey: ["chat-history"] }),
+				refreshAfterThreadChange(queries, workspaceId),
+			]);
+			return;
+		default:
+			update satisfies never;
 	}
 }
 
