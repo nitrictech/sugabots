@@ -12,10 +12,10 @@
 	},
 	"dependencies": {
 		"@sugabots/contracts": "workspace:*",
-		"cn": "^0.2.6"
+		"cn": "^0.5.2"
 	},
 	"peerDependencies": {
-		"react": "^19.2.8"
+		"react": "^19.3.1"
 	},
 	"devDependencies": {
 		"@types/react": "^19.2.18"

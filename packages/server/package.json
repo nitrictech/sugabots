@@ -22,7 +22,7 @@
 		"better-auth": "catalog:",
 		"drizzle-orm": "catalog:",
 		"effect": "catalog:",
-		"pg": "^8.23.0"
+		"pg": "^8.23.1"
 	},
 	"devDependencies": {
 		"@types/pg": "catalog:"
