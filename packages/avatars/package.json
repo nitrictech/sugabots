@@ -21,7 +21,7 @@
 		"@sugabots/contracts": "workspace:*",
 		"cn": "^0.5.2",
 		"es-toolkit": "1.53.2",
-		"motion": "13.4.4"
+		"motion": "14.14.0"
 	},
 	"peerDependencies": {
 		"react": "^19.3.1"
