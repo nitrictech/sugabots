@@ -40,6 +40,9 @@ const image = (
 		style={{
 			width: WIDTH,
 			height: HEIGHT,
+			// satori sizes boxes like a browser (content-box), which would put the
+			// padding outside the canvas and push the layout off its edges.
+			boxSizing: "border-box",
 			display: "flex",
 			flexDirection: "column",
 			justifyContent: "space-between",

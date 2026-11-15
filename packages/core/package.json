@@ -15,17 +15,17 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@ai-sdk/anthropic": "^4.0.52",
-		"@ai-sdk/google": "^4.0.80",
-		"@ai-sdk/mcp": "^2.0.49",
-		"@ai-sdk/openai": "^4.0.65",
-		"@ai-sdk/provider-utils": "^5.0.47",
+		"@ai-sdk/anthropic": "^4.0.105",
+		"@ai-sdk/google": "^4.0.121",
+		"@ai-sdk/mcp": "^2.0.99",
+		"@ai-sdk/openai": "^4.0.118",
+		"@ai-sdk/provider-utils": "^5.0.81",
 		"@alibaba-group/opensandbox": "1.1.0",
 		"@effect/platform-node": "catalog:",
 		"@effect/sql-pg": "catalog:",
-		"@modelcontextprotocol/sdk": "^1.30.0",
+		"@modelcontextprotocol/sdk": "^1.32.2",
 		"@mozilla/readability": "^0.6.0",
-		"@opencode-ai/models": "^0.0.127",
+		"@opencode-ai/models": "^0.0.135",
 		"@openrouter/ai-sdk-provider": "^3.1.0",
 		"@sugabots/accounting": "workspace:*",
 		"@sugabots/avatars": "workspace:*",
@@ -33,22 +33,22 @@
 		"@sugabots/docs": "workspace:*",
 		"@sugabots/errors": "workspace:*",
 		"@sugabots/workflow": "workspace:*",
-		"ai": "^7.0.100",
-		"cron-parser": "^5.10.1",
+		"ai": "^7.0.173",
+		"cron-parser": "^5.10.5",
 		"des.js": "1.1.0",
 		"drizzle-orm": "catalog:",
-		"e2b": "2.52.0",
+		"e2b": "2.64.0",
 		"effect": "catalog:",
-		"linkedom": "^0.18.13",
+		"linkedom": "^0.18.15",
 		"mime-types": "^3.0.2",
 		"minisearch": "^7.2.0",
-		"turndown": "^7.2.4",
+		"turndown": "^7.2.5",
 		"undici": "7.30.1"
 	},
 	"devDependencies": {
 		"@types/mime-types": "^3.0.1",
 		"@types/pg": "catalog:",
 		"@types/turndown": "^5.0.6",
-		"pg": "^8.23.0"
+		"pg": "^8.23.1"
 	}
 }
