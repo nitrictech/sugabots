@@ -226,10 +226,15 @@ export const make = Effect.gen(function* () {
 			signInDue.set(pod.podId, DateTime.toEpochMillis(due));
 		});
 
-	/** Brings a running sandbox's network up to date, as {@link applyNetwork} does on open. */
+	/**
+	 * Brings a running sandbox's network up to date, as {@link applyNetwork}
+	 * does on open. Checked again under the pod's lock, so a sandbox the sweep
+	 * paused meanwhile isn't resumed for it.
+	 */
 	const applyNetworkWhileRunning = (row: SandboxRow) =>
 		oneAtATime(row.podId)(
 			Effect.gen(function* () {
+				if (!(yield* isRecordedRunning(row))) return;
 				const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
 				if (!configured) return;
 				const at = sandboxes.forConnection(configured.connection);
@@ -262,6 +267,37 @@ export const make = Effect.gen(function* () {
 
 	const forget = (podId: string) =>
 		query((db) => db.delete(sandboxTable).where(eq(sandboxTable.podId, podId)));
+
+	/** Whether the pod's record still points at `row`'s sandbox, and says it is running. */
+	const isRecordedRunning = (row: SandboxRow) =>
+		query((db) =>
+			db
+				.select({ id: sandboxTable.id })
+				.from(sandboxTable)
+				.where(and(sameSandbox(row), isNull(sandboxTable.pausedAt))),
+		).pipe(Effect.map((rows) => rows.length > 0));
+
+	/**
+	 * Opens `row`'s sandbox, resuming it if it is paused, and records it
+	 * running, as one step that isn't stopped part-way when whoever asked goes
+	 * away: the provider finishes a resume it has started regardless, and a
+	 * sandbox recorded paused is one the idle sweep never pauses again. It is
+	 * recorded as just used too: another process's sweep doesn't wait for the
+	 * pod's lock, and would otherwise find it idle before a lease holds it.
+	 */
+	const openedAndRecorded = (at: Sandboxes.Provider, row: SandboxRow) =>
+		Effect.uninterruptible(
+			Effect.tap(at.open(row.providerSandboxId), () =>
+				Effect.flatMap(DateTime.nowAsDate, (now) =>
+					query((db) =>
+						db
+							.update(sandboxTable)
+							.set({ pausedAt: null, lastUsedAt: now })
+							.where(sameSandbox(row)),
+					),
+				),
+			),
+		);
 
 	/**
 	 * What the pod's sandbox is made from. Its work is named by the sandbox's
@@ -355,7 +391,7 @@ export const make = Effect.gen(function* () {
 				return replaced(yield* made(pod, provider));
 			}
 			const at = sandboxes.forConnection(provider.connection);
-			return yield* at.open(row.providerSandboxId).pipe(
+			return yield* openedAndRecorded(at, row).pipe(
 				Effect.map(
 					({ sandbox, resumed }): Opened => ({
 						sandbox,
@@ -428,7 +464,7 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
-	/** Takes or extends `holder`'s lease on the pod's sandbox, and marks it running. */
+	/** Takes or extends `holder`'s lease on the pod's sandbox. */
 	const lease = (pod: Pod, holder: Holder) =>
 		Effect.gen(function* () {
 			const row = yield* recorded(pod);
@@ -443,9 +479,6 @@ export const make = Effect.gen(function* () {
 						target: [sandboxLease.sandboxId, sandboxLease.holderKind, sandboxLease.holderId],
 						set: { expiresAt },
 					}),
-			);
-			yield* query((db) =>
-				db.update(sandboxTable).set({ pausedAt: null }).where(eq(sandboxTable.id, row.id)),
 			);
 		});
 
@@ -562,13 +595,7 @@ export const make = Effect.gen(function* () {
 			const at = sandboxes.forConnection(configured.connection);
 			const running = yield* oneAtATime(row.podId)(
 				Effect.gen(function* () {
-					const [still] = yield* query((db) =>
-						db
-							.select({ id: sandboxTable.id })
-							.from(sandboxTable)
-							.where(and(sameSandbox(row), isNull(sandboxTable.pausedAt))),
-					);
-					if (!still) return undefined;
+					if (!(yield* isRecordedRunning(row))) return undefined;
 					const { state } = yield* at.info(row.providerSandboxId);
 					if (state !== "running") return undefined;
 					return (yield* at.open(row.providerSandboxId)).sandbox;
@@ -657,7 +684,7 @@ export const make = Effect.gen(function* () {
 				yield* destroyOld;
 				return fresh;
 			}
-			const old = yield* from.open(row.providerSandboxId).pipe(
+			const old = yield* openedAndRecorded(from, row).pipe(
 				Effect.map(({ sandbox }) => sandbox),
 				Effect.catchTags({
 					SandboxMissing: () => Effect.fail(new NoSandbox()),
