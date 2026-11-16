@@ -21,7 +21,8 @@ export default mergeConfig(
 			testTimeout: 30_000,
 			browser: {
 				enabled: true,
-				provider: playwright(),
+				// Stories assert US-formatted dates, so the browser must not take the machine's locale.
+				provider: playwright({ contextOptions: { locale: "en-US" } }),
 				headless: true,
 				instances: [{ browser: "chromium" }],
 			},
