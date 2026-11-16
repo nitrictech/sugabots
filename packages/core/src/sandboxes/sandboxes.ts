@@ -51,6 +51,10 @@ export interface Provider {
 	readonly templates?: TemplateBuilds;
 	/** Whether the service answers and accepts the key, without making anything. */
 	readonly check: Effect.Effect<void, Unavailable>;
+	/**
+	 * A new sandbox, set up for agents to work in. One whose setup fails is
+	 * destroyed as far as the provider allows, since nothing else has its id.
+	 */
 	readonly create: (spec: Spec) => Effect.Effect<Sandbox, Unavailable>;
 	/**
 	 * The sandbox with this id, resumed first if it was paused. `resumed` says
