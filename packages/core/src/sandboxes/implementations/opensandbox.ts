@@ -143,7 +143,10 @@ export const fromOpenSandbox = (
 							return toSandbox(sandbox);
 						},
 						catch: unavailable,
-					}),
+					}).pipe(
+						// Nothing has recorded it yet, so nothing else would find it to destroy.
+						Effect.onError(() => Effect.tryPromise(() => sandbox.kill()).pipe(Effect.ignore)),
+					),
 				),
 			),
 		open: (id) =>

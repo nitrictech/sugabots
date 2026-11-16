@@ -97,8 +97,8 @@ export const fromE2b = (
 		}).pipe(Effect.asVoid),
 		create: (spec) =>
 			Effect.tryPromise({
-				try: async () => {
-					const sandbox = await E2bSandbox.create(connection.template, {
+				try: () =>
+					E2bSandbox.create(connection.template, {
 						...options(),
 						metadata: { ...spec.labels },
 						timeoutMs: Duration.toMillis(IDLE_BACKSTOP),
@@ -107,15 +107,25 @@ export const fromE2b = (
 						// told otherwise; private, they need the sandbox's traffic token.
 						// Set only here: updating the network leaves it as it is.
 						network: { ...egressOf(spec.reach), allowPublicTraffic: false },
-					});
-					await sandbox.commands.run(
-						`mkdir -p ${Sandboxes.WORKSPACE_DIRECTORY} && chown ${AGENT_USER}: ${Sandboxes.WORKSPACE_DIRECTORY}`,
-						{ user: "root" },
-					);
-					return toSandbox(sandbox);
-				},
+					}),
 				catch: unavailable,
-			}),
+			}).pipe(
+				Effect.flatMap((sandbox) =>
+					Effect.tryPromise({
+						try: async () => {
+							await sandbox.commands.run(
+								`mkdir -p ${Sandboxes.WORKSPACE_DIRECTORY} && chown ${AGENT_USER}: ${Sandboxes.WORKSPACE_DIRECTORY}`,
+								{ user: "root" },
+							);
+							return toSandbox(sandbox);
+						},
+						catch: unavailable,
+					}).pipe(
+						// Nothing has recorded it yet, so nothing else would find it to destroy.
+						Effect.onError(() => Effect.tryPromise(() => sandbox.kill()).pipe(Effect.ignore)),
+					),
+				),
+			),
 		open: (id) =>
 			Effect.tryPromise({
 				try: async () => {
