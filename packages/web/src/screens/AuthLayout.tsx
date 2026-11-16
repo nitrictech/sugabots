@@ -1,5 +1,5 @@
+import { ChevronLeft } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 
 /**
@@ -34,7 +34,7 @@ export function AuthLayout({
 						onClick={onBack}
 						className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link"
 					>
-						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
+						<ChevronLeft aria-hidden />
 						Back
 					</button>
 				)}

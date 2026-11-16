@@ -1,7 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { Check, ChevronRight } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { Check, ChevronRight } from "lucide-react";
 
 /*
  * A menu that floats over the page, drawn as the design draws every popover: a
@@ -90,11 +90,32 @@ function DropdownMenuCheckboxItem({
 				className="grid size-3.5 shrink-0 place-items-center rounded border border-disabled-foreground text-primary-foreground transition-colors group-data-checked/checkbox:border-primary group-data-checked/checkbox:bg-primary"
 			>
 				<MenuPrimitive.CheckboxItemIndicator className="flex">
-					<Check className="size-2.5" strokeWidth={3.5} />
+					<CheckboxTick />
 				</MenuPrimitive.CheckboxItemIndicator>
 			</span>
 			{children}
 		</MenuPrimitive.CheckboxItem>
+	);
+}
+
+/**
+ * The checkbox's own tick, bolder than the icon set's Check, whose 1px lines
+ * are too faint at the 10px a 14px box leaves room for.
+ */
+function CheckboxTick() {
+	return (
+		<svg
+			aria-hidden
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={3.5}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			className="size-2.5"
+		>
+			<path d="M20 6 9 17l-5-5" />
+		</svg>
 	);
 }
 

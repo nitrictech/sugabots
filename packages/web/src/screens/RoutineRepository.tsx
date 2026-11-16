@@ -1,5 +1,5 @@
+import { Check } from "@nitric/suga-icons";
 import { type GitHubTrigger, REPOSITORY_EVENTS, type RepositoryEvent } from "@sugabots/contracts";
-import { Check } from "lucide-react";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useConnectionRepositories } from "@/lib/github-connections.ts";
@@ -78,11 +78,7 @@ export function RepositoryGroups({
 					<SettingsRow
 						key={choice.repository}
 						label={<span className="font-mono text-xs">{choice.repository}</span>}
-						trailing={
-							isChosen(choice) ? (
-								<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
-							) : undefined
-						}
+						trailing={isChosen(choice) ? <Check aria-hidden className="text-link" /> : undefined}
 						onClick={() =>
 							onChange({
 								...draft,

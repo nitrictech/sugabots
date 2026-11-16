@@ -1,6 +1,6 @@
+import { CircleAlert, File as FileIcon, Info, RotateCcw, X } from "@nitric/suga-icons";
 import { MAX_ATTACHMENT_MEGABYTES, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { cn } from "cn";
-import { CircleAlert, FileIcon, Info, RotateCcw, X } from "lucide-react";
 import {
 	type CSSProperties,
 	type RefObject,
@@ -88,12 +88,7 @@ export function AttachmentTray({
 						id={`${failureIdPrefix}-${index}`}
 						className="m-0 flex min-w-0 items-start gap-2 text-soft-foreground"
 					>
-						<CircleAlert
-							aria-hidden
-							size={15}
-							strokeWidth={2.2}
-							className="mt-px shrink-0 text-destructive-text"
-						/>
+						<CircleAlert aria-hidden className="mt-px shrink-0 text-destructive-text" />
 						<span className="min-w-0 wrap-anywhere">
 							<span className="font-medium text-foreground">{note.names}</span>: {note.reason}
 						</span>
@@ -137,12 +132,7 @@ export function LeftOutNote({ count }: { count: number }) {
 		>
 			{count > 0 && (
 				<>
-					<Info
-						aria-hidden
-						size={15}
-						strokeWidth={2.2}
-						className="shrink-0 text-muted-foreground"
-					/>
+					<Info aria-hidden className="shrink-0 text-muted-foreground" />
 					<span>
 						{count === 1 ? "1 file wasn't added." : `${count} files weren't added.`} A message can
 						have {MAX_ATTACHMENTS_PER_MESSAGE} at most.
@@ -188,7 +178,7 @@ export function AttachmentChip({
 				// Retry takes the alert's place.
 				!retryable && (
 					<span className="absolute inset-0 grid place-items-center pb-3.5 text-destructive-text">
-						<CircleAlert aria-hidden size={18} strokeWidth={2.2} />
+						<CircleAlert aria-hidden />
 					</span>
 				)
 			) : (
@@ -210,7 +200,7 @@ export function AttachmentChip({
 						onClick={onRetry}
 						className="focus-ring absolute top-1/2 left-1/2 z-2 grid size-8 -translate-x-1/2 -translate-y-7/10 place-items-center rounded-full bg-hover text-foreground transition-colors hover:bg-hover-strong"
 					>
-						<RotateCcw aria-hidden size={16} strokeWidth={2.4} />
+						<RotateCcw aria-hidden />
 					</button>
 				</Tooltip>
 			)}
@@ -239,7 +229,7 @@ export function AttachmentChip({
 					onClick={onRemove}
 					className="focus-ring absolute top-1 right-1 z-3 grid size-6 place-items-center rounded-full bg-background/85 text-foreground opacity-0 transition-opacity hover:bg-background focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
 				>
-					<X aria-hidden size={12} strokeWidth={2.4} />
+					<X aria-hidden />
 				</button>
 			</Tooltip>
 			{upload.state === "uploading" && (
@@ -293,7 +283,7 @@ function FilePreview({ file, look, dimmed }: { file: File; look: FileLook; dimme
 	}
 	return (
 		<span className={cn("absolute inset-0 grid place-items-center text-muted-foreground", fade)}>
-			<FileIcon aria-hidden size={18} strokeWidth={2} />
+			<FileIcon aria-hidden />
 		</span>
 	);
 }
@@ -323,7 +313,7 @@ function ImageThumbnail({ file, className }: { file: File; className: string }) 
 			<span
 				className={cn("absolute inset-0 grid place-items-center text-muted-foreground", className)}
 			>
-				<FileIcon aria-hidden size={18} strokeWidth={2} />
+				<FileIcon aria-hidden />
 			</span>
 		);
 	}

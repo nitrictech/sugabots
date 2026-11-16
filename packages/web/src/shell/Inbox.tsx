@@ -1,7 +1,14 @@
+import {
+	CheckCheck,
+	Inbox20,
+	InboxDot,
+	Inbox as InboxIcon,
+	ListFilter,
+	MessageCircle,
+} from "@nitric/suga-icons";
 import type { ActivityItem, Pod } from "@sugabots/contracts";
 import { Link, linkOptions, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import {
 	useActivityFeed,
@@ -129,7 +136,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 								onClick={() => setUnreadOnly(!unreadOnly)}
 								className={cn("aria-pressed:bg-chip aria-pressed:text-foreground", ROOMY_ON_PHONE)}
 							>
-								<UnreadOnlyIcon />
+								<InboxDot />
 							</IconButton>
 							<KindFilter kinds={counted} chosen={kinds} onToggle={toggleKind} />
 							{unreadConversationIds.length > 0 && (
@@ -140,7 +147,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 									disabled={markRead.isPending}
 									onClick={() => markRead.mutate(unreadConversationIds)}
 								>
-									<CheckCheck size={16} strokeWidth={1.75} />
+									<CheckCheck />
 								</IconButton>
 							)}
 						</>
@@ -153,12 +160,7 @@ export function Inbox({ children }: { children: ReactNode }) {
 					{feed.isSuccess && items.length === 0 && (
 						// Quiet and in the middle; a phone, with no pane beside it, adds the tray.
 						<li className="m-auto flex flex-col items-center gap-2 px-6 py-16 text-center">
-							<InboxIcon
-								aria-hidden
-								size={40}
-								strokeWidth={1.25}
-								className="mb-2 text-subtle-foreground md:hidden"
-							/>
+							<InboxIcon aria-hidden className="mb-2 size-8 text-subtle-foreground md:hidden" />
 							<p className="m-0 text-xs text-muted-foreground max-md:text-sm">
 								{unreadOnly ? "Nothing unread" : "Nothing here yet"}
 							</p>
@@ -208,7 +210,7 @@ function KindFilter({
 				render={<DropdownMenuTrigger />}
 				className={cn(ROOMY_ON_PHONE, chosen.size > 0 && "bg-chip text-foreground")}
 			>
-				<ListFilter size={16} strokeWidth={1.75} />
+				<ListFilter />
 			</IconButton>
 			<DropdownMenuContent align="start" className="min-w-48">
 				{kinds.map((option) => (
@@ -229,34 +231,13 @@ function KindFilter({
 	);
 }
 
-/** An inbox tray with a dot at its corner: only what is unread. */
-function UnreadOnlyIcon() {
-	return (
-		<svg
-			aria-hidden
-			width={16}
-			height={16}
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth={1.75}
-			strokeLinecap="round"
-			strokeLinejoin="round"
-		>
-			<path d="M22 12h-6l-2 3h-4l-2-3H2" />
-			<path d="M14 4H7.24a2 2 0 0 0-1.79 1.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-1.4-2.8" />
-			<circle cx="19.5" cy="4.5" r="2.5" fill="currentColor" stroke="none" />
-		</svg>
-	);
-}
-
 /** Beside Inbox while nothing is chosen: how much is unread. */
 export function InboxOverview() {
 	const { unreadInInbox } = useAttentionCounts();
 	return (
 		<div className="flex h-full pb-20">
 			<EmptyState
-				icon={<InboxIcon strokeWidth={1.75} />}
+				icon={<Inbox20 />}
 				title={
 					unreadInInbox > 0
 						? countOf(unreadInInbox, "unread item", "unread items")
@@ -347,7 +328,7 @@ function FaceOf({ item }: { item: ActivityItem }) {
 						size={24}
 					/>
 					<span className="absolute -right-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full bg-chip-strong text-foreground ring-2 ring-background">
-						<RoutineTriggerIcon kind={item.triggerKind} size={11} strokeWidth={2.4} />
+						<RoutineTriggerIcon kind={item.triggerKind} size={12} />
 					</span>
 				</span>
 			);
@@ -465,7 +446,7 @@ function InboxRow({
 					)}
 					{place?.kind === "direct" && (
 						<span title="Direct message" className="flex text-muted-foreground">
-							<MessageCircle aria-hidden size={14} strokeWidth={2} />
+							<MessageCircle aria-hidden />
 							<span className="sr-only">in a direct message</span>
 						</span>
 					)}

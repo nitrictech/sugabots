@@ -1,4 +1,14 @@
 import { useRender } from "@base-ui/react/use-render";
+import {
+	Archive20,
+	ChevronDown,
+	FileText,
+	Hash,
+	Pencil20,
+	RefreshCcw20,
+	Settings,
+	Settings20,
+} from "@nitric/suga-icons";
 import type {
 	Agent,
 	Connection,
@@ -11,7 +21,6 @@ import type {
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Archive, ChevronDown, FileText, Hash, Pencil, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
@@ -28,7 +37,6 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
 import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
@@ -99,17 +107,17 @@ export function DetailsSidebar({
 						render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
 						className="border border-border-strong max-md:hidden"
 					>
-						<SettingsIcon size={15} />
+						<Settings />
 					</IconButton>
 					<div className="flex justify-center gap-7 pt-2 md:hidden">
 						<RoundAction
 							render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
-							icon={<SettingsIcon size={20} />}
+							icon={<Settings20 />}
 							label="Settings"
 						/>
 						<RoundAction
 							render={<button type="button" onClick={() => onOpenRoutines()} />}
-							icon={<RefreshCcw size={20} strokeWidth={1.75} />}
+							icon={<RefreshCcw20 />}
 							label="Routines"
 						/>
 					</div>
@@ -223,7 +231,7 @@ export function ChannelDetails({
 						aria-hidden
 						className="grid size-9 shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground max-md:size-22"
 					>
-						<Hash size={18} strokeWidth={2} className="max-md:size-9" />
+						<Hash className="max-md:size-9" />
 					</span>
 					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
 						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
@@ -239,13 +247,13 @@ export function ChannelDetails({
 								<div className="flex justify-center gap-7 pt-2 md:hidden">
 									<RoundAction
 										render={<button type="button" onClick={rename} />}
-										icon={<Pencil size={20} strokeWidth={1.75} />}
+										icon={<Pencil20 />}
 										label="Rename"
 									/>
 									{archive && (
 										<RoundAction
 											render={<button type="button" onClick={archive} />}
-											icon={<Archive size={20} strokeWidth={1.75} />}
+											icon={<Archive20 />}
 											label="Archive"
 										/>
 									)}
@@ -302,8 +310,6 @@ function InThisThread({
 						</span>
 						<ChevronDown
 							aria-hidden
-							size={12}
-							strokeWidth={2}
 							className={cn("text-subtle-foreground transition-transform", open && "rotate-180")}
 						/>
 					</button>
@@ -355,7 +361,7 @@ function SharedFiles({
 							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 						>
 							<span className="grid size-5.5 shrink-0 place-items-center rounded-sm border border-border-strong text-muted-foreground">
-								<FileText aria-hidden size={12} strokeWidth={2} />
+								<FileText aria-hidden />
 							</span>
 							<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 								{file.name}

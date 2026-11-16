@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronUp, Maximize } from "@nitric/suga-icons";
 import {
 	type ArtifactPart,
 	artifactsWrittenBy,
@@ -6,7 +7,6 @@ import {
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { cn } from "cn";
-import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
 import { useState } from "react";
 import { useArtifact } from "@/lib/artifacts.ts";
 import { StageMark } from "@/shell/Stage.tsx";
@@ -125,7 +125,7 @@ export function ArtifactCardView({
 					aria-hidden
 					className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-subtle-foreground [&_svg]:size-4"
 				>
-					<kind.Icon strokeWidth={2} />
+					<kind.Icon />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-muted-foreground text-xs line-through">
@@ -153,7 +153,7 @@ export function ArtifactCardView({
 				)}
 			>
 				<StageMark>
-					<kind.Icon strokeWidth={2} />
+					<kind.Icon />
 				</StageMark>
 				<span className="flex min-w-card-name flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-foreground text-xs">{artifact.title}</span>
@@ -181,7 +181,7 @@ export function ArtifactCardView({
 						aria-label={`Open ${artifact.title}`}
 						onClick={onOpen}
 					>
-						<Maximize2 aria-hidden />
+						<Maximize aria-hidden />
 						Open
 					</Button>
 				</div>

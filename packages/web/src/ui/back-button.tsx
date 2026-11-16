@@ -1,6 +1,6 @@
 import type { useRender } from "@base-ui/react/use-render";
+import { ChevronLeft20 } from "@nitric/suga-icons";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
 import { cloneElement, isValidElement, type MouseEvent, type ReactElement } from "react";
 import { pageBehind, type TrailPage } from "@/lib/history-trail.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
@@ -25,7 +25,7 @@ export const BACK_LABEL_ON_PHONE = "max-md:sr-only";
 
 /** The round Back's chevron. */
 export function BackChevron({ className }: { className?: string }) {
-	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} className={className} />;
+	return <ChevronLeft20 aria-hidden className={className} />;
 }
 
 /**

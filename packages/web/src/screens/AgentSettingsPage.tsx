@@ -1,3 +1,4 @@
+import { ArrowUpRight, Pencil, X20 } from "@nitric/suga-icons";
 import { botColors } from "@sugabots/avatars";
 import {
 	AGENT_NAME_MAX_LENGTH,
@@ -12,7 +13,6 @@ import {
 } from "@sugabots/contracts";
 import { Link, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowUpRight, Pencil, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
@@ -260,7 +260,7 @@ function EditableFace({
 					// Cut out of the face by a ring of the page's own colour.
 					className="absolute -right-1.5 -bottom-1.5 grid size-5.5 place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
 				>
-					<Pencil size={11} strokeWidth={2.2} />
+					<Pencil />
 				</span>
 			</button>
 			<Dialog open={editing} onOpenChange={setEditing}>
@@ -348,7 +348,7 @@ function LookEditor({
 					>
 						<span className="flex justify-self-start">
 							<button type="button" aria-label="Cancel" onClick={done} className={BACK_BUTTON}>
-								<X aria-hidden size={20} strokeWidth={2.25} />
+								<X20 aria-hidden />
 							</button>
 						</span>
 						<span className="font-semibold text-base text-foreground">Look</span>
@@ -608,7 +608,7 @@ function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
 					className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
 				>
 					Edit in {pod.name}
-					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
+					<ArrowUpRight aria-hidden />
 				</Link>
 			}
 			note={`Every bot in ${pod.name} shares these. What each connection allows is set on the pod.`}

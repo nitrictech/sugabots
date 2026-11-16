@@ -1,5 +1,5 @@
+import { ArrowRight } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ArrowRightIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { BotCrowd } from "@/components/bot-crowd";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
@@ -29,7 +29,7 @@ export function NotFoundPage() {
 						</a>
 						<a href={siteLinks.docs} className={buttonVariants({ size: "lg", variant: "outline" })}>
 							Read the docs
-							<ArrowRightIcon data-icon="inline-end" />
+							<ArrowRight data-icon="inline-end" />
 						</a>
 					</RevealItem>
 				</Reveal>

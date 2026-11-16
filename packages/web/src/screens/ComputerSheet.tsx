@@ -1,7 +1,7 @@
+import { Monitor } from "@nitric/suga-icons";
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Monitor } from "lucide-react";
 import { type PointerEvent, useRef, useState } from "react";
 import { useUpdateAgent } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -146,7 +146,7 @@ function NoComputer({
 }) {
 	return (
 		<div className="flex flex-col items-center gap-2 pt-2 text-center">
-			<Monitor aria-hidden size={28} strokeWidth={1.5} className="text-subtle-foreground" />
+			<Monitor aria-hidden className="size-8 text-subtle-foreground" />
 			<p className="m-0 font-medium text-sm text-foreground">{text}</p>
 			<p className="m-0 text-sm text-muted-foreground leading-normal">{detail}</p>
 			{children && <div className="mt-3 flex w-full flex-col gap-2">{children}</div>}

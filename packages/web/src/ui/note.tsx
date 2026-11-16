@@ -1,5 +1,5 @@
+import { Info } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { Info } from "lucide-react";
 import type { ComponentProps } from "react";
 
 /** Something worth knowing before going on, set apart from the settings around it. */
@@ -12,7 +12,7 @@ export function Note({ className, children, ...props }: ComponentProps<"div">) {
 			)}
 			{...props}
 		>
-			<Info aria-hidden size={16} className="mt-0.5 shrink-0 text-subtle-foreground" />
+			<Info aria-hidden className="mt-0.5 shrink-0 text-subtle-foreground" />
 			<p className="m-0">{children}</p>
 		</div>
 	);

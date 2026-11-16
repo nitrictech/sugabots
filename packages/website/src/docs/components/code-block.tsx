@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { Check, Copy } from "@nitric/suga-icons";
 import { type ComponentProps, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -52,7 +52,7 @@ export function CodeBlock({
 					onClick={copy}
 					className="text-muted-foreground"
 				>
-					{copied ? <CheckIcon /> : <CopyIcon />}
+					{copied ? <Check /> : <Copy />}
 				</Button>
 			</figcaption>
 			<pre

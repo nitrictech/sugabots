@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+import { Info } from "@nitric/suga-icons";
 import { expect, screen } from "storybook/test";
 import preview from "#storybook/preview";
 import { IconButton } from "./icon-button.tsx";

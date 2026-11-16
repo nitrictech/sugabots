@@ -1,4 +1,4 @@
-import { PlayIcon } from "lucide-react";
+import { Play } from "@nitric/suga-icons";
 import { useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import { trackVideoPlay } from "@/analytics";
@@ -83,7 +83,7 @@ function PosterFrame() {
 			)}
 			<div className="pointer-events-none absolute bottom-3.5 left-4 flex items-center gap-2.5">
 				<span className="grid size-12 place-items-center rounded-full border border-white/14 bg-landing-page/72 backdrop-blur-sm">
-					<PlayIcon className="size-4.5 fill-white text-white" />
+					<Play className="fill-white text-white" />
 				</span>
 				<span className="rounded-md bg-landing-page/72 px-2.5 py-1.25 text-sm font-medium text-landing-text">
 					Watch the demo

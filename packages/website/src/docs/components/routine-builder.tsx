@@ -1,5 +1,5 @@
+import { Minus, Plus } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { MinusIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { Button } from "@/components/ui/button";
@@ -101,7 +101,7 @@ export function RoutineBuilder() {
 						aria-label="Earlier"
 						onClick={() => setHour((h) => (h + HOURS_IN_DAY - 1) % HOURS_IN_DAY)}
 					>
-						<MinusIcon />
+						<Minus />
 					</Button>
 					<span className="w-14 text-center font-mono font-semibold">{hour}:00</span>
 					<Button
@@ -110,7 +110,7 @@ export function RoutineBuilder() {
 						aria-label="Later"
 						onClick={() => setHour((h) => (h + 1) % HOURS_IN_DAY)}
 					>
-						<PlusIcon />
+						<Plus />
 					</Button>
 				</div>
 			</div>

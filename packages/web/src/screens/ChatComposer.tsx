@@ -1,4 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
+import { ArrowUp, AtSign, Paperclip, Plus20, Send, Smile, X } from "@nitric/suga-icons";
 import {
 	type AgentParticipant,
 	canStartMention,
@@ -9,7 +10,6 @@ import {
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
-import { ArrowUp, AtSign, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
 	type ComposerAttachment,
@@ -327,7 +327,7 @@ export function ChatComposer({
 							onClick={startMention}
 							className={cn(toolButtonClassName, "max-md:hidden")}
 						>
-							<AtSign size={16} strokeWidth={2} />
+							<AtSign />
 						</button>
 					</Tooltip>
 					{/* A phone's own keyboard has emoji. */}
@@ -356,8 +356,8 @@ export function ChatComposer({
 						}
 						className="focus-ring grid size-7.5 place-items-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
 					>
-						<Send size={15} strokeWidth={2.2} className="max-md:hidden" />
-						<ArrowUp size={18} strokeWidth={2.25} className="md:hidden" />
+						<Send className="max-md:hidden" />
+						<ArrowUp className="md:hidden" />
 					</button>
 				</div>
 			</div>
@@ -432,7 +432,6 @@ function RemovableChip({
 					after={
 						<X
 							aria-hidden
-							size={12}
 							className="opacity-0 group-hover/chip:opacity-100 group-focus-visible/chip:opacity-100 max-md:opacity-100"
 						/>
 					}
@@ -489,8 +488,8 @@ function AttachButton({
 						unavailable && "opacity-40 hover:bg-transparent",
 					)}
 				>
-					<Paperclip aria-hidden size={16} strokeWidth={2} className="max-md:hidden" />
-					<Plus aria-hidden size={20} strokeWidth={2} className="md:hidden" />
+					<Paperclip aria-hidden className="max-md:hidden" />
+					<Plus20 aria-hidden className="md:hidden" />
 				</button>
 			</Tooltip>
 		</>
@@ -537,7 +536,7 @@ function EmojiButton({ onChoose }: { onChoose: (emoji: string) => void }) {
 		>
 			<Tooltip label="Add emoji" side="top">
 				<Popover.Trigger aria-label="Add emoji" className={toolButtonClassName}>
-					<Smile aria-hidden size={16} strokeWidth={2} />
+					<Smile aria-hidden />
 				</Popover.Trigger>
 			</Tooltip>
 			<Popover.Portal>
@@ -660,7 +659,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 					aria-hidden
 					className="grid size-6.5 shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
 				>
-					<AtSign size={14} />
+					<AtSign />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>

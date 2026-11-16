@@ -1,3 +1,4 @@
+import { Code } from "@nitric/suga-icons";
 import {
 	effectiveCapabilities,
 	type ModelProvider,
@@ -12,7 +13,6 @@ import {
 	signInServiceNames,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useModels } from "@/lib/agents.ts";
 import {
@@ -505,7 +505,7 @@ function AddProviderSteps({
 						<SettingsRow
 							icon={
 								<SettingsRowIcon>
-									<Code size={15} strokeWidth={2.2} />
+									<Code />
 								</SettingsRowIcon>
 							}
 							label="Custom provider"

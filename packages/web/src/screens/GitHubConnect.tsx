@@ -1,4 +1,4 @@
-import { BookOpen, Lock, Search, X } from "lucide-react";
+import { BookOpen, Lock, Search, X } from "@nitric/suga-icons";
 import { type FormEvent, useDeferredValue, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -146,7 +146,7 @@ export function GitHubRepositoriesGroup({
 									disabled={remove.isPending}
 									onClick={() => remove.mutate(item.repository)}
 								>
-									<X size={16} />
+									<X />
 								</IconButton>
 							)
 						}
@@ -217,7 +217,7 @@ function AddRepositoryDialog({
 				<DialogFormHeader title={`Add from ${account}`} />
 				<DialogFormBody>
 					<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-						<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+						<Search aria-hidden className="shrink-0 text-muted-foreground" />
 						<input
 							type="search"
 							value={query}
@@ -235,7 +235,7 @@ function AddRepositoryDialog({
 								{shown.map((choice) => (
 									<SettingsRow
 										key={choice.repository}
-										icon={choice.private ? <Lock size={14} /> : <BookOpen size={14} />}
+										icon={choice.private ? <Lock /> : <BookOpen />}
 										label={<span className="font-mono text-xs">{choice.repository}</span>}
 										sub={choice.private ? "Private" : "Public"}
 										trailing={

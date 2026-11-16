@@ -1,6 +1,6 @@
+import { Menu, X } from "@nitric/suga-icons";
 import { SugabotsMark } from "@sugabots/avatars";
 import { cn } from "cn";
-import { MenuIcon, XIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { type CallToActionPlacement, trackCallToActionClick } from "@/analytics";
 import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
@@ -156,7 +156,7 @@ function SiteMenu({
 				onClick={() => setOpen((isOpen) => !isOpen)}
 				className={cn(buttonClassName, "ml-1 opacity-100")}
 			>
-				{open ? <XIcon className="size-5" /> : <MenuIcon className="size-5" />}
+				{open ? <X /> : <Menu />}
 			</button>
 			{open && (
 				<div

@@ -1,3 +1,4 @@
+import { Check, ChevronRight, Hash, Plus, Plus12, Users } from "@nitric/suga-icons";
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
@@ -10,7 +11,6 @@ import {
 } from "@sugabots/contracts";
 import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronRight, Hash, Plus, Users } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
@@ -231,7 +231,7 @@ function NoBots({ onNewBot }: { onNewBot?: () => void }) {
 			aria-hidden
 			className="grid size-4.5 shrink-0 place-items-center rounded-full border border-border-strong border-dashed"
 		>
-			{onNewBot && <Plus size={10} strokeWidth={2.4} className="block" />}
+			{onNewBot && <Plus12 className="block" />}
 		</span>
 	);
 	if (!onNewBot) {
@@ -289,7 +289,7 @@ function PodChatRow({
 			aria-current={selected ? "page" : undefined}
 			className={sidebarRowClassName(selected)}
 		>
-			<Hash aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
+			<Hash aria-hidden className="mx-px shrink-0" />
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate-fade",
@@ -445,7 +445,7 @@ function BotItem({
 	const mark = agent ? (
 		<TurnTakingAvatar bot={agent} size={18} faceRef={face} className="shrink-0" />
 	) : (
-		<Users aria-hidden size={16} strokeWidth={1.75} className="mx-px shrink-0" />
+		<Users aria-hidden className="mx-px shrink-0" />
 	);
 	// Under the pointer or on focus, a caret takes the mark's place, as on a pod.
 	const markWithCaret = (
@@ -455,8 +455,6 @@ function BotItem({
 			</span>
 			<ChevronRight
 				aria-hidden
-				size={14}
-				strokeWidth={2.25}
 				className={cn(
 					"invisible text-muted-foreground transition-transform group-hover/bot:visible group-has-focus-visible/bot:visible",
 					open && "rotate-90",
@@ -531,7 +529,7 @@ function BotItem({
 							"opacity-0 focus-visible:opacity-100 group-hover/bot:opacity-100 max-md:opacity-100",
 					)}
 				>
-					<Plus strokeWidth={2.2} />
+					<Plus />
 				</IconButton>
 			</span>
 		</div>
@@ -634,7 +632,7 @@ function AllThreadsRow({
 			className={cn(threadRowClassName(selected), !selected && "text-subtle-foreground")}
 		>
 			<span className="min-w-0 flex-1 truncate">All threads</span>
-			<ChevronRight aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+			<ChevronRight aria-hidden className="shrink-0" />
 		</Link>
 	);
 }
@@ -669,7 +667,7 @@ function ThreadRow({ row, pod, selected }: { row: ChatListItem; pod: Pod; select
 				lit && "font-semibold text-foreground",
 			)}
 		>
-			{done && <Check aria-hidden size={12} strokeWidth={2.25} className="shrink-0" />}
+			{done && <Check aria-hidden className="shrink-0" />}
 			<span className="min-w-0 flex-1 truncate-fade">{title}</span>
 			<span className={END_SLOT}>
 				{!done && <UnreadMarker unreadMessages={row.unreadMessages} needsYou={needsYou} />}

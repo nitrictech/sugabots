@@ -1,6 +1,6 @@
+import { ChevronLeft, ChevronRight, Pause, Play, Search } from "@nitric/suga-icons";
 import type { BotLook } from "@sugabots/avatars";
 import { cn } from "cn";
-import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon, SearchIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -207,10 +207,10 @@ export function CompactionDemo() {
 					disabled={index === 0}
 					onClick={() => goTo(index - 1)}
 				>
-					<ChevronLeftIcon />
+					<ChevronLeft />
 				</Button>
 				<Button variant="secondary" size="sm" onClick={togglePlaying}>
-					{playing ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+					{playing ? <Pause data-icon="inline-start" /> : <Play data-icon="inline-start" />}
 					{playing ? "Pause" : "Play"}
 				</Button>
 				<Button
@@ -220,7 +220,7 @@ export function CompactionDemo() {
 					disabled={index === lastIndex}
 					onClick={() => goTo(index + 1)}
 				>
-					<ChevronRightIcon />
+					<ChevronRight />
 				</Button>
 			</div>
 
@@ -335,7 +335,7 @@ function SearchedBack() {
 			animate={{ opacity: 1 }}
 			className="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground"
 		>
-			<SearchIcon className="size-3.5" />
+			<Search />
 			Searched earlier messages for “hotel”
 		</motion.p>
 	);

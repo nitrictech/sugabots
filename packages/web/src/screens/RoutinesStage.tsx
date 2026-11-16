@@ -1,5 +1,5 @@
+import { Plus, RefreshCcw, X } from "@nitric/suga-icons";
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
-import { Plus, RefreshCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useChatList, useOpenRoutineFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
@@ -63,7 +63,7 @@ export function RoutinesStage({
 	}
 	const mark = (
 		<StageMark>
-			<RefreshCcw strokeWidth={2} />
+			<RefreshCcw />
 		</StageMark>
 	);
 	if (view.kind === "new") {
@@ -101,7 +101,7 @@ export function RoutinesStage({
 						variant="bar"
 						onClick={() => onViewChange({ kind: "new" })}
 					>
-						<Plus size={16} strokeWidth={1.75} />
+						<Plus />
 					</IconButton>
 				)
 			}
@@ -236,7 +236,7 @@ function RoutineThread({
 function CloseButton({ onClose }: { onClose: () => void }) {
 	return (
 		<IconButton label="Close" variant="bar" onClick={onClose} className="max-md:hidden">
-			<X size={16} strokeWidth={1.75} />
+			<X />
 		</IconButton>
 	);
 }

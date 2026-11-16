@@ -1,5 +1,5 @@
+import { Check, ChevronRight } from "@nitric/suga-icons";
 import type { ThreadParticipant } from "@sugabots/contracts";
-import { Check, ChevronRight } from "lucide-react";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -93,7 +93,7 @@ export function SideThreadLine({
 					) : (
 						status && (
 							<span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-md:text-xs">
-								{status.done && <Check aria-hidden size={12} strokeWidth={2.25} />}
+								{status.done && <Check aria-hidden />}
 								{status.text}
 							</span>
 						)
@@ -103,12 +103,7 @@ export function SideThreadLine({
 					)}
 				</span>
 			</span>
-			<ChevronRight
-				aria-hidden
-				size={16}
-				strokeWidth={2}
-				className="shrink-0 text-disabled-foreground md:hidden"
-			/>
+			<ChevronRight aria-hidden className="shrink-0 text-disabled-foreground md:hidden" />
 		</button>
 	);
 }

@@ -1,7 +1,7 @@
+import { ArrowUpRight, Plus } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Plus } from "lucide-react";
 import { podSettingsPageLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useSignOut } from "@/lib/session.ts";
@@ -63,7 +63,7 @@ export function You() {
 								aria-hidden
 								className="grid size-6 shrink-0 place-items-center rounded-md border border-border-dashed border-dashed text-muted-foreground"
 							>
-								<Plus size={14} strokeWidth={2.25} />
+								<Plus />
 							</span>
 						}
 						label="New workspace"
@@ -74,14 +74,7 @@ export function You() {
 				<SettingsGroup>
 					<SettingsRow
 						label="Help and docs"
-						trailing={
-							<ArrowUpRight
-								aria-hidden
-								size={16}
-								strokeWidth={2}
-								className="text-subtle-foreground"
-							/>
-						}
+						trailing={<ArrowUpRight aria-hidden className="text-subtle-foreground" />}
 						render={
 							<a href={projectLinks.documentation} target="_blank" rel="noopener noreferrer" />
 						}

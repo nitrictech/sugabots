@@ -1,3 +1,4 @@
+import { Pause } from "@nitric/suga-icons";
 import {
 	type Agent,
 	type AgentParticipant,
@@ -25,7 +26,6 @@ import { isApiFailure } from "@sugabots/sdk";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Option, Schema } from "effect";
-import { Pause } from "lucide-react";
 import {
 	type CSSProperties,
 	Fragment,
@@ -1236,7 +1236,7 @@ function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
 function PausedLine({ at }: { at: string }) {
 	return (
 		<p className="m-0 flex items-center gap-2 px-5 py-2 pl-17.5 font-medium text-xs text-muted-foreground">
-			<Pause aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+			<Pause aria-hidden className="shrink-0" />
 			Paused after two failed runs in a row.
 			<span className="font-normal text-xs text-subtle-foreground">
 				{formatListTime(new Date(at), new Date())}

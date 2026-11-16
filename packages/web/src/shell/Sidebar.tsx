@@ -1,8 +1,8 @@
 import { useRender } from "@base-ui/react/use-render";
+import { Inbox, Library, Settings, ShieldCheck } from "@nitric/suga-icons";
 import type { NotificationSettings, Pod, Workspace } from "@sugabots/contracts";
 import { Link, useMatchRoute, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Inbox, Library, ShieldCheck } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
 import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
@@ -22,7 +22,6 @@ import { NewInPodMenu } from "@/shell/NewInPod.tsx";
 import { type PodStanding, SidebarPod } from "@/shell/SidebarPod.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
 /** How wide the sidebar is until the viewer drags it, and how narrow it can go, in pixels. */
 const SIDEBAR_DEFAULT_WIDTH_PX = 272;
@@ -256,7 +255,7 @@ export function SidebarView({
 								state={settingsBack}
 							/>
 						}
-						icon={<SettingsIcon />}
+						icon={<Settings />}
 						label="Settings"
 						selected={view === "settings"}
 					/>
@@ -328,7 +327,7 @@ function SidebarLink({
 		props: {
 			"aria-current": selected ? "page" : undefined,
 			className: cn(
-				"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-sm transition-colors [&>svg]:mx-px [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:stroke-2",
+				"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-sm transition-colors [&>svg]:mx-px [&>svg]:size-4 [&>svg]:shrink-0",
 				selected
 					? "bg-row-selected text-foreground"
 					: "text-muted-foreground hover:bg-row-hover hover:text-foreground",

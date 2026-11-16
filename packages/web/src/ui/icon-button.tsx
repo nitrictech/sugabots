@@ -17,9 +17,9 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  */
 
 const sizes = {
-	sm: "size-5 [&_svg]:size-3.5",
-	default: "size-6 [&_svg]:size-3.5",
-	lg: "size-7.5 [&_svg]:size-3.75",
+	sm: "size-5 [&_svg]:size-4",
+	default: "size-6 [&_svg]:size-4",
+	lg: "size-7.5 [&_svg]:size-4",
 } as const;
 
 export interface IconButtonProps extends Omit<ComponentProps<"button">, "children"> {

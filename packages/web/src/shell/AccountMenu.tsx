@@ -1,6 +1,6 @@
+import { Check, LogOut, Plus, User, UserPlus } from "@nitric/suga-icons";
 import type { Workspace } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Check, LogOut, Plus, UserPlus, UserRound } from "lucide-react";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace } from "@/lib/workspace.ts";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -112,7 +112,7 @@ export function AccountMenu({
 						/>
 					}
 				>
-					<UserRound />
+					<User />
 					Preferences
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={onSignOut}>

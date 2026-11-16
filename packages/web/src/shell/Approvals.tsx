@@ -1,6 +1,6 @@
+import { ChevronRight, ShieldCheck20 } from "@nitric/suga-icons";
 import type { AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
 import { Link, linkOptions } from "@tanstack/react-router";
-import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
@@ -89,7 +89,7 @@ function NothingWaiting() {
 				aria-hidden
 				className="grid size-10 shrink-0 place-items-center rounded-lg bg-chip text-muted-foreground"
 			>
-				<ShieldCheck size={20} strokeWidth={1.75} />
+				<ShieldCheck20 />
 			</span>
 			<div className="flex min-w-0 flex-col gap-0.5">
 				<p className="m-0 font-medium text-sm text-foreground max-md:text-sm">
@@ -162,12 +162,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 						{agent.name} asked {asked}
 					</span>
 				</div>
-				<ChevronRight
-					aria-hidden
-					size={16}
-					strokeWidth={2}
-					className="shrink-0 text-disabled-foreground md:hidden"
-				/>
+				<ChevronRight aria-hidden className="shrink-0 text-disabled-foreground md:hidden" />
 			</Link>
 			<div className="ml-9 min-w-0 max-md:ml-0">
 				<FoldedRequest input={call.input} />

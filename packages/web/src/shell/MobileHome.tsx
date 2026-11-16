@@ -1,7 +1,7 @@
+import { ChevronRight, Library20, MessageCircle20, Plus, Plus20, User20 } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Library, MessageCircle, Plus, User } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useDirectMessages, usePodChatMarkers } from "@/lib/chats.ts";
 import {
@@ -70,7 +70,7 @@ export function MobileDirectMessages({ className }: { className?: string }) {
 					Direct messages
 				</h1>
 				<IconButton label="New message" render={<Link {...newDirectMessageLink()} />}>
-					<Plus strokeWidth={2.2} />
+					<Plus />
 				</IconButton>
 			</header>
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pr-2 pb-4 pl-1.5">
@@ -101,12 +101,7 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 						<h1 className="m-0 min-w-0 truncate font-semibold text-xl tracking-tight">
 							{pod.name}
 						</h1>
-						<ChevronRight
-							aria-hidden
-							size={16}
-							strokeWidth={2}
-							className="shrink-0 text-subtle-foreground"
-						/>
+						<ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />
 					</Link>
 					<span className="flex-1" />
 					<NewInPodMenu pod={pod} className="size-9" />
@@ -123,7 +118,7 @@ export function MobileHome({ pod, className }: { pod: Pod; className?: string })
 					{...artifactsLink(pod)}
 					className="focus-ring flex h-11 shrink-0 items-center gap-3 rounded-lg px-3 text-base text-muted-foreground active:bg-row-selected"
 				>
-					<Library aria-hidden size={20} strokeWidth={1.75} className="shrink-0" />
+					<Library20 aria-hidden className="shrink-0" />
 					Artifacts
 				</Link>
 				<span aria-hidden className="mx-3 h-px shrink-0 bg-border" />
@@ -166,7 +161,7 @@ function PodRail({ place }: { place: HomePlace }) {
 						aria-hidden
 						className="grid size-11.5 place-items-center rounded-2xl bg-tile text-foreground"
 					>
-						<MessageCircle size={20} strokeWidth={2} />
+						<MessageCircle20 />
 					</span>
 				</Link>
 			</RailItem>
@@ -205,7 +200,7 @@ function PodRail({ place }: { place: HomePlace }) {
 						onClick={() => setCreating(true)}
 						className="focus-ring grid size-11.5 shrink-0 place-items-center rounded-2xl bg-chip text-subtle-foreground"
 					>
-						<Plus aria-hidden size={20} strokeWidth={2} />
+						<Plus20 aria-hidden />
 					</button>
 					<Dialog open={creating} onOpenChange={setCreating}>
 						<NewPodDialog
@@ -260,11 +255,7 @@ function RailTile({ pod }: { pod: Pod }) {
 			)}
 			style={palette && { background: palette.tile, color: palette.swatch }}
 		>
-			{personal ? (
-				<User size={20} strokeWidth={2} />
-			) : (
-				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "?")
-			)}
+			{personal ? <User20 /> : (Array.from(pod.name.trim())[0]?.toUpperCase() ?? "?")}
 		</span>
 	);
 	return personal ? <Locked lockSize={16}>{tile}</Locked> : tile;

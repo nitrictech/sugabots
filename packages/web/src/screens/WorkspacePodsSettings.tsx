@@ -1,3 +1,4 @@
+import { Minus } from "@nitric/suga-icons";
 import {
 	type Agent,
 	POD_NAME_MAX_LENGTH,
@@ -6,7 +7,6 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, linkOptions, useNavigate, useRouter } from "@tanstack/react-router";
-import { Minus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
@@ -421,7 +421,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 									onClick={() => setRemoving(member)}
 									className="focus-ring grid size-7 shrink-0 place-items-center rounded-full text-destructive-text transition-colors hover:bg-destructive-hover"
 								>
-									<Minus size={13} strokeWidth={2.6} />
+									<Minus />
 								</button>
 							</Tooltip>
 						)}

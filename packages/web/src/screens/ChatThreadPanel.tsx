@@ -1,6 +1,6 @@
+import { Braces, ChevronLeft, ExternalLink, Settings } from "@nitric/suga-icons";
 import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
@@ -12,7 +12,6 @@ import { useThread } from "@/lib/threads.ts";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
@@ -147,7 +146,7 @@ export function ChatThreadPanel({
 					onClick={() => onOpenThread(parentRoutine.threadId)}
 					className="focus-ring mx-4.5 mt-3 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-xs"
 				>
-					<ChevronLeft aria-hidden size={14} />
+					<ChevronLeft aria-hidden />
 					Back to Routine
 				</button>
 			)}
@@ -290,7 +289,7 @@ function RoutineHeaderActions({
 						render={<summary />}
 						className="list-none [&::-webkit-details-marker]:hidden"
 					>
-						<Braces aria-hidden size={15} strokeWidth={2.4} />
+						<Braces aria-hidden />
 					</IconButton>
 					{/* Hangs from the sidebar's top right corner, so it opens leftwards. */}
 					<div className="absolute right-0 z-20 mt-2 w-thread-popover overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
@@ -314,7 +313,7 @@ function RoutineHeaderActions({
 					variant="bar"
 					render={<a href={execution.trigger.url} target="_blank" rel="noreferrer" />}
 				>
-					<ExternalLink aria-hidden size={15} strokeWidth={2.4} />
+					<ExternalLink aria-hidden />
 				</IconButton>
 			)}
 			{pod && (
@@ -323,7 +322,7 @@ function RoutineHeaderActions({
 					variant="bar"
 					render={<Link {...routineThreadLink(pod, execution.routineId)} state={backToChat} />}
 				>
-					<SettingsIcon />
+					<Settings />
 				</IconButton>
 			)}
 		</>

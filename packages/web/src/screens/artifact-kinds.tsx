@@ -1,6 +1,12 @@
+import {
+	ChevronDown,
+	ChevronUp,
+	FileText,
+	type IconComponent,
+	PanelsTopLeft,
+} from "@nitric/suga-icons";
 import type { ArtifactKind } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-catalog.ts";
 import type { PageAt } from "@/lib/artifacts.ts";
@@ -15,7 +21,7 @@ import { MessageMarkdown } from "./MessageMarkdown.tsx";
 export interface ArtifactKindView {
 	/** What it is called beside its title, such as "Document". */
 	label: string;
-	Icon: LucideIcon;
+	Icon: IconComponent;
 	/** How Download saves it: as `type`, ending in `.extension`, holding `contentOf` its content. */
 	file: { extension: string; type: string; contentOf: (content: string) => string };
 	/** How wide its card among the messages may grow once expanded, as a Tailwind class. */
@@ -135,7 +141,7 @@ function LivePage({
 						onClick={expanded ? collapse : () => setExpanded(true)}
 						className="focus-ring flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-panel px-3.5 font-semibold text-xs text-foreground shadow-popover transition-colors hover:bg-hover"
 					>
-						{expanded ? <ChevronUp aria-hidden size={15} /> : <ChevronDown aria-hidden size={15} />}
+						{expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
 						{expanded ? "Show less" : "Show all"}
 					</button>
 				</div>

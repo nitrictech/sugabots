@@ -10,6 +10,7 @@
 	"catalog": {
 		"@effect/platform-node": "4.0.0-rc.117",
 		"@effect/sql-pg": "4.0.0-rc.117",
+		"@nitric/suga-icons": "^0.1.4",
 		"@types/pg": "^8.23.1",
 		"better-auth": "^1.7.23",
 		"drizzle-orm": "1.0.0-rc.5",

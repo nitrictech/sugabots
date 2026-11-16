@@ -1,7 +1,7 @@
+import { Check, ChevronDown, Globe, X } from "@nitric/suga-icons";
 import { botColorVariables } from "@sugabots/avatars";
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronDown, Globe, X } from "lucide-react";
 import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -85,11 +85,11 @@ export function ToolApprovalCard({
 				{awaitedDeciders(call)}
 			</p>
 		) : decided?.status === "allowed" ? (
-			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
+			<Outcome announced={announced} icon={<Check aria-hidden />}>
 				Allowed{decided.decidedByName && ` by ${decided.decidedByName}`}
 			</Outcome>
 		) : decided?.status === "denied" ? (
-			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>
+			<Outcome announced={announced} icon={<X aria-hidden />}>
 				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {agent.name} won't go
 				ahead.
 			</Outcome>
@@ -176,7 +176,7 @@ function Outcome({
 			role={announced ? "status" : undefined}
 			className="m-0 flex items-start gap-1.5 text-muted-foreground text-xs leading-normal"
 		>
-			<span className="mt-0.75 flex shrink-0">{icon}</span>
+			<span className="mt-px flex shrink-0">{icon}</span>
 			<span>{children}</span>
 		</p>
 	);
@@ -193,8 +193,8 @@ interface Step {
 }
 
 const MARK_SIZES = {
-	md: { box: "size-6 rounded-sm", icon: 14 },
-	sm: { box: "size-8 rounded-lg", icon: 16 },
+	md: { box: "size-6 rounded-sm" },
+	sm: { box: "size-8 rounded-lg" },
 } as const;
 
 /** What the step uses: the connection's mark, or a globe for a network request. */
@@ -204,13 +204,13 @@ function StepMark({ step, size }: { step: Step; size: keyof typeof MARK_SIZES })
 			<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size={size} />
 		);
 	}
-	const { box, icon } = MARK_SIZES[size];
+	const { box } = MARK_SIZES[size];
 	return (
 		<span
 			aria-hidden
 			className={cn("grid shrink-0 place-items-center bg-border-strong text-foreground", box)}
 		>
-			<Globe size={icon} strokeWidth={2} />
+			<Globe />
 		</span>
 	);
 }
@@ -284,11 +284,7 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 					className="focus-ring flex cursor-pointer items-center gap-1.25 rounded-md py-1.5 font-medium text-link text-xs max-md:hidden"
 				>
 					{open ? "See less" : "See more"}
-					<ChevronDown
-						aria-hidden
-						className={cn("size-3 transition-transform", open && "rotate-180")}
-						strokeWidth={3}
-					/>
+					<ChevronDown aria-hidden className={cn("transition-transform", open && "rotate-180")} />
 				</button>
 			)}
 		</div>

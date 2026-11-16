@@ -1,8 +1,8 @@
+import { Check, X } from "@nitric/suga-icons";
 import { BotFace } from "@sugabots/avatars";
 import type { ProviderPresetId } from "@sugabots/contracts";
 import { providerLogos } from "@sugabots/provider-logos";
 import { cn } from "cn";
-import { CheckIcon, XIcon } from "lucide-react";
 import { useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { StripeIcon } from "@/components/brand-icons";
@@ -110,11 +110,7 @@ export function ApprovalDemo() {
 							role="status"
 							className={cn("flex items-center gap-1.5 text-xs/normal text-landing-muted", arrive)}
 						>
-							{answer === "allowed" ? (
-								<CheckIcon className="size-3 shrink-0" strokeWidth={2.8} />
-							) : (
-								<XIcon className="size-3 shrink-0" strokeWidth={2.8} />
-							)}
+							{answer === "allowed" ? <Check className="shrink-0" /> : <X className="shrink-0" />}
 							{answer === "allowed" ? "Allowed by you" : "Denied by you"}
 							<button
 								type="button"

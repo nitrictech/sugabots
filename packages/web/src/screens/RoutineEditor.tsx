@@ -1,3 +1,4 @@
+import { Check, ChevronDown, ChevronRight } from "@nitric/suga-icons";
 import {
 	type Agent,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
@@ -10,7 +11,6 @@ import {
 	type RoutineTriggerInput,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -353,8 +353,6 @@ function BotRow({
 				{summary}
 				<ChevronRight
 					aria-hidden
-					size={15}
-					strokeWidth={2.4}
 					className={cn(
 						"shrink-0 text-subtle-foreground transition-transform duration-150",
 						open && "rotate-90",
@@ -390,9 +388,7 @@ function BotRow({
 											<span className="min-w-0 flex-1 truncate text-xs text-foreground">
 												{agent.name}
 											</span>
-											{agent.id === chosen?.agent.id && (
-												<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
-											)}
+											{agent.id === chosen?.agent.id && <Check aria-hidden className="text-link" />}
 										</button>
 									</li>
 								))}
@@ -512,7 +508,7 @@ export function ChatRow({
 					className="focus-ring ml-auto flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
 				>
 					<span className="truncate">{name}</span>
-					<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+					<ChevronDown aria-hidden className="shrink-0 text-muted-foreground" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" className="min-w-48">
 					<DropdownMenuRadioGroup

@@ -1,3 +1,4 @@
+import { Check, Minus } from "@nitric/suga-icons";
 import {
 	WORKSPACE_ROLES,
 	type WorkspaceRole,
@@ -6,7 +7,6 @@ import {
 } from "@sugabots/contracts";
 import { roleAbilities } from "@sugabots/docs/roles";
 import { cn } from "cn";
-import { CheckIcon, MinusIcon } from "lucide-react";
 import { useState } from "react";
 
 /** Who can do what, with a role to pick out. */
@@ -54,7 +54,7 @@ export function RoleMatrix() {
 									allowed ? "bg-green-500 text-white" : "bg-muted text-muted-foreground",
 								)}
 							>
-								{allowed ? <CheckIcon className="size-3.5" /> : <MinusIcon className="size-3.5" />}
+								{allowed ? <Check /> : <Minus />}
 							</span>
 							<span className="flex flex-col">
 								<span className="font-medium">{ability.label}</span>

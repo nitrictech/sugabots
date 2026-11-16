@@ -1,3 +1,4 @@
+import { ChevronLeft, Search, X12 } from "@nitric/suga-icons";
 import { botColorVariables } from "@sugabots/avatars";
 import {
 	AGENT_NAME_MAX_LENGTH,
@@ -18,7 +19,6 @@ import {
 	type Workspace,
 } from "@sugabots/contracts";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, Search, X } from "lucide-react";
 import {
 	type FormEvent,
 	type KeyboardEvent,
@@ -231,7 +231,7 @@ function OnboardingFrame({
 							onClick={onBack}
 							className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link"
 						>
-							<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
+							<ChevronLeft aria-hidden />
 							Back
 						</button>
 					)}
@@ -532,7 +532,7 @@ function ChooseModelStep({
 					{large && (
 						<div className="border-border border-b p-3">
 							<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-								<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+								<Search aria-hidden className="shrink-0 text-muted-foreground" />
 								<input
 									type="search"
 									value={search}
@@ -725,7 +725,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 							onClick={() => setEmails((current) => current.filter((one) => one !== email))}
 							className="focus-ring grid size-4.5 place-items-center rounded-full text-soft-foreground"
 						>
-							<X aria-hidden size={10} strokeWidth={3} />
+							<X12 aria-hidden />
 						</button>
 					</span>
 				))}

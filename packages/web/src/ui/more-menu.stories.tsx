@@ -1,4 +1,4 @@
-import { Download, Trash2 } from "lucide-react";
+import { Download, Trash } from "@nitric/suga-icons";
 import { expect, screen } from "storybook/test";
 import preview from "#storybook/preview";
 import { DropdownMenuItem } from "./dropdown-menu.tsx";
@@ -16,7 +16,7 @@ const meta = preview.meta({
 				Download
 			</DropdownMenuItem>
 			<DropdownMenuItem variant="destructive">
-				<Trash2 aria-hidden />
+				<Trash aria-hidden />
 				Delete
 			</DropdownMenuItem>
 		</MoreMenu>

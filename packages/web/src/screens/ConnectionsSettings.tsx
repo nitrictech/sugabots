@@ -1,3 +1,4 @@
+import { ArrowUpRight, ChevronRight, Code, Globe, Search } from "@nitric/suga-icons";
 import {
 	type Connection,
 	type ConnectionPreset,
@@ -8,7 +9,6 @@ import {
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowUpRight, ChevronRight, Code, Globe, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -168,12 +168,7 @@ function ConnectionRow({
 					</Button>
 				)}
 			</span>
-			<ChevronRight
-				aria-hidden
-				size={14}
-				strokeWidth={2}
-				className="shrink-0 text-subtle-foreground"
-			/>
+			<ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />
 		</article>
 	);
 }
@@ -260,7 +255,7 @@ function AppList({
 			<DialogFormHeader title={`Add to ${podName}`} />
 			<DialogFormBody>
 				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+					<Search aria-hidden className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
 						value={query}
@@ -303,7 +298,7 @@ function AppList({
 						<SettingsRow
 							icon={
 								<SettingsRowIcon className="size-8.5 rounded-lg">
-									<Code size={15} strokeWidth={2.2} />
+									<Code />
 								</SettingsRowIcon>
 							}
 							label="Connect by URL"
@@ -314,7 +309,7 @@ function AppList({
 						<SettingsRow
 							icon={
 								<SettingsRowIcon className="size-8.5 rounded-lg">
-									<Globe size={15} strokeWidth={2.2} />
+									<Globe />
 								</SettingsRowIcon>
 							}
 							label="HTTP endpoint"

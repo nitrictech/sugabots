@@ -1,7 +1,7 @@
+import { ChevronRight, Settings, User, User12 } from "@nitric/suga-icons";
 import type { NotificationSettings, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, User } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { podSettingsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
@@ -11,7 +11,6 @@ import { NESTED_INDENT } from "@/shell/ConversationList.tsx";
 import { Locked, OnlyYou, PERSONAL_POD_PRIVACY_IN_FULL } from "@/shell/PersonalPrivacy.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** A pod the viewer reaches, with how its chats stand for them. */
@@ -84,8 +83,6 @@ export function SidebarPod({
 							/>
 							<ChevronRight
 								aria-hidden
-								size={14}
-								strokeWidth={2.25}
 								className={cn(
 									"invisible text-muted-foreground transition-transform group-hover/pod:visible group-has-focus-visible/pod:visible",
 									open && "rotate-90",
@@ -124,7 +121,7 @@ export function SidebarPod({
 						render={<Link {...podSettingsLink(pod)} state={settingsBack} />}
 						className="hidden group-hover/pod:grid group-has-focus-visible/pod:grid"
 					>
-						<SettingsIcon />
+						<Settings />
 					</IconButton>
 				</div>
 			</NotificationsContextMenu>
@@ -229,7 +226,11 @@ function PodSquare({
 			}
 		>
 			{pod.kind === "personal" ? (
-				<User size={{ sm: 10, md: 11, lg: 20 }[size]} strokeWidth={2.25} />
+				size === "lg" ? (
+					<User />
+				) : (
+					<User12 />
+				)
 			) : (
 				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "")
 			)}

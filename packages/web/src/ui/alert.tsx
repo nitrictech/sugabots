@@ -1,5 +1,5 @@
+import { CircleCheck } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { CircleCheck } from "lucide-react";
 import type { ComponentProps } from "react";
 
 /*
@@ -21,7 +21,7 @@ export function Success({ className, children, ...props }: ComponentProps<"p">) 
 			className={cn("flex items-center gap-1.5 font-medium text-xs text-success-text", className)}
 			{...props}
 		>
-			<CircleCheck aria-hidden size={16} className="shrink-0" />
+			<CircleCheck aria-hidden className="shrink-0" />
 			{children}
 		</p>
 	);

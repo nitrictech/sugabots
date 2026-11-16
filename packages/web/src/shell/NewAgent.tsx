@@ -1,3 +1,16 @@
+import {
+	ArrowLeft,
+	AudioLines,
+	Brain,
+	Eye,
+	Image,
+	Pencil,
+	Search,
+	SmilePlus20,
+	Star,
+	Wrench,
+	X20,
+} from "@nitric/suga-icons";
 import { botColors, CREATION_MOODS, type LivelyFace, useMoodLoop } from "@sugabots/avatars";
 import {
 	AGENT_NAME_MAX_LENGTH,
@@ -13,19 +26,6 @@ import {
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { cn } from "cn";
-import {
-	ArrowLeft,
-	AudioLines,
-	Brain,
-	Eye,
-	Image,
-	Pencil,
-	Search,
-	SmilePlus,
-	Star,
-	Wrench,
-	X,
-} from "lucide-react";
 import {
 	type CSSProperties,
 	type FormEvent,
@@ -297,7 +297,7 @@ function PhoneNewBot({
 						</button>
 					) : (
 						<DialogClose aria-label="Close" className={BACK_BUTTON}>
-							<X aria-hidden size={20} strokeWidth={2.25} />
+							<X20 aria-hidden />
 						</DialogClose>
 					)}
 				</span>
@@ -344,7 +344,7 @@ function PhoneNewBot({
 							aria-hidden
 							className="glass absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full text-foreground"
 						>
-							<Pencil size={14} strokeWidth={2} />
+							<Pencil />
 						</span>
 					)}
 				</button>
@@ -414,7 +414,7 @@ function LookGrid({
 				aria-pressed={customising}
 				className="focus-ring grid size-14 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover hover:text-foreground aria-pressed:bg-chip-strong aria-pressed:text-foreground"
 			>
-				<SmilePlus aria-hidden size={20} strokeWidth={1.75} />
+				<SmilePlus20 aria-hidden />
 			</button>
 		</fieldset>
 	);
@@ -491,12 +491,7 @@ function ModelPicker({
 					<Close />
 				</div>
 				<div className="flex h-10 items-center gap-2 rounded-lg border border-border-strong px-3 focus-within:shadow-(--ring-shadow)">
-					<Search
-						aria-hidden
-						size={15}
-						strokeWidth={1.75}
-						className="shrink-0 text-subtle-foreground"
-					/>
+					<Search aria-hidden className="shrink-0 text-subtle-foreground" />
 					<input
 						aria-label="Search models"
 						value={search}
@@ -526,7 +521,7 @@ function ModelPicker({
 					</p>
 				)}
 				{suggested.length > 0 && (
-					<ModelGroup label="Suggested" mark={<Star aria-hidden size={14} strokeWidth={1.75} />}>
+					<ModelGroup label="Suggested" mark={<Star aria-hidden />}>
 						{suggested.map(row)}
 					</ModelGroup>
 				)}
@@ -624,7 +619,7 @@ function ModelRow({
 					<span className="flex items-center gap-1.5 text-subtle-foreground">
 						{shown.map(({ capability, icon: Icon, label }) => (
 							<span key={capability} title={label} className="flex">
-								<Icon aria-hidden size={13} strokeWidth={1.75} />
+								<Icon aria-hidden />
 								<span className="sr-only">{label}</span>
 							</span>
 						))}
@@ -748,7 +743,7 @@ function StepHeader({ onBack, children }: { onBack?: () => void; children: React
 						aria-label="Back"
 						className="focus-ring -ml-1 grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
 					>
-						<ArrowLeft aria-hidden size={16} strokeWidth={1.75} />
+						<ArrowLeft aria-hidden />
 					</button>
 				)}
 				{children}

@@ -1,7 +1,7 @@
 import { useRender } from "@base-ui/react/use-render";
+import { House, Inbox, ShieldCheck } from "@nitric/suga-icons";
 import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
-import { House, Inbox, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { findPod, usePods } from "@/lib/pods.ts";
@@ -131,7 +131,7 @@ function TabLink({
 			),
 			children: (
 				<>
-					<span className="relative grid size-6 place-items-center [&>svg]:size-6 [&>svg]:stroke-2">
+					<span className="relative grid size-6 place-items-center [&>svg]:size-6">
 						{icon}
 						{count && <span className="absolute -top-1.5 left-3.5">{count}</span>}
 					</span>

@@ -1,6 +1,6 @@
+import { Check, ChevronRight, X } from "@nitric/suga-icons";
 import type { BotLook } from "@sugabots/avatars";
 import { cn } from "cn";
-import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -90,7 +90,7 @@ export function ChatRoutineNote({ routine }: { routine: string }) {
 	return (
 		<p className="flex items-center gap-0.5 pt-1 text-xs font-medium text-muted-foreground">
 			From {routine}
-			<ChevronRightIcon aria-hidden className="size-3" strokeWidth={2.4} />
+			<ChevronRight aria-hidden />
 		</p>
 	);
 }
@@ -199,9 +199,9 @@ export function ChatApproval({
 						) : (
 							<p role="status" className="flex items-start gap-1.5 text-xs text-muted-foreground">
 								{decision === "allowed" ? (
-									<CheckIcon aria-hidden className="mt-0.5 size-3 shrink-0" strokeWidth={2.8} />
+									<Check aria-hidden className="shrink-0" />
 								) : (
-									<XIcon aria-hidden className="mt-0.5 size-3 shrink-0" strokeWidth={2.8} />
+									<X aria-hidden className="shrink-0" />
 								)}
 								{outcomes[decision]}
 							</p>

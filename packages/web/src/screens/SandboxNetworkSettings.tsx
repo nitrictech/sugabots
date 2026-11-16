@@ -1,9 +1,9 @@
+import { X } from "@nitric/suga-icons";
 import type {
 	SandboxAddedHost,
 	SandboxBlockedHost,
 	SandboxNetworkSettings,
 } from "@sugabots/contracts";
-import { X } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSandboxNetwork } from "@/lib/sandbox-providers.ts";
@@ -155,7 +155,7 @@ export function AddedHostRow({
 			trailing={
 				onRemove && (
 					<IconButton label={`Remove ${added.host}`} disabled={disabled} onClick={onRemove}>
-						<X size={16} />
+						<X />
 					</IconButton>
 				)
 			}
@@ -178,7 +178,7 @@ function BlockedHostRow({
 			sub={`Blocked by ${blocked.blockedByName ?? "someone who has left"}`}
 			trailing={
 				<IconButton label={`Unblock ${blocked.host}`} disabled={disabled} onClick={onUnblock}>
-					<X size={16} />
+					<X />
 				</IconButton>
 			}
 		/>

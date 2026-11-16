@@ -1,7 +1,7 @@
+import { ChevronRight, MessageCircle, MessageCircle20, Plus12, User } from "@nitric/suga-icons";
 import type { DirectMessageListItem, PersonParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, MessageCircle, Plus, User } from "lucide-react";
 import {
 	type DirectPeople,
 	directPeopleNames,
@@ -106,7 +106,7 @@ export function DirectMessagesSection({
 							aria-hidden
 							className="grid size-4.5 shrink-0 place-items-center rounded-full border border-border-strong"
 						>
-							<Plus size={10} strokeWidth={2.4} className="block" />
+							<Plus12 className="block" />
 						</span>
 						New message
 					</Link>
@@ -142,14 +142,10 @@ function DirectMessagesHeading({
 				<span className="grid size-5 shrink-0 place-items-center text-muted-foreground *:col-start-1 *:row-start-1">
 					<MessageCircle
 						aria-hidden
-						size={16}
-						strokeWidth={2}
 						className="group-hover/section:invisible group-has-focus-visible/section:invisible"
 					/>
 					<ChevronRight
 						aria-hidden
-						size={14}
-						strokeWidth={2.25}
 						className={cn(
 							"invisible transition-transform group-hover/section:visible group-has-focus-visible/section:visible",
 							open && "rotate-90",
@@ -308,7 +304,7 @@ export function DirectMessageCards({
 export function DirectMessagesOverview() {
 	return (
 		<div className="flex h-full pb-20">
-			<EmptyState icon={<MessageCircle strokeWidth={1.75} />} title="Direct messages">
+			<EmptyState icon={<MessageCircle20 />} title="Direct messages">
 				<p className="m-0">
 					Write to one person or a few, where nobody else sees. Choose a conversation on the left,
 					or start a new one.
@@ -371,13 +367,14 @@ const FORMER_MEMBER_FIGURE_SCALE = 0.6;
 
 /** In place of the face of somebody who has left the workspace: a plain figure, as nobody is named. */
 export function FormerMemberFace({ size }: { size: number }) {
+	const figure = Math.round(size * FORMER_MEMBER_FIGURE_SCALE);
 	return (
 		<span
 			aria-hidden
 			className="grid shrink-0 place-items-center rounded-full bg-person-avatar text-person-avatar-foreground"
 			style={{ width: size, height: size }}
 		>
-			<User size={Math.round(size * FORMER_MEMBER_FIGURE_SCALE)} strokeWidth={2} />
+			<User width={figure} height={figure} />
 		</span>
 	);
 }

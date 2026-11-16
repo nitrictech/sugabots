@@ -1,4 +1,4 @@
-import { Repeat } from "lucide-react";
+import { Repeat } from "@nitric/suga-icons";
 import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
@@ -82,7 +82,7 @@ export const Listing = meta.story({
 				<SettingsRow
 					icon={
 						<SettingsRowIcon>
-							<Repeat size={15} strokeWidth={2.2} />
+							<Repeat />
 						</SettingsRowIcon>
 					}
 					label="Overnight outbound"
