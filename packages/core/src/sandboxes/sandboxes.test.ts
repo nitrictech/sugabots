@@ -3,6 +3,7 @@ import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Ids } from "../ids/ids.ts";
 import { Sandboxes } from "./sandboxes.ts";
+import { removeWorkVolumes } from "./testing.ts";
 
 /**
  * The same behaviour from every provider, run against the real service.
@@ -49,8 +50,8 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 const SPEC: Sandboxes.Spec = {
 	labels: { "sugabots.test": "sandboxes.test.ts" },
 	reach: { kind: "allowlist", hosts: ["example.com"] },
-	// One name for every run, so a provider that keeps work apart reuses one volume.
-	workName: "provider-tests",
+	// This run's own, so removing its volume afterwards can't affect another run.
+	workName: `provider-${crypto.randomUUID()}`,
 };
 const EXEC = { timeout: "30 seconds", maxOutputCharacters: 10_000 } as const;
 const SLOW = 180_000;
@@ -80,6 +81,10 @@ function failureTag(exit: Exit.Exit<unknown, { _tag: string }>) {
 }
 
 describe.each(connections)("%s sandboxes", (_, connection) => {
+	afterAll(() => {
+		if (connection?.provider === "opensandbox") removeWorkVolumes([SPEC.workName]);
+	});
+
 	describe.skipIf(!connection)("against the service", () => {
 		const provider = Effect.map(Sandboxes.Service, (sandboxes) =>
 			sandboxes.forConnection(connection as Sandboxes.Connection),

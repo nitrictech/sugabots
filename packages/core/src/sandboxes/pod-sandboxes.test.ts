@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { ConnectionConfig, SandboxManager } from "@alibaba-group/opensandbox";
 import { SANDBOX_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	pod,
 	sandbox,
@@ -19,6 +20,7 @@ import { PodSandboxes } from "./pod-sandboxes.ts";
 import { SandboxCredentials } from "./sandbox-credentials.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
+import { recordingIds, removeWorkVolumes } from "./testing.ts";
 
 /**
  * A pod's one sandbox, against Postgres and a real OpenSandbox server
@@ -50,7 +52,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 	let direct: Sandboxes.Provider;
 	let thePod: PodSandboxes.Pod;
 	let ownerId: string;
-	const made: Sandboxes.SandboxId[] = [];
+	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
 		[podSandboxes, providers] = await runOnPostgres(
@@ -75,6 +77,7 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 										: Promise.reject(new Error("registry unreachable"))) as typeof fetch,
 						},
 					}),
+					recordingIds(idsHandedOut),
 				]),
 			),
 		);
@@ -85,9 +88,26 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		);
 	});
 
+	// Found by the workspace's label rather than its records, so a sandbox no
+	// record names any more, such as a deleted workspace's, is destroyed too.
+	afterEach(async () => {
+		const server = SandboxManager.create({
+			connectionConfig: new ConnectionConfig({
+				domain: connection.baseUrl,
+				apiKey: Redacted.value(connection.apiKey),
+			}),
+		});
+		const { items } = await server.listSandboxInfos({
+			metadata: { "sugabots.workspace": thePod.workspaceId },
+		});
+		for (const { id } of items) {
+			await Effect.runPromise(direct.destroy(Sandboxes.SandboxId(id)));
+		}
+	}, SLOW);
+
 	afterAll(async () => {
-		for (const id of made) await Effect.runPromise(direct.destroy(id));
 		await closeDatabase();
+		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
 	beforeEach(async () => {
@@ -147,11 +167,8 @@ describe.skipIf(!configured)("pod sandboxes, against Postgres and OpenSandbox", 
 		return provider;
 	};
 
-	const open = async () => {
-		const opened = await runOnPostgres(podSandboxes.open(thePod, await enabledProvider(), HOLDER));
-		if (!made.includes(opened.sandbox.id)) made.push(opened.sandbox.id);
-		return opened;
-	};
+	const open = async () =>
+		runOnPostgres(podSandboxes.open(thePod, await enabledProvider(), HOLDER));
 
 	const missing = async (id: Sandboxes.SandboxId) =>
 		(await Effect.runPromiseExit(direct.open(id))).toString().includes("SandboxMissing");

@@ -18,6 +18,7 @@ import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxCredentials } from "../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
+import { recordingIds, removeWorkVolumes } from "../../sandboxes/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SandboxTools } from "./sandbox.ts";
@@ -38,12 +39,14 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 	let thePod: PodSandboxes.Pod;
 	let ownerId: string;
 	const scope = Effect.runSync(Scope.make());
+	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
 		[sandboxTools, podSandboxes] = await runOnPostgres(
 			Effect.all([SandboxTools.Service, PodSandboxes.Service]).pipe(
 				Effect.provide(Layer.merge(SandboxTools.layer, PodSandboxes.layer)),
 				Effect.provide(SandboxCredentials.none),
+				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
 				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
 			),
@@ -111,6 +114,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		const provider = await runOnPostgres(providers.enabled(thePod.workspaceId));
 		if (provider) await runOnPostgres(podSandboxes.destroyAllMadeBy(thePod.workspaceId, provider));
 		await closeDatabase();
+		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
 	const toolsFor = (

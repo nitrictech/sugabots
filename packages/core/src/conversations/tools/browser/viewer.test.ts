@@ -17,6 +17,7 @@ import { Egress } from "../../../providers/network/egress.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
+import { recordingIds, removeWorkVolumes } from "../../../sandboxes/testing.ts";
 import { unimplemented } from "../../../testing.ts";
 import { SandboxTools } from "../sandbox.ts";
 import { DesktopViewer } from "./viewer.ts";
@@ -45,6 +46,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	let sandboxlessId: string;
 	let threadId: string;
 	const scope = Effect.runSync(Scope.make());
+	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
 		let sandboxTools: SandboxTools.Interface;
@@ -65,6 +67,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					),
 				),
 				Effect.provide(SandboxCredentials.none),
+				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
 				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
 			),
@@ -197,6 +200,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		const provider = await runOnPostgres(providers.enabled(workspaceId));
 		if (provider) await runOnPostgres(podSandboxes.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
+		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
 	const openAs = (userId: string, of = agentId) =>

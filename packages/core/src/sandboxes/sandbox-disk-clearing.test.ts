@@ -20,6 +20,7 @@ import {
 	SET_ASIDE_DIRECTORY,
 } from "./sandbox-disk-clearing.ts";
 import { Sandboxes } from "./sandboxes.ts";
+import { removeWorkVolumes } from "./testing.ts";
 
 const env = process.env;
 const SLOW = 180_000;
@@ -209,6 +210,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 	describe.skipIf(!env.OPENSANDBOX_URL || !env.OPENSANDBOX_API_KEY)("in a sandbox", () => {
 		let sandbox: Sandboxes.Sandbox;
 		let provider: Sandboxes.Provider;
+		const workName = `clearing-${crypto.randomUUID()}`;
 
 		beforeAll(async () => {
 			provider = await Effect.runPromise(
@@ -227,13 +229,14 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 				provider.create({
 					labels: {},
 					reach: { kind: "allowlist", hosts: [] },
-					workName: `clearing-${crypto.randomUUID()}`,
+					workName,
 				}),
 			);
 		}, SLOW);
 
 		afterAll(async () => {
 			if (sandbox) await Effect.runPromise(provider.destroy(sandbox.id));
+			removeWorkVolumes([workName]);
 		}, SLOW);
 
 		const run = async (command: string) => {

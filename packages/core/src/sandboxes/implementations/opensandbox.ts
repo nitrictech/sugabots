@@ -297,7 +297,7 @@ export const fromOpenSandbox = (
 };
 
 /** The Docker volume or Kubernetes claim a sandbox's work is on. */
-function workVolume(workName: string) {
+export function workVolume(workName: string) {
 	return `sugabots-work-${workName}`;
 }
 
