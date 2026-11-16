@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Effect, Fiber, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { Database } from "../database/database.ts";
 import { pod, sandbox, user, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Egress } from "../providers/network/egress.ts";
@@ -23,6 +24,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing pod sandboxes, against Postg
 	let nextId = 0;
 	let resuming: Held | undefined;
 	let pausing: Held | undefined;
+	// Called after each query the service runs, so a case can tell when one has.
+	let afterQuery: (() => void) | undefined;
 
 	const fakeSandbox = (id: Sandboxes.SandboxId): Sandboxes.Sandbox => ({
 		id,
@@ -89,6 +92,16 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing pod sandboxes, against Postg
 							Layer.provide([
 								Layer.succeed(Sandboxes.Service, { forConnection: () => fakeProvider }),
 								SandboxProviderRepository.layer,
+								Layer.effect(
+									Database,
+									Effect.map(Database, (database) =>
+										Database.of({
+											...database,
+											execute: (run) =>
+												Effect.tap(database.execute(run), () => Effect.sync(() => afterQuery?.())),
+										}),
+									),
+								),
 							]),
 						),
 						SandboxProviderRepository.layer,
@@ -105,6 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing pod sandboxes, against Postg
 		atProvider.clear();
 		resuming = undefined;
 		pausing = undefined;
+		afterQuery = undefined;
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [space] = await onDatabase((db) =>
 			db
@@ -226,13 +240,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing pod sandboxes, against Postg
 			Effect.gen(function* () {
 				const sweeping = yield* Effect.forkChild(podSandboxes.pauseIdle);
 				yield* Effect.promise(() => pause.hasStarted);
-				// An allowed host changes once the sweep holds the pod: the update
-				// finds the sandbox running, then waits its turn for the pod. Were
-				// finding it to take longer than the sleep, this would check nothing.
+				// An allowed host changes once the sweep holds the pod: the update's
+				// first query finds the sandbox running, then it waits its turn for
+				// the pod. Nothing else queries while the sweep is held.
+				const found = Promise.withResolvers<void>();
+				afterQuery = found.resolve;
 				const updating = yield* Effect.forkChild(
 					podSandboxes.applyNetwork({ workspaceId: thePod.workspaceId, podId: thePod.podId }),
 				);
-				yield* Effect.sleep("200 millis");
+				yield* Effect.promise(() => found.promise);
 				yield* Effect.sync(pause.finish);
 				yield* Fiber.join(sweeping);
 				yield* Fiber.join(updating);
