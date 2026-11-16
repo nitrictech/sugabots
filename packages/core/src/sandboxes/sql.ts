@@ -92,7 +92,7 @@ export const sandbox = pgTable(
 		image: text("image"),
 		/** When it was paused for sitting idle; null while it runs. */
 		pausedAt: timestamp("paused_at", { withTimezone: true }),
-		/** When a turn last let go of it, which is when its idle time starts. */
+		/** When it was last opened or let go of, which is when its idle time starts. */
 		lastUsedAt: stamp("last_used_at"),
 		/** How full its disk was at `diskMeasuredAt`; null until it is measured, and again once it is replaced. */
 		diskUsage: jsonb("disk_usage").$type<DiskUsage>(),
