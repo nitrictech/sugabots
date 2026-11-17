@@ -63,18 +63,3 @@ describe("Authentication.layer", () => {
 		expect(await startup(PRODUCTION)).toBe("started");
 	});
 });
-
-describe("TRUSTED_PROXIES", () => {
-	it.each(["10.0.0.1", "10.0.0.0/8, 2001:db8::/32", ""])("accepts %j", async (proxies) => {
-		expect(await startup({ ...REQUIRED, TRUSTED_PROXIES: proxies })).toBe("started");
-	});
-
-	it.each(["10.0.0.0/33", "load-balancer", "10.0.0.1/8/8", "fe80::1%eth0", "::ffff:10.0.0.0/104"])(
-		"refuses %j",
-		async (proxies) => {
-			expect(await startup({ ...REQUIRED, TRUSTED_PROXIES: proxies })).toMatch(
-				/TRUSTED_PROXIES entries must be IP addresses or CIDR ranges/,
-			);
-		},
-	);
-});

@@ -201,11 +201,6 @@ Either way, the service needs these settings:
 - The email settings from `compose.yml` above: `EMAIL_PROVIDER`,
   `EMAIL_RESEND_API_KEY` and `EMAIL_TRANSACTIONAL_FROM`
 
-If the platform's load balancer adds its own address to `X-Forwarded-For`,
-as Google Cloud's does, also set `TRUSTED_PROXIES` to that address. Otherwise
-everyone shares one sign-in limit, and a few sign-in attempts from anyone
-briefly stop everyone signing in.
-
 See the [configuration reference](/docs/configuration) for what each does.
 
 ## Files on a volume
