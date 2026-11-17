@@ -1,5 +1,5 @@
+import { X } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { X } from "lucide-react";
 import { FLOATING_ON_PHONE, IconButton, type IconButtonProps } from "@/ui/icon-button.tsx";
 
 /**
@@ -20,7 +20,7 @@ export function CloseButton({
 			className={cn(FLOATING_ON_PHONE, className)}
 			{...props}
 		>
-			<X aria-hidden size={16} strokeWidth={2.2} />
+			<X aria-hidden />
 		</IconButton>
 	);
 }

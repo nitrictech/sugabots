@@ -1,5 +1,5 @@
+import { Check, Search } from "@nitric/suga-icons";
 import type { TimeZone } from "@sugabots/contracts";
-import { Check, Search } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -105,8 +105,6 @@ function TimeZoneStep({
 					<SettingsValue>{choice.offset}</SettingsValue>
 					<Check
 						aria-hidden
-						size={16}
-						strokeWidth={2.4}
 						className={choice.zone === selected ? "shrink-0 text-link" : "invisible shrink-0"}
 					/>
 					{choice.zone === selected && <span className="sr-only">Chosen</span>}
@@ -148,7 +146,7 @@ function TimeZoneStep({
 			/>
 			<DialogFormBody>
 				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+					<Search aria-hidden className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
 						value={query}

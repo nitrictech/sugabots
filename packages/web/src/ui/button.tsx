@@ -29,7 +29,7 @@ import { cn } from "cn";
  */
 
 export const buttonStyles = cva(
-	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-sans font-semibold transition-colors disabled:cursor-default [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-sans font-semibold transition-colors disabled:cursor-default [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
 	{
 		variants: {
 			variant: {
@@ -48,7 +48,7 @@ export const buttonStyles = cva(
 				sm: "h-7.25 px-3.5 text-xs",
 				default: "h-9 px-4 text-sm",
 				lg: "h-12 px-5 text-sm",
-				icon: "size-8.5 [&_svg]:size-3.75",
+				icon: "size-8.5 [&_svg]:size-4",
 				bare: "h-auto p-0",
 			},
 		},

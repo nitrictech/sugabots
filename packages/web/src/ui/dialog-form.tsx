@@ -1,5 +1,5 @@
+import { ChevronLeft, X20 } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ChevronLeft, X } from "lucide-react";
 import {
 	createContext,
 	type FormEvent,
@@ -155,7 +155,7 @@ export function DialogFormHeader({
 						disabled={backDisabled}
 						onClick={onBack}
 					>
-						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
+						<ChevronLeft aria-hidden className="max-md:size-5" />
 						<span className={BACK_LABEL_ON_PHONE}>Back</span>
 					</button>
 				)}
@@ -182,7 +182,7 @@ function PhoneClose() {
 	const cancel = step?.cancel;
 	if (cancel && !cancel.shown) return null;
 	const className = cn(BACK_BUTTON, "md:hidden disabled:opacity-50");
-	const icon = <X aria-hidden size={20} strokeWidth={2.25} />;
+	const icon = <X20 aria-hidden />;
 	if (cancel?.ownAction) {
 		return (
 			<button

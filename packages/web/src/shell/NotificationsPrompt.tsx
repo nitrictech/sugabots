@@ -1,4 +1,4 @@
-import { BellRing } from "lucide-react";
+import { BellRing } from "@nitric/suga-icons";
 import { useState } from "react";
 import { useBrowserNotifications } from "@/lib/notifications.ts";
 import { Button } from "@/ui/button.tsx";
@@ -31,7 +31,7 @@ export function NotificationsPrompt() {
 			aria-label="Turn on notifications"
 			className="flex shrink-0 items-center gap-3 border-border border-b bg-panel py-1.5 pr-2 pl-4"
 		>
-			<BellRing aria-hidden size={16} className="shrink-0 text-link" />
+			<BellRing aria-hidden className="shrink-0 text-link" />
 			<p className="m-0 min-w-0 flex-1 text-xs text-soft-foreground leading-normal">
 				Get notified when you're mentioned, a bot replies to you, or one needs your approval.
 			</p>

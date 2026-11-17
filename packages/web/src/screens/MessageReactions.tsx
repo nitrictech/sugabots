@@ -1,4 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
+import { SmilePlus } from "@nitric/suga-icons";
 import {
 	MAX_REACTION_EMOJI_PER_MESSAGE,
 	type Message,
@@ -7,7 +8,6 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Option, Schema } from "effect";
-import { SmilePlus } from "lucide-react";
 import { useState } from "react";
 import { EmojiPicker } from "@/ui/emoji-picker.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -94,7 +94,7 @@ export function MessageReactions({
 						message={message}
 						reacting={reacting}
 						align="start"
-						className="h-6 w-12 rounded-full border border-chip-strong text-muted-foreground hover:border-border-dashed hover:bg-chip hover:text-foreground [&_svg]:size-3.5"
+						className="h-6 w-12 rounded-full border border-chip-strong text-muted-foreground hover:border-border-dashed hover:bg-chip hover:text-foreground [&_svg]:size-4"
 					/>
 				</li>
 			)}

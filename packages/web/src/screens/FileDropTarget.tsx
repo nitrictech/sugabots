@@ -1,6 +1,6 @@
+import { Upload20 } from "@nitric/suga-icons";
 import { MAX_ATTACHMENT_MEGABYTES, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Upload } from "lucide-react";
 import { type DragEvent, type ReactNode, useRef, useState } from "react";
 
 /**
@@ -61,7 +61,7 @@ export function FileDropTarget({
 				>
 					<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-ring border-dashed bg-drop-target px-4 text-center">
 						<span className="mb-1 grid size-12 place-items-center rounded-tile bg-primary text-primary-foreground">
-							<Upload size={22} strokeWidth={2.2} />
+							<Upload20 />
 						</span>
 						<span className="font-semibold text-base text-foreground">Drop files to attach</span>
 						<span className="text-xs text-muted-foreground">

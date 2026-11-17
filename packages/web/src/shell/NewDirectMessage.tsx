@@ -1,3 +1,4 @@
+import { MessageCircle, X } from "@nitric/suga-icons";
 import {
 	type DirectMessageListItem,
 	MAX_DIRECT_MESSAGE_PEOPLE,
@@ -5,7 +6,6 @@ import {
 } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { MessageCircle, X } from "lucide-react";
 import {
 	type KeyboardEvent,
 	useDeferredValue,
@@ -248,7 +248,7 @@ export function NewDirectMessagePage() {
 				back={{ to: "directMessages" }}
 				face={
 					<span className="grid size-8 shrink-0 place-items-center rounded-full bg-chip text-soft-foreground">
-						<MessageCircle size={16} strokeWidth={2} />
+						<MessageCircle />
 					</span>
 				}
 			/>
@@ -273,7 +273,7 @@ export function NewDirectMessagePage() {
 									onClick={() => remove(person.id)}
 									className="focus-ring grid size-5 place-items-center rounded-xs text-muted-foreground hover:bg-hover hover:text-foreground"
 								>
-									<X size={12} strokeWidth={2.4} />
+									<X />
 								</button>
 							</li>
 						))}

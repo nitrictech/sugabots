@@ -1,8 +1,8 @@
+import { ChevronDown, ChevronUp } from "@nitric/suga-icons";
 import type { MessageAuthor } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ElementContent, Root } from "hast";
 import { toString as hastToString } from "hast-util-to-string";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import type { Definition, Image, Link, Root as MdastRoot } from "mdast";
 import {
 	type CSSProperties,

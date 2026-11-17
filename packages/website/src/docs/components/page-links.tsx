@@ -1,6 +1,6 @@
+import { ArrowLeft, ArrowRight } from "@nitric/suga-icons";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import type { DocPage } from "@/docs/pages";
 
 function PageLink({ page, direction }: { page: DocPage; direction: "previous" | "next" }) {
@@ -23,11 +23,11 @@ function PageLink({ page, direction }: { page: DocPage; direction: "previous" | 
 				>
 					{isNext ? (
 						<>
-							Next <ArrowRightIcon className="size-3" />
+							Next <ArrowRight />
 						</>
 					) : (
 						<>
-							<ArrowLeftIcon className="size-3" /> Previous
+							<ArrowLeft /> Previous
 						</>
 					)}
 				</span>

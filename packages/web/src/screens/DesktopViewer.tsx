@@ -1,8 +1,8 @@
+import { Keyboard, Monitor, Monitor20, X20 } from "@nitric/suga-icons";
 import type RFB from "@novnc/novnc";
 import type { Agent, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Keyboard, Monitor, X } from "lucide-react";
 import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
@@ -61,7 +61,7 @@ export function DesktopStage({
 	const content = (
 		<>
 			{missing === "workspace" ? (
-				<EmptyState icon={<Monitor strokeWidth={1.75} />} title="Computers aren't set up yet">
+				<EmptyState icon={<Monitor20 />} title="Computers aren't set up yet">
 					{may.manageProviders ? (
 						<>
 							Computers let bots run commands, open websites and edit files. They're set up once for
@@ -83,7 +83,7 @@ export function DesktopStage({
 					)}
 				</EmptyState>
 			) : missing === "bot" ? (
-				<EmptyState icon={<Monitor strokeWidth={1.75} />} title={`${agent.name} has no computer`}>
+				<EmptyState icon={<Monitor20 />} title={`${agent.name} has no computer`}>
 					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
 					{pod.permissions.updateAgents && (
 						<Link
@@ -114,7 +114,7 @@ export function DesktopStage({
 			>
 				<div className="shrink-0 px-4">
 					<button type="button" aria-label="Close" onClick={onClose} className={BACK_BUTTON}>
-						<X aria-hidden size={20} strokeWidth={2.25} />
+						<X20 aria-hidden />
 					</button>
 				</div>
 				<div className="flex min-h-0 flex-1 flex-col pt-3">{content}</div>
@@ -126,7 +126,7 @@ export function DesktopStage({
 			label={`${agent.name}'s computer`}
 			icon={
 				<StageMark>
-					<Monitor strokeWidth={2} />
+					<Monitor />
 				</StageMark>
 			}
 			title={`${agent.name}'s computer`}

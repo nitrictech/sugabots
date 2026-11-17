@@ -1,3 +1,4 @@
+import { Trash } from "@nitric/suga-icons";
 import {
 	MAX_WEBHOOK_FILTER_CONDITIONS,
 	MAX_WEBHOOK_FILTER_TEXT_CHARACTERS,
@@ -6,7 +7,6 @@ import {
 	webhookConditionSchema,
 } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
-import { Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -88,7 +88,7 @@ export function FilterGroup({
 									disabled={pending || editing !== undefined}
 									onClick={() => void save(filter.filter((_, at) => at !== index))}
 								>
-									<Trash2 />
+									<Trash />
 								</IconButton>
 							</div>
 						}
@@ -176,7 +176,7 @@ function ConditionEditor({
 						disabled={pending || values.length === 1}
 						onClick={() => setValues(values.filter((_, at) => at !== index))}
 					>
-						<Trash2 />
+						<Trash />
 					</IconButton>
 				</div>
 			))}

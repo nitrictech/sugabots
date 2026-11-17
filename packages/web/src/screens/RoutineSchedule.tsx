@@ -1,11 +1,11 @@
 import { Select } from "@base-ui/react/select";
+import { Check, Minus, Plus, X } from "@nitric/suga-icons";
 import {
 	type CalendarSchedule,
 	MAX_EVERY_DAYS,
 	MAX_EVERY_MONTHS,
 	MAX_EVERY_WEEKS,
 } from "@sugabots/contracts";
-import { Check, Minus, Plus, X } from "lucide-react";
 import type { ReactNode } from "react";
 import {
 	canAddTime,
@@ -311,7 +311,7 @@ function StepperRow({
 			<SettingsFieldLabel>{label}</SettingsFieldLabel>
 			<span className="flex flex-1 items-center justify-end gap-3">
 				<StepButton label={lessLabel} onClick={onLess}>
-					<Minus size={14} strokeWidth={2.4} />
+					<Minus />
 				</StepButton>
 				<output
 					aria-label={label}
@@ -320,7 +320,7 @@ function StepperRow({
 					{value}
 				</output>
 				<StepButton label={moreLabel} onClick={onMore}>
-					<Plus size={14} strokeWidth={2.4} />
+					<Plus />
 				</StepButton>
 			</span>
 		</div>

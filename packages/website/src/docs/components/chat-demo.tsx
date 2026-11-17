@@ -1,4 +1,4 @@
-import { RotateCcwIcon } from "lucide-react";
+import { RotateCcw } from "@nitric/suga-icons";
 import { Children, type ReactNode, useState } from "react";
 import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
 import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
@@ -49,7 +49,7 @@ export function Chat({ title, children }: ChatProps) {
 						onClick={() => setPlayCount((count) => count + 1)}
 						className="text-muted-foreground"
 					>
-						<RotateCcwIcon data-icon="inline-start" />
+						<RotateCcw data-icon="inline-start" />
 						Replay
 					</Button>
 				</div>

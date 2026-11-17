@@ -1,5 +1,5 @@
+import { Check } from "@nitric/suga-icons";
 import type { WorkspaceModelsResponse } from "@sugabots/contracts";
-import { Check } from "lucide-react";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 export type ModelChoice = Pick<
@@ -64,9 +64,7 @@ export function ModelChoiceRow({
 		<SettingsRow
 			label={label}
 			render={onChoose && <button type="button" aria-pressed={chosen} />}
-			trailing={
-				chosen && <Check aria-hidden size={16} strokeWidth={2.6} className="shrink-0 text-link" />
-			}
+			trailing={chosen && <Check aria-hidden className="shrink-0 text-link" />}
 			onClick={chosen ? undefined : onChoose}
 			className={chosen ? "cursor-default" : undefined}
 		/>

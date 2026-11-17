@@ -1,3 +1,4 @@
+import { ExternalLink, Refresh, TriangleAlert } from "@nitric/suga-icons";
 import {
 	type ModelProvider,
 	type ProviderSignInStarted,
@@ -5,7 +6,6 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
-import { ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
@@ -227,7 +227,7 @@ function SignInCode({
 					<ExternalLink aria-hidden /> Open sign-in page
 				</a>
 				<span className="flex-1" />
-				<RefreshCw aria-hidden className="size-4 animate-spin text-muted-foreground" />
+				<Refresh aria-hidden className="size-4 animate-spin text-muted-foreground" />
 				<Button variant="ghost" size="sm" onClick={() => finished.current()}>
 					Cancel
 				</Button>

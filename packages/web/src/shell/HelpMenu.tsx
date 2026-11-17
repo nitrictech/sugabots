@@ -1,5 +1,3 @@
-import { SugabotsMark } from "@sugabots/avatars";
-import { projectLinks } from "@sugabots/contracts/project-links";
 import {
 	ArrowUpRight,
 	BookOpen,
@@ -7,11 +5,13 @@ import {
 	Check,
 	CircleHelp,
 	Copy,
+	type IconComponent,
 	Info,
-	type LucideIcon,
 	MessageCircle,
 	Sparkles,
-} from "lucide-react";
+} from "@nitric/suga-icons";
+import { SugabotsMark } from "@sugabots/avatars";
+import { projectLinks } from "@sugabots/contracts/project-links";
 import { useMemo, useState } from "react";
 import {
 	bugReportUrl,
@@ -57,7 +57,7 @@ export function HelpMenu() {
 						aria-label="Help"
 						className="focus-ring grid size-7 shrink-0 place-items-center rounded-sm text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
 					>
-						<CircleHelp aria-hidden size={16} strokeWidth={1.75} />
+						<CircleHelp aria-hidden />
 					</DropdownMenuTrigger>
 				</Tooltip>
 				<DropdownMenuContent side="top" align="end" className="min-w-60">
@@ -103,7 +103,7 @@ function ExternalItem({
 	children,
 }: {
 	href: string;
-	icon: LucideIcon;
+	icon: IconComponent;
 	disabled?: boolean;
 	children: string;
 }) {
@@ -115,7 +115,7 @@ function ExternalItem({
 			<Icon aria-hidden className="text-muted-foreground" />
 			<span className="flex-1">{children}</span>
 			<span className="sr-only">(opens in a new tab)</span>
-			<ArrowUpRight aria-hidden className="size-3.5 text-subtle-foreground" />
+			<ArrowUpRight aria-hidden className="text-subtle-foreground" />
 		</DropdownMenuItem>
 	);
 }

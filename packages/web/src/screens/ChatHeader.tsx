@@ -1,6 +1,3 @@
-import type { Agent, Pod } from "@sugabots/contracts";
-import { useRouter } from "@tanstack/react-router";
-import { cn } from "cn";
 import {
 	CircleCheck,
 	Ellipsis,
@@ -9,7 +6,10 @@ import {
 	PanelRight,
 	RefreshCcw,
 	RotateCcw,
-} from "lucide-react";
+} from "@nitric/suga-icons";
+import type { Agent, Pod } from "@sugabots/contracts";
+import { useRouter } from "@tanstack/react-router";
+import { cn } from "cn";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
 import { useAttentionCounts, useChatList } from "@/lib/chats.ts";
@@ -237,23 +237,19 @@ function ThreadMenu({
 						variant="bar"
 						className={cn(FLOATING_ON_PHONE, "md:hidden")}
 					>
-						<Ellipsis size={18} strokeWidth={2} />
+						<Ellipsis />
 					</IconButton>
 				}
 			/>
 			<DropdownMenuContent align="end" className="min-w-48">
 				<DropdownMenuItem onClick={onOpenDesktop}>
-					<Monitor aria-hidden size={16} />
+					<Monitor aria-hidden />
 					Computer
 				</DropdownMenuItem>
 				<DropdownMenuItem
 					onClick={done.isDone ? () => void done.onChange(false) : () => void markDone()}
 				>
-					{done.isDone ? (
-						<RotateCcw aria-hidden size={16} />
-					) : (
-						<CircleCheck aria-hidden size={16} />
-					)}
+					{done.isDone ? <RotateCcw aria-hidden /> : <CircleCheck aria-hidden />}
 					{done.isDone ? "Reopen" : "Mark done"}
 				</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -369,11 +365,7 @@ function ChannelFace({ mark }: { mark: ChatMark }) {
 			className="grid shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground"
 			style={{ width: PHONE_FACE_SIZE_PX, height: PHONE_FACE_SIZE_PX }}
 		>
-			{mark === "routine" ? (
-				<RefreshCcw size={16} strokeWidth={2} />
-			) : (
-				<Hash size={18} strokeWidth={2} />
-			)}
+			{mark === "routine" ? <RefreshCcw /> : <Hash />}
 		</span>
 	);
 }
@@ -441,7 +433,7 @@ function RoutinesButton({ agent, onOpen }: { agent: Agent; onOpen: () => void })
 	return (
 		<HeaderButton
 			label="Routines"
-			icon={<RefreshCcw size={16} strokeWidth={1.75} />}
+			icon={<RefreshCcw />}
 			onClick={onOpen}
 			mark={failed ? { dot: <FailedDot labelled={false} />, label: FAILED_DOT_LABEL } : undefined}
 			className="max-md:hidden"
@@ -459,7 +451,7 @@ function DetailsButton({ open, onChange }: DetailsToggle) {
 			onClick={() => onChange(!open)}
 			className={cn(HEADER_ICON_CLASS_NAME, "max-md:hidden")}
 		>
-			<PanelRight size={16} strokeWidth={1.75} />
+			<PanelRight />
 		</IconButton>
 	);
 }
@@ -543,11 +535,7 @@ function DoneButton({ isDone, onChange }: DoneToggle) {
 			onClick={() => void onChange(!isDone)}
 			className={HEADER_ICON_CLASS_NAME}
 		>
-			{isDone ? (
-				<RotateCcw size={16} strokeWidth={1.75} />
-			) : (
-				<CircleCheck size={16} strokeWidth={1.75} />
-			)}
+			{isDone ? <RotateCcw /> : <CircleCheck />}
 		</IconButton>
 	);
 }

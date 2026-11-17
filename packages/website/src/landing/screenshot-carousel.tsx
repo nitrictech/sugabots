@@ -1,5 +1,5 @@
+import { ChevronLeft, ChevronRight, Maximize, X } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, XIcon } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { type Screenshot, screenshots } from "@/landing/media";
@@ -229,7 +229,7 @@ function Slide({ screenshot, label, offset, draggedPx, onSelect, onEnlarge }: Sl
 							)}
 						</ForVisitorOs>
 						<span className="pointer-events-none absolute right-3.5 bottom-3.5 grid size-9 place-items-center rounded-full border border-white/14 bg-landing-page/72 text-landing-text opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
-							<Maximize2Icon className="size-4" />
+							<Maximize />
 						</span>
 					</button>
 				) : (
@@ -304,7 +304,7 @@ function EnlargedScreenshot({
 				onClick={onPrevious}
 				className={cn(lightboxButton, "fixed top-1/2 left-4 -translate-y-1/2")}
 			>
-				<ChevronLeftIcon className="size-5" />
+				<ChevronLeft />
 			</button>
 			<button
 				type="button"
@@ -312,7 +312,7 @@ function EnlargedScreenshot({
 				onClick={onNext}
 				className={cn(lightboxButton, "fixed top-1/2 right-4 -translate-y-1/2")}
 			>
-				<ChevronRightIcon className="size-5" />
+				<ChevronRight />
 			</button>
 			<button
 				type="button"
@@ -320,7 +320,7 @@ function EnlargedScreenshot({
 				onClick={() => dialog.current?.close()}
 				className={cn(lightboxButton, "fixed top-4 right-4")}
 			>
-				<XIcon className="size-5" />
+				<X />
 			</button>
 		</dialog>
 	);

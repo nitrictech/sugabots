@@ -1,3 +1,4 @@
+import { Check, ChevronDown, Download, FileText20, Link2, Trash } from "@nitric/suga-icons";
 import type {
 	Artifact,
 	ArtifactAuthor,
@@ -7,7 +8,6 @@ import type {
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronDown, Download, FileText, Link2, Trash2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import {
 	useArtifact,
@@ -104,10 +104,7 @@ export function ArtifactListView({
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
 					// As tall as the page leaves above the tabs, so there is nothing to scroll.
 					<div className="flex h-above-tab-bar pb-20">
-						<EmptyState
-							title={`No artifacts in ${pod.name} yet`}
-							icon={<FileText strokeWidth={1.75} />}
-						>
+						<EmptyState title={`No artifacts in ${pod.name} yet`} icon={<FileText20 />}>
 							When a bot writes you a doc, report or page, it's saved here so the whole pod can find
 							it later.
 						</EmptyState>
@@ -313,7 +310,7 @@ export function ArtifactStageView({
 			label={artifact.title}
 			icon={
 				<StageMark>
-					<kind.Icon strokeWidth={2} />
+					<kind.Icon />
 				</StageMark>
 			}
 			title={artifact.title}
@@ -343,7 +340,7 @@ export function ArtifactStageView({
 						</DropdownMenuItem>
 						{deletion && (
 							<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
-								<Trash2 aria-hidden />
+								<Trash aria-hidden />
 								Delete
 							</DropdownMenuItem>
 						)}
@@ -399,7 +396,7 @@ function VersionPicker({
 			>
 				v{shown.number}
 				{isCurrent ? "" : ` of ${artifact.version}`}
-				<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
+				<ChevronDown aria-hidden className="text-subtle-foreground" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{versions.map((version) => (
@@ -492,7 +489,7 @@ function KindMark({ kind }: { kind: ArtifactSummary["kind"] }) {
 			aria-hidden
 			className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-muted-foreground"
 		>
-			<Icon size={16} strokeWidth={1.75} />
+			<Icon />
 		</span>
 	);
 }

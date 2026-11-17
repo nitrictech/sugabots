@@ -1,5 +1,5 @@
+import { Plug } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { type ApprovalDecision, ChatApproval, ChatMessage, ChatToolLine } from "@/components/chat";
@@ -121,7 +121,7 @@ export function ApprovalPlayground() {
 							<ChatApproval
 								who={`${bot.name} wants to ${tools[tool].changes ? "make a change" : "use a tool"}`}
 								action={tools[tool].name}
-								mark={<PlugIcon className="size-3.5" />}
+								mark={<Plug />}
 								decision={decision}
 								outcomes={decisionOutcomes}
 								onDecide={setDecision}

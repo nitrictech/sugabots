@@ -1,3 +1,4 @@
+import { MessageSquareOff20 } from "@nitric/suga-icons";
 import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
 import {
 	CONNECTION_SIGN_IN_RETURN_PATH,
@@ -22,7 +23,6 @@ import {
 	useParams,
 	useRouter,
 } from "@tanstack/react-router";
-import { MessageSquareOff } from "lucide-react";
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
@@ -1691,7 +1691,7 @@ function ConversationScreen<Place>({
 			<div className="flex min-h-0 flex-1 pb-20">
 				<EmptyState
 					title={error ? "Could not load this conversation" : "Conversation not found"}
-					icon={<MessageSquareOff strokeWidth={1.75} />}
+					icon={<MessageSquareOff20 />}
 				>
 					{error
 						? "Reload the page, or check that the API is running."

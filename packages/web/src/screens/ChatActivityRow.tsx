@@ -1,9 +1,20 @@
+import {
+	Clock,
+	Clock12,
+	GitBranch,
+	GitBranch12,
+	type IconComponent,
+	type IconProps,
+	Refresh,
+	Refresh12,
+	Webhook,
+	Webhook12,
+} from "@nitric/suga-icons";
 import type {
 	ChatHistoryEntry,
 	RoutineExecutionTriggerKind,
 	ThreadParticipant,
 } from "@sugabots/contracts";
-import { Clock, GitBranch, type LucideProps, RefreshCw, Webhook } from "lucide-react";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -81,7 +92,7 @@ export function ChatActivityRow(
 						!
 					</span>
 				) : (
-					<RoutineTriggerIcon kind={props.triggerKind} size={15} strokeWidth={2.2} />
+					<RoutineTriggerIcon kind={props.triggerKind} />
 				)}
 			</span>
 			<span className="min-w-0 truncate font-medium text-xs text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
@@ -118,13 +129,18 @@ export function ChatActivityRow(
  */
 export function RoutineTriggerIcon({
 	kind,
+	size = 16,
 	...props
-}: { kind: RoutineExecutionTriggerKind } & LucideProps) {
-	if (kind === "cron") return <Clock {...props} />;
-	if (kind === "webhook") return <Webhook {...props} />;
-	if (kind === "github") return <GitBranch {...props} />;
-	return <RefreshCw {...props} />;
+}: { kind: RoutineExecutionTriggerKind; size?: keyof typeof triggerMarks } & IconProps) {
+	const Mark = triggerMarks[size][kind];
+	return <Mark {...props} />;
 }
+
+/** Each trigger's mark at the sizes it is drawn for: 16px, and 12px for a small badge. */
+const triggerMarks = {
+	16: { cron: Clock, webhook: Webhook, github: GitBranch, manual: Refresh },
+	12: { cron: Clock12, webhook: Webhook12, github: GitBranch12, manual: Refresh12 },
+} satisfies Record<number, Record<RoutineExecutionTriggerKind, IconComponent>>;
 
 export function collaborationText(host: string, other: string, state: ActivityState): string {
 	switch (state) {

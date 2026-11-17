@@ -1,3 +1,4 @@
+import { ChevronDown, Eye, EyeOff, Webhook } from "@nitric/suga-icons";
 import {
 	DEFAULT_DELIVERY_ID_HEADER,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
@@ -9,7 +10,6 @@ import {
 	type WebhookSource,
 	webhookSecretLongEnough,
 } from "@sugabots/contracts";
-import { ChevronDown, Eye, EyeOff, Webhook } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -403,8 +403,6 @@ function MenuRow<Value extends string>({
 				</span>
 				<ChevronDown
 					aria-hidden
-					size={15}
-					strokeWidth={2.4}
 					className="shrink-0 text-subtle-foreground transition-transform group-data-popup-open:rotate-180"
 				/>
 			</DropdownMenuTrigger>
@@ -430,7 +428,7 @@ function SourceMark({ source }: { source: WebhookSourceChoice }) {
 			aria-hidden
 			className="grid size-6 shrink-0 place-items-center rounded-sm bg-chip text-soft-foreground"
 		>
-			<Webhook size={14} strokeWidth={2.2} />
+			<Webhook />
 		</span>
 	);
 }

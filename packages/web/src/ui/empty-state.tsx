@@ -25,7 +25,7 @@ export function EmptyState({
 				{icon && (
 					<span
 						aria-hidden
-						className="mb-3.5 grid size-14 place-items-center rounded-xl border border-border bg-list text-muted-foreground [&_svg]:size-5"
+						className="mb-3.5 grid size-14 place-items-center rounded-xl border border-border bg-list text-muted-foreground"
 					>
 						{icon}
 					</span>

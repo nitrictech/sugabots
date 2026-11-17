@@ -1,3 +1,4 @@
+import { Search } from "@nitric/suga-icons";
 import {
 	type Connection,
 	type ConnectionAccess,
@@ -10,7 +11,6 @@ import {
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Search } from "lucide-react";
 import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
 import {
 	bearerAuthorization,
@@ -686,7 +686,7 @@ function IndividualTools({
 				{/* Above the list and as solid as the card, so no row shows past the list's top as it scrolls. */}
 				<div className="relative z-1 border-border border-b bg-settings-card p-2.5">
 					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+						<Search aria-hidden className="shrink-0 text-subtle-foreground" />
 						<input
 							type="search"
 							value={query}

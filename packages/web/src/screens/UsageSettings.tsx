@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight } from "@nitric/suga-icons";
 import { botColors } from "@sugabots/avatars";
 import {
 	type AgentColor,
@@ -8,7 +9,6 @@ import {
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { PROVIDER_HUES } from "@/lib/provider-hues.ts";
@@ -90,7 +90,7 @@ function MonthStepper({
 	return (
 		<div className="flex items-center gap-1">
 			<IconButton label="Previous month" onClick={() => onChange(shiftMonth(month, -1))}>
-				<ChevronLeft strokeWidth={2} />
+				<ChevronLeft />
 			</IconButton>
 			<span className="min-w-18 text-center font-medium text-xs text-foreground">
 				{monthLabel(month)}
@@ -100,7 +100,7 @@ function MonthStepper({
 				disabled={month >= latest}
 				onClick={() => onChange(shiftMonth(month, 1))}
 			>
-				<ChevronRight strokeWidth={2} />
+				<ChevronRight />
 			</IconButton>
 		</div>
 	);

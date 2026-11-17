@@ -1,6 +1,6 @@
+import { X } from "@nitric/suga-icons";
 import type { Connection, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { X } from "lucide-react";
 import { useState } from "react";
 import { useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { podSettingsPageLink } from "@/lib/links.ts";

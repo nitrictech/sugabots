@@ -1,3 +1,4 @@
+import { Check, Copy, RotateCcw } from "@nitric/suga-icons";
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
 	type Agent,
@@ -8,7 +9,6 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";

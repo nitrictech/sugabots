@@ -1,6 +1,6 @@
+import { ArrowRight } from "@nitric/suga-icons";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowRightIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { accentText } from "@/components/accent";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -95,7 +95,7 @@ function DocsHome() {
 									className={buttonVariants({ size: "lg" })}
 								>
 									Start with the basics
-									<ArrowRightIcon data-icon="inline-end" />
+									<ArrowRight data-icon="inline-end" />
 								</Link>
 							</RevealItem>
 						)}

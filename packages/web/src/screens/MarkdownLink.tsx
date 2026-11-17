@@ -1,6 +1,6 @@
+import { Image } from "@nitric/suga-icons";
 import type { Element } from "hast";
 import { toString as hastToString } from "hast-util-to-string";
-import { ImageIcon } from "lucide-react";
 import { normalizeUri } from "micromark-util-sanitize-uri";
 import { type ComponentProps, type MouseEvent, type ReactNode, useState } from "react";
 import type { ExtraProps } from "streamdown";
@@ -62,7 +62,7 @@ export function MarkdownImageLink({
 			className="focus-ring my-1 inline-flex max-w-full items-center gap-2.5 rounded-lg border border-border bg-card py-2 pr-3 pl-2.5 align-middle hover:border-border-strong"
 		>
 			<span className="grid size-8 shrink-0 place-items-center rounded-md bg-tile text-soft-foreground">
-				<ImageIcon aria-hidden size={16} />
+				<Image aria-hidden />
 			</span>
 			<span className="flex min-w-0 flex-col gap-px">
 				<span className="truncate font-medium text-foreground text-sm">{children}</span>

@@ -1,8 +1,8 @@
+import { Check, MessagesSquare } from "@nitric/suga-icons";
 import type { Agent, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Check, MessagesSquare } from "lucide-react";
 import { useChatList } from "@/lib/chats.ts";
 import { conversationLink, type ThreadsTab } from "@/lib/links.ts";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
@@ -40,7 +40,7 @@ export function ThreadsStage({
 			label={title}
 			icon={
 				<StageMark>
-					<MessagesSquare strokeWidth={2} />
+					<MessagesSquare />
 				</StageMark>
 			}
 			title={title}
@@ -101,14 +101,7 @@ function ThreadListRow({ pod, row, tab }: { pod: Pod; row: ChatListItem; tab: Th
 			)}
 		>
 			<span className="flex min-w-0 items-center gap-2">
-				{done && (
-					<Check
-						aria-hidden
-						size={12}
-						strokeWidth={2.25}
-						className="shrink-0 text-subtle-foreground"
-					/>
-				)}
+				{done && <Check aria-hidden className="shrink-0 text-subtle-foreground" />}
 				<span
 					className={cn(
 						"min-w-0 flex-1 truncate text-sm",

@@ -1,7 +1,7 @@
+import { Check, ChevronLeft, X } from "@nitric/suga-icons";
 import type { AnsweredApproval, ApprovalInbox, ApprovalRequest } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
@@ -74,7 +74,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 				BACK_ON_PHONE,
 			)}
 		>
-			<ChevronLeft aria-hidden size={16} className="max-md:size-5.5" />
+			<ChevronLeft aria-hidden className="max-md:size-5" />
 			<span className={BACK_LABEL_ON_PHONE}>Approvals</span>
 		</Link>,
 	);
@@ -160,11 +160,7 @@ function AnswerGiven({
 			role={announced ? "status" : undefined}
 			className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground"
 		>
-			{allowed ? (
-				<Check aria-hidden size={13} strokeWidth={2.8} />
-			) : (
-				<X aria-hidden size={13} strokeWidth={2.8} />
-			)}
+			{allowed ? <Check aria-hidden /> : <X aria-hidden />}
 			{allowed ? "Allowed" : "Denied"}
 			{answer.decidedByName && ` by ${answer.decidedByName}`}
 			{` at ${formatListTime(new Date(answer.decidedAt), new Date())}`}

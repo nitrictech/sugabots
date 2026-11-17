@@ -1,8 +1,8 @@
 import { useRender } from "@base-ui/react/use-render";
+import { Plus, RefreshCcw20 } from "@nitric/suga-icons";
 import type { ListedRoutine, Pod, Routine } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
@@ -66,7 +66,7 @@ export function RoutinesPage({
 				FLOATING_ON_PHONE,
 			)}
 		>
-			<Plus size={16} strokeWidth={1.75} />
+			<Plus />
 		</IconButton>
 	);
 	// With none yet, the list stays, with its + where it always is, and the space beside it says how one is made.
@@ -172,7 +172,7 @@ export function NoRoutines({
 		props: { className: buttonStyles({ size: "sm" }), children: "New routine" },
 	});
 	return (
-		<EmptyState title={title} icon={<RefreshCcw strokeWidth={1.75} />}>
+		<EmptyState title={title} icon={<RefreshCcw20 />}>
 			{create ? (
 				<span className="mt-3 flex flex-col items-center gap-3">
 					{newRoutine}

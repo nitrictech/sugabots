@@ -1,3 +1,4 @@
+import { ChevronRight, Copy, Pencil, Play, Trash } from "@nitric/suga-icons";
 import {
 	type Agent,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
@@ -8,7 +9,6 @@ import {
 } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Copy, Pencil, Play, Trash2 } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useRoutineControls } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -100,15 +100,15 @@ export function RoutinePanel({
 	const more = mayManage && routine && (
 		<MoreMenu label={`More for ${routine.name}`}>
 			<DropdownMenuItem onClick={() => setDialog({ kind: "rename" })}>
-				<Pencil aria-hidden size={16} />
+				<Pencil aria-hidden />
 				Rename
 			</DropdownMenuItem>
 			<DropdownMenuItem disabled={actions.create.isPending} onClick={() => void duplicate(routine)}>
-				<Copy aria-hidden size={16} />
+				<Copy aria-hidden />
 				Duplicate
 			</DropdownMenuItem>
 			<DropdownMenuItem variant="destructive" onClick={() => setDialog({ kind: "delete" })}>
-				<Trash2 aria-hidden size={16} />
+				<Trash aria-hidden />
 				Delete routine
 			</DropdownMenuItem>
 		</MoreMenu>
@@ -216,7 +216,7 @@ export function RoutinePanel({
 							disabled={controls.pending}
 							onClick={() => void control(() => controls.runAgain())}
 						>
-							<Play aria-hidden size={12} strokeWidth={2} fill="currentColor" />
+							<Play aria-hidden fill="currentColor" />
 							Run now
 						</Button>
 					)}
@@ -311,12 +311,7 @@ function Instructions({
 					<span className="text-xs text-muted-foreground">Instructions</span>
 					<span className="truncate text-sm text-soft-foreground">{instructions}</span>
 				</span>
-				<ChevronRight
-					aria-hidden
-					size={16}
-					strokeWidth={2}
-					className="shrink-0 text-subtle-foreground"
-				/>
+				<ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />
 			</button>
 		);
 	}
@@ -332,7 +327,7 @@ function Instructions({
 						className="focus-ring inline-flex items-center gap-0.5 rounded-sm text-muted-foreground text-xs hover:text-foreground"
 					>
 						Edit
-						<ChevronRight aria-hidden size={13} strokeWidth={2.2} />
+						<ChevronRight aria-hidden />
 					</button>
 				)}
 			</div>
@@ -430,14 +425,7 @@ function TriggerRow({
 				<span className="truncate text-xs text-foreground">{label}</span>
 				{sub && <span className="truncate text-muted-foreground text-xs">{sub}</span>}
 			</span>
-			{onClick && sub && (
-				<ChevronRight
-					aria-hidden
-					size={14}
-					strokeWidth={2.2}
-					className="shrink-0 text-subtle-foreground"
-				/>
-			)}
+			{onClick && sub && <ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />}
 		</>
 	);
 	const className = "flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left";

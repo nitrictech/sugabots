@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { Check, Copy } from "@nitric/suga-icons";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -16,7 +16,7 @@ export function CopyPageButton({ markdown }: { markdown: string }) {
 
 	return (
 		<Button variant="outline" size="sm" onClick={copy}>
-			{copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+			{copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
 			{copied ? "Copied" : "Copy as Markdown"}
 		</Button>
 	);

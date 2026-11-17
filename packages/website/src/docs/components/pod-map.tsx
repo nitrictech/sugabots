@@ -1,5 +1,5 @@
+import { MessagesSquare, Plug } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { MessagesSquareIcon, PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -99,7 +99,7 @@ export function PodMap() {
 					<div className="flex flex-col gap-2">
 						{bots.map((bot) => (
 							<span key={bot.name} className="flex items-center gap-2 text-sm">
-								<MessagesSquareIcon className="size-4 text-muted-foreground" />
+								<MessagesSquare className="text-muted-foreground" />
 								Chat with {bot.name}
 							</span>
 						))}
@@ -112,7 +112,7 @@ export function PodMap() {
 								key={app}
 								className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-sm font-semibold"
 							>
-								<PlugIcon className="size-3.5" />
+								<Plug />
 								{app}
 							</span>
 						))}

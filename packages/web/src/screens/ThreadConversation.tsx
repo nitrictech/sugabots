@@ -1,3 +1,4 @@
+import { ChevronRight, CornerUpLeft, MessageSquarePlus, Reply } from "@nitric/suga-icons";
 import { botColorVariables } from "@sugabots/avatars";
 import {
 	type CollaborationPart,
@@ -13,7 +14,6 @@ import {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, CornerUpLeft, MessageSquarePlus, Reply } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
@@ -675,7 +675,7 @@ function MessageRow({
 }
 
 const TOOLBAR_BUTTON =
-	"h-7 w-7.5 rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-3.75";
+	"h-7 w-7.5 rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-4";
 
 /**
  * Over a reply, whose message it answers and that message's first line. With
@@ -691,7 +691,7 @@ function ReplyQuote({
 	const name = messageAuthorName(replyTo.author);
 	const quote = (
 		<>
-			<CornerUpLeft aria-hidden size={13} strokeWidth={2.2} className="shrink-0" />
+			<CornerUpLeft aria-hidden className="shrink-0" />
 			<span className="shrink-0">Replying to</span>
 			<span className="shrink-0 font-semibold text-soft-foreground">{name}</span>
 			<span className="ml-0.5 min-w-0 truncate">{replyTo.preview}</span>
@@ -759,7 +759,7 @@ function RoutineResultLink({
 			className="focus-ring inline-flex items-center gap-0.5 rounded-sm font-medium transition-colors hover:text-soft-foreground"
 		>
 			From {run.routineName}
-			<ChevronRight aria-hidden size={12} strokeWidth={2.4} />
+			<ChevronRight aria-hidden />
 		</button>
 	);
 }

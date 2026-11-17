@@ -1,6 +1,6 @@
 import { Popover } from "@base-ui/react/popover";
+import { User } from "@nitric/suga-icons";
 import type { PersonParticipant, SessionUser } from "@sugabots/contracts";
-import { User } from "lucide-react";
 import type { DirectPeople } from "@/lib/chats.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { FormerMemberFace } from "@/shell/DirectMessages.tsx";
@@ -23,7 +23,7 @@ export function DirectMembersButton({ direct, user }: { direct: DirectPeople; us
 				aria-label={`${countOf(everyone, "member", "members")}. Show who is here`}
 				className="focus-ring flex h-8 shrink-0 items-center gap-1.5 rounded-sm px-2 text-2xs text-muted-foreground tabular-nums transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
 			>
-				<User aria-hidden size={15} strokeWidth={1.75} />
+				<User aria-hidden />
 				{everyone}
 			</Popover.Trigger>
 			<Popover.Portal>

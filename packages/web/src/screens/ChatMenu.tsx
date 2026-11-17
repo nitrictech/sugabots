@@ -1,6 +1,6 @@
+import { Archive, Ellipsis, Pencil } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
-import { Archive, Ellipsis, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useArchiveChat, useRenameChat } from "@/lib/chats.ts";
 import { podLink } from "@/lib/links.ts";
@@ -43,18 +43,18 @@ export function ChatMenu(channel: ChannelToChange) {
 								variant="bar"
 								className="size-8 max-md:hidden"
 							>
-								<Ellipsis size={18} strokeWidth={2} />
+								<Ellipsis />
 							</IconButton>
 						}
 					/>
 					<DropdownMenuContent align="end" className="min-w-48">
 						<DropdownMenuItem onClick={rename}>
-							<Pencil aria-hidden size={16} />
+							<Pencil aria-hidden />
 							Rename channel
 						</DropdownMenuItem>
 						{archive && (
 							<DropdownMenuItem variant="destructive" onClick={archive}>
-								<Archive aria-hidden size={16} />
+								<Archive aria-hidden />
 								Archive channel
 							</DropdownMenuItem>
 						)}

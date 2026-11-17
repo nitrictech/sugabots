@@ -1,6 +1,6 @@
+import { ArrowUpRight, Search } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useConnections } from "@/lib/connections.ts";
 import { podSettingsLink } from "@/lib/links.ts";
@@ -33,7 +33,7 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 	}
 	return (
 		<SettingsRowIcon className="size-8.5 rounded-lg">
-			<RoutineTriggerIcon kind={choice.kind} size={15} strokeWidth={2.2} />
+			<RoutineTriggerIcon kind={choice.kind} />
 		</SettingsRowIcon>
 	);
 }
@@ -80,7 +80,7 @@ export function TriggerKindStep({
 			<DialogFormHeader title="Add a trigger" onClose={done} />
 			<DialogFormBody>
 				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+					<Search aria-hidden className="shrink-0 text-muted-foreground" />
 					<input
 						type="search"
 						value={query}
@@ -109,9 +109,7 @@ export function TriggerKindStep({
 										? `In ${pod.name}'s settings`
 										: `Connect an app in ${pod.name}'s settings`
 								}
-								trailing={
-									<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
-								}
+								trailing={<ArrowUpRight aria-hidden className="shrink-0 text-subtle-foreground" />}
 								render={<Link {...podSettingsLink(pod)} />}
 							/>
 						</SettingsGroup>

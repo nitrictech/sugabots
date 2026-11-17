@@ -1,3 +1,4 @@
+import { X } from "@nitric/suga-icons";
 import {
 	ASSIGNABLE_WORKSPACE_ROLES,
 	type AssignableWorkspaceRole,
@@ -8,7 +9,6 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
-import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";

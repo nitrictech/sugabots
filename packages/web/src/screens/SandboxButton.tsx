@@ -1,5 +1,5 @@
+import { Monitor } from "@nitric/suga-icons";
 import type { Agent } from "@sugabots/contracts";
-import { Monitor } from "lucide-react";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { HeaderButton } from "./HeaderButton.tsx";
@@ -56,13 +56,9 @@ export function SandboxButton({
 				<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
 			</span>
 			<span className="max-md:hidden">Sandbox in use</span>
-			<Monitor aria-hidden size={17} strokeWidth={2} className="md:hidden" />
+			<Monitor aria-hidden className="md:hidden" />
 		</button>
 	) : (
-		<HeaderButton
-			label="Computer"
-			icon={<Monitor size={16} strokeWidth={1.75} />}
-			onClick={onOpen}
-		/>
+		<HeaderButton label="Computer" icon={<Monitor />} onClick={onOpen} />
 	);
 }

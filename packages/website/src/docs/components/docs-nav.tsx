@@ -1,6 +1,6 @@
+import { Menu, X } from "@nitric/suga-icons";
 import { Link, useLocation } from "@tanstack/react-router";
 import { cn } from "cn";
-import { MenuIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { accentText } from "@/components/accent";
 import { docGroups } from "@/docs/nav";
@@ -72,7 +72,7 @@ export function DocsMenu() {
 				onClick={() => setOpen((isOpen) => !isOpen)}
 				className="ml-1 grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 			>
-				{open ? <XIcon className="size-5" /> : <MenuIcon className="size-5" />}
+				{open ? <X /> : <Menu />}
 			</button>
 			{open && (
 				<nav

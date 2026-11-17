@@ -1,5 +1,5 @@
+import { Ellipsis } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { Ellipsis } from "lucide-react";
 import type { ReactNode } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/ui/dropdown-menu.tsx";
 import { FLOATING_ON_PHONE, iconButtonClassName } from "@/ui/icon-button.tsx";

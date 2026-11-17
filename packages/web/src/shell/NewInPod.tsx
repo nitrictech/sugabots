@@ -1,7 +1,7 @@
+import { Bot, Hash, Plus } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Bot, Hash, Plus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useStartChat } from "@/lib/chats.ts";
 import { agentChatLink, conversationLink } from "@/lib/links.ts";
@@ -85,7 +85,7 @@ export function NewInPodMenu({ pod, className }: { pod: Pod; className?: string 
 							size="sm"
 							className={cn("data-popup-open:bg-row-selected", className)}
 						>
-							<Plus strokeWidth={2.2} />
+							<Plus />
 						</IconButton>
 					}
 				/>

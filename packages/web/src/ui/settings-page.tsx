@@ -1,6 +1,6 @@
 import { useRender } from "@base-ui/react/use-render";
+import { ChevronLeft, ChevronRight, Plus } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -157,7 +157,7 @@ export function SettingsAddButton({
 			),
 			children: (
 				<>
-					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-5.5" />
+					<Plus aria-hidden className="max-md:size-5" />
 					<span className="max-md:sr-only">{children}</span>
 				</>
 			),
@@ -272,14 +272,7 @@ export function SettingsRow({
 						{sub && <span className="text-pretty text-subtle-foreground text-xs">{sub}</span>}
 					</span>
 					{trailing}
-					{chevron && (
-						<ChevronRight
-							aria-hidden
-							size={14}
-							strokeWidth={2}
-							className="shrink-0 text-subtle-foreground"
-						/>
-					)}
+					{chevron && <ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />}
 				</>
 			),
 		},
@@ -612,7 +605,7 @@ export function SettingsAddRow({ label, onClick }: { label: string; onClick: () 
 export function SettingsAddMark() {
 	return (
 		<SettingsRowIcon>
-			<Plus size={14} strokeWidth={2} />
+			<Plus />
 		</SettingsRowIcon>
 	);
 }
@@ -676,7 +669,7 @@ export function PageBackLink({ label, render }: BackTarget) {
 			className: cn(PANEL_BACK_LINK, BACK_ON_PHONE),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
+					<ChevronLeft aria-hidden className="max-md:size-5" />
 					<span className={cn("min-w-0 truncate", BACK_LABEL_ON_PHONE)}>{label}</span>
 				</>
 			),
@@ -685,9 +678,8 @@ export function PageBackLink({ label, render }: BackTarget) {
 }
 
 /**
- * The bar across the top of a page on a narrow screen, with its Back in the
- * larger size a tablet's is, and on a phone the round Back every page there
- * has. `className` hides it where the page is wide enough for its own:
+ * The bar across the top of a page on a narrow screen, with its Back, and on a
+ * phone the round Back every page there has. `className` hides it where the page is wide enough for its own:
  * `md:hidden`.
  */
 export function CompactBackBar({ label, render, className }: BackTarget & { className: string }) {
@@ -701,7 +693,7 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 			),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-5.5" />
+					<ChevronLeft aria-hidden className="max-md:size-5" />
 					<span className={BACK_LABEL_ON_PHONE}>{label}</span>
 				</>
 			),

@@ -1,5 +1,5 @@
+import { ChevronLeft, X } from "@nitric/suga-icons";
 import { cn } from "cn";
-import { ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BACK_BUTTON, BackChevron, useLeave } from "@/ui/back-button.tsx";
@@ -34,7 +34,7 @@ export function StageBack({ parent }: { parent: StageParent }) {
 			onClick={parent.onBack}
 			className={cn("-ml-1.5 text-muted-foreground hover:text-foreground", FLOATING_ON_PHONE)}
 		>
-			<ChevronLeft size={18} strokeWidth={2} />
+			<ChevronLeft />
 		</IconButton>
 	);
 }
@@ -102,7 +102,7 @@ export function Stage({
 				</div>
 				{actions}
 				<IconButton label="Close" variant="bar" onClick={() => onClose()} className="max-md:hidden">
-					<X size={16} strokeWidth={1.75} />
+					<X />
 				</IconButton>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-tab-bar-offset-3">
@@ -119,7 +119,7 @@ export function StageMark({ children }: { children: ReactNode }) {
 	return (
 		<span
 			aria-hidden
-			className="grid size-7 shrink-0 place-items-center rounded-sm bg-chip text-muted-foreground [&_svg]:size-3.75"
+			className="grid size-7 shrink-0 place-items-center rounded-sm bg-chip text-muted-foreground [&_svg]:size-4"
 		>
 			{children}
 		</span>

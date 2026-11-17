@@ -1,3 +1,4 @@
+import { ChevronRight, Plus } from "@nitric/suga-icons";
 import type { Pod } from "@sugabots/contracts";
 import {
 	type HistoryState,
@@ -8,7 +9,6 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Plus } from "lucide-react";
 import {
 	cloneElement,
 	Fragment,
@@ -366,8 +366,6 @@ function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
 				<span className="min-w-0 flex-1 truncate">{pod.name}</span>
 				<span aria-hidden className={TRAILING_SLOT}>
 					<ChevronRight
-						size={12}
-						strokeWidth={2}
 						className={cn("text-subtle-foreground transition-transform", open && "rotate-90")}
 					/>
 				</span>
@@ -465,7 +463,7 @@ function NewPodButton() {
 						"focus-ring h-5.5 rounded-xs text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground",
 					)}
 				>
-					<Plus size={13} strokeWidth={2} />
+					<Plus />
 				</button>
 			</Tooltip>
 			<Dialog open={creating} onOpenChange={setCreating}>
@@ -534,7 +532,7 @@ export function SettingsListGroups({
 							Profile and notifications
 						</span>
 					</span>
-					<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
+					<ChevronRight aria-hidden className="shrink-0 text-subtle-foreground" />
 				</Link>
 			)}
 			<SettingsGroup label="Workspace" headingLevel={2}>

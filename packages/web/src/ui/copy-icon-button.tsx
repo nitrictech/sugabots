@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "@nitric/suga-icons";
 import { IconButton, type IconButtonProps } from "@/ui/icon-button.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
 

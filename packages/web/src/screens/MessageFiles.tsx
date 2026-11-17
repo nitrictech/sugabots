@@ -1,13 +1,13 @@
-import type { FilePart } from "@sugabots/contracts";
-import { cn } from "cn";
 import {
 	ChevronLeft,
 	ChevronRight,
 	Download,
-	FileIcon,
+	File,
 	FileSpreadsheet,
 	FileText,
-} from "lucide-react";
+} from "@nitric/suga-icons";
+import type { FilePart } from "@sugabots/contracts";
+import { cn } from "cn";
 import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
@@ -117,7 +117,7 @@ function ImageTile({
 		"flex size-full items-center justify-center overflow-hidden rounded-lg border border-border bg-tile";
 	const standIn = (
 		<span className="flex min-w-0 flex-col items-center gap-1 px-2 text-muted-foreground">
-			<FileIcon aria-hidden size={18} />
+			<File aria-hidden />
 			<MiddleTruncated text={file.name} className="max-w-full text-2xs" />
 		</span>
 	);
@@ -310,7 +310,7 @@ function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
 }
 
 function FileLookIcon({ look }: { look: FileLook }): ReactNode {
-	if (look === "pdf") return <FileText aria-hidden size={16} />;
-	if (look === "sheet") return <FileSpreadsheet aria-hidden size={16} />;
-	return <FileIcon aria-hidden size={16} />;
+	if (look === "pdf") return <FileText aria-hidden />;
+	if (look === "sheet") return <FileSpreadsheet aria-hidden />;
+	return <File aria-hidden />;
 }

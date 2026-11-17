@@ -1,6 +1,6 @@
+import { ChevronRight, Wrench12 } from "@nitric/suga-icons";
 import type { MessagePart, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronRight, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { BUILT_IN_HANDLE, splitToolKey } from "@/lib/tool-names.ts";
@@ -54,8 +54,6 @@ export function ToolLine({
 				<span className="min-w-0 truncate">{toolLineText(calls, looks)}</span>
 				<ChevronRight
 					aria-hidden
-					size={10}
-					strokeWidth={3}
 					className={cn(
 						"shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
 						open && "rotate-90",
@@ -126,7 +124,7 @@ function ToolCallRow({
 						aria-hidden
 						className="grid size-4 shrink-0 place-items-center rounded-xs bg-border-strong text-soft-foreground"
 					>
-						<Wrench size={10} strokeWidth={2.4} />
+						<Wrench12 />
 					</span>
 				) : (
 					<ConnectionMark presetId={look?.presetId} name={appOf(call, look)} size="xs" />
@@ -166,8 +164,6 @@ function ToolCallRow({
 					)}
 					<ChevronRight
 						aria-hidden
-						size={10}
-						strokeWidth={3}
 						className={cn(
 							"text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
 							open && "rotate-90",

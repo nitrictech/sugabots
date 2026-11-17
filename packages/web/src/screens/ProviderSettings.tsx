@@ -1,3 +1,16 @@
+import {
+	Brain,
+	ChevronDown,
+	Eye,
+	Grid2x2,
+	type IconComponent,
+	Image,
+	Mic,
+	Pencil,
+	Refresh,
+	Search,
+	Wrench,
+} from "@nitric/suga-icons";
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Agent,
@@ -18,19 +31,6 @@ import {
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
-import {
-	Brain,
-	ChevronDown,
-	Eye,
-	Grid2X2,
-	Image,
-	type LucideIcon,
-	Mic,
-	Pencil,
-	RefreshCw,
-	Search,
-	Wrench,
-} from "lucide-react";
 import {
 	type ComponentProps,
 	type FormEvent,
@@ -569,7 +569,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 						disabled={actions.test.isPending}
 						onClick={() => actions.test.mutate({ providerId: provider.id })}
 					>
-						{actions.test.isPending && <RefreshCw className="animate-spin" />}
+						{actions.test.isPending && <Refresh className="animate-spin" />}
 						Test connection
 					</Button>
 					{!actions.test.isPending && (
@@ -846,7 +846,7 @@ function MoveToMenu({
 				className="focus-ring flex h-8 min-w-0 max-w-48 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
 			>
 				<span className="truncate">{name}</span>
-				<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+				<ChevronDown aria-hidden className="shrink-0 text-muted-foreground" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="max-h-80 min-w-48">
 				<DropdownMenuRadioGroup
@@ -1168,13 +1168,13 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 	);
 }
 
-const capabilityIcons: Record<ProviderModelCapability, LucideIcon> = {
+const capabilityIcons: Record<ProviderModelCapability, IconComponent> = {
 	tools: Wrench,
 	vision: Eye,
 	images: Image,
 	audio: Mic,
 	reasoning: Brain,
-	embeddings: Grid2X2,
+	embeddings: Grid2x2,
 };
 
 /** What a model can do, as small icons after its line; a capability switched off is left out. */
@@ -1188,12 +1188,7 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 					const Icon = capabilityIcons[entry.key];
 					return (
 						<Tooltip key={entry.key} label={entry.name}>
-							<Icon
-								role="img"
-								aria-label={entry.name}
-								className="size-3.25 shrink-0"
-								strokeWidth={2}
-							/>
+							<Icon role="img" aria-hidden={false} aria-label={entry.name} className="shrink-0" />
 						</Tooltip>
 					);
 				})}
@@ -1232,7 +1227,7 @@ function ModelSearch({
 }) {
 	return (
 		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+			<Search aria-hidden className="shrink-0 text-subtle-foreground" />
 			<input
 				type="search"
 				value={value}

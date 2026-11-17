@@ -1,5 +1,3 @@
-import type { NotificationLevel, NotificationSettings } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
 import {
 	AtSign,
 	Bell,
@@ -8,9 +6,11 @@ import {
 	ChevronDown,
 	Clock,
 	Ellipsis,
-	type LucideIcon,
+	type IconComponent,
 	Settings,
-} from "lucide-react";
+} from "@nitric/suga-icons";
+import type { NotificationLevel, NotificationSettings } from "@sugabots/contracts";
+import { Link } from "@tanstack/react-router";
 import type { ReactElement } from "react";
 import { NOTIFICATION_LEVEL_LABELS } from "@/lib/notification-choices.ts";
 import {
@@ -146,9 +146,8 @@ export function MutedMark({
 	return (
 		<BellOff
 			role="img"
+			aria-hidden={false}
 			aria-label={mutedUntil ? `Muted until ${formatUntil(mutedUntil)}` : "Muted"}
-			size={13}
-			strokeWidth={1.75}
 			className="shrink-0 text-subtle-foreground"
 		/>
 	);
@@ -172,7 +171,7 @@ export function NotificationLevelPicker({
 				className="focus-ring flex shrink-0 items-center gap-1 rounded-md text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				{chosen ? NOTIFICATION_LEVEL_LABELS[chosen] : "Default"}
-				<ChevronDown aria-hidden size={14} strokeWidth={2} />
+				<ChevronDown aria-hidden />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-56">
 				<LevelChoices settings={settings} place={place} />
@@ -184,7 +183,7 @@ export function NotificationLevelPicker({
 /** The choice that follows the level above, as against choosing one for this place. */
 const FOLLOW = "follow";
 
-const LEVEL_ICONS: Record<NotificationLevel, LucideIcon> = {
+const LEVEL_ICONS: Record<NotificationLevel, IconComponent> = {
 	all: BellRing,
 	mentions: AtSign,
 	nothing: BellOff,
