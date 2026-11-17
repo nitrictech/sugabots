@@ -2066,6 +2066,29 @@ describe("workspace settings", () => {
 		});
 	});
 
+	it("opens another workspace once you leave, asking nothing more of the one you left", async () => {
+		const other = { ...workspace, id: "0199a3a0-0000-7000-8000-0000000000f9", slug: "nitric" };
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		client.api.workspaces.leave.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([other]));
+			client.api.pods.list.mockClear();
+			client.api.workspaceAccess.mockClear();
+			return Effect.void;
+		});
+		const router = mount(samPage);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Leave workspace" }));
+		await screen.findByRole("heading", { name: "Leave this workspace?" });
+		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		const askedOfTheLeftWorkspace = [
+			...client.api.pods.list.mock.calls,
+			...client.api.workspaceAccess.mock.calls,
+		].filter(([request]) => request.params.workspace === workspace.id);
+		expect(askedOfTheLeftWorkspace).toEqual([]);
+	});
+
 	it("lists an invitation that has not been accepted, and can withdraw it", async () => {
 		mount("/suga/settings/members");
 
