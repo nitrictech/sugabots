@@ -1,5 +1,6 @@
 export * as Authentication from "./authentication.ts";
 
+import { isIP } from "node:net";
 import {
 	httpUrlSchema,
 	type SessionUser,
@@ -83,6 +84,7 @@ export const make = Effect.gen(function* () {
 	const secret = yield* signingSecret;
 	const accounts = yield* Accounts.Service;
 	const sender = yield* Email.transactionalSender;
+	const proxies = yield* trustedProxies;
 	const pool = yield* Effect.acquireRelease(
 		Effect.map(
 			Config.Redacted("DATABASE_URL"),
@@ -105,9 +107,15 @@ export const make = Effect.gen(function* () {
 			schema: { user, session, account, verification },
 		}),
 
-		// Postgres mints the id of every row better-auth inserts, as it does
-		// every other table's, so better-auth leaves the column alone.
-		advanced: { database: { generateId: false } },
+		advanced: {
+			// Postgres mints the id of every row better-auth inserts, as it does
+			// every other table's, so better-auth leaves the column alone.
+			database: { generateId: false },
+			// Without trusted proxies better-auth reads a client's address only from
+			// a single-address X-Forwarded-For, and rate limits every other request
+			// in one counter that all clients share.
+			ipAddress: { trustedProxies: [...proxies] },
+		},
 
 		user: {
 			additionalFields: {
@@ -284,6 +292,43 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"your-secret",
 	"your-secret-key",
 ]);
+
+/**
+ * `TRUSTED_PROXIES`: the addresses or CIDR ranges of the proxies in front of
+ * the server that append to X-Forwarded-For. better-auth ignores an entry it
+ * can't parse with only a warning, which leaves those proxies' clients sharing
+ * one rate-limit counter, so a bad entry stops the server instead.
+ */
+const trustedProxies = Effect.gen(function* () {
+	const entries = yield* Config.Array(Schema.String, "TRUSTED_PROXIES").pipe(
+		Config.withDefault([]),
+	);
+	const proxies = entries.map((entry) => entry.trim()).filter((entry) => entry !== "");
+	const invalid = proxies.filter((entry) => !isAddressOrRange(entry));
+	if (invalid.length > 0) {
+		return yield* new InvalidConfig({
+			message: `TRUSTED_PROXIES entries must be IP addresses or CIDR ranges: ${invalid.join(", ")}`,
+		});
+	}
+	return proxies;
+});
+
+/**
+ * Whether `entry` is an IP address, such as `10.0.0.1`, or a CIDR range, such
+ * as `10.0.0.0/8`. Zone IDs (`fe80::1%eth0`) and IPv4-mapped IPv6 (`::ffff:…`)
+ * are refused: better-auth drops the first and reads the second's prefix as
+ * IPv4, so neither would mean what was written.
+ */
+function isAddressOrRange(entry: string): boolean {
+	if (entry.includes("%") || entry.toLowerCase().startsWith("::ffff:")) return false;
+	const [address = "", prefix, ...rest] = entry.split("/");
+	if (rest.length > 0) return false;
+	const version = isIP(address);
+	if (version === 0) return false;
+	if (prefix === undefined) return true;
+	const maxPrefix = version === 4 ? 32 : 128;
+	return /^\d+$/.test(prefix) && Number(prefix) <= maxPrefix;
+}
 
 /** `BETTER_AUTH_SECRET`, which production refuses when it is short or a placeholder. */
 const signingSecret = Effect.gen(function* () {
