@@ -1,0 +1,23 @@
+{
+	"name": "@sugabots/desktop",
+	"productName": "Sugabots",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"main": "out/main/main.js",
+	"scripts": {
+		"start": "electron-vite dev --watch",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@fontsource-variable/rubik": "^5.3.0",
+		"@sugabots/avatars": "workspace:*",
+		"@sugabots/contracts": "workspace:*",
+		"@types/node": "^24.19.2",
+		"effect": "catalog:",
+		"electron": "45.3.4",
+		"electron-vite": "6.0.0",
+		"vite": "catalog:"
+	}
+}
