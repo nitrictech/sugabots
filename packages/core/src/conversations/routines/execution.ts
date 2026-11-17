@@ -3,13 +3,17 @@ import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { routineExecution, thread, threadRead } from "../../database/schema.ts";
+import { message, routineExecution, thread, threadRead } from "../../database/schema.ts";
 import { lineageOf } from "../threads/tree.ts";
 
-/** A run as the API describes it, listed in the conversation `conversationId`. */
+/**
+ * A run as the API describes it, listed in the conversation `conversationId`,
+ * which `posted` a result or not (see `resultPosted`).
+ */
 export function toRoutineExecution(
 	row: schema.RoutineExecutionRow,
 	conversationId: string,
+	posted: boolean,
 ): RoutineExecution {
 	return {
 		id: row.id,
@@ -23,11 +27,19 @@ export function toRoutineExecution(
 		trigger: row.trigger,
 		state: row.state,
 		error: row.error,
+		posted,
 		acceptedAt: row.acceptedAt.toISOString(),
 		startedAt: row.startedAt?.toISOString() ?? null,
 		finishedAt: row.finishedAt?.toISOString() ?? null,
 	};
 }
+
+/**
+ * Whether the run `executionId` posted a result, as a SQL condition. Every
+ * result is posted in the routine's thread, whatever else it goes to.
+ */
+export const resultPosted = (executionId: SQLWrapper) =>
+	sql<boolean>`exists (select 1 from ${message} where ${message.routineExecutionId} = ${executionId})`;
 
 /**
  * The routine execution a thread belongs to, found through its ancestors, as a

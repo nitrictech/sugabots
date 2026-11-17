@@ -139,6 +139,7 @@ function routineRun(failed: boolean): ThreadDetails {
 			},
 			state: failed ? "failed" : "completed",
 			error: failed ? "HubSpot did not answer within 30 seconds." : null,
+			posted: !failed,
 			acceptedAt: "2026-09-18T06:00:00.000Z",
 			startedAt: "2026-09-18T06:00:01.000Z",
 			finishedAt: "2026-09-18T06:02:00.000Z",

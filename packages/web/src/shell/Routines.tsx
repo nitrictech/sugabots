@@ -213,7 +213,7 @@ export function RoutineRow({
 		? row.routine.pausedAfterFailures
 			? "pausedAfterFailures"
 			: "paused"
-		: lastRun && outcomeOf(lastRun.state);
+		: lastRun && outcomeOf(lastRun.state, lastRun.posted);
 	const schedule = routine && scheduleLabel(routine);
 	return useRender({
 		render: render ?? <Link {...routineThreadLink(pod, row.routine.id)} />,

@@ -1,4 +1,5 @@
 import {
+	type ActivityItem,
 	type Agent,
 	type ChatMessageItem,
 	type FilePart,
@@ -278,8 +279,9 @@ export function useDirectMessage(conversationId: string): {
 /** How much in the workspace is waiting for the person. */
 export type AttentionCounts = {
 	/**
-	 * Messages written to the person that they have not read: those that
-	 * mention them, and every message in their direct messages.
+	 * Messages written to the person that they have not read: those and
+	 * routine results that mention them, and every message in their direct
+	 * messages.
 	 */
 	unreadForYou: number;
 	/** Everything in Inbox the person has not read: mentions, messages, runs and collaborations. */
@@ -299,7 +301,7 @@ export function useAttentionCounts(): AttentionCounts {
 	const { data: activity } = useActivityFeed();
 	const { data: directMessages } = useDirectMessages();
 	const mentionsInPods =
-		activity?.items.filter((item) => item.kind === "mention" && item.unread && item.podId !== null)
+		activity?.items.filter((item) => item.unread && item.podId !== null && mentionsYou(item))
 			.length ?? 0;
 	const unreadInDirectMessages =
 		directMessages?.items.reduce((sum, item) => sum + item.unreadMessages, 0) ?? 0;
@@ -308,6 +310,11 @@ export function useAttentionCounts(): AttentionCounts {
 		unreadInInbox: activity?.items.filter((item) => item.unread).length ?? 0,
 		waitingApprovals: approvals?.waiting.length ?? 0,
 	};
+}
+
+/** Whether an Inbox item names the person: a mention, or a routine run whose result asks for them. */
+function mentionsYou(item: ActivityItem): boolean {
+	return item.kind === "mention" || (item.kind === "routine" && item.mentionsYou);
 }
 
 /**
