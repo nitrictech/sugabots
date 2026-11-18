@@ -1,30 +1,14 @@
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 import { cn } from "cn";
-import type { Ref, UIEventHandler } from "react";
-
-type ScrollAreaProps = ScrollAreaPrimitive.Root.Props & {
-	viewportRef?: Ref<HTMLDivElement>;
-	onViewportScroll?: UIEventHandler<HTMLDivElement>;
-};
 
 /**
  * A scrolling region with a thin overlay scrollbar, so the sidebar and the
  * panels do not gain and lose a gutter as their content changes.
  */
-export function ScrollArea({
-	className,
-	children,
-	viewportRef,
-	onViewportScroll,
-	...props
-}: ScrollAreaProps) {
+export function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.Props) {
 	return (
 		<ScrollAreaPrimitive.Root className={cn("relative overflow-hidden", className)} {...props}>
-			<ScrollAreaPrimitive.Viewport
-				ref={viewportRef}
-				onScroll={onViewportScroll}
-				className="focus-ring size-full"
-			>
+			<ScrollAreaPrimitive.Viewport className="focus-ring size-full">
 				{children}
 			</ScrollAreaPrimitive.Viewport>
 			<Scrollbar />

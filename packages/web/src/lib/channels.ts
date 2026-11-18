@@ -33,7 +33,7 @@ export function useChannels() {
 }
 
 /** The channels of one workspace, which need not be the one being looked at. */
-export function channelsQuery(workspaceId: string | undefined) {
+function channelsQuery(workspaceId: string | undefined) {
 	return queryOptions({
 		queryKey: ["channels", workspaceId],
 		queryFn: workspaceId

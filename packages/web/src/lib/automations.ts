@@ -1,19 +1,33 @@
 import type {
+	Automation,
 	AutomationCurrentSecret,
 	AutomationTriggerInput,
 	AutomationUpdate,
 	AutomationWriteResult,
 	NewAutomation,
+	Run,
 } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQueries,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
 
 /** Every automation query starts with this, so one change refreshes the workspace list and each bot's. */
 const AUTOMATIONS_KEY = "automations";
 
-export function useWorkspaceAutomations(workspaceId: string | undefined) {
-	return useQuery({
+/**
+ * The workspace's automations in full, by id, as an automation's row reads
+ * when it runs; empty until they are loaded.
+ */
+export function useWorkspaceAutomationsById(): ReadonlyMap<string, Automation> {
+	const workspaceId = useWorkspace().workspace?.id;
+	const { data } = useQuery({
 		queryKey: [AUTOMATIONS_KEY, "workspace", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
@@ -23,10 +37,11 @@ export function useWorkspaceAutomations(workspaceId: string | undefined) {
 					)
 			: skipToken,
 	});
+	return new Map(data?.items.map((item) => [item.automation.id, item.automation]));
 }
 
 /** How many of an automation's latest runs its page shows. */
-export const RECENT_RUN_COUNT = 5;
+const RECENT_RUN_COUNT = 5;
 
 /** How often the runs are read again while one has not ended, so its status stays current. */
 const RUN_POLL_MS = 3_000;
@@ -61,6 +76,36 @@ export function useRecentRuns({
 				? RUN_POLL_MS
 				: false,
 	});
+}
+
+/** How many of each automation's latest runs a bot's sidebar lists among its tasks. */
+const SIDEBAR_RUN_COUNT = 10;
+
+/**
+ * The latest runs of a bot's automations, newest first, each automation's read
+ * again while one of its runs is queued or running.
+ */
+export function useBotRuns(botId: string, automationIds: readonly string[]): Run[] {
+	const results = useQueries({
+		queries: automationIds.map((automationId) => ({
+			queryKey: [AUTOMATIONS_KEY, "runs", automationId, "sidebar"],
+			queryFn: ({ signal }: { signal: AbortSignal }) =>
+				Effect.runPromise(
+					client.api.automations.runs({
+						params: { botId, automationId },
+						query: { limit: SIDEBAR_RUN_COUNT },
+					}),
+					{ signal },
+				),
+			refetchInterval: (query: { state: { data?: { items: readonly Run[] } } }) =>
+				query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
+					? RUN_POLL_MS
+					: false,
+		})),
+	});
+	return results
+		.flatMap((result) => result.data?.items ?? [])
+		.toSorted((a, b) => Date.parse(b.acceptedAt) - Date.parse(a.acceptedAt));
 }
 
 /** The bot `botId`'s automations in full; nothing is asked while it is undefined. */

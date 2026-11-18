@@ -9,16 +9,17 @@ import {
 	DESCRIPTION_MAX_LENGTH,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
+import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
-import { cn } from "cn";
-import { ArrowUpRight, Pencil, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Pencil, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import { useDeleteBot, useModelName, useUpdateBot } from "@/lib/bots.ts";
+import { useDeleteBot, useModels, useUpdateBot } from "@/lib/bots.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsPageLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { modelLogoOf } from "@/lib/model-logo.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -33,7 +34,13 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 import {
-	PageBackLink,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
+import {
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -42,69 +49,24 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { BotAutomations } from "./AutomationEditing.tsx";
-import { BotModelPicker } from "./BotModelPicker.tsx";
 
 /*
  * One bot, as its contact card: its face and colour first, then what it is,
- * what it thinks with and what it is told, what it can reach, and what it does
- * unprompted. Model and instructions each open on a page of their own in the
- * same place, so the card never rearranges under you.
+ * what it thinks with and what it is told, all open on the page, what it can
+ * reach, and what it does unprompted.
  *
  * What can be changed comes from the bot's resolved permissions, and a control
- * nobody may use is not drawn. Each field saves on its own; instructions are
- * prose somebody may be part-way through, so they wait for Save.
+ * nobody may use is not drawn. Each field saves on its own, as you leave it.
  */
 export function BotSettingsPage({ bot }: { bot: Bot }) {
-	const [page, setPage] = useState<"card" | "model" | "instructions">("card");
 	const update = useUpdateBot(bot.id);
 	const failure = update.error ? failureMessage(update.error) : undefined;
-	const back = (
-		<PageBackLink
-			label={bot.name}
-			render={<button type="button" onClick={() => setPage("card")} />}
-		/>
-	);
-
-	if (page === "model" && !bot.assistant) {
-		return (
-			<SettingsPage
-				back={back}
-				backOnWide
-				title="Model"
-				description={`What ${bot.name} thinks with.`}
-			>
-				{failure && <Alert>{failure}</Alert>}
-				<BotModelPicker
-					botName={bot.name}
-					model={bot.model}
-					canChoose={bot.permissions.update && !bot.assistant}
-					onChoose={(model) => {
-						void update.mutateAsync({ model }).catch(() => {});
-					}}
-				/>
-			</SettingsPage>
-		);
-	}
-	if (page === "instructions" && !bot.assistant) {
-		return (
-			<Instructions
-				bot={bot}
-				editable={bot.permissions.update && !bot.assistant}
-				back={back}
-				save={update.mutateAsync}
-				savePending={update.isPending}
-				failure={failure}
-			/>
-		);
-	}
 	return (
 		<ContactCard
 			bot={bot}
 			save={update.mutateAsync}
 			savePending={update.isPending}
 			failure={failure}
-			onOpenModel={() => setPage("model")}
-			onOpenInstructions={() => setPage("instructions")}
 		/>
 	);
 }
@@ -116,20 +78,15 @@ function ContactCard({
 	save,
 	savePending,
 	failure,
-	onOpenModel,
-	onOpenInstructions,
 }: {
 	bot: Bot;
 	save: Save;
 	savePending: boolean;
 	failure: string | undefined;
-	onOpenModel: () => void;
-	onOpenInstructions: () => void;
 }) {
 	const may = bot.permissions;
 	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape) and connections.
 	const fixed = bot.assistant;
-	const modelName = useModelName(bot.model);
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteBot();
@@ -184,29 +141,25 @@ function ContactCard({
 							value={bot.description ?? ""}
 							placeholder="One line on what it's for"
 							maxLength={DESCRIPTION_MAX_LENGTH}
-							wide
 							editable={may.update}
 							savePending={savePending}
 							onCommit={(description) => save({ description })}
 						/>
 						<VisibilityRow bot={bot} editable={may.update} savePending={savePending} save={save} />
-						<SettingsRow
-							label="Model"
-							sub={`From the models set up for ${workspaceName}`}
-							trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
-							chevron
-							onClick={onOpenModel}
-						/>
-						<SettingsRow
-							label="Instructions"
-							sub="How it should behave and what to focus on"
-							chevron
-							onClick={onOpenInstructions}
+						<ModelRow
+							model={bot.model}
+							canChoose={may.update}
+							onChoose={(model) => {
+								void save({ model }).catch(() => {});
+							}}
 						/>
 						<AddedByRow bot={bot} />
 					</>
 				)}
 			</SettingsGroup>
+			{!fixed && (
+				<Instructions bot={bot} editable={may.update} save={save} savePending={savePending} />
+			)}
 			{!fixed && (
 				<BuiltInTools bot={bot} workspaceName={workspaceName} canChange={may.update} save={save} />
 			)}
@@ -439,10 +392,10 @@ function AddedByRow({ bot }: { bot: Bot }) {
 }
 
 /**
- * A line of the bot's profile in a field at the row's end, which saves trimmed
- * when you leave it or press Enter. Escape, or leaving it unchanged, or blank
- * when it is `required`, puts it back; so does a save that fails. `wide`
- * gives the field the rest of the row, for a line longer than a name.
+ * A line of the bot's profile in a field taking the rest of its row, after a
+ * label as wide as every other's, so the fields line up. It saves trimmed when
+ * you leave it or press Enter. Escape, or leaving it unchanged, or blank when
+ * it is `required`, puts it back; so does a save that fails.
  */
 function ProfileField({
 	label,
@@ -450,7 +403,6 @@ function ProfileField({
 	placeholder,
 	maxLength,
 	required = false,
-	wide = false,
 	editable,
 	savePending,
 	onCommit,
@@ -460,7 +412,6 @@ function ProfileField({
 	placeholder?: string;
 	maxLength: number;
 	required?: boolean;
-	wide?: boolean;
 	editable: boolean;
 	savePending: boolean;
 	onCommit: (value: string) => Promise<unknown>;
@@ -480,31 +431,28 @@ function ProfileField({
 
 	return (
 		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label
-				htmlFor={id}
-				className={cn("text-sm text-foreground", wide ? "w-24 shrink-0" : "flex-1")}
-			>
+			<label htmlFor={id} className="w-24 shrink-0 text-sm text-foreground">
 				{label}
 			</label>
 			{editable ? (
-				<input
-					id={id}
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					onBlur={commit}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") event.currentTarget.blur();
-						if (event.key === "Escape") setDraft(value);
-					}}
-					placeholder={placeholder}
-					maxLength={maxLength}
-					className={cn(
-						"h-8 min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring",
-						wide ? "flex-1" : "w-60 max-w-1/2",
-					)}
-				/>
+				// In a box of its own, so anything put beside the field, as some browser extensions do, can't take room from the row.
+				<div className="min-w-0 flex-1">
+					<input
+						id={id}
+						value={draft}
+						onChange={(event) => setDraft(event.target.value)}
+						onBlur={commit}
+						onKeyDown={(event) => {
+							if (event.key === "Enter") event.currentTarget.blur();
+							if (event.key === "Escape") setDraft(value);
+						}}
+						placeholder={placeholder}
+						maxLength={maxLength}
+						className="h-8 w-full min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring"
+					/>
+				</div>
 			) : (
-				<span id={id} className={cn("min-w-0 text-xs text-muted-foreground", wide && "flex-1")}>
+				<span id={id} className="min-w-0 flex-1 text-xs text-muted-foreground">
 					{value || "None yet"}
 				</span>
 			)}
@@ -514,65 +462,128 @@ function ProfileField({
 
 const countFormat = new Intl.NumberFormat("en");
 
+/** How the bot should work, written straight into on its card and saved when you leave the box. */
 function Instructions({
 	bot,
 	editable,
-	back,
 	save,
 	savePending,
-	failure,
 }: {
 	bot: Bot;
 	editable: boolean;
-	back: React.ReactNode;
 	save: Save;
 	savePending: boolean;
-	failure: string | undefined;
 }) {
 	const [draft, setDraft] = useState(bot.prompt);
 	const id = useId();
-	const dirty = draft !== bot.prompt;
+
+	// Saved when you leave the box, as the profile's fields are; a failed save puts them back.
+	function commit() {
+		if (savePending || draft === bot.prompt) return;
+		void save({ prompt: draft }).catch(() => setDraft(bot.prompt));
+	}
 
 	return (
-		<SettingsPage
-			back={back}
-			backOnWide
-			title="Instructions"
-			description={`How ${bot.name} should work. It follows these in every chat.`}
+		<SettingsGroup
+			label="Instructions"
+			description={`How ${bot.name} should work. It follows these in every task.`}
+			className="p-1"
+			note={
+				editable
+					? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${countFormat.format(draft.length)} of ${countFormat.format(PROMPT_MAX_LENGTH)} characters.${savePending ? " Saving…" : ""}`
+					: undefined
+			}
 		>
-			{failure && <Alert>{failure}</Alert>}
-			<SettingsGroup
-				className="p-1"
-				note={
-					editable
-						? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${countFormat.format(draft.length)} of ${countFormat.format(PROMPT_MAX_LENGTH)} characters.`
-						: undefined
-				}
-			>
-				<label htmlFor={id} className="sr-only">
-					Instructions
-				</label>
-				<textarea
-					id={id}
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					readOnly={!editable}
-					maxLength={PROMPT_MAX_LENGTH}
-					placeholder="No instructions yet."
-					className="block min-h-95 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
-				/>
-			</SettingsGroup>
-			{editable && (
-				<div className="flex justify-end">
-					<Button
-						disabled={!dirty || savePending}
-						onClick={() => void save({ prompt: draft }).catch(() => {})}
+			<label htmlFor={id} className="sr-only">
+				Instructions
+			</label>
+			<textarea
+				id={id}
+				value={draft}
+				onChange={(event) => setDraft(event.target.value)}
+				onBlur={commit}
+				readOnly={!editable}
+				maxLength={PROMPT_MAX_LENGTH}
+				placeholder="No instructions yet."
+				className="block min-h-75 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+			/>
+		</SettingsGroup>
+	);
+}
+
+/**
+ * The model the bot thinks with, as a row of its profile: the one in use, by
+ * its maker's logo and name, which opens the models switched on for the
+ * workspace to choose from. A model chosen before it was switched off is still
+ * the one in use, and says so under it.
+ */
+function ModelRow({
+	model,
+	canChoose,
+	onChoose,
+}: {
+	model: string | null;
+	canChoose: boolean;
+	onChoose: (model: string) => void;
+}) {
+	const { data } = useModels();
+	const offered = data?.models ?? [];
+	const current = offered.find((candidate) => candidate.modelId === model);
+	const switchedOff = model !== null && data !== undefined && current === undefined;
+	const logo = modelLogoOf(model, current?.providerPreset ?? null);
+	return (
+		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
+			<span className="w-24 shrink-0 text-sm text-foreground">Model</span>
+			<div className="flex min-w-0 flex-1 flex-col gap-1">
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						disabled={!canChoose}
+						aria-label={`Model: ${current?.displayName ?? model ?? "None chosen"}`}
+						className="focus-ring flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-left text-xs text-foreground disabled:cursor-default"
 					>
-						{savePending ? "Saving…" : "Save"}
-					</Button>
-				</div>
-			)}
-		</SettingsPage>
+						{logo && <ProviderLogo preset={logo} className="size-3.5" />}
+						<span className="min-w-0 flex-1 truncate">
+							{current?.displayName ?? model ?? "None chosen"}
+						</span>
+						{canChoose && (
+							<ChevronDown aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
+						)}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" className="max-h-80 min-w-64 overflow-y-auto">
+						{offered.length === 0 ? (
+							<p className="m-0 px-2.5 py-2 text-muted-foreground text-xs">
+								No models are switched on yet.
+							</p>
+						) : (
+							<DropdownMenuRadioGroup
+								value={model ?? ""}
+								onValueChange={(value) => onChoose(value)}
+							>
+								{offered.map((candidate) => {
+									const mark = modelLogoOf(candidate.modelId, candidate.providerPreset);
+									return (
+										<DropdownMenuRadioItem key={candidate.modelId} value={candidate.modelId}>
+											{mark && <ProviderLogo preset={mark} className="size-3.5" />}
+											<span className="min-w-0 flex-1 truncate">
+												{candidate.displayName ?? candidate.modelId}
+											</span>
+											<span className="shrink-0 text-subtle-foreground text-xs">
+												{candidate.providerName}
+											</span>
+										</DropdownMenuRadioItem>
+									);
+								})}
+							</DropdownMenuRadioGroup>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+				{switchedOff && (
+					<p className="m-0 text-warning text-xs">
+						This model is no longer switched on for the workspace.
+					</p>
+				)}
+			</div>
+		</div>
 	);
 }
 

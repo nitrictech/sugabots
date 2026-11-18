@@ -17,8 +17,6 @@ import { bot } from "../../database/schema.ts";
  * for, and on its own only for a bot with none.
  */
 
-export type { SystemBotKey };
-
 /** The system bot that keeps conversation summaries and titles up to date. */
 export const SUMMARISE_SYSTEM_BOT: SystemBotKey = "summarise";
 

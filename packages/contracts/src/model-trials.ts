@@ -10,7 +10,7 @@ import { modelIdSchema, systemBotKeySchema } from "./bots.ts";
  */
 
 /** The jobs a model can be tried on: the system bots, by their own keys. */
-export const trialSystemBotSchema = systemBotKeySchema;
+const trialSystemBotSchema = systemBotKeySchema;
 export type TrialSystemBot = typeof trialSystemBotSchema.Type;
 
 export const newModelTrialSchema = Schema.Struct({
@@ -26,7 +26,7 @@ export type NewModelTrial = typeof newModelTrialSchema.Type;
  * pick another one" and a number invites haggling over a model that is wrong
  * one time in three.
  */
-export const trialRatingSchema = Schema.Literals(["excellent", "good", "poor", "terrible"]);
+const trialRatingSchema = Schema.Literals(["excellent", "good", "poor", "terrible"]);
 export type TrialRating = typeof trialRatingSchema.Type;
 
 export const trialCaseResultSchema = Schema.Struct({
@@ -71,4 +71,3 @@ export const modelTrialSchema = Schema.Struct({
 	verdict: Schema.Array(Schema.String),
 	cases: Schema.Array(trialCaseResultSchema),
 });
-export type ModelTrial = typeof modelTrialSchema.Type;

@@ -30,6 +30,15 @@ export function formatDuration(ms: number): string {
 	return `${(ms / 1_000).toFixed(1)}s`;
 }
 
+/** How long a bot worked on a reply: `12s`, `4m 1s`, `1h 2m`. */
+export function formatElapsed(ms: number): string {
+	const seconds = Math.max(Math.round(ms / 1_000), 0);
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 /**
  * What the whole turn took: `32s`. Rounded where a step is not, because the
  * total is there to be read at a glance rather than added up.

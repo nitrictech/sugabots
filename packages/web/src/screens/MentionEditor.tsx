@@ -49,7 +49,7 @@ export interface MentionEditorHandle {
 }
 
 /** A stretch of the box's text, by offsets into it. */
-export interface TextRange {
+interface TextRange {
 	start: number;
 	end: number;
 }

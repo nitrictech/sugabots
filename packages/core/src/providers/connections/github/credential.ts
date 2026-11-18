@@ -7,7 +7,7 @@ const GitHubAppCredential = Schema.Struct({
 	/** Null for an app made without a webhook. */
 	webhookSecret: Schema.NullOr(Schema.String),
 });
-export type GitHubAppCredential = typeof GitHubAppCredential.Type;
+type GitHubAppCredential = typeof GitHubAppCredential.Type;
 
 const GitHubAppCredentialJson = Schema.fromJsonString(GitHubAppCredential);
 

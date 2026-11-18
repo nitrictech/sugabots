@@ -215,7 +215,7 @@ describe("direct messages", () => {
 	it("counts what is unread in the sidebar until it is read", async () => {
 		windowFocused();
 		directMessageAnswers({ unread: 2 });
-		mount(`/suga/bots/${linear.handle}`);
+		mount("/suga/bots");
 		const section = await directMessagesInSidebar();
 		const row = await within(section).findByRole("link", { name: /^Juno(?!,)/ });
 		expect(row.textContent).toContain("2 unread messages");
@@ -243,7 +243,7 @@ describe("direct messages", () => {
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
 		client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
-		mount(`/suga/bots/${linear.handle}`);
+		mount("/suga/bots");
 		const section = await directMessagesInSidebar();
 		await within(section).findByRole("link", { name: "New message" });
 
@@ -268,7 +268,7 @@ describe("direct messages", () => {
 					? Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]))
 					: conversationOf?.(request),
 		);
-		const router = mount(`/suga/bots/${linear.handle}`);
+		const router = mount("/suga/bots");
 		const section = await directMessagesInSidebar();
 		fireEvent.click(within(section).getByRole("link", { name: "New message" }));
 
@@ -547,8 +547,8 @@ describe("direct messages", () => {
 		client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 		mount(`/suga/dm/${withJunoAndTheo.id}`);
 
-		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		expect(await within(sidebar).findByText("2 unread messages for you")).toBeDefined();
+		const tabs = await screen.findByRole("navigation", { name: "Tabs" });
+		expect(await within(tabs).findByText("2 unread messages for you")).toBeDefined();
 	});
 
 	it("marks every direct message with anything unread read from Inbox, past what Inbox lists", async () => {

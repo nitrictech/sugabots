@@ -16,7 +16,7 @@ export interface RequestContext {
 }
 
 /** The parts of a provider's error that a dialect uses to classify it. */
-export interface FailureReport {
+interface FailureReport {
 	/** HTTP status. Undefined when the provider gave none, as with many errors sent mid-stream. */
 	status: number | undefined;
 	/** The error's `code`, or its `type` if it has no code. */
@@ -26,7 +26,7 @@ export interface FailureReport {
 }
 
 /** Failures a dialect can identify from an error when the status code isn't enough. */
-export type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overloaded";
+type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overloaded";
 
 /** Maps a provider's error to a shared failure, or undefined to fall back to the status. */
 export type RecognizeFailure = (report: FailureReport) => RecognizedFailure | undefined;
@@ -40,7 +40,7 @@ export const RequestStage = Schema.Literals(["asking", "answering", "calling-too
 export type RequestStage = typeof RequestStage.Type;
 
 /** Provider and model names and the stage for the failure message, and the dialect's error mapping. */
-export interface FailedRequest extends RequestContext {
+interface FailedRequest extends RequestContext {
 	readonly stage: RequestStage;
 	readonly recognize?: RecognizeFailure;
 }

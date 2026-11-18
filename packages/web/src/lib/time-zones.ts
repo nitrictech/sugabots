@@ -19,7 +19,7 @@ export function timeZoneChoices(now: Date): TimeZoneChoice[] {
 	return named.map((zone) => timeZoneChoice(zone, now));
 }
 
-export function timeZoneChoice(zone: TimeZone, now: Date): TimeZoneChoice {
+function timeZoneChoice(zone: TimeZone, now: Date): TimeZoneChoice {
 	return { zone, place: timeZonePlace(zone), offset: utcOffset(zone, now) };
 }
 
@@ -63,7 +63,7 @@ export function timeZonePlace(zone: string): string {
 }
 
 /** How far `zone` is from UTC at `now`: "UTC+11", "UTC-2:30", or "UTC" itself. */
-export function utcOffset(zone: string, now: Date): string {
+function utcOffset(zone: string, now: Date): string {
 	const offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "shortOffset" })
 		.formatToParts(now)
 		.find((part) => part.type === "timeZoneName")?.value;

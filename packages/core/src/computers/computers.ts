@@ -76,7 +76,7 @@ export interface Provider {
 	readonly destroy: (id: ComputerId) => Effect.Effect<void, Unavailable>;
 }
 
-export interface TemplateBuilds {
+interface TemplateBuilds {
 	/** Starts building the connection's template from `image`, replacing what it was built from before. */
 	readonly build: (image: string) => Effect.Effect<TemplateBuild, Unavailable>;
 	/** How the template stands after `build`, the last one started. */
@@ -243,7 +243,7 @@ export interface Computer {
 }
 
 /** What a computer may connect to, and what is added to its requests on the way. */
-export interface Network {
+interface Network {
 	readonly reach: Reach;
 	/**
 	 * Added to its HTTPS requests by the provider, outside the computer, as far
@@ -326,7 +326,7 @@ export interface CapturedOutput {
 }
 
 /** The start of a file, as {@link Computer.readFile} reads it. */
-export interface FileStart {
+interface FileStart {
 	readonly content: Uint8Array;
 	/** The whole file's size, which is more than `content` when it was cut off. */
 	readonly sizeBytes: number;

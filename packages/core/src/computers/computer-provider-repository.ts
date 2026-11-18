@@ -319,7 +319,7 @@ export function connectionOf(
 }
 
 /** Whether the provider has everything it needs to make a computer. */
-export function isComplete({ settings, apiKeyEncrypted }: Omit<Provider, "enabled">): boolean {
+function isComplete({ settings, apiKeyEncrypted }: Omit<Provider, "enabled">): boolean {
 	if (!apiKeyEncrypted) return false;
 	switch (settings.preset) {
 		case "opensandbox":

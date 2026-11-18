@@ -39,11 +39,7 @@ export function toBot(row: PersonFacingBotRow, viewer: { actor: Actor; pinned?: 
 		visibility: row.visibility,
 		assistant: row.assistantOf !== null,
 		pinned: viewer.pinned ?? false,
-		permissions: botPermissions(viewer.actor, {
-			visibility: row.visibility,
-			createdById: row.createdById,
-			assistantOf: row.assistantOf,
-		}),
+		permissions: botPermissions(viewer.actor, row),
 		createdAt: row.createdAt.toISOString(),
 	};
 }

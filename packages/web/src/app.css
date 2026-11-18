@@ -17,18 +17,18 @@
 	 * Surfaces. The conversation and the sidebar share the ground in dark; light gives
 	 * the sidebar its own grey so the white conversation reads as the working area.
 	 */
-	--background: light-dark(#ffffff, #0a0a0a);
-	--rail: light-dark(#f7f7f8, #000000);
+	--background: light-dark(#ffffff, var(--color-zinc-950));
+	--rail: light-dark(var(--color-zinc-100), var(--color-black));
 	/* The conversation list column, and the grouped rows in settings. */
-	--list: light-dark(#f7f7f8, #0f0f11);
+	--list: light-dark(var(--color-zinc-50), var(--color-zinc-900));
 	/* The column beside a chat: Details, or a collaboration or run. */
-	--aside: light-dark(#ffffff, #0a0a0a);
+	--aside: light-dark(#ffffff, var(--color-zinc-950));
 	/* Behind a page opened beside a chat, such as a file. */
-	--stage: light-dark(#f1f1f3, #0f0f11);
+	--stage: light-dark(var(--color-zinc-100), var(--color-zinc-900));
 	/* A card among the messages, such as an approval request. */
-	--card: light-dark(#f7f7f8, #111113);
+	--card: light-dark(var(--color-zinc-50), var(--color-zinc-900));
 	/* A raised panel: a dialog, the composer's input. */
-	--panel: light-dark(#ffffff, #111113);
+	--panel: light-dark(#ffffff, var(--color-zinc-900));
 	/*
 	 * A settings card: barely lifted off the page in dark, held by its border
 	 * rather than its fill, so a page of them stays calm.
@@ -46,30 +46,30 @@
 	/* A control already filled with `--hover`, such as Deny, under the pointer. */
 	--hover-strong: light-dark(#d4d4d8, #26262a);
 	/* Rows sit on the list column, which is already a step up, so their hover is quieter. */
-	--row-hover: light-dark(#f1f1f3, #151518);
+	--row-hover: light-dark(var(--color-zinc-200), var(--color-zinc-900));
 	/* A message row under the pointer, barely lifted off the chat. */
 	--message-hover: light-dark(#f7f7f8, #111113);
 	/* The open conversation in the list. */
-	--row-selected: light-dark(#e4e4e7, #17171a);
+	--row-selected: light-dark(var(--color-zinc-200), var(--color-zinc-800));
 
-	--foreground: light-dark(#111113, #ededed);
+	--foreground: light-dark(var(--color-zinc-900), var(--color-zinc-100));
 	/* A message's words: as strong as a name in dark, a step softer in light. */
-	--body-foreground: light-dark(#1c1c1f, #ededed);
-	--soft-foreground: light-dark(#3f3f46, #c4c4ca);
-	--muted-foreground: light-dark(#52525b, #a1a1aa);
+	--body-foreground: light-dark(var(--color-zinc-800), var(--color-zinc-200));
+	--soft-foreground: light-dark(var(--color-zinc-700), var(--color-zinc-300));
+	--muted-foreground: light-dark(var(--color-zinc-600), var(--color-zinc-400));
 	/*
 	 * Times, section labels, hints. A shade lighter in dark than the design's
 	 * #6b6b73, and darker in light than its #71717a, so both pass AA on a chip.
 	 */
-	--subtle-foreground: light-dark(#6b6b73, #808089);
+	--subtle-foreground: light-dark(var(--color-zinc-500), var(--color-zinc-500));
 	--disabled-foreground: light-dark(#a1a1aa, #52525b);
 	/* A text action, such as Cancel or Create in a dialog header. */
 	--link: light-dark(#111113, #ededed);
 
 	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
-	--border-subtle: light-dark(#f1f1f3, #1c1c1f);
-	--border: light-dark(#e4e4e7, #1c1c1f);
-	--border-strong: light-dark(#d4d4d8, #26262a);
+	--border-subtle: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	--border: light-dark(var(--color-zinc-200), var(--color-zinc-800));
+	--border-strong: light-dark(var(--color-zinc-300), var(--color-zinc-700));
 	--border-dashed: light-dark(#d4d4d8, #3f3f46);
 	/*
 	 * The `glass` of a phone's floating controls, over whatever scrolls under
@@ -500,6 +500,81 @@
 	);
 }
 
+/*
+ * Room on the right of a bot's task for Details' floating cards (17rem), only
+ * as much as its centred column (50rem, `max-w-200`) needs to clear them: none
+ * while the task is wide enough for both, all of them once it is not.
+ */
+@utility pr-clear-details {
+	padding-right: clamp(0px, 2 * 17rem + 50rem - 100%, 17rem);
+}
+
+/*
+ * Your own bubble: Tailwind's indigo, with everything in it white, its words and what is
+ * set in them (links, code, mentions, its time) alike, in either theme.
+ */
+@utility bubble-mine {
+	/* The theme is inline, so its utilities read these, not the `--color-` names. */
+	background-color: var(--color-indigo-500);
+	color: #ffffff;
+	--foreground: #ffffff;
+	--body-foreground: #ffffff;
+	--soft-foreground: rgb(255 255 255 / 0.92);
+	--muted-foreground: rgb(255 255 255 / 0.82);
+	--subtle-foreground: rgb(255 255 255 / 0.72);
+	--link: #ffffff;
+	--chip: rgb(255 255 255 / 0.18);
+	--hover: rgb(255 255 255 / 0.26);
+	--border-strong: rgb(255 255 255 / 0.4);
+}
+
+/* In your own bubble a mention is a quiet wash of white, not its bot's colour, which fights the indigo. */
+.bubble-mine [data-mention-chip] {
+	background-color: rgb(255 255 255 / 0.16);
+	color: #ffffff;
+}
+
+/* A collapsible panel growing to its content, as `Trace` opens one. */
+@utility transition-height {
+	transition-property: height;
+	transition-timing-function: var(--default-transition-timing-function);
+	transition-duration: var(--default-transition-duration);
+}
+
+/*
+ * Words for something still happening, with a light sweeping across them, as
+ * `Trace` draws a running line. Still, under reduced motion, they keep their colour.
+ */
+@utility shimmer {
+	@media (prefers-reduced-motion: no-preference) {
+		background-image: linear-gradient(
+			90deg,
+			currentColor 35%,
+			var(--foreground) 50%,
+			currentColor 65%
+		);
+		background-size: 300% 100%;
+		background-clip: text;
+		-webkit-text-fill-color: transparent;
+		animation: shimmer 2.2s linear infinite;
+	}
+}
+
+@utility shimmer-none {
+	background-image: none;
+	-webkit-text-fill-color: currentColor;
+	animation: none;
+}
+
+@keyframes shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: 0% 0;
+	}
+}
+
 /* A row that scrolls sideways under a swipe or its own arrows, without a bar. */
 @utility no-scrollbar {
 	scrollbar-width: none;
@@ -523,6 +598,7 @@
 
 @theme {
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	--animate-cards-in: cards-in 240ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
 	--animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-reply-in: reply-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
@@ -534,6 +610,18 @@
 		to {
 			opacity: 1;
 			transform: translateY(0);
+		}
+	}
+
+	/* Details' floating cards, settling in under the button that opened them. */
+	@keyframes cards-in {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: none;
 		}
 	}
 

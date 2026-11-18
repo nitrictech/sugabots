@@ -7,12 +7,10 @@ import type * as schema from "../database/schema.ts";
 import { OPENABLE_CONVERSATION_KINDS, placedConversation } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import {
-	type ChannelStanding,
 	type ConversationReachColumns,
 	type ConversationStanding,
 	conversationStandingFor,
 	ResourceHidden,
-	reachedChannelStandingsFor,
 	reachesBotFor,
 	reachesChannelFor,
 	reachesConversationFor,
@@ -35,10 +33,6 @@ export interface Interface {
 	readonly reachesBot: Effect.Effect<ReachesBot, never, CurrentActor.Service>;
 	/** The rule for the conversations the actor reaches, for queries that scope a list. */
 	readonly reachesConversation: Effect.Effect<ReachesConversation, never, CurrentActor.Service>;
-	/** The channels the actor is in, by name, with their standing in each. */
-	readonly channels: (
-		workspaceId: string,
-	) => Effect.Effect<ChannelStanding[], never, CurrentActor.Service>;
 	/** The conversation, of any kind, with the actor's standing towards it. */
 	readonly conversationStanding: (
 		conversationId: string,
@@ -86,14 +80,6 @@ export const make = Effect.gen(function* () {
 				(row) =>
 					reachesConversationFor(row, userId),
 		),
-
-		channels: (workspaceId) =>
-			operation(
-				"channels",
-				Effect.flatMap(CurrentActor.Service, ({ userId }) =>
-					query((db) => reachedChannelStandingsFor(db, workspaceId, userId)),
-				),
-			),
 
 		conversationStanding: (conversationId) =>
 			operation(

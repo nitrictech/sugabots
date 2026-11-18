@@ -9,11 +9,12 @@ import { botLink, botsLink, channelLink, channelsLink, newDirectMessageLink } fr
 import { BotAvatar } from "@/shell/Bot.tsx";
 import {
 	ChannelConversations,
+	NOTHING_NEW,
 	SidebarBot,
 	sidebarRowClassName,
 } from "@/shell/ConversationList.tsx";
 import { DirectMessageCards } from "@/shell/DirectMessages.tsx";
-import { sidebarBots, useEnsuredAssistant } from "@/shell/Sidebar.tsx";
+import { sidebarBots } from "@/shell/Sidebar.tsx";
 import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
@@ -80,12 +81,10 @@ export function MobileDirectMessages({ className }: { className?: string }) {
  */
 export function MobileHome({ className }: { className?: string }) {
 	const { data: channels } = useChannels();
-	const { bots, isPending, error } = useBots();
+	const { bots } = useBots();
 	const assistant = useAssistant();
-	useEnsuredAssistant(!isPending && !error && !assistant);
 	const { data: markers } = useChannelConversationMarkers();
-	const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
-	const pinned = sidebarBots(bots ?? [], undefined);
+	const pinned = sidebarBots(bots ?? []);
 	return (
 		<MobilePage title="Home" className={className}>
 			{assistant && (
@@ -123,8 +122,7 @@ export function MobileHome({ className }: { className?: string }) {
 					{pinned.map((bot) => (
 						<SidebarBot
 							key={bot.id}
-							standing={{ bot, ...(markers?.bots[bot.id] ?? nothing) }}
-							open={false}
+							standing={{ bot, ...(markers?.bots[bot.id] ?? NOTHING_NEW) }}
 							selected={false}
 						/>
 					))}

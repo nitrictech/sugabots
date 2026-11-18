@@ -105,7 +105,7 @@ const compactionSectionNames = [
 	"Search hints:",
 ];
 
-export const COMPACT_CASES: readonly TrialCase[] = [
+const COMPACT_CASES: readonly TrialCase[] = [
 	{
 		name: "Keeps the facts a bot needs within the length asked for",
 		prompt: (model, workspaceId) => compactionPrompt(compaction(model, workspaceId)),

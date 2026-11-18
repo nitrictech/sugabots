@@ -8,7 +8,7 @@ import { forModel } from "./large-results.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
-export interface RecordingTurn {
+interface RecordingTurn {
 	conversationId: string;
 	messageId: string;
 	turnId: string;
@@ -36,7 +36,7 @@ export interface RecordingOptions {
 }
 
 /** What the model is told when a tool did not give a result, in place of the result. */
-export interface ToolFailedResult {
+interface ToolFailedResult {
 	status: "failed";
 	error: UserText;
 }

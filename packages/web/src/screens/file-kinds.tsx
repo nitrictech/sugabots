@@ -12,7 +12,7 @@ import { MessageMarkdown } from "./MessageMarkdown.tsx";
  * How each kind of file is shown and saved. A kind added to
  * `writtenFileKindSchema` is a type error here until it says how.
  */
-export interface WrittenFileKindView {
+interface WrittenFileKindView {
 	/** What it is called beside its title, such as "Document". */
 	label: string;
 	Icon: LucideIcon;

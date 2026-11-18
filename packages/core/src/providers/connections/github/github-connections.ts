@@ -301,7 +301,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ConnectionRepository.layer]),
 );
 
-export interface Bot {
+interface Bot {
 	readonly workspaceId: string;
 	readonly botId: string;
 }
@@ -328,7 +328,7 @@ function installedApp(
 }
 
 /** A GitHub connection whose app isn't installed on an account yet. */
-export class AppNotInstalled
+class AppNotInstalled
 	extends Schema.TaggedError<AppNotInstalled>()("GitHubAppNotInstalled", {})
 	implements DomainError
 {
@@ -388,14 +388,14 @@ export class RepositoryUnreachable
 }
 
 /** A request GitHub sent the connection's webhook, as it arrived. */
-export interface Delivery {
+interface Delivery {
 	/** Its headers, by lowercase name. */
 	readonly headers: Readonly<Record<string, string | undefined>>;
 	readonly body: string;
 }
 
 /** A delivery the connection's app signed, the id GitHub gave it, and what it says happened. */
-export interface Delivered {
+interface Delivered {
 	readonly workspaceId: string;
 	readonly connectionId: string;
 	readonly deliveryId: string | undefined;

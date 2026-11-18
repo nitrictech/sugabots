@@ -11,7 +11,7 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { httpUrlSchema } from "./urls.ts";
 import { uuidSchema } from "./uuid.ts";
 
-export const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
+const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
 export type ProviderApiFormat = typeof providerApiFormatSchema.Type;
 export const providerStatusSchema = Schema.Literals([
 	"missing_key",
@@ -169,7 +169,7 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	},
 ];
 
-export const providerModelSchema = Schema.Struct({
+const providerModelSchema = Schema.Struct({
 	id: uuidSchema,
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
@@ -278,7 +278,7 @@ const presetNames = new Set(providerCatalog.map(({ name }) => name.toLowerCase()
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
 /** A provider from the catalog: the preset supplies everything but the key. */
-export const newProviderFromPresetSchema = Schema.Struct({
+const newProviderFromPresetSchema = Schema.Struct({
 	preset: providerPresetIdSchema,
 	apiKey: Schema.optional(apiKeySchema),
 	/** Only a local preset's address is worth changing at creation. */
@@ -304,9 +304,6 @@ export const newModelProviderSchema = Schema.Union([
 	newProviderFromPresetSchema,
 	newCustomProviderSchema,
 ]);
-
-export type NewProviderFromPreset = typeof newProviderFromPresetSchema.Type;
-export type NewCustomProvider = typeof newCustomProviderSchema.Type;
 export type NewModelProvider = typeof newModelProviderSchema.Type;
 
 export const modelProviderUpdateSchema = Schema.Struct({
@@ -383,7 +380,7 @@ export const providerModelSwitchOffSchema = Schema.Struct({
 export type ProviderModelSwitchOff = typeof providerModelSwitchOffSchema.Type;
 
 /** Moving the bots on one model to another, as the model stops being offered. */
-export const botMoveSchema = Schema.Struct({
+const botMoveSchema = Schema.Struct({
 	from: modelIdSchema,
 	to: modelIdSchema,
 });
@@ -404,7 +401,7 @@ export const bulkProviderModelUpdateSchema = Schema.Struct({
 	enabled: Schema.Boolean,
 });
 
-export const workspaceModelSchema = Schema.Struct({
+const workspaceModelSchema = Schema.Struct({
 	providerId: uuidSchema,
 	providerName: Schema.String,
 	providerPreset: Schema.NullOr(providerPresetIdSchema),
@@ -429,7 +426,6 @@ export const workspaceModelsResponseSchema = Schema.Struct({
 export const defaultModelUpdateSchema = Schema.Struct({
 	model: modelIdSchema,
 });
-export type DefaultModelUpdate = typeof defaultModelUpdateSchema.Type;
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;
 
 export const providerSignInOutcomeSchema = Schema.Union([

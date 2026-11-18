@@ -325,24 +325,19 @@ export const NewMessageOnAPhone = meta.story({
 	},
 });
 
-/**
- * On a phone, the direct messages are the first place in Home's rail: each
- * with its latest message, and + to start another.
- */
+/** On a phone, the direct messages are a page of Home: each with its latest message, and + to start another. */
 export const PhoneList = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/dm`} />,
 	play: async ({ canvas }) => {
-		const rail = await canvas.findByRole(
-			"navigation",
-			{ name: "Direct messages and channels" },
-			{ timeout: 10_000 },
-		);
-		await expect(within(rail).getByRole("link", { name: /^Direct messages/ })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
-		await expect(canvas.getByRole("heading", { level: 1, name: "Direct messages" })).toBeVisible();
+		await expect(
+			await canvas.findByRole(
+				"heading",
+				{ level: 1, name: "Direct messages" },
+				{ timeout: 10_000 },
+			),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "New message" })).toBeVisible();
 		await expect(await canvas.findByText(/renewal deck before Thursday/)).toBeVisible();
 	},
 });

@@ -1,6 +1,6 @@
 export * as EventStore from "./store.ts";
 
-import type { StreamChannel, StreamEvent } from "@sugabots/contracts";
+import type { EventStream, StreamEvent } from "@sugabots/contracts";
 import { and, asc, count, eq, gt, lt } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
@@ -15,21 +15,21 @@ import { event } from "../schema.ts";
  * `make` is the real thing; `inMemory` is the same contract, for tests.
  */
 export interface Interface {
-	/** Persists an event on a channel and returns its `seq`. */
-	append(channel: StreamChannel, event: StreamEvent): Promise<number>;
+	/** Persists an event on a stream and returns its `seq`. */
+	append(stream: EventStream, event: StreamEvent): Promise<number>;
 
-	/** Events on a channel after `since`, oldest first, at most `limit` of them. */
-	replay(channel: StreamChannel, since: number, limit: number): Promise<Stored[]>;
+	/** Events on a stream after `since`, oldest first, at most `limit` of them. */
+	replay(stream: EventStream, since: number, limit: number): Promise<Stored[]>;
 
 	/**
 	 * Whether the event a client claims to have last seen is still here.
 	 *
 	 * This is how a resume point is judged, rather than comparing it to the
-	 * oldest surviving `seq`: the sequence is global, so a channel's ids have
+	 * oldest surviving `seq`: the sequence is global, so a stream's ids have
 	 * gaps that say nothing about what was pruned. If the row a client names is
 	 * gone, its history is broken and it needs a `reset`.
 	 */
-	has(channel: StreamChannel, seq: number): Promise<boolean>;
+	has(stream: EventStream, seq: number): Promise<boolean>;
 
 	/** Drops events older than `before`. Returns how many went. */
 	prune(before: Date): Promise<number>;
@@ -48,26 +48,26 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		Effect.runPromiseWith(context)(query(statement));
 
 	return {
-		async append(channel, payload) {
+		async append(stream, payload) {
 			const [row] = await run((db) =>
 				db
 					.insert(event)
-					.values({ channel, type: payload.type, payload })
+					.values({ stream, type: payload.type, payload })
 					.returning({ seq: event.seq }),
 			);
 
 			if (!row) {
-				throw new Error(`Storing a ${payload.type} on ${channel} returned no row`);
+				throw new Error(`Storing a ${payload.type} on ${stream} returned no row`);
 			}
 			return row.seq;
 		},
 
-		async replay(channel, since, limit) {
+		async replay(stream, since, limit) {
 			const rows = await run((db) =>
 				db
 					.select({ seq: event.seq, payload: event.payload })
 					.from(event)
-					.where(and(eq(event.channel, channel), gt(event.seq, since)))
+					.where(and(eq(event.stream, stream), gt(event.seq, since)))
 					.orderBy(asc(event.seq))
 					.limit(limit),
 			);
@@ -75,12 +75,12 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 			return rows.map((row) => ({ seq: row.seq, event: row.payload }));
 		},
 
-		async has(channel, seq) {
+		async has(stream, seq) {
 			const rows = await run((db) =>
 				db
 					.select({ seq: event.seq })
 					.from(event)
-					.where(and(eq(event.channel, channel), eq(event.seq, seq)))
+					.where(and(eq(event.stream, stream), eq(event.seq, seq)))
 					.limit(1),
 			);
 
@@ -110,11 +110,11 @@ export interface Stored {
 }
 
 interface MemoryRow extends Stored {
-	channel: StreamChannel;
+	stream: EventStream;
 	createdAt: Date;
 }
 
-export interface InMemoryOptions {
+interface InMemoryOptions {
 	/** The clock rows are stamped with. Only pruning reads it, and only a test
 	 * ever needs to move it. */
 	now?: () => Date;
@@ -129,21 +129,21 @@ export function inMemory({ now = () => new Date() }: InMemoryOptions = {}): Inte
 	let next = 0;
 
 	return {
-		async append(channel, event) {
+		async append(stream, event) {
 			next += 1;
-			rows.push({ seq: next, channel, event, createdAt: now() });
+			rows.push({ seq: next, stream, event, createdAt: now() });
 			return next;
 		},
 
-		async replay(channel, since, limit) {
+		async replay(stream, since, limit) {
 			return rows
-				.filter((row) => row.channel === channel && row.seq > since)
+				.filter((row) => row.stream === stream && row.seq > since)
 				.slice(0, limit)
 				.map(({ seq, event }) => ({ seq, event }));
 		},
 
-		async has(channel, seq) {
-			return rows.some((row) => row.channel === channel && row.seq === seq);
+		async has(stream, seq) {
+			return rows.some((row) => row.stream === stream && row.seq === seq);
 		},
 
 		async prune(before) {

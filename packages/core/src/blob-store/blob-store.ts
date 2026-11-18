@@ -82,7 +82,7 @@ export interface Content<E = never> {
 }
 
 /** What `get` reads back. */
-export interface Blob {
+interface Blob {
 	stream: Stream.Stream<Uint8Array, NotFound | Failure>;
 	contentType: string;
 	/** In bytes. */

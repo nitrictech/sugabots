@@ -16,13 +16,13 @@ const MAX_MATCHES = 10;
 /** Enough of a message to answer from; the whole of a long one would crowd out the others. */
 const MATCH_CHARACTERS = 1_500;
 
-export interface HistoryMatch {
+interface HistoryMatch {
 	author: string;
 	at: string;
 	text: string;
 }
 
-export type HistorySearchResult =
+type HistorySearchResult =
 	| {
 			messages: HistoryMatch[];
 			/** Whether more messages matched than were returned, so a narrower search would find others. */
@@ -144,7 +144,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
  * A found message as a bot is given it: who wrote it, when, and what it said,
  * cut short when long, followed by a line for each file it carried.
  */
-export function toHistoryMatch(
+function toHistoryMatch(
 	row: MessageRow,
 	author: ParticipantRow,
 	attachmentLines: readonly string[],
@@ -176,7 +176,7 @@ export function toHistoryMatch(
  * substring-only matches follow. Each expression is the one its index on
  * `message.content` is built on, so the indexes are used.
  */
-export function wordMatch(words: string): { where: SQL; best: SQL[] } {
+function wordMatch(words: string): { where: SQL; best: SQL[] } {
 	const english = sql`to_tsvector('english', ${message.content}) @@ websearch_to_tsquery('english', ${words})`;
 	const simple = sql`to_tsvector('simple', ${message.content}) @@ websearch_to_tsquery('simple', ${words})`;
 	const terms = substringTerms(words);
@@ -213,6 +213,6 @@ function substringTerms(words: string): string[] {
 }
 
 /** `term` with LIKE's wildcards taken literally. */
-export function escapeLike(term: string): string {
+function escapeLike(term: string): string {
 	return term.replace(/[\\%_]/g, (character) => `\\${character}`);
 }

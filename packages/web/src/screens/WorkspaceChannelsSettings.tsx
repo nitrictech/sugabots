@@ -27,7 +27,7 @@ import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import type { ChannelSettingsPage } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ChannelColourPicker } from "@/shell/LookPicker.tsx";
-import { useNewBot } from "@/shell/NewInChannel.tsx";
+import { useNewBot } from "@/shell/NewBot.tsx";
 import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";

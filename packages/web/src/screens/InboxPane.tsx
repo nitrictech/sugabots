@@ -11,9 +11,9 @@ import { useConversation } from "@/lib/conversations.ts";
 import { automationFeedLink, conversationLink } from "@/lib/links.ts";
 import { buttonStyles } from "@/ui/button.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
-import type { Staged, StagedChange } from "./ConversationChat.tsx";
 import { ConversationPage } from "./ConversationPage.tsx";
 import { ItemPanel } from "./ItemPanel.tsx";
+import type { Staged, StagedChange } from "./staged.ts";
 
 const BACK_TO_INBOX: BackTo = { to: "inbox" };
 

@@ -12,7 +12,7 @@ import {
 import { useFolded } from "@/lib/folded.ts";
 import { directMessageLink, newDirectMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { END_SLOT, NESTED_INDENT, sidebarRowClassName } from "@/shell/ConversationList.tsx";
+import { END_SLOT, sidebarRowClassName } from "@/shell/ConversationList.tsx";
 import { ListTime } from "@/shell/Page.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
@@ -30,7 +30,7 @@ const SMALL_RING_PX = 1.5;
 const FOLD_KEY = "direct-messages";
 
 /** How a list of direct messages is doing at loading. */
-export type DirectMessagesStatus = "loading" | "ready" | "failed";
+type DirectMessagesStatus = "loading" | "ready" | "failed";
 
 /** The sidebar's Direct messages, with New message, which opens the page that starts one. */
 export function DirectMessages({
@@ -81,7 +81,7 @@ export function DirectMessagesSection({
 				unreadMessages={items.reduce((sum, item) => sum + item.unreadMessages, 0)}
 			/>
 			{open && (
-				<div className={cn("flex flex-col gap-px", NESTED_INDENT)}>
+				<div className="flex flex-col gap-px">
 					{status === "failed" && (
 						<p className="m-0 px-2 py-1 text-xs text-muted-foreground">
 							Could not load your direct messages.

@@ -13,7 +13,7 @@ import type { EgressHttpClient } from "../../network/egress.ts";
  */
 
 /** What a GitHub App signs requests about itself with. */
-export interface AppIdentity {
+interface AppIdentity {
 	readonly appId: number;
 	readonly privateKey: string;
 }
@@ -212,7 +212,7 @@ const Repositories = Schema.Struct({
 const MAX_LISTED_REPOSITORIES = 1_000;
 const PAGE_SIZE = 100;
 
-export interface Repository {
+interface Repository {
 	readonly id: number;
 	/** `owner/name`, as GitHub writes it. */
 	readonly fullName: string;
@@ -657,7 +657,7 @@ const APP_JWT_SECONDS = 9 * 60;
 const CLOCK_ALLOWANCE_SECONDS = 60;
 
 /** The app's own token, signed with its private key, for requests about the app and its installations. */
-export const appJwt = (app: AppIdentity) =>
+const appJwt = (app: AppIdentity) =>
 	Effect.map(Clock.currentTimeMillis, (nowMilliseconds) => {
 		const now = Math.floor(nowMilliseconds / 1000);
 		const encode = (part: object) => Buffer.from(JSON.stringify(part)).toString("base64url");

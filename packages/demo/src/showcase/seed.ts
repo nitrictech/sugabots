@@ -38,6 +38,7 @@ import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assi
 import { ChannelRepository } from "@sugabots/core/workspaces/channels/channel-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { userText } from "@sugabots/errors";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -347,6 +348,15 @@ const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 	{
 		bot: "Growth Desk",
 		automation: {
+			name: "Renewal risk check",
+			instructions:
+				"Each morning, look through HubSpot for renewals in the next 30 days with falling usage, and list them with what to do about each.",
+			triggers: [daily([minutes(8)])],
+		},
+	},
+	{
+		bot: "Growth Desk",
+		automation: {
 			name: "Monday pipeline summary",
 			instructions:
 				"Summarise last week's deals: what closed, what slipped and what needs a reply today.",
@@ -537,6 +547,176 @@ const TASKS: readonly TaskScene<PersonKey>[] = [
 				from: { person: "gary" },
 				parts: [{ text: "Makes sense. I'll leave it in drafts." }],
 			},
+			{
+				at: { time: "9:20" },
+				from: { person: "anita" },
+				parts: [
+					{
+						text: "Before Lorraine's call, can you pull together what we know about Fernhill? Seats, usage, anything open.",
+					},
+				],
+			},
+			{
+				key: "fernhill-brief",
+				at: { time: "9:21" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{ text: "Pulling their account and deals from HubSpot, and checking their site.\n\n" },
+					{
+						toolCall: {
+							connection: "hubspot",
+							tool: "search_companies",
+							input: { query: "Fernhill Outfitters" },
+							output: {
+								results: [
+									{
+										id: "18842",
+										name: "Fernhill Outfitters",
+										domain: "fernhilloutfitters.co.nz",
+										plan: "Team",
+										seats: 25,
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							connection: "hubspot",
+							tool: "search_deals",
+							input: { companyId: "18842", stage: "open" },
+							output: {
+								results: [
+									{
+										name: "Fernhill: Business upgrade",
+										amount: 13824,
+										stage: "Proposal",
+										owner: "Lorraine Delgado",
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "web_fetch",
+							input: { url: "https://fernhilloutfitters.co.nz/news" },
+							output: {
+								title: "News | Fernhill Outfitters",
+								excerpt:
+									"This spring we opened two new stores in Wellington, bringing us to six across the North Island.",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Here's Fernhill at a glance:\n\n| | Now | In March |\n|---|---|---|\n| Weekly active people | 32 | 23 |\n| Seats on Team | 25 | 25 |\n| Monthly spend | $500 | $500 |\n\n**Open deal:** *Fernhill: Business upgrade*, $13,824 a year at list, at the *Proposal* stage with Lorraine.\n\n**Worth knowing before the call:**\n\n1. They're 7 people over their 25 Team seats, so they already hit the seat limit most weeks.\n2. Dana Whitfield, their operations lead, decides. Their CFO, Marcus Ng, joined the last two calls.\n3. Their site says they opened two stores in Wellington this spring, which lines up with the jump in usage.\n\nIf they push back on Business, 30 seats on Team at `$20/seat` keeps them at $600 a month.",
+					},
+				],
+				reactions: [{ emoji: "🙌", by: ["anita"] }],
+			},
+			{
+				at: { time: "9:24" },
+				from: { person: "lorraine" },
+				replyTo: "fernhill-brief",
+				parts: [
+					{
+						text: "This is great. Did they ask about SSO anywhere? I have a feeling that's the real blocker.",
+					},
+				],
+			},
+			{
+				key: "fernhill-sso",
+				at: { time: "9:25" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						toolCall: {
+							connection: "hubspot",
+							tool: "search_notes",
+							input: { companyId: "18842", query: "SSO" },
+							output: {
+								results: [
+									{
+										date: "2026-10-14",
+										author: "Lorraine Delgado",
+										text: "Dana asked whether Team has SSO.",
+									},
+									{
+										date: "2026-11-02",
+										author: "Ari (IT contractor)",
+										text: "We'd need Okta SSO before rolling Fieldnote out to the store teams.",
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Twice. Dana asked about it on the 14 October call, and their IT contractor emailed on 2 November:\n\n> We'd need Okta SSO before rolling Fieldnote out to the store teams.\n\nSo SSO is likely what decides it. Business includes it and Team doesn't.",
+					},
+				],
+				reactions: [{ emoji: "💯", by: ["lorraine", "anita"] }],
+			},
+			{
+				at: { time: "9:27" },
+				from: { person: "anita" },
+				parts: [
+					{
+						text: "Good catch. Lorraine, lead with SSO tomorrow, and offer the annual price if they commit before the end of the month.",
+					},
+				],
+				reactions: [{ emoji: "👍", by: ["lorraine"] }],
+			},
+			{
+				at: { time: "9:28" },
+				from: { person: "lorraine" },
+				parts: [{ text: "Will do 👌" }],
+			},
+			{
+				at: { time: "9:31" },
+				from: { person: "anita" },
+				parts: [{ text: "Update the draft so it mentions Okta, and keep it short." }],
+			},
+			{
+				at: { time: "9:32" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						text: "Updated:\n\n> Hi Dana, thanks for coming back to us. Business includes Okta SSO, so your store teams can sign in with the accounts they already have. With 32 people on Fieldnote each week it's $48 a seat, or $40.80 on an annual plan if you go ahead before the end of the month.\n\nIt's still in drafts until Lorraine's call.",
+					},
+				],
+			},
+			{
+				at: { time: "9:40" },
+				from: { person: "gary" },
+				parts: [{ text: "Long shot, but do we know when their current plan renews?" }],
+			},
+			{
+				at: { time: "9:41" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						toolCall: {
+							connection: "hubspot",
+							tool: "get_company",
+							input: { companyId: "18842", properties: ["renewal_date", "billing_cycle"] },
+							output: { renewal_date: "2027-01-14", billing_cycle: "monthly" },
+							readOnly: true,
+						},
+					},
+					{
+						text: "Their Team plan renews on **14 January**, billed monthly. Moving to Business before then prorates the rest of the month, so the first Business invoice would carry a credit of about $410.",
+					},
+				],
+			},
+			{
+				at: { time: "9:44" },
+				from: { person: "anita" },
+				parts: [{ text: "Perfect, thanks. That's everything we need for tomorrow." }],
+			},
 		],
 	},
 	{
@@ -638,10 +818,195 @@ const TASKS: readonly TaskScene<PersonKey>[] = [
 			},
 		],
 	},
+	{
+		bot: "Code Reviewer",
+		messages: [
+			{
+				at: { time: "11:02" },
+				from: { person: "rob" },
+				parts: [
+					{
+						text: "The nightly export took 3 hours last night instead of the usual 40 minutes. Can you find out why?",
+					},
+				],
+			},
+			{
+				at: { time: "11:05" },
+				from: { bot: "Code Reviewer" },
+				parts: [
+					{ text: "I'll start with last night's run in the job log.\n\n" },
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -n "ExportJob" logs/jobs-2026-11-17.log | tail -20' },
+							output: {
+								stdout:
+									"4812: ExportJob started  batch=1/38  rows=50000\n4977: ExportJob finished batch=1/38  took=41s\n...\n9120: ExportJob started  batch=38/38 rows=50000\n9188: ExportJob finished batch=38/38 took=7m12s\n9189: ExportJob done total=3h02m",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -c "retrying" logs/jobs-2026-11-17.log' },
+							output: { stdout: "0", exitCode: 0 },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									"awk '/ExportJob finished/ {print $5}' logs/jobs-2026-11-17.log | head -40",
+							},
+							output: {
+								stdout:
+									"took=41s\ntook=44s\ntook=52s\ntook=1m09s\ntook=1m31s\ntook=1m58s\ntook=2m40s\ntook=3m22s\ntook=4m05s\n...",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "No retries, but every batch is slower than the one before it, which points at the query rather than the queue. Reading how a batch is fetched.\n\n",
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/exports/export-job.ts" },
+							output: {
+								content:
+									"export async function runBatch(cursor: number) {\n  const rows = await db.query(\n    `select * from events order by created_at offset $1 limit $2`,\n    [cursor, BATCH_SIZE],\n  );\n  ...",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/exports/batch-size.ts" },
+							output: { content: "export const BATCH_SIZE = 50_000;" },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: "git log --oneline -5 -- src/exports/" },
+							output: {
+								stdout:
+									"a91c2e4 feat(exports): page events by offset, not created_at\n6f03b11 fix(exports): retry 5 times with backoff\n2d7e9a0 feat(exports): move the export job onto the new queue",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: "git show a91c2e4 --stat" },
+							output: {
+								stdout:
+									"src/exports/export-job.ts | 12 +++++-------\n1 file changed, 5 insertions(+), 7 deletions(-)",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "That commit swapped keyset paging for `offset`. Checking what Postgres does with it on a copy of production.\n\n",
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									'psql $STAGING_URL -c "explain analyze select * from events order by created_at offset 1850000 limit 50000"',
+							},
+							output: {
+								stdout:
+									"Limit  (actual time=402113.2..412480.9 rows=50000)\n  ->  Index Scan using events_created_at_idx on events  (rows=1900000)\nExecution Time: 412491.7 ms",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									"psql $STAGING_URL -c \"explain analyze select * from events where created_at > '2026-11-17 02:14' order by created_at limit 50000\"",
+							},
+							output: {
+								stdout:
+									"Limit  (actual time=0.09..388.4 rows=50000)\n  ->  Index Scan using events_created_at_idx on events\nExecution Time: 391.2 ms",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'psql $STAGING_URL -c "select count(*) from events"' },
+							output: { stdout: " count\n---------\n 1900412", exitCode: 0 },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -rn "offset" src/exports/ src/reports/' },
+							output: {
+								stdout:
+									"src/exports/export-job.ts:4:    `select * from events order by created_at offset $1 limit $2`,\nsrc/reports/monthly.ts:18:  .offset(page * PAGE_SIZE)",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/reports/monthly.ts" },
+							output: {
+								content:
+									"export const monthly = (page: number) =>\n  db.select().from(invoices).orderBy(invoices.issuedAt)\n    .limit(PAGE_SIZE)\n    .offset(page * PAGE_SIZE);",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Found it. a91c2e4 (Tuesday) moved the export from keyset paging to `offset`. With `offset`, Postgres reads and throws away every row before the page it wants, so batch 38 reads 1.9M rows to return 50k. That's why each batch was slower than the last, and the whole run took **3h02m** instead of 40m.\n\n**Fix**\n- Go back to paging by `created_at`, starting each batch after the last row of the one before. On staging that batch went from **412s to 0.4s**.\n\n**Worth a look**\n- `src/reports/monthly.ts` pages with `offset` too. It's small today, but it'll slow down the same way as invoices grow.\n\nWant me to open a PR reverting the paging in `export-job.ts`?",
+					},
+				],
+			},
+		],
+	},
 ];
 
 /** Past runs of automations, so their conversations and run lists have history. */
 const AUTOMATION_RUNS: readonly AutomationRun[] = [
+	{
+		bot: "Growth Desk",
+		automation: "Renewal risk check",
+		scheduledAt: { time: "8:00", day: "previous weekday" },
+		finishedAt: { time: "8:03", day: "previous weekday" },
+		result:
+			"Two renewals at risk this month:\n\n- **Fernhill Outfitters** (14 Jan): usage up, but they're 7 over their seats. Offer Business before renewal.\n- **Parcel & Co** (22 Jan): weekly active people down from 12 to 5. Worth a check-in call.",
+	},
+	{
+		bot: "Growth Desk",
+		automation: "Renewal risk check",
+		scheduledAt: { time: "8:00" },
+		finishedAt: { time: "8:01" },
+		result: "I started on this morning's renewals but couldn't read the deals.",
+		failed: userText`HubSpot's sign-in has expired, so the renewals couldn't be read. Sign in to HubSpot again in Growth Desk's connections, then run it again.`,
+	},
 	{
 		bot: "Ticket Desk",
 		automation: "Morning queue",
@@ -735,6 +1100,19 @@ function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
 }
 
 const CONNECTIONS: readonly SeedConnection[] = [
+	{
+		channel: "growth",
+		name: "HubSpot",
+		handle: "hubspot",
+		url: "https://mcp.hubspot.com",
+		tools: [
+			...["search_companies", "get_company", "search_deals", "search_notes"].map((name) =>
+				connectionTool(name, { readOnly: true }),
+			),
+			connectionTool("create_note", { readOnly: false }),
+		],
+		toolAccess: { create_note: "ask" },
+	},
 	{
 		channel: "support",
 		name: "Stripe",

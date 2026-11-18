@@ -37,7 +37,7 @@ export interface Address {
 	name?: string;
 }
 
-export type Body = { text: string; html?: string } | { html: string; text?: string };
+type Body = { text: string; html?: string } | { html: string; text?: string };
 
 export type Message = Body & {
 	from: Address;

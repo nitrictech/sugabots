@@ -3,7 +3,7 @@ import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { chief, growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
@@ -82,17 +82,12 @@ const meta = preview.meta({
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
 });
 
-/**
- * A bot's channel beside the sidebar, going by the bot's name and never done,
- * with Details a tap on the header away.
- */
+/** A bot's task beside the sidebar, headed by the bot's name, with no Mark done in its header. */
 export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
-		const header = chatHeaderOf(canvas.getByRole("heading", { name: growthDesk.name, level: 1 }));
-		// A public bot: the header leaves out a private bot's "Only you".
-		await expect(within(header).queryByText("Only you")).toBeNull();
+		await expect(canvas.getByRole("heading", { name: growthDesk.name, level: 1 })).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
 	},
 });
@@ -294,36 +289,23 @@ const automationResult: Message = {
 	},
 };
 
-/**
- * An automation's result in the channel's conversation says which automation it is from, and a
- * thread from it opens the run it came from rather than starting a new one.
- */
+/** An automation's result in the channel's conversation says which automation it is from. */
 export const ChannelConversationAutomationResult = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.post(`${API}/messages/:messageId/thread`, () => {
-				throw new Error("An automation's result started a thread of its own");
-			}),
 			...appHandlers({
 				channelConversationMessages: { [revenue.id]: [...channelConversation, automationResult] },
 			}),
 		);
 	},
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		const result = (await within(log).findByText(/overnight leads replied/)).closest("article");
 		if (!result) throw new Error("The automation's result is not a message row");
 		await expect(
 			within(result).getByRole("button", { name: "From Overnight outbound" }),
 		).toBeInTheDocument();
-		const startThread = within(result).getByRole("button", { name: "Start a thread" });
-		// The toolbar comes in while the message holds focus.
-		startThread.focus();
-		await userEvent.click(startThread);
-		await waitFor(() =>
-			expect(canvas.queryByRole("heading", { name: "General", level: 1 })).toBeNull(),
-		);
 	},
 });
 
@@ -336,42 +318,6 @@ export const ChannelConversationEmpty = meta.story({
 			await within(log).findByRole("heading", { name: "General", level: 2 }),
 		).toBeVisible();
 		await expect(within(log).getByText(/This is the start of/)).toBeVisible();
-	},
-});
-
-/** Starting a thread from its first message, with a chip for each of the channel's bots. */
-export const NewThread = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/new`} />,
-	play: async ({ canvas, userEvent }) => {
-		await canvas.findByRole("heading", { name: `New thread in ${revenue.name}`, level: 2 });
-		const bots = await canvas.findByRole("list", { name: "Bots" });
-		await userEvent.click(within(bots).getByRole("button", { name: growthDesk.name }));
-		await expect(
-			canvas.getByText(`Sending starts a thread with ${growthDesk.name}.`),
-		).toBeInTheDocument();
-	},
-});
-
-/**
- * Starting a thread from a bot's +: it is with that bot, so the page asks what
- * it should work on, under no header of its own, and the message needs no chip
- * and no word on who it goes to.
- */
-export const NewThreadWithABot = meta.story({
-	render: () => (
-		<StoryApp
-			path={`/${storyWorkspace.slug}/channels/${revenue.slug}/new?bot=${growthDesk.handle}`}
-		/>
-	),
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("heading", { name: `What should ${growthDesk.name} work on?` }),
-		).toBeVisible();
-		await expect(canvas.queryByRole("heading", { name: "New thread", level: 1 })).toBeNull();
-		const message = canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` });
-		await expect(message).toHaveTextContent("");
-		await expect(canvas.queryByRole("list", { name: "Bots" })).toBeNull();
-		await expect(canvas.queryByText(/^Sending starts a thread/)).toBeNull();
 	},
 });
 
@@ -485,9 +431,6 @@ export const NamedChat = meta.story({
 						{ conversation: storyChannelConversationFor(revenue), unreadMessages: 0 },
 						{ conversation: pricingChat, unreadMessages: 0 },
 					],
-					channels: [],
-					threads: [],
-					automations: [],
 				}),
 			),
 			http.get(`${API}/conversations/${pricingChat.id}`, () =>
@@ -519,8 +462,8 @@ export const NamedChat = meta.story({
 		);
 		await expect(canvas.getByRole("textbox", { name: "Message Pricing" })).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "More for Pricing" }));
-		await expect(await screen.findByRole("menuitem", { name: "Rename channel" })).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Archive channel" })).toBeVisible();
+		await expect(await screen.findByRole("menuitem", { name: "Rename thread" })).toBeVisible();
+		await expect(screen.getByRole("menuitem", { name: "Archive thread" })).toBeVisible();
 	},
 });
 
@@ -548,38 +491,13 @@ export const ChannelOnAPhone = meta.story({
 	},
 });
 
-/**
- * Your own private bot, nobody has written to yet: the start of
- * the chat, saying it is yours alone, as its header does for as long as it is open.
- */
-export const FirstMessage = meta.story({
-	render: () => <StoryApp path={chatPath(chief)} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(
-				"Your own bot. It works for you only, and nobody else can see this conversation, workspace admins included.",
-			),
-		).toBeInTheDocument();
-		const header = chatHeaderOf(canvas.getByRole("heading", { name: chief.name, level: 1 }));
-		await expect(within(header).getByText("Only you")).toBeVisible();
-		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-	},
-});
-
-/** Your own bot on a phone: "Only you" before its model, under its name. */
-export const FirstMessageOnAPhone = meta.story({
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={chatPath(chief)} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByText(/^Only you · /)).toBeVisible();
-	},
-});
-
-/** On a phone: the chat alone, with Back to the channel's list beside the bot's face, name and model. */
+/** On a phone: the task alone, with Back to the bot it is with. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Back to Revenue" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("link", { name: `Back to ${growthDesk.name}` }),
+		).toBeInTheDocument();
 	},
 });
 
@@ -969,61 +887,27 @@ const browsing: Message = {
 	],
 };
 
-/** The bot's computer, a button at the top right of its chat that opens its desktop. */
+/** The bot's computer, a card in its Details from a tablet up, which opens its desktop. */
 export const Computer = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...computerHandlers(conversation));
 	},
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("button", { name: "Computer" })).toBeVisible();
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
+		const details = await canvas.findByRole("complementary", { name: "Details" });
+		await expect(await within(details).findByRole("button", { name: "Not running" })).toBeVisible();
 	},
 });
 
 /**
- * The bot's automations, opened from the top of its chat beside it as its
- * computer is, offering New automation while it has none, and closed again.
- */
-export const AutomationsBesideTheChat = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Automations" }));
-		const automations = await canvas.findByRole("region", {
-			name: `${growthDesk.name}'s automations`,
-		});
-		await expect(
-			await within(automations).findByText(`No automations for ${growthDesk.name} yet`),
-		).toBeVisible();
-		await expect(
-			within(automations).getByText(`Or ask ${growthDesk.name} to set one up.`),
-		).toBeVisible();
-		await userEvent.click(within(automations).getByRole("button", { name: "Close" }));
-		await waitFor(() =>
-			expect(canvas.queryByRole("region", { name: `${growthDesk.name}'s automations` })).toBeNull(),
-		);
-	},
-});
-
-/** New automation, in the bot's automations beside its chat while it has none, opens the form in their place. */
-export const NewAutomationBesideTheChat = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Automations" }));
-		const automations = await canvas.findByRole("region", {
-			name: `${growthDesk.name}'s automations`,
-		});
-		// By its text: the + in the header has none.
-		await userEvent.click(
-			await within(automations).findByText("New automation", { selector: "button" }),
-		);
-		await expect(await canvas.findByRole("region", { name: "New automation" })).toBeVisible();
-	},
-});
-
-/**
- * Without computers set up in the workspace, the button is still there, and
- * opens to say what computers are for and how to get them.
+ * Without computers set up in the workspace, its card is still in Details,
+ * and opens to say what computers are for and how to get them.
  */
 export const NoComputer = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Computer" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
+		const details = await canvas.findByRole("complementary", { name: "Details" });
+		await userEvent.click(await within(details).findByRole("button", { name: "No computer" }));
 		const computer = await canvas.findByRole("region", { name: `${growthDesk.name}'s computer` });
 		await expect(await within(computer).findByText("Computers aren't set up yet")).toBeVisible();
 		await expect(within(computer).getByText("No computer")).toBeVisible();
@@ -1035,8 +919,7 @@ export const NoComputer = meta.story({
 });
 
 /**
- * While the bot is browsing, its screen shows live in the reply and the header
- * button pulses. Opening the screen shows the desktop beside the chat, watched
+ * While the bot is browsing, its screen shows live in the reply. Opening the screen shows the desktop beside the chat, watched
  * until the person takes over.
  */
 export const ComputerInUse = meta.story({
@@ -1044,10 +927,6 @@ export const ComputerInUse = meta.story({
 		msw.use(...computerHandlers([...conversation, browsing]));
 	},
 	play: async ({ canvas }) => {
-		const inUse = await canvas.findByRole("button", {
-			name: `${growthDesk.name} is using the computer. Open its desktop`,
-		});
-		await expect(inUse).toHaveTextContent("Computer in use");
 		const screen = await canvas.findByRole("article", { name: `${growthDesk.name}'s screen` });
 		await userEvent.click(
 			within(screen).getByRole("button", { name: `Open ${growthDesk.name}'s desktop` }),
@@ -1298,10 +1177,3 @@ export const DraggingFiles = meta.story({
 		await expect(await canvas.findByText("Drop files to attach")).toBeVisible();
 	},
 });
-
-/** The header a chat's title heading is in, apart from the sidebar beside it. */
-function chatHeaderOf(heading: HTMLElement): HTMLElement {
-	const header = heading.closest("header");
-	if (!header) throw new Error("The chat's title is not in a header");
-	return header;
-}

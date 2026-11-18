@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { check, index, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 
-export type LaneState = "idle" | "starting" | "running";
+type LaneState = "idle" | "starting" | "running";
 
 /**
  * A lane runs one workflow execution at a time for its key (for example one

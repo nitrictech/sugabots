@@ -355,7 +355,6 @@ export function botPermissions(actor: Actor, bot: BotFacts): BotPermissionsView 
 		useDesktop: may("computer.desktop.use"),
 		manageAutomations: may("automation.manage"),
 		runAutomations: may("automation.run"),
-		decideApprovals: may("approval.decide"),
 		talk: reachesBot(actor, bot) && actor.workspaceRole !== undefined,
 	};
 }

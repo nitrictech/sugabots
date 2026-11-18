@@ -247,18 +247,18 @@ export interface Interface {
  * offered afterwards. One left out stays put, and the switch-off fails with
  * `ModelInUse` if that leaves it on a model no longer offered.
  */
-export interface SettingMoves {
+interface SettingMoves {
 	newBotsTo?: string;
 	summariesTo?: string;
 }
 
 /** A workspace, by its id or its slug. */
-export interface InWorkspace {
+interface InWorkspace {
 	workspace: string;
 }
 
 /** One of a workspace's model providers. */
-export interface InProvider extends InWorkspace {
+interface InProvider extends InWorkspace {
 	providerId: string;
 }
 
@@ -726,7 +726,7 @@ const SignInAttempt = Schema.Struct({
 });
 type SignInAttempt = typeof SignInAttempt.Type;
 
-export interface TestOutcome {
+interface TestOutcome {
 	reachable: boolean;
 	latencyMs: number;
 	error?: UserText;

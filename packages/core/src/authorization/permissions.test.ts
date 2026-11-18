@@ -388,7 +388,6 @@ describe("what the API tells a client", () => {
 			useDesktop: true,
 			manageAutomations: false,
 			runAutomations: true,
-			decideApprovals: true,
 			talk: true,
 		});
 	});
@@ -402,7 +401,6 @@ describe("what the API tells a client", () => {
 			useDesktop: false,
 			manageAutomations: true,
 			runAutomations: false,
-			decideApprovals: false,
 			talk: false,
 		});
 	});

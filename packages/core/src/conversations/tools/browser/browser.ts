@@ -19,7 +19,7 @@ import playwrightTools from "./playwright-tools.json" with { type: "json" };
  */
 
 /** What a browser tool gives back: the server's text, and any screenshots. */
-export interface BrowserResult {
+interface BrowserResult {
 	text: string;
 	images?: readonly Image[];
 }
@@ -55,7 +55,7 @@ export interface BotInConversation {
 }
 
 /** A bot browsing in a conversation, in the way it was set to. */
-export interface BotBrowsing extends BotInConversation {
+interface BotBrowsing extends BotInConversation {
 	/**
 	 * Whether it browses so people watching can follow: a cursor that moves to
 	 * what it clicks, smooth scrolling, and typing at a typing pace. Slower.
@@ -64,7 +64,7 @@ export interface BotBrowsing extends BotInConversation {
 }
 
 /** The session's name for a bot in a conversation: one desktop and browser each. */
-export function sessionName(turn: { conversationId: string; botId: string }) {
+function sessionName(turn: { conversationId: string; botId: string }) {
 	return `${turn.conversationId}-${turn.botId}`;
 }
 
@@ -78,7 +78,7 @@ export interface Desktop {
 }
 
 /** One of a desktop's VNC servers, which takes a WebSocket on its port. */
-export interface VncServer {
+interface VncServer {
 	readonly port: number;
 	/** What it asks for: Sugabots' to know, never a person's. */
 	readonly password: string;
@@ -116,7 +116,7 @@ export const startDesktop = (computer: Computers.Computer, place: Place, turn: B
  * desktop first meets the same desktop, and the same browser if the dock
  * started it.
  */
-export const startBrowser = (computer: Computers.Computer, place: Place, turn: BotInConversation) =>
+const startBrowser = (computer: Computers.Computer, place: Place, turn: BotInConversation) =>
 	Effect.flatMap(desktopCommand(computer, place, turn, "session"), (ports) =>
 		ports.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))

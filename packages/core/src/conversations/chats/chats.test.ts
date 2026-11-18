@@ -1,6 +1,6 @@
 import {
 	type ChatMessageItem,
-	conversationChannel,
+	conversationStream,
 	type FilePart,
 	handleFromName,
 } from "@sugabots/contracts";
@@ -246,7 +246,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		expect(started.conversation).toMatchObject({
 			botId,
-			title: "Budget review is Friday and bring the number…",
+			title: "Budget review is Friday and bring the numbers",
 		});
 		expect(started.message).toMatchObject({
 			id: messageId,
@@ -264,6 +264,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				conversation: expect.objectContaining({ id: started.conversation.id }),
 				lastMessage: expect.objectContaining({ authorUserId: userId }),
 				participants: expect.any(Array),
+				messageCount: 1,
 				waitingOn: null,
 				unreadMessages: 0,
 				needsApproval: false,
@@ -806,7 +807,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						db
 							.select({ type: event.type })
 							.from(event)
-							.where(eq(event.channel, conversationChannel(current.id))),
+							.where(eq(event.stream, conversationStream(current.id))),
 					)
 				).filter(({ type }) => type === "conversation.read").length;
 
@@ -1186,7 +1187,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		]);
 		expect(await view.channelMarkers(workspaceId)).toEqual({
-			channels: { [channelId]: { unreadMessages: 1, needsApproval: false, failedAutomations: 0 } },
+			channels: { [channelId]: { unreadMessages: 1, needsApproval: false } },
 			bots: {},
 		});
 	});
@@ -1323,7 +1324,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.from(event)
 					.where(
 						and(
-							eq(event.channel, conversationChannel(current.id)),
+							eq(event.stream, conversationStream(current.id)),
 							eq(event.type, "message.reactions_changed"),
 						),
 					)
@@ -1411,7 +1412,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					db
 						.select({ type: event.type })
 						.from(event)
-						.where(eq(event.channel, conversationChannel(current.id))),
+						.where(eq(event.stream, conversationStream(current.id))),
 				)
 			).filter(({ type }) => type === "conversation.changed").length;
 
@@ -1484,7 +1485,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db
 				.select({ type: event.type })
 				.from(event)
-				.where(eq(event.channel, conversationChannel(current.id)))
+				.where(eq(event.stream, conversationStream(current.id)))
 				.orderBy(event.seq),
 		);
 		expect(announced.slice(0, 2).map(({ type }) => type)).toEqual([
@@ -2498,7 +2499,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.from(event)
 					.where(
 						and(
-							eq(event.channel, conversationChannel(sent.conversationId)),
+							eq(event.stream, conversationStream(sent.conversationId)),
 							eq(event.type, "message.created"),
 						),
 					)

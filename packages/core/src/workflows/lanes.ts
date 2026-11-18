@@ -57,7 +57,7 @@ export interface Interface {
  */
 export type WhenBusy = "coalesce" | "replace" | "queue";
 
-export type Admission = "started" | "waiting" | "coalesced" | "replaced";
+type Admission = "started" | "waiting" | "coalesced" | "replaced";
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Lanes") {}
 

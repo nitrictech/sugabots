@@ -21,7 +21,7 @@ import { loadPlacedParts } from "./placed-parts.ts";
  */
 
 /** The conversation a system bot works on, as much of it as preparing that work needs. */
-export interface SystemBotScope {
+interface SystemBotScope {
 	conversationId: string;
 	workspaceId: string;
 	conversationKind: ConversationKind;

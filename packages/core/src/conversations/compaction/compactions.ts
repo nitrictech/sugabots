@@ -203,7 +203,7 @@ export const layer = layerNoDeps.pipe(Layer.provide(ConversationRepository.layer
  * nothing new to summarise, or the Compaction bot's turn may not run.
  * `reason` is for the logs.
  */
-export interface CompactionSkipped {
+interface CompactionSkipped {
 	readonly _tag: "Skipped";
 	readonly reason: string;
 }

@@ -156,7 +156,7 @@ export const quotedMessageColumns = {
 } as const;
 
 /** A message read with {@link quotedMessageColumns}. */
-export interface QuotedMessage
+interface QuotedMessage
 	extends Pick<schema.MessageRow, "id" | "content" | "parts" | "automationTrigger"> {
 	authorUser: PersonIdentity | null;
 	authorBot: BotIdentity | null;
@@ -185,7 +185,7 @@ export const reactionColumns = {
 } as const;
 
 /** A reaction read with {@link reactionColumns}. */
-export interface ReactionRow {
+interface ReactionRow {
 	emoji: string;
 	createdAt: Date;
 	user: { id: string; name: string };
@@ -225,7 +225,7 @@ export type PersonIdentity = { id: string; name: string; email: string; image: s
 type BotIdentity = Pick<schema.BotRow, "id" | "name" | "handle" | "color" | "face" | "shape">;
 
 /** A message row read with `messageRelations`. */
-export interface MessageWithRelations extends schema.MessageRow {
+interface MessageWithRelations extends schema.MessageRow {
 	authorUser: PersonIdentity | null;
 	authorBot: BotIdentity | null;
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
@@ -242,8 +242,8 @@ export interface MessageWithRelations extends schema.MessageRow {
 /** A message read with `messageRelations`, as the API shows it. */
 export function messageFromRelations(
 	stored: MessageWithRelations,
-	/** What people are told of why the turn behind a failed reply failed. */
-	error?: UserText | null,
+	/** The turn that wrote the reply: why it failed, if it did, and when it ended. */
+	turn?: { error: UserText | null; finishedAt: Date | null } | null,
 ): Message {
 	const shown = toMessage(
 		stored,
@@ -255,11 +255,12 @@ export function messageFromRelations(
 			),
 			files: stored.files.map(toFilePart),
 		},
-		error,
+		turn?.error,
 	);
 	const run = stored.automationRun;
 	return {
 		...shown,
+		...(turn?.finishedAt ? { finishedAt: turn.finishedAt.toISOString() } : {}),
 		...(run
 			? {
 					automationResultOf: {

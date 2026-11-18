@@ -104,7 +104,7 @@ export const VIEWER_IN_CHANNEL: ChannelPermissions = {
 };
 
 /** Every bot permission, as its creator or an administrator gets them. */
-export const MANAGER_OF_BOT: BotPermissions = {
+const MANAGER_OF_BOT: BotPermissions = {
 	update: true,
 	delete: true,
 	manageConnections: true,
@@ -112,12 +112,11 @@ export const MANAGER_OF_BOT: BotPermissions = {
 	useDesktop: true,
 	manageAutomations: true,
 	runAutomations: true,
-	decideApprovals: true,
 	talk: true,
 };
 
 /** What anyone else in the workspace gets with a public bot: talking to it, and running its automations. */
-export const USER_OF_BOT: BotPermissions = {
+const USER_OF_BOT: BotPermissions = {
 	...MANAGER_OF_BOT,
 	update: false,
 	delete: false,
@@ -412,6 +411,7 @@ export function taskItem(bot: Bot, task: Task = taskWith(bot)) {
 		conversation: task,
 		lastMessage: null,
 		participants: [],
+		messageCount: 1,
 		waitingOn: null,
 		unreadMessages: 0,
 		needsApproval: false,
@@ -495,7 +495,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	const onBot = administersWorkspace(role)
 		? MANAGER_OF_BOT
 		: role === "viewer"
-			? { ...USER_OF_BOT, runAutomations: false, decideApprovals: false, useDesktop: false }
+			? { ...USER_OF_BOT, runAutomations: false, useDesktop: false }
 			: USER_OF_BOT;
 	client.api.bots.list.mockReturnValue(
 		Effect.succeed([
@@ -601,7 +601,7 @@ export function pendingAnswer() {
 	return { effect: Effect.flatten(Effect.promise(() => promise)), answer: resolve };
 }
 
-export function quietEventStream(...events: StreamEvent[]) {
+function quietEventStream(...events: StreamEvent[]) {
 	let finish = () => {};
 	const closed = new Promise<void>((resolve) => {
 		finish = resolve;

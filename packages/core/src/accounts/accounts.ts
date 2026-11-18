@@ -76,17 +76,17 @@ export const layer = Layer.effect(Service, make);
  * `referral`: those, and anybody holding a member's referral link.
  * `open`: anybody.
  */
-export const SIGNUP_MODES = ["closed", "referral", "open"] as const;
+const SIGNUP_MODES = ["closed", "referral", "open"] as const;
 
 export type SignUpMode = (typeof SIGNUP_MODES)[number];
 
-export interface Applicant {
+interface Applicant {
 	email: string;
 	/** The code from a referral link, when the applicant arrived with one. */
 	referralCode?: string;
 }
 
-export interface Admission {
+interface Admission {
 	/** The member whose referral link let the applicant in. */
 	referredBy?: string;
 }

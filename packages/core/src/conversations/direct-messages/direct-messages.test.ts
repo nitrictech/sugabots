@@ -3,11 +3,11 @@ import { MAX_DIRECT_MESSAGE_PEOPLE } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { Visibility } from "../../authorization/visibility.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { channel, channelMember, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { ChannelAdministration } from "../../workspaces/channels/channel-administration.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
@@ -18,14 +18,16 @@ const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", async () => {
 	const conversations = await conversationsForTests(EventBus.inProcess({ store: eventStore }));
-	const visibility = await runOnPostgres(Effect.provide(Visibility.Service, Visibility.layer));
+	const channelAdministration = await runOnPostgres(
+		Effect.provide(ChannelAdministration.Service, ChannelAdministration.layer),
+	);
 
 	/** The chat services as one person, and what they can see. */
 	const as = (userId: string) => ({
 		chats: onPostgresAs(userId)(Context.get(conversations, Chats.Service)),
 		view: onPostgresAs(userId)(Context.get(conversations, ChatView.Service)),
 		conversations: onPostgresAs(userId)(Context.get(conversations, ConversationView.Service)),
-		visibility: onPostgresAs(userId)({ channels: visibility.channels }),
+		channels: onPostgresAs(userId)(channelAdministration),
 	});
 
 	let workspaceId: string;
@@ -248,10 +250,10 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 		it("is in no channel, so the channels its people reach are unchanged", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Hello");
 
-			const channels = await as(member.id).visibility.channels(workspaceId);
+			const channels = await as(member.id).channels.list({ workspace: workspaceId });
 
 			expect(conversation).not.toHaveProperty("channelId");
-			expect(channels.map((standing) => standing.channel.id)).toEqual([channelId]);
+			expect(channels.map((listed) => listed.id)).toEqual([channelId]);
 		});
 
 		it("refuses a direct message with yourself, or with somebody outside the workspace", async () => {

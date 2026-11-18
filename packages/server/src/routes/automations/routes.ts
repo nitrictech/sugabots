@@ -124,7 +124,6 @@ const automationErrors = {
 	InvalidRunCursor: BadRequest,
 	InvalidAutomationSchedule: BadRequest,
 	AutomationDeliveryIdTooLong: BadRequest,
-	AutomationChatNotFound: BadRequest,
 	AutomationNameTaken: Conflict,
 	AutomationNotFound: NotFound,
 	AutomationRepositoryNotConnected: BadRequest,

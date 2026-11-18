@@ -1,15 +1,13 @@
-import { START_TASK_TOOL } from "@sugabots/contracts";
+import type { BotStartedTask } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { BotTasks } from "../../chats/bot-tasks.ts";
 
-export { START_TASK_TOOL };
-
 const MAX_TITLE_CHARACTERS = 120;
 const MAX_BRIEF_CHARACTERS = 8_000;
 
-export type StartTaskResult = { task: BotTasks.StartedTask } | { refused: string };
+type StartTaskResult = { task: BotStartedTask } | { refused: string };
 
 /**
  * The `start_task` tool: moves a piece of work that came up in this

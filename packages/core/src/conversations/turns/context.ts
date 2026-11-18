@@ -1,4 +1,9 @@
-import { type Message, messageAuthorName, quotedPreview } from "@sugabots/contracts";
+import {
+	type Message,
+	messageAuthorName,
+	quotedPreview,
+	START_TASK_TOOL,
+} from "@sugabots/contracts";
 import { DateTime } from "effect";
 import type { Models } from "../../providers/models/models.ts";
 import {
@@ -11,7 +16,6 @@ import {
 	SEARCH_HISTORY_TOOL,
 } from "../repository/message-text.ts";
 import { AUTOMATIONS_KEY, spokenTimeZone } from "../tools/automations/tool.ts";
-import { START_TASK_TOOL } from "../tools/start-task/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 

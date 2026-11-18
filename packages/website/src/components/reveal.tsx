@@ -9,7 +9,7 @@ export const riseIn: Variants = {
 };
 
 /** A springy pop from slightly small: how a bot's face arrives. */
-export const popIn: Variants = {
+const popIn: Variants = {
 	hidden: { opacity: 0, scale: 0.6 },
 	visible: { opacity: 1, scale: 1, transition: { type: "spring", stiffness: 320, damping: 18 } },
 };

@@ -54,7 +54,7 @@ export const channelColors = [
 	"orange",
 ] as const;
 
-export const channelColorSchema = Schema.Literals(channelColors);
+const channelColorSchema = Schema.Literals(channelColors);
 
 /** What a channel is drawn in when it has no colour of its own stored. */
 export const DEFAULT_CHANNEL_COLOR = channelColors[0];
@@ -102,7 +102,7 @@ export const channelPermissionsSchema = Schema.Struct({
 export type ChannelPermissions = typeof channelPermissionsSchema.Type;
 
 /** Whether a channel is listed in the directory for anyone to join, or invitation-only. */
-export const channelVisibilitySchema = Schema.Literals(["public", "private"]);
+const channelVisibilitySchema = Schema.Literals(["public", "private"]);
 export type ChannelVisibility = typeof channelVisibilitySchema.Type;
 
 export const channelSchema = Schema.Struct({

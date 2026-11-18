@@ -5,7 +5,7 @@ import { useBots, usePinBot } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botLink, botSettingsLink } from "@/lib/links.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { useNewBot } from "@/shell/NewInChannel.tsx";
+import { useNewBot } from "@/shell/NewBot.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";

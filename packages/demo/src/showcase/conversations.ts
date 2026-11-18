@@ -31,7 +31,8 @@ import {
 } from "@sugabots/core/database/schema";
 import { Files } from "@sugabots/core/files/files";
 import type { ToolAccess } from "@sugabots/core/providers/sql";
-import { and, eq, getColumns, isNotNull, isNull, max, sql } from "drizzle-orm";
+import type { UserText } from "@sugabots/errors";
+import { and, eq, getColumns, isNull, max, sql } from "drizzle-orm";
 import { Effect } from "effect";
 
 /**
@@ -39,12 +40,13 @@ import { Effect } from "effect";
  * them from, so the screenshots need no model, no second login and no waiting.
  * Nothing is announced: the app shows them when it next loads.
  *
- * Each channel's conversation and each task is written once: one that already has
- * messages is left alone, and so is an automation that already has runs.
+ * Each main chat and task gets only the scripted messages it does not have
+ * yet, matched by their text, so a scene added later reaches a showcase seeded
+ * before it. An automation that already has a run at a scheduled time keeps it.
  */
 
 /** Who the conversations name, by the keys `seed.ts` gives them. */
-export interface Cast<Person extends string> {
+interface Cast<Person extends string> {
 	workspaceId: string;
 	people: Record<Person, string>;
 	/** By the seed's key for each channel. */
@@ -79,12 +81,15 @@ type ScriptedPart<Person extends string> =
 	  }
 	| {
 			toolCall: {
-				connection: string;
+				/** The bot's connection it went through; without one, a tool built into every bot. */
+				connection?: string;
 				tool: string;
 				input: JsonValue;
 				/** What the call returned, once it has run. */
 				output?: JsonValue;
-				/** Who allowed it, and when; without it, the call is still waiting for someone to. */
+				/** A call that only reads, so it ran without anyone being asked. */
+				readOnly?: boolean;
+				/** Who allowed it, and when; without it (and not `readOnly`), the call is still waiting for someone to. */
 				allowed?: { by: Person; at: Clock };
 			};
 	  }
@@ -127,7 +132,10 @@ export interface AutomationRun {
 	automation: string;
 	scheduledAt: Clock;
 	finishedAt: Clock;
+	/** What the run posted; with `failed`, what it got as far as saying. */
 	result: string;
+	/** Why the run failed, as its people are told; without it, the run finished. */
+	failed?: UserText;
 }
 
 /** A connection every bot in a channel has, with the tools its server lists and what they may do with each. */
@@ -331,7 +339,7 @@ const automationFeedOf = (
 		return yield* placedById(id);
 	});
 
-/** Writes the task, unless it already has messages. */
+/** Writes into the task the scene's messages it does not have yet. */
 const writeTask = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
@@ -339,20 +347,15 @@ const writeTask = <Person extends string>(
 ) =>
 	Effect.gen(function* () {
 		const task = yield* taskOf(cast, day, scene);
-		const [said] = yield* query((db) =>
-			db
-				.select({ id: message.id })
-				.from(message)
-				.where(eq(message.conversationId, task.id))
-				.limit(1),
-		);
-		if (said) return false;
-		yield* writeMessages(cast, day, { inConversation: task, messages: scene.messages });
-		yield* touch(task.id);
-		return true;
+		const wrote = yield* writeMessages(cast, day, {
+			inConversation: task,
+			messages: scene.messages,
+		});
+		if (wrote) yield* touch(task.id);
+		return wrote;
 	});
 
-/** Writes the scene into its channel's main chat, unless somebody has already written there. */
+/** Writes into its channel's main chat the scene's messages it does not have yet. */
 const writeChatScene = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
@@ -360,22 +363,18 @@ const writeChatScene = <Person extends string>(
 ) =>
 	Effect.gen(function* () {
 		const mainChat = yield* mainChatOf(cast, channelIdOf(cast.channelIds, scene.channel));
-		const [said] = yield* query((db) =>
-			db
-				.select({ id: message.id })
-				.from(message)
-				.where(and(eq(message.conversationId, mainChat.id), isNotNull(message.authorUserId)))
-				.limit(1),
-		);
-		if (said) return false;
-		yield* writeMessages(cast, day, { inConversation: mainChat, messages: scene.messages });
-		yield* touch(mainChat.id);
-		return true;
+		const wrote = yield* writeMessages(cast, day, {
+			inConversation: mainChat,
+			messages: scene.messages,
+		});
+		if (wrote) yield* touch(mainChat.id);
+		return wrote;
 	});
 
 /**
  * Writes the scripted messages into the conversation, each bot reply answering the
- * person's message before it.
+ * person's message before it, leaving out those it already has: a person's or a
+ * bot's with the same words. Says whether it wrote any.
  */
 const writeMessages = <Person extends string>(
 	cast: Cast<Person>,
@@ -387,9 +386,31 @@ const writeMessages = <Person extends string>(
 ) =>
 	Effect.gen(function* () {
 		const conversationId = input.inConversation.id;
+		const said = yield* query((db) =>
+			db
+				.select({
+					id: message.id,
+					content: message.content,
+					authorUserId: message.authorUserId,
+				})
+				.from(message)
+				.where(eq(message.conversationId, conversationId)),
+		);
+		const saidAlready = new Map(
+			said.map((row) => [`${row.authorUserId ? "person" : "bot"}:${row.content}`, row.id]),
+		);
 		const keyed = new Map<string, string>();
 		let lastPersonMessage: string | undefined;
+		let wrote = false;
 		for (const scripted of input.messages) {
+			const byPerson = "person" in scripted.from;
+			const already = saidAlready.get(`${byPerson ? "person" : "bot"}:${textOf(scripted.parts)}`);
+			if (already) {
+				if (scripted.key) keyed.set(scripted.key, already);
+				if (byPerson) lastPersonMessage = already;
+				continue;
+			}
+			wrote = true;
 			const at = timeOn(day, scripted.at);
 			const replyToMessageId = scripted.replyTo ? keyed.get(scripted.replyTo) : undefined;
 			const messageId =
@@ -414,6 +435,7 @@ const writeMessages = <Person extends string>(
 			if (scripted.key) keyed.set(scripted.key, messageId);
 			yield* writeReactions(cast, messageId, at, scripted.reactions);
 		}
+		return wrote;
 	});
 
 const writeReactions = <Person extends string>(
@@ -441,6 +463,8 @@ const writeReactions = <Person extends string>(
 const REACTION_DELAY_MILLISECONDS = 60_000;
 /** How long a scripted bot takes to reply, from its turn starting to its message being done. */
 const REPLY_MILLISECONDS = 20_000;
+/** How much longer a scripted reply takes for each tool call it makes, and how far apart they start. */
+const CALL_MILLISECONDS = 6_000;
 
 const writePersonMessage = (input: {
 	conversationId: string;
@@ -497,13 +521,20 @@ const writeBotReply = <Person extends string>(
 		const botId = idOf(cast.botIds, input.bot);
 		const { stored, content, placed } = placeParts(input.parts);
 		// A call still waiting for approval leaves its turn waiting and its reply unfinished.
-		const waiting = placed.some(({ part }) => "toolCall" in part && !part.toolCall.allowed);
+		const waiting = placed.some(
+			({ part }) => "toolCall" in part && !part.toolCall.allowed && !part.toolCall.readOnly,
+		);
+		const calls = placed.filter(({ part }) => "toolCall" in part).length;
+		const workMilliseconds = REPLY_MILLISECONDS + calls * CALL_MILLISECONDS;
+		// The reply is written from its turn's start, as a real one is, so it shows how long the bot worked.
+		const startedAt = new Date(input.at.getTime() - workMilliseconds);
 		const turnId = yield* writeTurn(cast, {
 			conversationId: input.conversationId,
 			bot: input.bot,
 			triggerMessageId: input.triggerMessageId,
 			at: input.at,
 			waiting,
+			workMilliseconds,
 		});
 		const messageId = randomUUID();
 		yield* query((db) =>
@@ -517,9 +548,10 @@ const writeBotReply = <Person extends string>(
 				content,
 				turnId,
 				replyToMessageId: input.replyToMessageId ?? null,
-				createdAt: input.at,
+				createdAt: startedAt,
 			}),
 		);
+		let callsStarted = 0;
 		for (const { id, atOffset, part } of placed) {
 			if ("collaboration" in part) {
 				yield* writeCollaboration(cast, day, {
@@ -552,7 +584,7 @@ const writeBotReply = <Person extends string>(
 					turnId,
 					botId,
 					atOffset,
-					startedAt: input.at,
+					startedAt: new Date(startedAt.getTime() + ++callsStarted * CALL_MILLISECONDS),
 					...part.toolCall,
 				});
 			}
@@ -574,11 +606,13 @@ const writeTurn = (
 		triggerMessageId: string;
 		at: Date;
 		waiting?: boolean;
+		/** How long before `at` the turn started. */
+		workMilliseconds?: number;
 	},
 ) =>
 	Effect.gen(function* () {
 		const id = randomUUID();
-		const startedAt = new Date(input.at.getTime() - REPLY_MILLISECONDS);
+		const startedAt = new Date(input.at.getTime() - (input.workMilliseconds ?? REPLY_MILLISECONDS));
 		yield* query((db) =>
 			db.insert(turn).values({
 				id,
@@ -686,7 +720,14 @@ const writeCollaboration = (
 		);
 	});
 
-/** A connection tool call that waited for a person, who allowed it, and then ran. */
+/** How long a scripted call that only reads takes to run. */
+const READ_CALL_MILLISECONDS = 1_400;
+
+/**
+ * A tool call in a bot's reply: one that only read and ran straight away, or a
+ * connection's call that waited for a person, who allowed it, and then ran.
+ * Without a connection it is a tool built into every bot.
+ */
 const writeToolCall = (
 	cast: Cast<string>,
 	day: Date,
@@ -698,25 +739,38 @@ const writeToolCall = (
 		botId: string;
 		atOffset: number;
 		startedAt: Date;
-		connection: string;
+		connection?: string;
 		tool: string;
 		input: JsonValue;
 		/** What the call returned, once it has run. */
 		output?: JsonValue;
+		readOnly?: boolean;
 		allowed?: { by: string; at: Clock };
 	},
 ) =>
 	Effect.gen(function* () {
-		const [used] = yield* query((db) =>
-			db
-				.select({ id: connection.id, revision: connection.configurationRevision })
-				.from(connection)
-				.where(and(eq(connection.botId, input.botId), eq(connection.handle, input.connection))),
-		);
-		if (!used) return yield* Effect.die(new Error(`No ${input.connection} connection`));
+		const handle = input.connection;
+		const [used] =
+			handle === undefined
+				? [undefined]
+				: yield* query((db) =>
+						db
+							.select({ id: connection.id, revision: connection.configurationRevision })
+							.from(connection)
+							.where(and(eq(connection.botId, input.botId), eq(connection.handle, handle))),
+					);
+		if (handle !== undefined && !used)
+			return yield* Effect.die(new Error(`No ${handle} connection`));
 		const allowedAt = input.allowed ? timeOn(day, input.allowed.at) : undefined;
-		const decided =
-			input.allowed && allowedAt
+		const ranAt = new Date(input.startedAt.getTime() + READ_CALL_MILLISECONDS);
+		const decided = input.readOnly
+			? {
+					output: input.output ?? null,
+					status: "completed" as const,
+					finishedAt: ranAt,
+					updatedAt: ranAt,
+				}
+			: input.allowed && allowedAt
 				? {
 						approvalStatus: "allowed" as const,
 						decidedById: (cast.people as Record<string, string>)[input.allowed.by] ?? null,
@@ -737,15 +791,16 @@ const writeToolCall = (
 				conversationId: input.conversationId,
 				messageId: input.messageId,
 				turnId: input.turnId,
-				tool: `${input.connection}${CONNECTION_TOOL_SEPARATOR}${input.tool}`,
+				tool:
+					handle === undefined ? input.tool : `${handle}${CONNECTION_TOOL_SEPARATOR}${input.tool}`,
 				sdkToolCallId: randomUUID(),
-				approvalId: randomUUID(),
-				connectionId: used.id,
-				connectionRevision: used.revision,
-				remoteToolName: input.tool,
+				approvalId: input.readOnly ? null : randomUUID(),
+				connectionId: used?.id ?? null,
+				connectionRevision: used?.revision ?? null,
+				remoteToolName: handle === undefined ? null : input.tool,
 				executionInput: input.input,
 				input: input.input,
-				mutating: true,
+				mutating: !input.readOnly,
 				atOffset: input.atOffset,
 				startedAt: input.startedAt,
 				createdAt: input.startedAt,
@@ -829,10 +884,10 @@ const writeFile = (
 	});
 
 /**
- * A finished run, as the automation runner leaves one: its conversation in the
- * automation's own, what started it, the bot's reply there, and that reply
- * posted as the run's result in the automation's feed.
- * Skipped when the automation already has a run.
+ * A finished or failed run, as the automation runner leaves one: its
+ * conversation in the automation's own, what started it, the bot's reply
+ * there, and that reply posted as the run's result in the automation's feed.
+ * Skipped when the automation already has a run at that time.
  */
 const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =>
 	Effect.gen(function* () {
@@ -888,7 +943,8 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 					},
 					automationName: defined.name,
 					instructions: defined.instructions,
-					state: "completed",
+					state: run.failed ? "failed" : "completed",
+					error: run.failed ?? null,
 					acceptedAt: scheduledAt,
 					startedAt: scheduledAt,
 					finishedAt,
@@ -924,6 +980,13 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 			triggerMessageId: triggerId,
 			at: finishedAt,
 		});
+		// A failed run's reply says why from its turn, as a real failed turn's does.
+		const failed = run.failed;
+		if (failed) {
+			yield* query((db) =>
+				db.update(turn).set({ status: "failed", error: failed }).where(eq(turn.id, turnId)),
+			);
+		}
 		const posts = [
 			{ conversationId: runConversation.id, runId: null, turnId },
 			{ conversationId: feed.id, runId, turnId: null },
@@ -934,7 +997,7 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 					...post,
 					authorBotId: botId,
 					kind: "text",
-					status: "complete",
+					status: run.failed ? "failed" : "complete",
 					parts: [{ type: "text", text: run.result }],
 					content: run.result,
 					createdAt: finishedAt,

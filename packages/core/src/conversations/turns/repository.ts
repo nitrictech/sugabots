@@ -765,7 +765,7 @@ export const layer = layerNoDeps.pipe(
 );
 
 /** A file a bot attaches to its reply: its name, media type and bytes. */
-export interface ReplyFile {
+interface ReplyFile {
 	readonly name: string;
 	readonly contentType: string;
 	readonly content: Uint8Array;
@@ -912,14 +912,14 @@ export const TurnCheckpoint = Schema.Struct({
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
 /** How much of its model's context window a turn's prompt took. */
-export interface ContextMeasurement {
+interface ContextMeasurement {
 	contextTokens?: number;
 	/** The window the prompt was read with. */
 	contextCapacity?: number;
 }
 
 /** How a reply completed, for what reacts to it (see `TurnCompleted`). */
-export interface TurnCompletion extends ContextMeasurement {
+interface TurnCompletion extends ContextMeasurement {
 	/** A reply is always read with a window. */
 	readonly contextCapacity: number;
 	readonly readKeptFrom: string | null;

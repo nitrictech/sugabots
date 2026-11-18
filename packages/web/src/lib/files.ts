@@ -16,7 +16,7 @@ import { client } from "@/api.ts";
  */
 
 /** Whose files a list shows: a channel's, from its conversations, or a bot's, from its tasks. */
-export type FileScope = { kind: "channel"; channelId: string } | { kind: "bot"; botId: string };
+type FileScope = { kind: "channel"; channelId: string } | { kind: "bot"; botId: string };
 
 /**
  * Refetches the files on screen once `toolCall` has written one. Every
@@ -51,12 +51,6 @@ export function useFile(fileId: string, version?: number) {
 		...fileQuery(fileId, version),
 		refetchOnMount: version === undefined ? "always" : true,
 	});
-}
-
-/** Fetches a file's current version when asked, such as to download it from a list. */
-export function useFetchFile() {
-	const queries = useQueryClient();
-	return (fileId: string) => queries.fetchQuery(fileQuery(fileId));
 }
 
 function fileQuery(fileId: string, version?: number) {

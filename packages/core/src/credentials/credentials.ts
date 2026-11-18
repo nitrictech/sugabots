@@ -37,7 +37,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-export class InvalidConfig extends Data.TaggedError("InvalidCredentialsConfig")<{
+class InvalidConfig extends Data.TaggedError("InvalidCredentialsConfig")<{
 	message: string;
 }> {}
 

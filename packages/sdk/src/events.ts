@@ -47,7 +47,7 @@ export interface EventsApi {
 	me(options?: EventStreamOptions): EventStream;
 }
 
-export interface EventsApiOptions {
+interface EventsApiOptions {
 	baseUrl: string;
 	tokens?: TokenStore;
 	fetch?: typeof globalThis.fetch;

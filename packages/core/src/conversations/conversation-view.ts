@@ -36,7 +36,7 @@ import {
 } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
-import { latestRunFailed, resultPosted, runIdOf, toRun } from "./automations/automations.ts";
+import { latestRunFailed, resultPosted, runIdOf, toRun } from "./automations/execution.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
 import {
@@ -45,7 +45,6 @@ import {
 	messageFromRelations,
 	messageRelations,
 	personColumns,
-	recentParticipantsOf,
 	toParticipant,
 	toPerson,
 } from "./repository/participants.ts";
@@ -174,7 +173,6 @@ export const make = Effect.gen(function* () {
 						db
 							.select({
 								summary: conversationSummary,
-								recentParticipants: recentParticipantsOf(placedConversation.id),
 								measured: latestMeasurementOf(placedConversation.id),
 								compactedAt: conversationCompaction.updatedAt,
 							})
@@ -199,7 +197,6 @@ export const make = Effect.gen(function* () {
 						summary: row.summary ? toConversationSummary(row.summary) : null,
 						context:
 							row.measured === null ? null : toConversationContext(row.measured, row.compactedAt),
-						recentParticipants: row.recentParticipants.map(toParticipant),
 					};
 				}),
 			),
@@ -288,8 +285,8 @@ const loadConversation = Effect.fn("ConversationView.loadConversation")(function
 				}),
 				with: {
 					...messageRelations,
-					// A failed reply's reason lives on its turn.
-					turn: { columns: { error: true } },
+					// A failed reply's reason, and when it ended, live on its turn.
+					turn: { columns: { error: true, finishedAt: true } },
 				},
 			},
 		},
@@ -367,7 +364,7 @@ function toConversationDetails(
 		channelBots: (row.channel?.bots ?? []).map((bot): Participant => ({ kind: "bot", ...bot })),
 		// A direct message's people are its members, as a channel's are the channel's.
 		members: (row.channel?.members ?? row.directMessageMembers ?? []).map(toPerson),
-		messages: page.map((stored) => messageFromRelations(stored, stored.turn?.error)),
+		messages: page.map((stored) => messageFromRelations(stored, stored.turn)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest
 				? encodeCursor({ at: oldest.createdAt, id: oldest.id })

@@ -1,7 +1,7 @@
 import {
 	EVENT_VERSION,
+	type EventStream,
 	type EventType,
-	type StreamChannel,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
@@ -59,29 +59,29 @@ afterAll(closeDatabase);
 for (const { name, skip, make, backdate } of stores) {
 	describe.skipIf(skip)(`${name} event store`, () => {
 		let store: EventStore.Interface;
-		// Channels are per-test so a shared Postgres instance, and whatever a
+		// Streams are per-test so a shared Postgres instance, and whatever a
 		// previous run left in it, cannot affect the result.
-		let channel: StreamChannel;
+		let stream: EventStream;
 
 		beforeEach(async () => {
 			clock = new Date(Date.now() - DAY_MS);
 			store = await make();
-			channel = `conversation:${crypto.randomUUID()}`;
+			stream = `conversation:${crypto.randomUUID()}`;
 		});
 
 		it("hands back a sequence number that rises", async () => {
-			const first = await store.append(channel, rawEvent("message.created"));
-			const second = await store.append(channel, rawEvent("message.completed"));
+			const first = await store.append(stream, rawEvent("message.created"));
+			const second = await store.append(stream, rawEvent("message.completed"));
 
 			expect(second).toBeGreaterThan(first);
 		});
 
-		it("replays a channel in order, after a point", async () => {
-			const first = await store.append(channel, rawEvent("message.created", { n: 1 }));
-			await store.append(channel, rawEvent("message.created", { n: 2 }));
-			await store.append(channel, rawEvent("message.created", { n: 3 }));
+		it("replays a stream in order, after a point", async () => {
+			const first = await store.append(stream, rawEvent("message.created", { n: 1 }));
+			await store.append(stream, rawEvent("message.created", { n: 2 }));
+			await store.append(stream, rawEvent("message.created", { n: 3 }));
 
-			const replayed = await store.replay(channel, first, 10);
+			const replayed = await store.replay(stream, first, 10);
 
 			expect(replayed.map((row) => row.event.n)).toEqual([2, 3]);
 		});
@@ -92,43 +92,43 @@ for (const { name, skip, make, backdate } of stores) {
 				output: { rows: [1, 2], nested: { ok: true } },
 			});
 
-			const seq = await store.append(channel, published);
-			const [replayed] = await store.replay(channel, seq - 1, 10);
+			const seq = await store.append(stream, published);
+			const [replayed] = await store.replay(stream, seq - 1, 10);
 
 			expect(replayed?.event).toEqual(published);
 		});
 
 		it("honours the limit", async () => {
 			for (const n of [1, 2, 3]) {
-				await store.append(channel, rawEvent("message.created", { n }));
+				await store.append(stream, rawEvent("message.created", { n }));
 			}
 
-			expect(await store.replay(channel, 0, 2)).toHaveLength(2);
+			expect(await store.replay(stream, 0, 2)).toHaveLength(2);
 		});
 
-		it("never replays another channel's events", async () => {
+		it("never replays another stream's events", async () => {
 			await store.append(`workspace:${crypto.randomUUID()}`, rawEvent("conversation.created"));
 
-			expect(await store.replay(channel, 0, 10)).toEqual([]);
+			expect(await store.replay(stream, 0, 10)).toEqual([]);
 		});
 
 		it("knows whether a resume point is still here", async () => {
-			const seq = await store.append(channel, rawEvent("message.created"));
+			const seq = await store.append(stream, rawEvent("message.created"));
 
-			expect(await store.has(channel, seq)).toBe(true);
-			expect(await store.has(channel, seq + 1_000_000)).toBe(false);
-			// The row exists, but not on the channel the client is resuming.
+			expect(await store.has(stream, seq)).toBe(true);
+			expect(await store.has(stream, seq + 1_000_000)).toBe(false);
+			// The row exists, but not on the stream the client is resuming.
 			expect(await store.has(`conversation:${crypto.randomUUID()}`, seq)).toBe(false);
 		});
 
 		it("prunes what is older than the cutoff and keeps the rest", async () => {
-			const old = await store.append(channel, rawEvent("message.created"));
+			const old = await store.append(stream, rawEvent("message.created"));
 			await backdate(old);
-			const kept = await store.append(channel, rawEvent("message.completed"));
+			const kept = await store.append(stream, rawEvent("message.completed"));
 
 			expect(await store.prune(new Date(Date.now() - 60_000))).toBeGreaterThanOrEqual(1);
-			expect(await store.has(channel, old)).toBe(false);
-			expect(await store.has(channel, kept)).toBe(true);
+			expect(await store.has(stream, old)).toBe(false);
+			expect(await store.has(stream, kept)).toBe(true);
 		});
 	});
 }

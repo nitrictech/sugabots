@@ -1,6 +1,6 @@
 import { act, cleanup, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount, onWideScreen } from "@/test-api.tsx";
+import { apiAnswers, linear, mount, onWideScreen, taskWith } from "@/test-api.tsx";
 
 const chatModule = vi.hoisted(() => Promise.withResolvers<void>());
 const newTaskModule = vi.hoisted(() => Promise.withResolvers<void>());
@@ -23,13 +23,13 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-it("keeps the sidebar and its bots visible while the chat screen loads", async () => {
+it("keeps the bot's sidebar visible while the chat screen loads", async () => {
 	apiAnswers();
-	mount(`/suga/bots/${linear.handle}`);
+	mount(`/suga/bots/${linear.handle}/tasks/${taskWith(linear).id}`);
 
-	// The bot whose task is opening is open in the sidebar.
+	// The bot whose task is opening has its own sidebar.
 	const rail = await screen.findByRole("navigation", { name: "Sidebar" });
-	await within(rail).findByRole("link", { name: linear.name });
+	await within(rail).findByRole("navigation", { name: `${linear.name}'s pages` });
 	expect(screen.queryAllByRole("heading", { name: "Working with Linear Handler" })).toHaveLength(0);
 
 	await act(async () => {
@@ -49,7 +49,9 @@ it("keeps the sidebar, with the bot in it, while the new task screen loads", asy
 	mount(`/suga/bots/${linear.handle}/new`);
 
 	const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-	expect(await within(sidebar).findByRole("link", { name: linear.name })).toBeDefined();
+	expect(
+		await within(sidebar).findByRole("navigation", { name: `${linear.name}'s pages` }),
+	).toBeDefined();
 
 	await act(async () => {
 		newTaskModule.resolve();

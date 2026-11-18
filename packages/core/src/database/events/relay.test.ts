@@ -1,5 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import { type StreamChannel, streamEvent } from "@sugabots/contracts";
+import { type EventStream, streamEvent } from "@sugabots/contracts";
 import { Effect, Layer, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ import { EventStore } from "./store.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses", () => {
 	let store: EventStore.Interface;
-	const channel = `conversation:relay-${Date.now()}` as const satisfies StreamChannel;
+	const stream = `conversation:relay-${Date.now()}` as const satisfies EventStream;
 	const buses: EventBus.Interface[] = [];
 
 	beforeAll(async () => {
@@ -37,7 +37,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		await closeDatabase();
 	});
 
-	/** Collects deliveries on a channel until `count` have arrived. */
+	/** Collects deliveries on a stream until `count` have arrived. */
 	function collect(bus: EventBus.Interface, count: number): Promise<EventBus.Delivery[]> {
 		return new Promise((resolve, reject) => {
 			const stop = new AbortController();
@@ -47,7 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 				reject(new Error(`only ${taken.length} of ${count} arrived`));
 			}, 3_000);
 			void (async () => {
-				for await (const delivery of bus.subscribe(channel, { signal: stop.signal })) {
+				for await (const delivery of bus.subscribe(stream, { signal: stop.signal })) {
 					taken.push(delivery);
 					if (taken.length === count) {
 						clearTimeout(timer);
@@ -71,12 +71,12 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		const heardByReader = collect(reader, 1);
 		const heardByWriter = collect(writer, 1);
 		const seq = await store.append(
-			channel,
+			stream,
 			streamEvent("conversation.changed", { conversationId: "t" }),
 		);
 
 		await writer.publishCommitted([
-			{ channel, seq, event: streamEvent("conversation.changed", { conversationId: "t" }) },
+			{ stream, seq, event: streamEvent("conversation.changed", { conversationId: "t" }) },
 		]);
 
 		expect(await heardByReader).toMatchObject([{ seq, event: { type: "conversation.changed" } }]);
@@ -92,7 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		const heard = collect(reader, 2);
 
 		await writer.publish(
-			channel,
+			stream,
 			streamEvent("message.delta", { conversationId: "t", messageId: "m", offset: 0, text: "hi" }),
 		);
 		const large = streamEvent("message.completed", {
@@ -101,7 +101,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 			status: "complete",
 			content: "x".repeat(9_000),
 		});
-		await writer.publish(channel, large);
+		await writer.publish(stream, large);
 
 		const deliveries = await heard;
 		expect(deliveries[0]).toEqual({ event: expect.objectContaining({ type: "message.delta" }) });

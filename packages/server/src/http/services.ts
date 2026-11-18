@@ -25,12 +25,12 @@ import type { ChannelAdministration } from "@sugabots/core/workspaces/channels/c
 import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import type { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
-import type { ChannelAccess } from "../routes/events/access.ts";
+import type { StreamAccess } from "../routes/events/access.ts";
 
 /**
  * Everything the routes may ask core for. Each is a use case or a view whose
  * every method requires the current actor and authorizes them, or the event
- * streams' `ChannelAccess`, which does the same for a channel. The exception
+ * streams' `StreamAccess`, which does the same for an event stream. The exception
  * is `Automations.Webhooks`, which nobody signs in to call: the automation's secret
  * admits the run instead; and `Automations.ConnectionEvents`, which an
  * integration's signed delivery admits. `Accounts` is here for the referral link; its
@@ -70,4 +70,4 @@ export type HttpServices =
 	| Automations.Service
 	| Automations.Webhooks
 	| Automations.ConnectionEvents
-	| ChannelAccess.Service;
+	| StreamAccess.Service;

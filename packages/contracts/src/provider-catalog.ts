@@ -31,7 +31,7 @@ export type ProviderPresetId = typeof providerPresetIdSchema.Type;
  * is read in. `openai-compatible` is the plain protocol and what a custom
  * OpenAI-format endpoint gets.
  */
-export const providerDialectIdSchema = Schema.Literals([
+const providerDialectIdSchema = Schema.Literals([
 	"openai-compatible",
 	"anthropic",
 	"openrouter",
@@ -41,7 +41,7 @@ export const providerDialectIdSchema = Schema.Literals([
 ]);
 export type ProviderDialectId = typeof providerDialectIdSchema.Type;
 
-export interface StarterModel {
+interface StarterModel {
 	modelId: string;
 	displayName: string;
 	capabilities: ProviderModelCapability[];
@@ -324,6 +324,3 @@ export function presetSignInService(preset: ProviderPresetId | null): SignInServ
 	const found = providerPreset(preset);
 	return found.credential === "sign-in" ? found.signIn : undefined;
 }
-
-/** Where a stock Ollama install serves its OpenAI-compatible API. */
-export const OLLAMA_LOCAL_BASE_URL = providerPreset("ollama").baseUrl;

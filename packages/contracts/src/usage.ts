@@ -12,7 +12,7 @@ import { providerPresetIdSchema } from "./provider-catalog.ts";
  */
 
 /** A calendar month, as `YYYY-MM`. */
-export const usageMonthSchema = Schema.String.check(Schema.isPattern(/^\d{4}-(0[1-9]|1[0-2])$/));
+const usageMonthSchema = Schema.String.check(Schema.isPattern(/^\d{4}-(0[1-9]|1[0-2])$/));
 export type UsageMonth = typeof usageMonthSchema.Type;
 
 export const usageQuerySchema = Schema.Struct({
@@ -30,14 +30,14 @@ const spendFields = {
 	unpricedRequests: countSchema,
 };
 
-export const usageDaySchema = Schema.Struct({
+const usageDaySchema = Schema.Struct({
 	/** `YYYY-MM-DD`, in the query's time zone. */
 	date: Schema.String,
 	usd: usdSchema,
 });
 
 /** A bot's spend: the requests its own turns made. */
-export const botUsageSchema = Schema.Struct({
+const botUsageSchema = Schema.Struct({
 	botId: Schema.String,
 	/** Null for a bot that has since been deleted. */
 	name: Schema.NullOr(Schema.String),
@@ -48,7 +48,7 @@ export const botUsageSchema = Schema.Struct({
 });
 
 /** A model's spend through one provider, the bots' and the system bots' together. */
-export const modelUsageSchema = Schema.Struct({
+const modelUsageSchema = Schema.Struct({
 	/** The model id sent to the provider. */
 	model: Schema.String,
 	displayName: Schema.NullOr(Schema.String),

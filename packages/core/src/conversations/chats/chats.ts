@@ -6,6 +6,7 @@ import type {
 	ConversationKind,
 	DirectMessage,
 	Message,
+	StartedTask,
 	Task,
 } from "@sugabots/contracts";
 import { MAX_DIRECT_MESSAGE_PEOPLE } from "@sugabots/contracts";
@@ -643,12 +644,6 @@ export class FirstChatNotArchivable
 	get userMessage() {
 		return userText`A channel's main chat can't be archived`;
 	}
-}
-
-/** A task started with a bot, and the message it was started with. */
-export interface StartedTask {
-	conversation: Task;
-	message: Message;
 }
 
 /** Whether `reachesBot` reaches the bot, which is in the workspace and one people make. */

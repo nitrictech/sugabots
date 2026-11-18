@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
 
 /** Someone a development seed signs in as. */
-export interface SeedPerson {
+interface SeedPerson {
 	name: string;
 	email: string;
 	password: string;

@@ -1,10 +1,14 @@
-import type { AnsweredApproval, ApprovalInbox, ApprovalRequest } from "@sugabots/contracts";
+import type {
+	AnsweredApproval,
+	ApprovalInbox,
+	ApprovalRequest,
+	Channel,
+} from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useApprovalApp } from "@/lib/approval-app.ts";
-import { useChannels } from "@/lib/channels.ts";
+import { useApprovalApp, useAskedIn } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
 import { useReviewToolCall } from "@/lib/conversations.ts";
 import { formatListTime } from "@/lib/list-time.ts";
@@ -51,16 +55,9 @@ function findRequest(inbox: ApprovalInbox | undefined, callId: string): InboxReq
 function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const { request } = found;
 	const { call, bot } = request;
-	const { data: channels } = useChannels();
 	const { look, appName, action } = useApprovalApp(request);
 	const review = useReviewToolCall(request.conversationId);
-	const channel = channels?.find((candidate) => candidate.id === request.channelId);
-	const askedIn = [
-		channel && `in ${channel.name}`,
-		`at ${formatListTime(new Date(call.startedAt), new Date())}`,
-	]
-		.filter(Boolean)
-		.join(" ");
+	const { channel, askedIn } = useAskedIn(request);
 	const fields = fieldsOf(call.input) ?? [];
 	// A phone answers with two wide buttons, as Approvals does.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -129,21 +126,11 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						</p>
 					)}
 					<span className="flex-1 max-md:hidden" />
-					{/* A channel's conversation links once the channel is known. */}
-					{request.rootConversationId && (request.channelId === null || channel) && (
-						<ConversationLink
-							channel={channel ?? null}
-							conversationId={request.rootConversationId}
-							search={
-								request.conversationId === request.rootConversationId
-									? {}
-									: { item: request.conversationId }
-							}
-							className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
-						>
-							Open conversation
-						</ConversationLink>
-					)}
+					<RequestConversationLink
+						request={request}
+						channel={channel}
+						className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
+					/>
 				</div>
 			</article>
 		</div>
@@ -183,5 +170,37 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 			<dt className="text-xs text-subtle-foreground max-md:text-sm">{label}</dt>
 			<dd className="m-0 min-w-0 text-xs text-foreground max-md:text-sm">{children}</dd>
 		</div>
+	);
+}
+
+/**
+ * Open conversation: the conversation a request was asked in, with the run or
+ * collaboration it came from open beside it. A channel's conversation links
+ * once `channel` is known; a request outside any conversation has none.
+ */
+export function RequestConversationLink({
+	request,
+	channel,
+	className,
+}: {
+	request: ApprovalRequest;
+	/** The channel it was asked in, as `useAskedIn` finds it. */
+	channel: Channel | undefined;
+	className: string;
+}) {
+	if (!request.rootConversationId || (request.channelId !== null && !channel)) return null;
+	return (
+		<ConversationLink
+			channel={channel ?? null}
+			conversationId={request.rootConversationId}
+			search={
+				request.conversationId === request.rootConversationId
+					? {}
+					: { item: request.conversationId }
+			}
+			className={className}
+		>
+			Open conversation
+		</ConversationLink>
 	);
 }

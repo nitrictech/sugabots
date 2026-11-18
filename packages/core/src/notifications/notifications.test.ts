@@ -1,10 +1,10 @@
 import {
 	conversationNotificationTag,
+	type EventStream,
 	handleFromName,
 	type Message,
 	type NotificationPreferences,
-	personChannel,
-	type StreamChannel,
+	personStream,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
@@ -54,7 +54,7 @@ function preferences(chosen: Partial<NotificationPreferences>): NotificationPref
 }
 
 /** What the service published on the bus, for every test in the file. */
-const published: { channel: StreamChannel; event: StreamEvent }[] = [];
+const published: { stream: EventStream; event: StreamEvent }[] = [];
 
 /**
  * The service over the test database's own pool, publishing to `published`,
@@ -63,8 +63,8 @@ const published: { channel: StreamChannel; event: StreamEvent }[] = [];
 async function served() {
 	const scope = Scope.makeUnsafe();
 	const bus = unimplemented(EventBus.Service, {
-		publish: async (channel, event) => {
-			published.push({ channel, event });
+		publish: async (stream, event) => {
+			published.push({ stream, event });
 		},
 	});
 	const context = await runOnPostgres(
@@ -111,7 +111,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	const sentTo = (userId: string) =>
 		published
 			.filter(
-				({ channel, event }) => channel === personChannel(userId) && event.type === "notification",
+				({ stream, event }) => stream === personStream(userId) && event.type === "notification",
 			)
 			.map(({ event: { type: _type, v: _version, ...notification } }) => notification);
 	/** Waits for `userId` to be sent something, then for anything sent alongside it. */
@@ -505,7 +505,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		expect(published).toEqual([
 			{
-				channel: personChannel(people.ada.id),
+				stream: personStream(people.ada.id),
 				event: expect.objectContaining({ type: "presence", ...looking }),
 			},
 		]);

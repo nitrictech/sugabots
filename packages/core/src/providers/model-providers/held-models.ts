@@ -17,7 +17,7 @@ import { defaultModelOf, ModelNotEnabled } from "./model-provider-repository.ts"
  */
 
 /** What holds one model: the workspace default, and the system bots by name. */
-export interface Holders {
+interface Holders {
 	readonly workspaceDefault: boolean;
 	readonly systemBots: readonly string[];
 }

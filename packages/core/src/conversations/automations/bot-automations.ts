@@ -14,6 +14,7 @@ import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-a
 import { query, serviceOperations } from "../../database/database.ts";
 import { bot, workspace } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
+import { botAutomationsPath } from "../../installation/web-app-paths.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type {
 	AutomationNotFound,
@@ -77,7 +78,7 @@ export const make = Effect.gen(function* () {
 				row
 					? Effect.succeed({
 							timeZone: row.timeZone,
-							automationsUrl: `${installation.webAppUrl}/${row.workspaceSlug}/bots/${row.handle}/automations`,
+							automationsUrl: `${installation.webAppUrl}${botAutomationsPath(row.workspaceSlug, row.handle)}`,
 						})
 					: Effect.die(new Error("A bot with automations is not in a workspace")),
 		);
@@ -192,7 +193,7 @@ export interface Bot {
 }
 
 /** An automation as the bot reads it back. */
-export interface BotAutomation {
+interface BotAutomation {
 	id: string;
 	name: string;
 	instructions: string;
@@ -212,14 +213,14 @@ export interface BotAutomation {
 	settingsUrl: string;
 }
 
-export interface NewBotAutomation {
+interface NewBotAutomation {
 	name: string;
 	instructions: string;
 	/** A five-field cron expression, in the workspace's timezone. */
 	schedule: string;
 }
 
-export interface BotAutomationChanges {
+interface BotAutomationChanges {
 	name?: string;
 	instructions?: string;
 	schedule?: string;

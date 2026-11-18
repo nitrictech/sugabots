@@ -1,3 +1,4 @@
+import { botColorVariables } from "@sugabots/avatars";
 import {
 	type BotParticipant,
 	type ConversationDetails,
@@ -49,17 +50,6 @@ export function botsNamed(draft: string, channelBots: readonly Participant[]): B
 	const bots = channelBots.filter((member): member is BotParticipant => member.kind === "bot");
 	const handles = new Set(mentionedHandles(draft));
 	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
-}
-
-/**
- * The bot named first in `draft` among `channelBots`, which sending a new thread's
- * first message starts it with; any named after it are only mentioned.
- */
-export function firstBotNamed(
-	draft: string,
-	channelBots: readonly Participant[],
-): BotParticipant | undefined {
-	return botsNamed(draft, channelBots).at(0);
 }
 
 /** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
@@ -134,11 +124,16 @@ export function MentionChip({
 	/** Shown after the name, inside the chip, such as a × that removes it. */
 	after?: ReactNode;
 } & ComponentProps<"span">) {
+	// A bot's in its own colour, a person's on a light wash that sits on any surface.
+	const bot = target.kind === "bot" ? target : undefined;
 	return (
 		<span
 			{...rest}
+			data-mention-chip
+			style={bot ? { ...botColorVariables(bot.color), ...rest.style } : rest.style}
 			className={cn(
-				"focus-ring mx-px inline-flex cursor-pointer items-baseline gap-1 rounded-xs bg-chip px-1 font-semibold text-foreground leading-normal hover:bg-hover",
+				"focus-ring mx-px inline-flex cursor-pointer items-baseline gap-1 rounded-md px-1.5 font-medium leading-normal transition hover:brightness-125",
+				bot ? "bg-bot-tint text-bot-text" : "bg-foreground/10 text-foreground",
 				className,
 			)}
 		>

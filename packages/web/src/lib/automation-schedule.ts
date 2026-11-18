@@ -120,7 +120,7 @@ export function canAddTime(times: readonly number[]): boolean {
 }
 
 /** Moves a time of day by `step` minutes, round the clock either way. */
-export function stepTime(minutesPastMidnight: number, step: number): number {
+function stepTime(minutesPastMidnight: number, step: number): number {
 	return (((minutesPastMidnight + step) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
@@ -191,7 +191,7 @@ export function triggerLabel(trigger: AutomationTriggerInput): string {
 }
 
 /** A schedule, short enough for a row's value: "Daily at 22:00", "Mon Wed Fri, 3 times". */
-export function readingLabel(reading: ScheduleReading): string {
+function readingLabel(reading: ScheduleReading): string {
 	if (reading.kind === "written") return reading.label;
 	const { schedule } = reading;
 	return schedule.times.length === 1

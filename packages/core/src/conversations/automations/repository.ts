@@ -558,7 +558,7 @@ const ofAutomation = (scope: Scope, triggerId: string) =>
 	);
 
 /** Failed runs in a row after which an automation pauses itself. */
-export const FAILURES_THAT_PAUSE = 2;
+const FAILURES_THAT_PAUSE = 2;
 
 /** How a run's work ended. */
 export type Settled = Turns.Ended | { readonly state: "completed" };

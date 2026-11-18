@@ -8,7 +8,7 @@ import { Schema } from "effect";
  * and `automations` covers the tools a bot reads and changes its own automations
  * with. The names and descriptions are for the bot's settings page.
  */
-export const builtInToolKeySchema = Schema.Literals([
+const builtInToolKeySchema = Schema.Literals([
 	"web_fetch",
 	"web_search",
 	"automations",
@@ -19,7 +19,7 @@ export const builtInToolKeySchema = Schema.Literals([
 ]);
 export type BuiltInToolKey = typeof builtInToolKeySchema.Type;
 
-export interface BuiltInToolEntry {
+interface BuiltInToolEntry {
 	key: BuiltInToolKey;
 	name: string;
 	/** What the tool does, in one plain sentence. */

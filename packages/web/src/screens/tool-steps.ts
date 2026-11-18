@@ -24,14 +24,14 @@ import { awaitsApproval, durationOf, formatTotal } from "./tool-activity.ts";
  */
 
 /** Calls made one after another, under what the bot said just before the first of them. */
-export interface ToolStepRun {
+interface ToolStepRun {
 	/** The narration that introduced them, as one line: "Checking the uploaded screenshots". */
 	narration?: string;
 	calls: ToolCallPart[];
 }
 
 /** What a call did, in words: an action, and what it acted on when its input says. */
-export interface ToolStep {
+interface ToolStep {
 	action: string;
 	subject?: { text: string; asCode: boolean };
 }
@@ -204,7 +204,7 @@ export function stepDetails(call: ToolCallPart): StepDetails {
  * (`{ content: [{ type: "text", text }], structuredContent }`): its structured
  * content, or its text, read as JSON when it is JSON. Any other output as it is.
  */
-export function outputValue(output: unknown): unknown {
+function outputValue(output: unknown): unknown {
 	const answer = asRecord(output);
 	if (answer.structuredContent !== undefined) return answer.structuredContent;
 	if (!Array.isArray(answer.content)) return output;

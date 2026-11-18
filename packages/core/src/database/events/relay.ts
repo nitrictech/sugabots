@@ -1,5 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import type { StreamChannel, StreamEvent } from "@sugabots/contracts";
+import type { EventStream, StreamEvent } from "@sugabots/contracts";
 import { Data, Deferred, Duration, Effect, Fiber, Queue } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
@@ -16,13 +16,13 @@ import type { EventStore } from "./store.ts";
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
-	broadcast(channel: StreamChannel, delivery: EventBus.Delivery): Promise<void>;
+	broadcast(stream: EventStream, delivery: EventBus.Delivery): Promise<void>;
 	/**
 	 * Hands over what other processes broadcast, until the returned function is
 	 * called. Resolves once listening, so nothing published after that is missed.
 	 */
 	listen(
-		receive: (channel: StreamChannel, delivery: EventBus.Delivery) => void,
+		receive: (stream: EventStream, delivery: EventBus.Delivery) => void,
 	): Promise<() => Promise<void>>;
 }
 
@@ -44,7 +44,7 @@ const PROBE_TIMEOUT = Duration.seconds(5);
 /** What travels in a notification. `event` is absent when it did not fit. */
 interface Notice {
 	from: string;
-	channel: StreamChannel;
+	stream: EventStream;
 	seq?: number;
 	event?: StreamEvent;
 }
@@ -87,8 +87,8 @@ export const postgresEventRelay = (
 		const origin = yield* ids.random;
 
 		return {
-			async broadcast(channel, delivery) {
-				const whole: Notice = { from: origin, channel, seq: delivery.seq, event: delivery.event };
+			async broadcast(stream, delivery) {
+				const whole: Notice = { from: origin, stream, seq: delivery.seq, event: delivery.event };
 				let notice = JSON.stringify(whole);
 				if (Buffer.byteLength(notice) > MAX_NOTICE_BYTES) {
 					if (delivery.seq === undefined) {
@@ -96,7 +96,7 @@ export const postgresEventRelay = (
 						// it carries the whole text anyway.
 						return;
 					}
-					notice = JSON.stringify({ from: origin, channel, seq: delivery.seq } satisfies Notice);
+					notice = JSON.stringify({ from: origin, stream, seq: delivery.seq } satisfies Notice);
 				}
 				await runPromise(client.notify(NOTIFY_CHANNEL, notice));
 			},
@@ -115,15 +115,12 @@ export const postgresEventRelay = (
 					if (notice.from === origin) return;
 					const event = notice.event ?? (await storedEvent(notice));
 					if (!event) return;
-					receive(
-						notice.channel,
-						notice.seq === undefined ? { event } : { seq: notice.seq, event },
-					);
+					receive(notice.stream, notice.seq === undefined ? { event } : { seq: notice.seq, event });
 				}
 
-				async function storedEvent({ channel, seq }: Notice): Promise<StreamEvent | undefined> {
+				async function storedEvent({ stream, seq }: Notice): Promise<StreamEvent | undefined> {
 					if (seq === undefined) return undefined;
-					const [stored] = await store.replay(channel, seq - 1, 1);
+					const [stored] = await store.replay(stream, seq - 1, 1);
 					return stored?.seq === seq ? stored.event : undefined;
 				}
 

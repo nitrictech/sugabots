@@ -292,7 +292,13 @@ async function applyConversationEvent(
 	} else if (update.type === "message.completed") {
 		messageId = update.messageId;
 		const { content, status } = update;
-		applyMessage = (message) => ({ ...withContent(message, content), status });
+		// The event does not say when the turn ended; it ended as it arrived, near enough.
+		const finishedAt = new Date().toISOString();
+		applyMessage = (message) => ({
+			...withContent(message, content),
+			status,
+			finishedAt: message.finishedAt ?? finishedAt,
+		});
 	} else if (update.type === "collaboration.updated") {
 		messageId = update.messageId;
 		const { collaboration } = update;

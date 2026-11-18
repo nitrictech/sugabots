@@ -17,7 +17,7 @@ export interface Delivery {
 }
 
 /** The kinds whose callers send the secret itself rather than signing with it. */
-export type SentSecretAuth = Extract<WebhookAuth, { kind: "api_key" | "bearer" | "basic" }>;
+type SentSecretAuth = Extract<WebhookAuth, { kind: "api_key" | "bearer" | "basic" }>;
 
 /**
  * How far a signed timestamp may be from now, either way, before the delivery

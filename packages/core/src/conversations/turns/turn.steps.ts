@@ -1,4 +1,9 @@
-import { type CollaborationPart, conversationChannel, streamEvent } from "@sugabots/contracts";
+import {
+	type CollaborationPart,
+	conversationStream,
+	START_TASK_TOOL,
+	streamEvent,
+} from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
@@ -21,6 +26,7 @@ import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Files } from "../../files/files.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
+import { botConnectionsPath, searchSettingsPath } from "../../installation/web-app-paths.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
@@ -36,7 +42,7 @@ import { COLLABORATE_TOOL, collaborateTool } from "../tools/collaborate/tool.ts"
 import { ComputerTools, type Request } from "../tools/computer.ts";
 import { ConnectionTools, type OfferedTool } from "../tools/connections.ts";
 import { FILE_TOOLS } from "../tools/files/tool.ts";
-import { START_TASK_TOOL, startTaskTool } from "../tools/start-task/tool.ts";
+import { startTaskTool } from "../tools/start-task/tool.ts";
 import {
 	callToolApproval,
 	findApprovalTarget,
@@ -430,7 +436,7 @@ const streamReply = (
 			const now = yield* DateTime.nowAsDate;
 			const offeredBuiltIns = yield* builtInTools.forWorkspace(
 				prepared.context.conversation.workspaceId,
-				`${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/search`,
+				`${installation.webAppUrl}${searchSettingsPath(prepared.context.workspaceSlug)}`,
 			);
 			const builtIn = {
 				tools: offeredBuiltIns.tools,
@@ -605,7 +611,7 @@ const streamReply = (
 					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
-					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.bot.handle}/connections`,
+					connectionsPageUrl: `${installation.webAppUrl}${botConnectionsPath(prepared.context.workspaceSlug, prepared.context.bot.handle)}`,
 				}),
 				computer: computer.note,
 			};
@@ -837,8 +843,8 @@ const consumeDeltas = (
 /** Waits for `turn.cancel_requested` on this turn. Never succeeds if the bus closes first. */
 function cancelRequested(events: Pick<EventBus.Interface, "subscribe">, prepared: PreparedTurn) {
 	return Effect.promise(async (signal) => {
-		const channel = conversationChannel(prepared.context.conversation.id);
-		for await (const { event } of events.subscribe(channel, { signal })) {
+		const stream = conversationStream(prepared.context.conversation.id);
+		for await (const { event } of events.subscribe(stream, { signal })) {
 			if (event.type === "turn.cancel_requested" && event.turnId === prepared.turnId) return true;
 		}
 		return false;
@@ -854,7 +860,7 @@ const publishDelta = (
 ) =>
 	Effect.promise(() =>
 		events.publish(
-			conversationChannel(prepared.context.conversation.id),
+			conversationStream(prepared.context.conversation.id),
 			streamEvent("message.delta", {
 				conversationId: prepared.context.conversation.id,
 				messageId: prepared.responseMessage.id,

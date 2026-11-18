@@ -8,13 +8,14 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus, X } from "lucide-react";
 import {
 	cloneElement,
 	Fragment,
 	type ReactElement,
 	type ReactNode,
 	Suspense,
+	useEffect,
 	useId,
 	useRef,
 	useState,
@@ -28,11 +29,11 @@ import {
 	channelSettingsLink,
 	channelSettingsPageLink,
 } from "@/lib/links.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackTarget } from "@/lib/settings-back.tsx";
+import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
 	botSettingsPage,
@@ -49,6 +50,7 @@ import { NewChannelDialog } from "@/shell/NewChannel.tsx";
 import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
 	type BackTarget,
@@ -61,9 +63,9 @@ import {
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
- * Settings, as a page of the app beside the sidebar: the workspace's sections
- * each channel's pages and each bot down the left, the open page beside them under a trail
- * of where it sits. Below a laptop's width there is no room for both, so
+ * Settings, from a tablet up as a dialog over the dimmed app: the workspace's
+ * sections, each channel's pages and each bot down the left, the open page
+ * beside them under a trail of where it sits. Below a laptop's width there is no room for both, so
  * settings drill down as a phone's do: the sections as one list, and each
  * opening with a way back to it.
  *
@@ -85,32 +87,89 @@ export function SettingsLayout({
 	// A phone lists settings in its You tab.
 	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
 	return (
-		// A group, so the frame's Back can stand aside for one the page draws itself.
-		<div className="group/settings flex min-h-0 min-w-0 flex-1">
-			<SettingsNavigation />
-			{index && <CompactSettingsList />}
-			<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
-				<SettingsTrail className="max-lg:hidden" />
-				{/*
-				 * The scrollbar's room is kept whether or not the page is long enough
-				 * to need one, so a long page, such as Usage, centres its column where
-				 * a short one does.
-				 */}
-				<main
-					data-scroll-restoration-id="settings"
-					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
-				>
-					{!index && (
-						<CompactPageBackBar parent={phone ? phoneParentPage(pathname) : parentPage(pathname)} />
-					)}
+		// From a tablet up, a dialog over the dimmed app, which closes back to where it was opened.
+		<div className="contents md:fixed md:inset-0 md:z-50 md:flex md:items-center md:justify-center md:p-10">
+			<SettingsClose backdrop />
+			{/* A group, so the frame's Back can stand aside for one the page draws itself. */}
+			<div
+				{...(phone ? {} : { role: "dialog", "aria-modal": true, "aria-label": "Settings" })}
+				className="group/settings flex min-h-0 min-w-0 flex-1 md:relative md:h-full md:w-full md:overflow-hidden md:rounded-xl md:border md:border-border-strong md:bg-background md:shadow-dialog"
+			>
+				<SettingsClose />
+				<SettingsNavigation />
+				{index && <CompactSettingsList />}
+				<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
+					<SettingsTrail className="max-lg:hidden" />
 					{/*
-					 * Nothing rather than a skeleton: the navigation has already answered
-					 * the click, and a shape that flashes beside it reads as a fault.
+					 * The scrollbar's room is kept whether or not the page is long enough
+					 * to need one, so a long page, such as Usage, centres its column where
+					 * a short one does.
 					 */}
-					<Suspense fallback={null}>{children}</Suspense>
-				</main>
+					<main
+						data-scroll-restoration-id="settings"
+						className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
+					>
+						{!index && (
+							<CompactPageBackBar
+								parent={phone ? phoneParentPage(pathname) : parentPage(pathname)}
+							/>
+						)}
+						{/*
+						 * Nothing rather than a skeleton: the navigation has already answered
+						 * the click, and a shape that flashes beside it reads as a fault.
+						 */}
+						<Suspense fallback={null}>{children}</Suspense>
+					</main>
+				</div>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Closes the settings dialog, back to the page it was opened from, else the
+ * workspace's home: the × in its corner, or as `backdrop`, the dimmed app
+ * around it. A phone, whose settings are pages, has neither.
+ */
+function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
+	const back = useSettingsBack();
+	const { workspace } = useWorkspace();
+	const close = useRef<HTMLButtonElement>(null);
+	// Escape closes it wherever the focus is, unless something inside used the key, as a menu does.
+	useEffect(() => {
+		if (backdrop) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === "Escape" && !event.defaultPrevented && matchesMedia(SIDE_BY_SIDE)) {
+				close.current?.click();
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [backdrop]);
+	const to = back?.render ?? (
+		<Link to="/$workspace" params={{ workspace: workspace?.slug ?? "" }} />
+	);
+	if (backdrop) {
+		return (
+			<IconButton
+				label="Close settings"
+				render={to}
+				tabIndex={-1}
+				className="absolute inset-0 hidden size-auto cursor-default rounded-none bg-scrim hover:bg-scrim md:block"
+			>
+				{null}
+			</IconButton>
+		);
+	}
+	return (
+		<IconButton
+			ref={close}
+			label="Close settings"
+			render={to}
+			className="absolute top-2.5 right-3 z-10 hidden md:inline-grid"
+		>
+			<X aria-hidden />
+		</IconButton>
 	);
 }
 
@@ -138,15 +197,13 @@ function parentPage(pathname: string): BackTarget {
 	if (sectionId === "bots" && item !== undefined && page !== undefined) {
 		return {
 			label: "Bot",
-			render: <Link from="/$workspace" to="./settings/bots/$bot" params={{ bot: item }} />,
+			render: <Link {...botSettingsLink({ handle: item })} />,
 		};
 	}
 	if (sectionId === "channels" && item !== undefined && page !== undefined) {
 		return {
 			label: "Channel",
-			render: (
-				<Link from="/$workspace" to="./settings/channels/$channel" params={{ channel: item }} />
-			),
+			render: <Link {...channelSettingsLink({ slug: item })} />,
 		};
 	}
 	// A channel's own page is one of the navigation's, so it sits under the list itself.
@@ -456,7 +513,7 @@ function storedOpenChannels(): Record<string, boolean> {
 }
 
 /** What each of a channel's pages holds, counted once the channel is open in the navigation. */
-export function useChannelCounts(channel: Channel, open: boolean): Partial<Record<string, number>> {
+function useChannelCounts(channel: Channel, open: boolean): Partial<Record<string, number>> {
 	const members = useChannelMembers(open ? channel.id : undefined);
 	const bots = useChannelBots(open ? channel.id : undefined);
 	return {
@@ -612,10 +669,7 @@ function SettingsTrail({ className }: { className: string }) {
 	return (
 		<nav
 			aria-label="Breadcrumb"
-			className={cn(
-				"flex h-13 shrink-0 items-center justify-center border-border border-b px-18",
-				className,
-			)}
+			className={cn("flex h-13 shrink-0 items-center border-border border-b pr-14 pl-6", className)}
 		>
 			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-xs">
 				{crumbs.map((crumb, index) => {

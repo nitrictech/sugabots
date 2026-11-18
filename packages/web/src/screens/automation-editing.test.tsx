@@ -69,10 +69,10 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-/** An automation's feed, where its runs post, with the automation set up in the panel beside it. */
+/** An automation's own page, where it is set up. */
 const itemPage = (one: WorkspaceAutomation) =>
 	`/suga/bots/${one.bot.handle}/automations/${one.automation.id}`;
-/** An automation being made beside the triager's automations. */
+/** An automation being made, under the triager's automations. */
 const newPage = `/suga/bots/${triager.handle}/automations/new`;
 
 /** The id of `one`'s feed, where its runs post. */
@@ -141,7 +141,7 @@ function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[]
 	);
 }
 
-/** Opens `one`'s page and its panel, as a person would: Details beside its feed. */
+/** Opens `one`'s own page, where it is set up. */
 async function openPanel(one: WorkspaceAutomation, others: readonly Automation[] = []) {
 	serveAutomation(one, others);
 	const router = mount(itemPage(one));
@@ -150,20 +150,9 @@ async function openPanel(one: WorkspaceAutomation, others: readonly Automation[]
 	return { router, panel };
 }
 
-/**
- * Details on the automation's feed, until its panel shows. The feed's page
- * can mount again as it finishes loading, which drops a click made before.
- */
+/** The automation's own page, once it shows. */
 async function showPanel() {
-	return waitFor(
-		() => {
-			const shown = screen.queryByRole("complementary", { name: "Automation" });
-			if (shown) return shown;
-			fireEvent.click(screen.getByRole("button", { name: "Details" }));
-			throw new Error("The automation's panel isn't open yet");
-		},
-		{ timeout: 5000 },
-	);
+	return screen.findByRole("region", { name: "Automation" }, { timeout: 5000 });
 }
 
 /** Opens the dialog of the trigger whose row's name matches `row`. */
@@ -322,7 +311,7 @@ describe("a bot's automations", () => {
 		);
 		mount(`/suga/bots/${researcher.handle}/automations/new`);
 
-		expect(await screen.findByText(researcher.name, { selector: "main *" })).toBeDefined();
+		expect(await screen.findAllByText(researcher.name, { selector: "main *" })).not.toHaveLength(0);
 		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
 		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Pipeline check" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
@@ -339,13 +328,14 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("goes back to the bot's automations when an automation being made is cancelled", async () => {
+	it("goes to the bot's page when an automation being made, with nothing before it, is cancelled", async () => {
 		const router = mount(`/suga/bots/${researcher.handle}/automations/new`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
+		// Not its automations, which would bring a bot with none straight back to making one.
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/bots/${researcher.handle}/automations`),
+			expect(router.state.location.pathname).toBe(`/suga/bots/${researcher.handle}`),
 		);
 		expect(client.api.automations.create).not.toHaveBeenCalled();
 	});
@@ -811,19 +801,15 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("saves instructions from their dialog, then closes it", async () => {
+	it("saves instructions written on its page once the box is left, trimmed", async () => {
 		client.api.automations.update.mockReturnValue(
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		const { panel } = await openPanel(morningBrief);
-		fireEvent.click(within(panel).getByRole("button", { name: "Edit instructions" }));
-		const dialog = await screen.findByRole("dialog", { name: "Instructions" });
-		const save = within(dialog).getByRole("button", { name: "Save" });
-		expect(save).toHaveProperty("disabled", true);
-		fireEvent.change(within(dialog).getByLabelText("Instructions"), {
-			target: { value: "  Brief the team.  " },
-		});
-		fireEvent.click(save);
+		const instructions = within(panel).getByLabelText("Instructions");
+		fireEvent.change(instructions, { target: { value: "  Brief the team.  " } });
+		expect(client.api.automations.update).not.toHaveBeenCalled();
+		fireEvent.blur(instructions);
 
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
@@ -831,7 +817,6 @@ describe("a bot's automations", () => {
 				payload: { instructions: "Brief the team." },
 			}),
 		);
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("saves a schedule's change once it is saved, then closes", async () => {
@@ -994,8 +979,11 @@ describe("a bot's automations", () => {
 		const list = await screen.findByRole("region", { name: "Automations" });
 		fireEvent.click(await within(list).findByRole("link", { name: /Morning brief/ }));
 		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
-		expect(screen.getByText(morningBrief.automation.instructions)).toBeDefined();
-		expect(screen.getByRole("button", { name: "Edit instructions" })).toBeDefined();
+		expect(screen.getByLabelText("Instructions")).toHaveProperty(
+			"value",
+			morningBrief.automation.instructions,
+		);
+		expect(screen.getByLabelText("Instructions")).toHaveProperty("readOnly", false);
 		fireEvent.click(screen.getByRole("switch", { name: "Automation on" }));
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
@@ -1033,7 +1021,6 @@ describe("a bot's automations", () => {
 		expect(within(panel).getByText("Weekdays at 8:00")).toBeDefined();
 		expect(within(panel).queryByRole("button", { name: /^Schedule/ })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: "Add trigger" })).toBeNull();
-		expect(within(panel).getByText(morningBrief.automation.instructions)).toBeDefined();
-		expect(within(panel).queryByRole("button", { name: "Edit instructions" })).toBeNull();
+		expect(within(panel).getByLabelText("Instructions")).toHaveProperty("readOnly", true);
 	});
 });

@@ -22,7 +22,7 @@ export const COMPUTER_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
  * The E2B template Sugabots builds from {@link COMPUTER_IMAGE} in a
  * workspace's E2B account. E2B makes computers from templates, not images.
  */
-export const COMPUTER_E2B_TEMPLATE = "sugabots-sandbox";
+const COMPUTER_E2B_TEMPLATE = "sugabots-sandbox";
 
 /**
  * Room to install a repository's dependencies and run its checks. E2B's own
@@ -48,10 +48,10 @@ export const computerMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
 
-export const computerProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
+const computerProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
 export type ComputerProviderPresetId = typeof computerProviderPresetIdSchema.Type;
 
-export interface ComputerProviderPreset {
+interface ComputerProviderPreset {
 	id: ComputerProviderPresetId;
 	name: string;
 	/** A local preset is a server you run, at an address you give; a remote one has its own. */
@@ -106,7 +106,7 @@ const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(5
  * host but those the workspace blocks, as far as the provider can refuse
  * hosts by name. E2B can't, so its open computers reach every host.
  */
-export const computerNetworkModeSchema = Schema.Literals(["allowlist", "open"]);
+const computerNetworkModeSchema = Schema.Literals(["allowlist", "open"]);
 
 export type ComputerNetworkMode = typeof computerNetworkModeSchema.Type;
 
@@ -222,7 +222,6 @@ export type ComputerProviderUpdate = typeof computerProviderUpdateSchema.Type;
  * enabled computer provider with everything it needs.
  */
 export const computerAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
-export type ComputerAccess = typeof computerAccessSchema.Type;
 
 export const computerProviderTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
@@ -235,7 +234,7 @@ export type ComputerProviderTestResult = typeof computerProviderTestResultSchema
 const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** A folder of a bot's computer and how much of its disk it takes. */
-export const computerDiskFolderSchema = Schema.Union([
+const computerDiskFolderSchema = Schema.Union([
 	/** The bot's home, kept across all its conversations. */
 	Schema.Struct({ kind: Schema.Literal("home"), botId: uuidSchema, bytes: byteCountSchema }),
 	/** Every conversation's folder together, where the bots clone and build. Named for the folder, `threads/`, as computers keep it. */
@@ -251,7 +250,7 @@ export type ComputerDiskFolder = typeof computerDiskFolderSchema.Type;
  * few minutes while it runs. A paused computer's disk doesn't change, so its
  * last measurement still holds.
  */
-export const computerDiskSchema = Schema.Struct({
+const computerDiskSchema = Schema.Struct({
 	usedBytes: byteCountSchema,
 	/** What its files can fill: what they use and what is still free to them. */
 	totalBytes: byteCountSchema,
@@ -265,7 +264,7 @@ export type ComputerDisk = typeof computerDiskSchema.Type;
 /** Past this share of its disk, a computer is close to full. */
 export const COMPUTER_DISK_WARNING_SHARE = 0.8;
 /** Past this share, commands that write are about to fail. */
-export const COMPUTER_DISK_CRITICAL_SHARE = 0.9;
+const COMPUTER_DISK_CRITICAL_SHARE = 0.9;
 
 /** The share of its disk a computer's files use, from 0 to 1. */
 export function computerDiskShare(disk: Pick<ComputerDisk, "usedBytes" | "totalBytes">) {
@@ -300,7 +299,7 @@ export function formatDiskSize(bytes: number) {
 }
 
 /** A bot's computer as the bot's settings show it. */
-export const botComputerStateSchema = Schema.Union([
+const botComputerStateSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("none") }),
 	Schema.Struct({
 		kind: Schema.Literal("present"),
@@ -319,8 +318,6 @@ export const botComputerStateSchema = Schema.Union([
 		disk: Schema.NullOr(computerDiskSchema),
 	}),
 ]);
-
-export type BotComputerState = typeof botComputerStateSchema.Type;
 
 export const botComputerSchema = Schema.Struct({
 	computer: botComputerStateSchema,
@@ -349,8 +346,6 @@ export const computerTemplateSchema = Schema.Struct({
 	state: Schema.NullOr(Schema.Literals(["missing", "building", "ready", "failed"])),
 });
 
-export type ComputerTemplate = typeof computerTemplateSchema.Type;
-
 /**
  * A host a computer may reach: a domain name such as `api.example.com`, or a
  * leading wildcard such as `*.example.com`, which covers the domain's
@@ -373,7 +368,7 @@ export const computerHostSchema = Schema.String.check(
 );
 
 /** A host a workspace let every computer reach, or a bot its own, beyond the trusted ones. */
-export const computerAddedHostSchema = Schema.Struct({
+const computerAddedHostSchema = Schema.Struct({
 	host: computerHostSchema,
 	/** Who added it, or approved the bot's request for it; null once they've left. */
 	addedByName: Schema.NullOr(Schema.String),
@@ -383,11 +378,10 @@ export const computerAddedHostSchema = Schema.Struct({
 export type ComputerAddedHost = typeof computerAddedHostSchema.Type;
 
 /** A host no computer in the workspace may reach, whatever a bot allows. */
-export const blockedHostSchema = Schema.Struct({
+const blockedHostSchema = Schema.Struct({
 	host: computerHostSchema,
 	/** Who blocked it; null once they've left. */
 	blockedByName: Schema.NullOr(Schema.String),
-	blockedAt: isoTimestampSchema,
 });
 
 export type BlockedHost = typeof blockedHostSchema.Type;

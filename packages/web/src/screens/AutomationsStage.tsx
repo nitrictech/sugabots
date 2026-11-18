@@ -1,16 +1,16 @@
 import type { Bot, SessionUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useWorkspaceAutomations } from "@/lib/automations.ts";
+import { useWorkspaceAutomationsById } from "@/lib/automations.ts";
 import { useBotTasks, useOpenAutomationFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
 import { AutomationRow, NoAutomations } from "@/shell/Automations.tsx";
 import { Stage, StageMark, type StageParent } from "@/shell/Stage.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { NewAutomationPage } from "./AutomationEditor.tsx";
-import { ConversationChat, type StagedChange } from "./ConversationChat.tsx";
+import { ConversationChat } from "./ConversationChat.tsx";
+import type { StagedChange } from "./staged.ts";
 
 interface AutomationsStageProps {
 	bot: Bot;
@@ -126,11 +126,7 @@ function AutomationList({
 	onNew: () => void;
 }) {
 	const list = useBotTasks(bot.id);
-	const { workspace } = useWorkspace();
-	const full = useWorkspaceAutomations(workspace?.id);
-	const automationById = new Map(
-		full.data?.items.map((item) => [item.automation.id, item.automation]),
-	);
+	const automationById = useWorkspaceAutomationsById();
 	const automations = list.data?.automations ?? [];
 	if (list.isError) {
 		return (

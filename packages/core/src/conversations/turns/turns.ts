@@ -45,7 +45,6 @@ import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 export {
 	contextWindowTokens,
 	estimatedTokens,
-	historyLimitTokens,
 	loadContextWindow,
 	MAX_CONTEXT_WINDOW_TOKENS,
 	newestWithinLimit,
@@ -57,9 +56,6 @@ export {
 } from "./controls.ts";
 export type { Ended } from "./lifecycle.ts";
 export { WorkAdmission } from "./work-admission.ts";
-
-/** Which bot answers which message in which conversation, and why it was asked. */
-export type Request = TurnRequest;
 
 /** A system bot's piece of work, recorded as its turn in its own conversation. */
 export interface SystemTurn {
@@ -76,7 +72,7 @@ export interface SystemTurn {
  * the reason given, which is for the logs. A failure is recorded on the turn
  * and logged, so the caller has nothing more to do with it.
  */
-export type SystemTurnOutcome<A> =
+type SystemTurnOutcome<A> =
 	| { readonly _tag: "Completed"; readonly value: A }
 	| { readonly _tag: "Failed" }
 	| { readonly _tag: "Skipped"; readonly reason: string };
@@ -87,7 +83,7 @@ export interface Interface {
 	 * that commits. A turn already asked for, for the same bot in the same
 	 * conversation, is kept, because it will read every message posted since.
 	 */
-	readonly ask: (request: Request) => Effect.Effect<void>;
+	readonly ask: (request: TurnRequest) => Effect.Effect<void>;
 	/**
 	 * Stops the turns in the conversations `conversationIds`, in the caller's transaction:
 	 * cancels those waiting for approvals, tells their workflows once it

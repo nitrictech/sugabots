@@ -16,30 +16,30 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
-/** One of a channel's conversations, as changing it needs it. */
-export interface ChannelToChange {
+/** A channel's main chat or one of its threads, as changing it needs it. */
+export interface ChannelConversationToChange {
 	channel: Channel;
 	conversationId: string;
 	name: string;
-	/** Whether it may be archived, which the channel's first may not. */
+	/** Whether it may be archived: a thread may, the main chat may not. */
 	archivable: boolean;
 }
 
 /**
- * Beside a channel's name, for whoever may change the channel: renaming the
- * channel, and, unless it is the channel's first, archiving it, which takes it off
- * the channel's list and goes back to the channel. Its threads stay where they are.
- * A phone has these in the channel's details instead.
+ * Beside a thread's or main chat's name, for whoever may change the channel:
+ * renaming it, and archiving a thread, which takes it off the channel's list
+ * and goes back to the channel. A phone has these in the details instead.
  */
-export function ChatMenu(channel: ChannelToChange) {
+export function ChatMenu(conversation: ChannelConversationToChange) {
+	const noun = conversationNoun(conversation.archivable);
 	return (
-		<ChannelActions {...channel}>
+		<ChannelConversationActions {...conversation}>
 			{({ rename, archive }) => (
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
 							<IconButton
-								label={`More for ${channel.name}`}
+								label={`More for ${conversation.name}`}
 								variant="bar"
 								className="size-8 max-md:hidden"
 							>
@@ -50,33 +50,38 @@ export function ChatMenu(channel: ChannelToChange) {
 					<DropdownMenuContent align="end" className="min-w-48">
 						<DropdownMenuItem onClick={rename}>
 							<Pencil aria-hidden size={16} />
-							Rename channel
+							Rename {noun}
 						</DropdownMenuItem>
 						{archive && (
 							<DropdownMenuItem variant="destructive" onClick={archive}>
 								<Archive aria-hidden size={16} />
-								Archive channel
+								Archive {noun}
 							</DropdownMenuItem>
 						)}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			)}
-		</ChannelActions>
+		</ChannelConversationActions>
 	);
 }
 
+/** What a channel's conversation is called in its menu and dialogs. */
+function conversationNoun(archivable: boolean): string {
+	return archivable ? "thread" : "main chat";
+}
+
 /**
- * Renaming a channel and archiving it, which `children` offers as it likes,
- * each opening its own dialog; `archive` is absent for a channel that may
- * not be archived.
+ * Renaming a channel's main chat or thread and archiving a thread, which
+ * `children` offers as it likes, each opening its own dialog; `archive` is
+ * absent for the main chat, which may not be archived.
  */
-export function ChannelActions({
+export function ChannelConversationActions({
 	channel,
 	conversationId,
 	name,
 	archivable,
 	children,
-}: ChannelToChange & {
+}: ChannelConversationToChange & {
 	children: (open: { rename: () => void; archive?: () => void }) => ReactNode;
 }) {
 	const rename = useRenameChat(conversationId);
@@ -93,7 +98,7 @@ export function ChannelActions({
 			return;
 		}
 		setArchiving(false);
-		// Back to Home, or Home in the archived channel's place, so Back never returns to it.
+		// Back to the channel, or the channel in the archived thread's place, so Back never returns to it.
 		leaveForPage(router.buildLocation(channelLink(channel)).href);
 	}
 
@@ -105,7 +110,7 @@ export function ChannelActions({
 			})}
 			<Dialog open={renaming} onOpenChange={setRenaming}>
 				<ChatNameDialog
-					title="Rename channel"
+					title={`Rename ${conversationNoun(archivable)}`}
 					name={name}
 					action="Save"
 					onSave={async (renamed) => {
@@ -121,7 +126,7 @@ export function ChannelActions({
 				description="It leaves the channel's list for everyone."
 				confirmLabel="Archive"
 				pending={archive.isPending}
-				error={archive.isError ? "The channel was not archived. Try again." : undefined}
+				error={archive.isError ? "The thread was not archived. Try again." : undefined}
 				onDelete={archiveAndLeave}
 			/>
 		</>

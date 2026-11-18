@@ -37,7 +37,6 @@ export const BOT_PERMISSIONS: BotPermissions = {
 	useDesktop: true,
 	manageAutomations: true,
 	runAutomations: true,
-	decideApprovals: true,
 	talk: true,
 };
 

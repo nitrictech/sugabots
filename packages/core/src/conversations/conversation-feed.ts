@@ -1,6 +1,6 @@
 export * as ConversationFeed from "./conversation-feed.ts";
 
-import { conversationChannel, streamEvent, workspaceChannel } from "@sugabots/contracts";
+import { conversationStream, streamEvent, workspaceStream } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { Audience } from "../database/events/audience.ts";
@@ -17,10 +17,10 @@ export const handler =
 	};
 
 /**
- * The one place stream events are built: which channels an event goes on,
+ * The one place stream events are built: which streams an event goes on,
  * and what each carries.
  *
- * A conversation's events go on its own channel. The workspace channel, which feeds
+ * A conversation's events go on its own stream. The workspace stream, which feeds
  * the lists, hears `conversation.changed` naming the conversation whenever what a list
  * shows of it may have changed, for the people who reach the conversation alone
  * (see `Audience`).
@@ -181,7 +181,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 }
 
 function onConversation(conversationId: string, event: PendingEvent["event"]): PendingEvent {
-	return { channel: conversationChannel(conversationId), event };
+	return { stream: conversationStream(conversationId), event };
 }
 
 /** Tells the conversation's watchers why a reply they may be waiting for is not coming. */
@@ -192,7 +192,7 @@ function notice(conversationId: string, userMessage: UserText): PendingEvent {
 	);
 }
 
-/** For a change no more specific event on the conversation's channel describes. */
+/** For a change no more specific event on the conversation's stream describes. */
 function conversationChanged(workspaceId: string, conversationId: string): PendingEvent[] {
 	return [
 		onConversation(conversationId, streamEvent("conversation.changed", { conversationId })),
@@ -203,7 +203,7 @@ function conversationChanged(workspaceId: string, conversationId: string): Pendi
 /** Tells the lists showing the conversation, for those who reach it, that it changed. */
 function listedConversationChanged(workspaceId: string, conversationId: string): PendingEvent {
 	return {
-		channel: workspaceChannel(workspaceId),
+		stream: workspaceStream(workspaceId),
 		event: Audience.forConversation(
 			conversationId,
 			streamEvent("conversation.changed", { conversationId }),
@@ -221,7 +221,7 @@ function itemChanged(
 	conversationId: string,
 ): PendingEvent {
 	return {
-		channel: workspaceChannel(workspaceId),
+		stream: workspaceStream(workspaceId),
 		event: Audience.forConversation(
 			rootConversationId,
 			streamEvent("conversation.item_changed", { rootConversationId, conversationId }),

@@ -20,7 +20,7 @@ import {
  * holds. A run's and a collaboration's kind rows are their `run` and
  * `collaboration` rows, given whole but for the conversation they name.
  */
-export type ConversationSeed = {
+type ConversationSeed = {
 	id?: string;
 	workspaceId: string;
 	title: string;

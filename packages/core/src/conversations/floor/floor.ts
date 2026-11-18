@@ -59,7 +59,7 @@ export interface FloorInput {
 	repliedToBotId: string | undefined;
 }
 
-export type FloorDecision =
+type FloorDecision =
 	| { kind: "turns"; bots: Array<{ botId: string; reason: TurnReason }> }
 	| { kind: "nobody" };
 

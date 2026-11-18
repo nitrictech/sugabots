@@ -133,7 +133,7 @@ export const systemBotKeySchema = Schema.Literals(["summarise", "compact"]);
 export type SystemBotKey = typeof systemBotKeySchema.Type;
 
 /** Whether everyone in the workspace sees a bot, or only the person who made it. */
-export const botVisibilitySchema = Schema.Literals(["public", "private"]);
+const botVisibilitySchema = Schema.Literals(["public", "private"]);
 export type BotVisibility = typeof botVisibilitySchema.Type;
 
 /** What the person asking may do with a bot, resolved by the API so a client never reasons about roles. */
@@ -149,8 +149,6 @@ export const botPermissionsSchema = Schema.Struct({
 	/** Add, change and remove its automations, and rotate their webhook secrets. */
 	manageAutomations: Schema.Boolean,
 	runAutomations: Schema.Boolean,
-	/** Allow or refuse the tool calls it waits on. */
-	decideApprovals: Schema.Boolean,
 	/** Read and write in its tasks. False for a private bot an admin only sees listed. */
 	talk: Schema.Boolean,
 });

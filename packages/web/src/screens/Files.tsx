@@ -20,6 +20,7 @@ import { useDeleteFile, useFile, useFiles, useFileVersions } from "@/lib/files.t
 import { fileLink, filesLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
+import { BotCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -39,7 +40,7 @@ import { FILE_KINDS } from "./file-kinds.tsx";
 type Loading = "loading" | "failed";
 
 /** Whose files they are: a channel's, made in its conversations, or a bot's, made in its tasks. */
-export type FileOwner = { channel: Channel } | { bot: Bot };
+type FileOwner = { channel: Channel } | { bot: Bot };
 
 /** The file `fileId` of `owner`, as a link, at `version` when one is given. */
 function FileLink({
@@ -143,6 +144,7 @@ export function FileListView({
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<Page
 				title="Files"
+				parent={"bot" in owner ? <BotCrumb bot={owner.bot} /> : undefined}
 				place={
 					"channel" in owner
 						? { kind: "channel", channel: owner.channel }

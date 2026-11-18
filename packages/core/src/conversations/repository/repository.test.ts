@@ -1,4 +1,4 @@
-import { conversationChannel, handleFromName } from "@sugabots/contracts";
+import { conversationStream, handleFromName } from "@sugabots/contracts";
 import { DisplayName } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
@@ -36,6 +36,7 @@ import { lane } from "../../workflows/sql.ts";
 import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { SYSTEM_BOTS } from "../../workspaces/bots/system-bots.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
+import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
 import { compactionLane } from "../compaction/compaction.workflow.ts";
 import { Compactions } from "../compaction/compactions.ts";
@@ -70,6 +71,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		onPostgresAs(userId)(Context.get(conversations, ConversationView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const tasksAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
 	const controlsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
@@ -323,7 +326,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		});
 
 		// A task is titled from its first message.
-		expect(details.conversation.title).toBe("Check the release Pay attention to migration…");
+		expect(details.conversation.title).toBe("Check the release Pay attention to migrations.");
 		expect(details.participants.map(({ kind }) => kind).sort()).toEqual(["bot", "person"]);
 		expect(details.messages).toMatchObject([
 			{
@@ -420,8 +423,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 			startedById: memberId,
 			message: "First",
 		});
-		const channel = conversationChannel(details.conversation.id);
-		const [resumePoint] = await eventStore.replay(channel, 0, 10);
+		const stream = conversationStream(details.conversation.id);
+		const [resumePoint] = await eventStore.replay(stream, 0, 10);
 		if (!resumePoint) {
 			throw new Error("Conversation creation did not commit its durable event");
 		}
@@ -435,9 +438,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 			content: "Second",
 		});
 
-		const iterator = eventBus
-			.subscribe(channel, { since: resumePoint.seq })
-			[Symbol.asyncIterator]();
+		const iterator = eventBus.subscribe(stream, { since: resumePoint.seq })[Symbol.asyncIterator]();
 		const replayed = await iterator.next();
 		await iterator.return?.();
 		expect(replayed.value?.event).toMatchObject({
@@ -576,9 +577,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				]),
 		);
 		const recentIds = async () =>
-			(await viewAs(memberId).activity(details.conversation.id))?.recentParticipants.map(
-				({ id }) => id,
-			);
+			(await tasksAs(memberId).botTasks(botId)).tasks
+				.find((listed) => listed.conversation.id === details.conversation.id)
+				?.participants.map(({ id }) => id);
 
 		expect(await recentIds()).toEqual([memberId, botId, outsiderId]);
 

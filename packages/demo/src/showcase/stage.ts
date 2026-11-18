@@ -2,7 +2,7 @@ import { NodeRuntime } from "@effect/platform-node";
 import type { JsonValue, Message } from "@sugabots/contracts";
 import {
 	CONNECTION_TOOL_SEPARATOR,
-	conversationChannel,
+	conversationStream,
 	handleFromName,
 	streamEvent,
 } from "@sugabots/contracts";
@@ -295,7 +295,7 @@ const showTyping = (inConversation: PlacedConversationRow, person: Person) =>
 		const bus = yield* EventBus.Service;
 		yield* Effect.promise(() =>
 			bus.publish(
-				conversationChannel(inConversation.id),
+				conversationStream(inConversation.id),
 				streamEvent("person.typing", {
 					conversationId: inConversation.id,
 					person: toPerson(person),
@@ -575,7 +575,7 @@ const say = (reply: Reply, text: string) =>
 			const delta = words.slice(start, start + WORDS_PER_DELTA).join("");
 			yield* Effect.promise(() =>
 				bus.publish(
-					conversationChannel(reply.conversation.id),
+					conversationStream(reply.conversation.id),
 					streamEvent("message.delta", {
 						conversationId: reply.conversation.id,
 						messageId: reply.messageId,

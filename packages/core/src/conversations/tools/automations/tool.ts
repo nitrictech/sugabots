@@ -9,9 +9,9 @@ import type { RunEffect } from "../../../database/database.ts";
 import type { BotAutomations } from "../../automations/bot-automations.ts";
 import { noInputSchema } from "../no-input.ts";
 
-export const LIST_AUTOMATIONS_TOOL = "list_automations";
-export const CREATE_AUTOMATION_TOOL = "create_automation";
-export const UPDATE_AUTOMATION_TOOL = "update_automation";
+const LIST_AUTOMATIONS_TOOL = "list_automations";
+const CREATE_AUTOMATION_TOOL = "create_automation";
+const UPDATE_AUTOMATION_TOOL = "update_automation";
 
 /** The `disabledTools` key, and `builtInToolCatalog` entry, that switches off every automation tool. */
 export const AUTOMATIONS_KEY = "automations";

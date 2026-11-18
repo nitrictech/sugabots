@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { emailSchema } from "./email.ts";
 import { uuidSchema } from "./uuid.ts";
-import { workspaceRoleSchema } from "./workspaces.ts";
 
 export const healthResponseSchema = Schema.Struct({
 	status: Schema.Literal("ok"),
@@ -28,9 +27,3 @@ export const userNameSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(USER_NAME_MAX_LENGTH),
 );
-
-export const workspaceMembershipSchema = Schema.Struct({
-	role: workspaceRoleSchema,
-});
-
-export type WorkspaceMembership = typeof workspaceMembershipSchema.Type;

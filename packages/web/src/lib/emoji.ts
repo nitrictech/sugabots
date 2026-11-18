@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
  * glyph for the newest emoji and Windows draws a country's flag as two
  * letters. They load once for the page, from a file built with the app.
  */
-export interface AvailableEmoji extends EmojiData {
+interface AvailableEmoji extends EmojiData {
 	emojis: Emoji[];
 }
 

@@ -11,6 +11,7 @@
 		"@effect/platform-node": "catalog:",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/core": "workspace:*",
+		"@sugabots/errors": "workspace:*",
 		"@sugabots/server": "workspace:*",
 		"drizzle-orm": "catalog:",
 		"effect": "catalog:"

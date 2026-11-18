@@ -121,7 +121,7 @@ const takenOffRecipientsSchema = Schema.Struct({
 	botIds: Schema.Array(Schema.String),
 });
 
-export type TakenOffRecipients = typeof takenOffRecipientsSchema.Type;
+type TakenOffRecipients = typeof takenOffRecipientsSchema.Type;
 
 const decodeStoredTakenOff = Schema.decodeUnknownOption(
 	Schema.fromJsonString(takenOffRecipientsSchema),

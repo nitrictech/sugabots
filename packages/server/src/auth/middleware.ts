@@ -100,7 +100,7 @@ export const asSessionUser = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(user.id))),
 	);
 
-export function bearerToken(header: string | undefined): string | undefined {
+function bearerToken(header: string | undefined): string | undefined {
 	const [scheme, ...rest] = header?.trim().split(/\s+/) ?? [];
 	if (scheme?.toLowerCase() !== "bearer") {
 		return undefined;

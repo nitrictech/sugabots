@@ -20,11 +20,11 @@ import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import type { ComputerLeaseHolderKind } from "./sql.ts";
 
 /** How long a lease holds a computer awake unless it is renewed. */
-export const LEASE = Duration.seconds(90);
+const LEASE = Duration.seconds(90);
 /** How often a turn renews its lease, well inside {@link LEASE}. */
 export const LEASE_RENEWAL = Duration.seconds(30);
 /** How long a computer sits with no turn using it before it is paused. */
-export const IDLE_BEFORE_PAUSE = Duration.minutes(5);
+const IDLE_BEFORE_PAUSE = Duration.minutes(5);
 /** How long before its credentials expire a computer in use is given new ones. */
 const CREDENTIAL_REFRESH_MARGIN = Duration.minutes(10);
 /** How often the sweeps look for idle computers to pause, and running ones to measure. */
@@ -1324,7 +1324,7 @@ export interface Opened {
 	readonly arrival: "made" | "running" | "resumed" | "rebooted" | "replaced";
 }
 
-export type Status =
+type Status =
 	| { readonly kind: "none" }
 	| {
 			readonly kind: "present";
@@ -1356,7 +1356,7 @@ export interface MeasuredDisk extends DiskUsage {
 }
 
 /** The last measurement of a bot's computer's disk. */
-export interface BotDisk {
+interface BotDisk {
 	readonly botId: string;
 	readonly disk: MeasuredDisk;
 }

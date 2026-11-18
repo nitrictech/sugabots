@@ -390,7 +390,7 @@ export class Connected {
 }
 
 /** What a bot's computer is signed in to GitHub with, and when it must be replaced. */
-export interface ComputerSignIn {
+interface ComputerSignIn {
 	readonly credentials: readonly Computers.Credential[];
 	readonly expiresAt: GitHub.AccessToken["expiresAt"];
 }
@@ -489,7 +489,7 @@ function describedPermissions(permissions: GitHub.Permissions): string {
  * for an app made before Sugabots asked for it: its owner adds it in the
  * app's settings on GitHub, then the account it is installed on accepts it.
  */
-export class PermissionNotGranted
+class PermissionNotGranted
 	extends Schema.TaggedError<PermissionNotGranted>()("GitHubPermissionNotGranted", {
 		permissions: Schema.String,
 	})

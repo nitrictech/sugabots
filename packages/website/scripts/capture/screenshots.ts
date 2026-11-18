@@ -34,7 +34,7 @@ interface Shot {
 /** The carousel's slides, but for Computers, which needs a desktop: see {@link COMPUTERS}. */
 const SHOTS: Shot[] = [
 	{
-		name: "one-thread",
+		name: "main-chat",
 		backdrop: { form: "swoop", family: "silver" },
 		async prepare(stage) {
 			// Growth's main chat, where its people talk with each other and with its bots.
@@ -129,7 +129,7 @@ export async function captureScreenshots(browser: Browser, environment: Environm
 	rmSync(work, { recursive: true });
 }
 
-/** Takes `shot` once for each system's title bar: `one-thread-mac.webp`, `one-thread-windows.webp` and so on. */
+/** Takes `shot` once for each system's title bar: `main-chat-mac.webp`, `main-chat-windows.webp` and so on. */
 async function take(stage: Stage, shot: Shot, work: string) {
 	step(`Screenshot: ${shot.name}`);
 	await stage.setBackdrop(shot.backdrop);

@@ -134,7 +134,7 @@ function withMute(
 }
 
 /** Whether this browser can be notified, and whether it is, while Sugabots is open in it. */
-export type BrowserNotifications =
+type BrowserNotifications =
 	| { state: "unsupported" }
 	| { state: "denied" }
 	| { state: "off" }

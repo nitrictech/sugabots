@@ -5,7 +5,8 @@ import type { ConversationPlaceKind } from "@/lib/chats.ts";
 import { useDetailsOpen } from "@/lib/details-open.ts";
 import { usePresence } from "@/lib/notifications.ts";
 import type { BackTo } from "./ChatHeader.tsx";
-import { ConversationChat, type Staged, type StagedChange } from "./ConversationChat.tsx";
+import { ConversationChat } from "./ConversationChat.tsx";
+import type { Staged, StagedChange } from "./staged.ts";
 
 interface ConversationPageProps {
 	/** Which kind of conversation it is, and its bot when it has one. */

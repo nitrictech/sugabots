@@ -5,7 +5,7 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import type { ReactElement } from "react";
-import { useBots } from "@/lib/bots.ts";
+import { useBot } from "@/lib/bots.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -152,8 +152,7 @@ function BotCard({ bot }: { bot: BotParticipant }) {
 
 /** What the bot does, in its own words from its settings, once the workspace's bots are loaded. */
 function BotDescription({ botId }: { botId: string }) {
-	const { bots } = useBots();
-	const description = bots?.find((bot) => bot.id === botId)?.description;
+	const description = useBot(botId)?.description;
 	if (!description) return null;
 	return (
 		<p className="m-0 mt-2.5 wrap-break-word text-soft-foreground text-xs leading-normal">

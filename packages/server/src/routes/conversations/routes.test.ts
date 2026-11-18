@@ -118,7 +118,6 @@ beforeEach(() => {
 			seenBy(conversationId, {
 				summary: null,
 				context: null,
-				recentParticipants: details.participants,
 			}),
 	};
 });
@@ -189,7 +188,6 @@ describe("conversation routes", () => {
 		expect(Schema.decodeUnknownSync(conversationActivitySchema)(await response.json())).toEqual({
 			summary: null,
 			context: null,
-			recentParticipants: details.participants,
 		});
 
 		const hidden = await app().request(`/conversations/${TASK}/activity`, as("outsider-token"));

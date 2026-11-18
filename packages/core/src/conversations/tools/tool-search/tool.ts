@@ -24,7 +24,7 @@ const CallToolInput = Schema.Struct({
 
 type CallToolRequest = { tool: string; arguments: Record<string, unknown> };
 
-export function parseCallToolInput(input: unknown): CallToolRequest | undefined {
+function parseCallToolInput(input: unknown): CallToolRequest | undefined {
 	return Option.getOrUndefined(
 		Option.flatMap(Schema.decodeUnknownOption(CallToolInput)(input), ({ tool, arguments: given }) =>
 			Option.map(parseArguments(given), (args) => ({ tool, arguments: args })),
@@ -201,7 +201,7 @@ export function callToolApproval(tools: Readonly<Record<string, OfferedTool>>) {
 }
 
 /** A connection tool a call waits for approval of, and the input the call gives it. */
-export interface ApprovalTarget {
+interface ApprovalTarget {
 	key: string;
 	offered: OfferedTool;
 	input: unknown;

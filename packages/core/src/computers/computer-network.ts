@@ -97,7 +97,7 @@ export interface Interface {
 }
 
 /** What became of an allowed request: added, refused by a block, or never allowed. */
-export type Grant = { kind: "added" } | { kind: "blocked"; by: string } | { kind: "not-allowed" };
+type Grant = { kind: "added" } | { kind: "blocked"; by: string } | { kind: "not-allowed" };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerNetwork",
@@ -149,7 +149,6 @@ export const make = Effect.gen(function* () {
 				blockedHosts: blocked.map((row) => ({
 					host: row.host,
 					blockedByName: nameOf(names, row.blockedById),
-					blockedAt: row.createdAt.toISOString(),
 				})),
 			} satisfies ComputerNetworkSettings;
 		});
@@ -377,7 +376,7 @@ export class HostBlocked
 }
 
 /** A host as people read it. Hosts are domain names, checked by `computerHostSchema` on the way in. */
-export function hostName(host: string) {
+function hostName(host: string) {
 	return UserText.unchecked(host);
 }
 

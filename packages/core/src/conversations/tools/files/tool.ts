@@ -17,7 +17,7 @@ import { isUuid } from "../../../ids/ids.ts";
 import { noInputSchema } from "../no-input.ts";
 import { READ_CONVERSATION_FILE_TOOL } from "../read-conversation-file/tool.ts";
 
-export const FILE_LIST_TOOL = "file_list" satisfies BuiltInToolKey;
+const FILE_LIST_TOOL = "file_list" satisfies BuiltInToolKey;
 export const FILE_READ_TOOL = "file_read" satisfies BuiltInToolKey;
 export const FILE_WRITE_TOOL = "file_write" satisfies BuiltInToolKey;
 export const FILE_EDIT_TOOL = "file_edit" satisfies BuiltInToolKey;
@@ -29,7 +29,7 @@ export const FILE_TOOLS: ReadonlySet<string> = new Set([
 	FILE_EDIT_TOOL,
 ]);
 
-export interface FileToolOptions {
+interface FileToolOptions {
 	by: Files.BotInConversation;
 	/** The turn the tools are bound to, whose writes to one file are one version. */
 	turnId: string;

@@ -90,7 +90,7 @@ export const MAX_DIRECT_MESSAGE_PEOPLE = 9;
  * sees. It is in no channel, and has no bots. Its people never change: a
  * different set of people is a different one.
  */
-export const directMessageSchema = Schema.Struct({
+const directMessageSchema = Schema.Struct({
 	kind: Schema.Literal("direct_message"),
 	...conversationFields,
 });
@@ -98,7 +98,7 @@ export const directMessageSchema = Schema.Struct({
 export type DirectMessage = typeof directMessageSchema.Type;
 
 /** Something people open and post in: a channel's conversation, a task, an automation's feed, or a direct message. */
-export const conversationSchema = Schema.Union([
+const conversationSchema = Schema.Union([
 	channelConversationSchema,
 	taskSchema,
 	automationFeedSchema,
@@ -120,7 +120,7 @@ export const chatListQuerySchema = Schema.Struct({
  * opening it needs no request of its own. `lastMessage` is null until a
  * message is written.
  */
-export const chatListItemSchema = Schema.Struct({
+const chatListItemSchema = Schema.Struct({
 	bot: botSchema,
 	conversation: taskSchema,
 	lastMessage: Schema.NullOr(
@@ -134,6 +134,8 @@ export const chatListItemSchema = Schema.Struct({
 	),
 	/** Who has written in it lately, most recently active first, as its own details list them. */
 	participants: Schema.Array(participantSchema),
+	/** How many messages it holds, people's and the bot's alike. */
+	messageCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	/**
 	 * The tool the conversation's newest reply waiting for approval would run first, or
 	 * null. Such a reply may have written nothing at all, so this stands in for
@@ -153,22 +155,32 @@ export const chatListItemSchema = Schema.Struct({
 
 export type ChatListItem = typeof chatListItemSchema.Type;
 
-const markerSchema = Schema.Struct({
+/** How a channel stands for the person: its main chat's and threads' unread messages, and approvals. */
+const channelMarkerSchema = Schema.Struct({
 	unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	needsApproval: Schema.Boolean,
+});
+
+export type ChannelMarker = typeof channelMarkerSchema.Type;
+
+/** How a bot stands for the person: as a channel does, over its tasks and automations' feeds, and its failed automations. */
+const botMarkerSchema = Schema.Struct({
+	...channelMarkerSchema.fields,
 	/** How many of its automations' latest runs failed since the person last opened them. */
 	failedAutomations: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
+export type BotMarker = typeof botMarkerSchema.Type;
+
 /**
  * How each channel the person is in, and each bot they see, stands for them,
- * for the sidebar: how many unread messages its conversations hold, and
- * whether any waits for a decision they may make. Those with neither are
- * left out.
+ * for the sidebar: how many unread messages its conversations hold, whether
+ * any waits for a decision they may make, and for a bot, how many of its
+ * automations failed. Those with none of these are left out.
  */
 export const channelConversationMarkersSchema = Schema.Struct({
-	channels: Schema.Record(uuidSchema, markerSchema),
-	bots: Schema.Record(uuidSchema, markerSchema),
+	channels: Schema.Record(uuidSchema, channelMarkerSchema),
+	bots: Schema.Record(uuidSchema, botMarkerSchema),
 });
 
 export type ChannelConversationMarkers = typeof channelConversationMarkersSchema.Type;
@@ -178,7 +190,7 @@ export type ChannelConversationMarkers = typeof channelConversationMarkersSchema
  * bot that asked, the channel if it was asked in one, and the conversation to
  * open it in.
  */
-export const approvalRequestSchema = Schema.Struct({
+const approvalRequestSchema = Schema.Struct({
 	/** The call, its approval included. */
 	call: toolCallPartSchema,
 	/** The bot that asked. */
@@ -194,7 +206,7 @@ export const approvalRequestSchema = Schema.Struct({
 export type ApprovalRequest = typeof approvalRequestSchema.Type;
 
 /** An approval request somebody answered: how, by whom, and when. */
-export const answeredApprovalSchema = Schema.Struct({
+const answeredApprovalSchema = Schema.Struct({
 	...approvalRequestSchema.fields,
 	answer: Schema.Struct({
 		status: Schema.Literals(["allowed", "denied"]),
@@ -235,7 +247,7 @@ const inboxPlaceFields = {
  * end with nothing to report, or a collaboration one bot opened with another.
  * A run is unread only once it posted a result or failed.
  */
-export const inboxItemSchema = Schema.Union([
+const inboxItemSchema = Schema.Union([
 	Schema.Struct({
 		/** Whether it names the person, or is only something new. */
 		kind: Schema.Literals(["mention", "message"]),
@@ -289,7 +301,7 @@ export type InboxFeed = typeof inboxFeedSchema.Type;
  * One of a bot's automations, with the feed its runs post in: null until it
  * first runs or somebody opens it.
  */
-export const listedAutomationSchema = Schema.Struct({
+const listedAutomationSchema = Schema.Struct({
 	automation: Schema.Struct({
 		id: uuidSchema,
 		name: Schema.String,
@@ -394,8 +406,6 @@ export const sentDirectMessageSchema = Schema.Struct({
 	message: messageSchema,
 }).annotate({ identifier: "SentDirectMessage" });
 
-export type SentDirectMessage = typeof sentDirectMessageSchema.Type;
-
 /** The first message of a new task with a bot. */
 export const newTaskSchema = Schema.Struct({
 	id: uuidSchema,
@@ -410,15 +420,13 @@ export const CHAT_NAME_MAX_LENGTH = 64;
 export const FIRST_CHAT_NAME = "General";
 
 /** What a channel's conversation is called. */
-export const chatNameSchema = Schema.Trim.check(
+const chatNameSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(CHAT_NAME_MAX_LENGTH),
 );
 
 /** Another thread in a channel: what it is called. */
 export const newChatSchema = Schema.Struct({ name: chatNameSchema });
-
-export type NewChat = typeof newChatSchema.Type;
 
 /** A task started with a bot, and the message it was started with. */
 export const startedTaskSchema = Schema.Struct({
@@ -431,7 +439,7 @@ export type StartedTask = typeof startedTaskSchema.Type;
 /** The conversations a conversation lists among its messages, opened beside it: collaborations and runs. */
 export const itemConversationKindSchema = Schema.Literals(["collaboration", "run"]);
 
-export const chatMessageItemSchema = Schema.Union([
+const chatMessageItemSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("message"),
 		message: messageSchema,
@@ -466,7 +474,7 @@ export const chatMessagesPageSchema = Schema.Struct({
 
 export type ChatMessagesPage = typeof chatMessagesPageSchema.Type;
 
-export const chatHistoryEntrySchema = Schema.Struct({
+const chatHistoryEntrySchema = Schema.Struct({
 	conversationId: uuidSchema,
 	parentConversationId: Schema.NullOr(uuidSchema),
 	kind: itemConversationKindSchema,

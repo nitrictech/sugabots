@@ -228,7 +228,7 @@ export interface CollaborationChange {
 }
 
 /** Whether a collaboration's end is owed to the bot that asked, in a turn of its own. */
-export interface AskerResume {
+interface AskerResume {
 	/**
 	 * The asking bot, when its turn stopped waiting and so nothing is reading
 	 * how the collaboration ended. Null while the asking tool still waits, and

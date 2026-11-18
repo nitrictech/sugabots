@@ -13,12 +13,12 @@ import { Lanes } from "../../workflows/lanes.ts";
  * lanes store payloads, so the conversation's and the bot's ids keep the keys
  * the first ones were stored with.
  */
-export const StoredSummary = Schema.Struct({
+const StoredSummary = Schema.Struct({
 	threadId: Schema.String,
 	agentId: Schema.String,
 	sourceMessageId: Schema.String,
 });
-export type StoredSummary = typeof StoredSummary.Type;
+type StoredSummary = typeof StoredSummary.Type;
 
 export interface SummaryRequest {
 	readonly conversationId: string;

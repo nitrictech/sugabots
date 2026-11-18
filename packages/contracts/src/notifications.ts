@@ -11,12 +11,12 @@ import { uuidSchema } from "./uuid.ts";
  * conversations they take part in, and approvals they may decide.
  * `nothing`: no notifications.
  */
-export const notificationLevelSchema = Schema.Literals(["all", "mentions", "nothing"]);
+const notificationLevelSchema = Schema.Literals(["all", "mentions", "nothing"]);
 
 export type NotificationLevel = typeof notificationLevelSchema.Type;
 
 /** A time of day on a 24-hour clock, `HH:MM`. */
-export const timeOfDaySchema = Schema.String.check(
+const timeOfDaySchema = Schema.String.check(
 	Schema.isPattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/, { message: "Expected a time as HH:MM" }),
 );
 
@@ -24,7 +24,7 @@ export const timeOfDaySchema = Schema.String.check(
  * The hours of each day a person is not notified, in their time zone. `from`
  * after `to` spans midnight.
  */
-export const quietHoursSchema = Schema.Struct({
+const quietHoursSchema = Schema.Struct({
 	from: timeOfDaySchema,
 	to: timeOfDaySchema,
 	timeZone: timeZoneSchema,
@@ -33,7 +33,7 @@ export const quietHoursSchema = Schema.Struct({
 export type QuietHours = typeof quietHoursSchema.Type;
 
 /** Which of a person's automations' runs they hear the end of: failed ones, every one, or none. */
-export const automationRunNotificationsSchema = Schema.Literals(["failures", "all", "none"]);
+const automationRunNotificationsSchema = Schema.Literals(["failures", "all", "none"]);
 
 export type AutomationRunNotifications = typeof automationRunNotificationsSchema.Type;
 

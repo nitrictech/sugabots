@@ -49,8 +49,8 @@ export const notificationSettings = pgTable(
 );
 
 /**
- * What a person chose for one channel or one of a channel's bots: a level, in place of
- * the one above it, a mute until `mutedUntil`, or both.
+ * What a person chose for one channel or one bot: a level, in place of the one
+ * above it, a mute until `mutedUntil`, or both.
  */
 export const notificationOverride = pgTable(
 	"notification_override",

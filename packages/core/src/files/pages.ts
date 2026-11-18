@@ -94,7 +94,7 @@ export const PAGE_PATH = "/pages";
 /** How long an address stays good. Long enough to load a page, short enough that a copied address soon stops working. */
 const ADDRESS_LIFETIME_MS = 10 * 60 * 1000;
 
-export interface Page {
+interface Page {
 	title: string;
 	html: string;
 }

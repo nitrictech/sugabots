@@ -4,8 +4,10 @@ import type {
 	AnsweredApproval,
 	ApprovalInbox,
 	ApprovalRequest,
+	BotMarker,
 	BotTaskList,
 	ChannelConversationMarkers,
+	ChannelMarker,
 	ChatHistoryEntry,
 	ChatHistoryPage,
 	ChatList,
@@ -33,6 +35,7 @@ import { userText } from "@sugabots/errors";
 import {
 	and,
 	asc,
+	count,
 	type DBQueryConfig,
 	desc,
 	eq,
@@ -52,7 +55,8 @@ import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
 	botStandingsFor,
-	mayDecideApprovals,
+	type DecidingStanding,
+	mayDecideToolCall,
 	ResourceHidden,
 	reachedChannelStandingsFor,
 } from "../../authorization/access.ts";
@@ -86,7 +90,7 @@ import {
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { personFacingBotRow, toBot } from "../../workspaces/bots/bot.ts";
-import { latestRunFailedUnseen, resultPosted, runIdOf } from "../automations/automations.ts";
+import { latestRunFailedUnseen, resultPosted, runIdOf } from "../automations/execution.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import {
 	authorRow,
@@ -261,6 +265,7 @@ export const make = Effect.gen(function* () {
 					const listed = yield* query((db) => tasksOf(db, host.id));
 					const conversationIds = listed.map((row) => row.conversation.id);
 					const latest = yield* query((db) => latestMessages(db, conversationIds));
+					const counts = yield* query((db) => messageCounts(db, conversationIds));
 					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, conversationIds));
 					const marksOf = yield* conversationMarks(host.workspaceId, conversationIds);
 					const mentioning = yield* query((db) => unreadMentionsIn(db, userId, conversationIds));
@@ -279,6 +284,7 @@ export const make = Effect.gen(function* () {
 									}
 								: null,
 							participants: row.participants.map(toParticipant),
+							messageCount: counts.get(row.conversation.id) ?? 0,
 							waitingOn: waitingOn.get(row.conversation.id) || null,
 							...marksOf(row.conversation.id),
 							mentionsYou: mentioning.has(row.conversation.id),
@@ -342,8 +348,12 @@ export const make = Effect.gen(function* () {
 					const failed = yield* query((db) =>
 						failedAutomationsByBot(db, workspaceId, reachesBot, userId),
 					);
-					const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
-					const tally = (into: Record<string, Marker>, key: string, conversationId: string) => {
+					const tally = <Marker extends ChannelMarker>(
+						into: Record<string, Marker>,
+						key: string,
+						conversationId: string,
+						nothing: Marker,
+					) => {
 						const { unreadMessages, needsApproval } = marksOf(conversationId);
 						if (unreadMessages === 0 && !needsApproval) return;
 						const marked = into[key] ?? nothing;
@@ -353,12 +363,14 @@ export const make = Effect.gen(function* () {
 							needsApproval: marked.needsApproval || needsApproval,
 						};
 					};
-					const channels: Record<string, Marker> = {};
-					for (const chat of chats) tally(channels, chat.channelId, chat.id);
-					const bots: Record<string, Marker> = {};
-					for (const conversation of botTasks) tally(bots, conversation.botId, conversation.id);
+					const channels: Record<string, ChannelMarker> = {};
+					for (const chat of chats) tally(channels, chat.channelId, chat.id, NOTHING_NEW);
+					const bots: Record<string, BotMarker> = {};
+					for (const conversation of botTasks) {
+						tally(bots, conversation.botId, conversation.id, NOTHING_NEW_FOR_BOT);
+					}
 					for (const [botId, failedAutomations] of failed) {
-						bots[botId] = { ...(bots[botId] ?? nothing), failedAutomations };
+						bots[botId] = { ...(bots[botId] ?? NOTHING_NEW_FOR_BOT), failedAutomations };
 					}
 					return { channels, bots };
 				}),
@@ -526,8 +538,10 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
-/** How one channel or bot stands for the person, as the markers show it. */
-type Marker = ChannelConversationMarkers["channels"][string];
+/** A channel's marker before any of its conversations is counted. */
+const NOTHING_NEW: ChannelMarker = { unreadMessages: 0, needsApproval: false };
+/** A bot's marker before any of its conversations or automations is counted. */
+const NOTHING_NEW_FOR_BOT: BotMarker = { ...NOTHING_NEW, failedAutomations: 0 };
 
 export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") implements UserFacing {
 	get userMessage() {
@@ -664,6 +678,20 @@ const botConversationsReached = Effect.fn("ChatView.botConversationsReached")(fu
 			),
 		);
 	return rows.flatMap(({ id, botId }) => (botId ? [{ id, botId }] : []));
+});
+
+/** How many messages each of the conversations holds, by its id; one with none is left out. */
+const messageCounts = Effect.fn("ChatView.messageCounts")(function* (
+	db: Executor,
+	conversationIds: readonly string[],
+) {
+	if (conversationIds.length === 0) return new Map<string, number>();
+	const rows = yield* db
+		.select({ conversationId: message.conversationId, count: count() })
+		.from(message)
+		.where(inArray(message.conversationId, [...conversationIds]))
+		.groupBy(message.conversationId);
+	return new Map(rows.map((row) => [row.conversationId, row.count]));
 });
 
 /** The newest message with words in it in each conversation, in one query. */
@@ -1176,22 +1204,25 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 			standing,
 		]),
 	);
+	/** The person's standing towards a conversation in the channel `channelId`, or else hosted by the bot `hostBotId`. */
+	const standingIn = (conversation: {
+		channelId: string | null;
+		hostBotId: string | null;
+	}): DecidingStanding | undefined => {
+		if (conversation.channelId !== null) {
+			const standing = channels.get(conversation.channelId);
+			return standing && { kind: "channel", standing };
+		}
+		const standing = conversation.hostBotId === null ? undefined : bots.get(conversation.hostBotId);
+		return standing && { kind: "bot", standing };
+	};
 	/** `conversation` is the one the call's conversation belongs to; `askingBotId` the bot that raised it. */
 	const mayDecide = (
 		conversation: { channelId: string | null; hostBotId: string | null },
 		askingBotId: string,
 		inAutomation: boolean,
 		deciders: ToolApprovalDeciders,
-	) => {
-		if (deciders === "computer-managers") {
-			return bots.get(askingBotId)?.may("computer.request.decide") ?? false;
-		}
-		if (conversation.channelId !== null) {
-			return channels.get(conversation.channelId)?.may("approval.decide") ?? false;
-		}
-		const host = conversation.hostBotId === null ? undefined : bots.get(conversation.hostBotId);
-		return host !== undefined && mayDecideApprovals(host, inAutomation, deciders);
-	};
+	) => mayDecideToolCall(standingIn(conversation), bots.get(askingBotId), inAutomation, deciders);
 	const botIds = [...bots.keys()];
 	const decidable: Decidable = {
 		channelsDeciding: [...channels.keys()].filter((channelId) =>

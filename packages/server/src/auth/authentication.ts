@@ -40,7 +40,7 @@ export interface Interface {
 }
 
 /** The holder of a request's credentials. */
-export interface Identified {
+interface Identified {
 	readonly user: SessionUser;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
@@ -272,7 +272,7 @@ function referralCodeIn(body: unknown): string | undefined {
 	);
 }
 
-export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
+class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
 	message: string;
 }> {}
 

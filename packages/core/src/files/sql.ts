@@ -22,7 +22,7 @@ import { bot, user } from "../workspaces/sql.ts";
  * - `bot_attachment`: a bot attached it to its reply.
  * - `tool_result`: a tool call's result, too long to give the model whole.
  */
-export type FileKind = WrittenFileKind | "upload" | "bot_attachment" | "tool_result";
+type FileKind = WrittenFileKind | "upload" | "bot_attachment" | "tool_result";
 
 /** The kinds a bot writes with its file tools, which alone have versions. */
 export const WRITTEN_FILE_KINDS = ["document", "html"] as const satisfies readonly FileKind[];

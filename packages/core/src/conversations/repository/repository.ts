@@ -256,7 +256,7 @@ type RunPosting = Pick<
  * the run wrote, which the calls that wrote them show only in the run's
  * conversation.
  */
-export interface RunResult {
+interface RunResult {
 	readonly content: string;
 	readonly files: readonly WrittenFilePart[];
 }

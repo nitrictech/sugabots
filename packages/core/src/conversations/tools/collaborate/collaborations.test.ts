@@ -1,4 +1,4 @@
-import { handleFromName, workspaceChannel } from "@sugabots/contracts";
+import { handleFromName, workspaceStream } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
@@ -199,7 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			db
 				.select({ payload: event.payload })
 				.from(event)
-				.where(eq(event.channel, workspaceChannel(workspaceId))),
+				.where(eq(event.stream, workspaceStream(workspaceId))),
 		);
 		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
 			expect.objectContaining({

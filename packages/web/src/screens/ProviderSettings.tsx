@@ -121,7 +121,7 @@ export function ProviderTile({
 }
 
 /** The bots on a model, as overlapping faces with a count past the first few. */
-export function BotFaces({ bots }: { bots: readonly Bot[] }) {
+function BotFaces({ bots }: { bots: readonly Bot[] }) {
 	if (bots.length === 0) return null;
 	const shown = bots.slice(0, bots.length > 3 ? 2 : 3);
 	const more = bots.length - shown.length;
@@ -289,7 +289,7 @@ function NamedBotFace({ bot, size }: { bot: Bot; size: number }) {
 }
 
 /** The bots people talk to on each model id, which is what a bot's `model` names. */
-export function useBotsByModel(): (modelId: string) => Bot[] {
+function useBotsByModel(): (modelId: string) => Bot[] {
 	const { bots } = useBots();
 	return (modelId) => personFacingBotsOn(bots ?? [], modelId);
 }
@@ -305,7 +305,7 @@ function personFacingBotsOn(bots: readonly Bot[], modelId: string): Bot[] {
  * provider, moves them to another as it goes; the server refuses any other
  * change that would stop offering it, such as removing its provider's key.
  */
-export function useModelHolders(): (modelId: string) => ModelHolders | undefined {
+function useModelHolders(): (modelId: string) => ModelHolders | undefined {
 	const defaultModel = useModels().data?.defaultModel ?? null;
 	const builtInBots = useBuiltInBots().data ?? [];
 	return (modelId) => {
@@ -315,13 +315,13 @@ export function useModelHolders(): (modelId: string) => ModelHolders | undefined
 	};
 }
 
-export interface ModelHolders {
+interface ModelHolders {
 	newBots: boolean;
 	systemBots: boolean;
 }
 
 /** Why a model, or its provider, cannot be switched off. */
-export function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
+function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
 	const holders =
 		newBots && systemBots
 			? "New bots and system bots use"

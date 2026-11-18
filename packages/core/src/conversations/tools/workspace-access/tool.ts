@@ -14,7 +14,7 @@ export const WORKSPACE_ACCESS_TOOL = "workspace_access";
 /** Enough people to go to; a large workspace's every admin would only be noise. */
 const MAX_HELPERS = 5;
 
-export interface PersonAccess {
+interface PersonAccess {
 	name: string;
 	handle: string;
 	/** `none` for someone in the conversation who has since left the workspace. */

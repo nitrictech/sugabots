@@ -1,5 +1,7 @@
 import type { ApprovalRequest } from "@sugabots/contracts";
+import { useChannels } from "@/lib/channels.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
+import { formatListTime } from "@/lib/list-time.ts";
 import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
 
 /**
@@ -13,4 +15,21 @@ export function useApprovalApp(request: ApprovalRequest) {
 	const look = looks.get(handle);
 	const action = stepLabel(request.call.tool, name);
 	return { look, appName: handle ? connectionLabel(handle, look?.name) : action, action };
+}
+
+/**
+ * The channel an approval request was asked in, once the channels are loaded,
+ * and where and when it was asked, as its row and its page say it: "in Launch
+ * at 9:14", or "at 9:14" outside a channel.
+ */
+export function useAskedIn(request: ApprovalRequest) {
+	const { data: channels } = useChannels();
+	const channel = channels?.find((candidate) => candidate.id === request.channelId);
+	const askedIn = [
+		channel && `in ${channel.name}`,
+		`at ${formatListTime(new Date(request.call.startedAt), new Date())}`,
+	]
+		.filter(Boolean)
+		.join(" ");
+	return { channel, askedIn };
 }

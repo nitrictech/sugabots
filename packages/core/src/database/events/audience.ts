@@ -3,7 +3,7 @@ export * as Audience from "./audience.ts";
 import type { StreamEvent } from "@sugabots/contracts";
 
 /**
- * Who may hear an event on a workspace channel. Every member of the
+ * Who may hear an event on a workspace's stream. Every member of the
  * workspace listens there, but an event about a conversation is only for the
  * people who reach it: a channel's conversation by those in the channel, a
  * bot's by those who reach the bot, and a direct message by those in it.
@@ -24,38 +24,15 @@ export const forConversation = <Event extends StreamEvent>(
 });
 
 /**
- * Who heard the events stored before an event named its conversation, by the fields
- * they were stored with: everyone in a group of people and bots, or in a
- * direct message. Nothing can tell who those are any more, so such an event,
- * replayed to a client that reconnects, is heard by nobody.
- */
-interface LegacyAudience {
-	readonly audiencePodId?: unknown;
-	readonly audienceDirectId?: unknown;
-}
-
-/** An event nobody may hear. */
-export type Nobody = { readonly kind: "nobody" };
-
-/**
  * Who alone may hear `event`, if it names anybody, and the event as clients
- * see it, without the fields that say so.
+ * see it, without the field that says so.
  */
 export function read(event: StreamEvent): {
-	readonly audience: Group | Nobody | undefined;
+	readonly audience: Group | undefined;
 	readonly event: StreamEvent;
 } {
-	const {
-		[CONVERSATION_FIELD]: conversationId,
-		audiencePodId,
-		audienceDirectId,
-		...delivered
-	}: StreamEvent & LegacyAudience = event;
-	const audience: Group | Nobody | undefined =
-		audiencePodId !== undefined || audienceDirectId !== undefined
-			? { kind: "nobody" }
-			: typeof conversationId === "string"
-				? { kind: "conversation", conversationId }
-				: undefined;
+	const { [CONVERSATION_FIELD]: conversationId, ...delivered }: StreamEvent = event;
+	const audience: Group | undefined =
+		typeof conversationId === "string" ? { kind: "conversation", conversationId } : undefined;
 	return { audience, event: delivered as StreamEvent };
 }

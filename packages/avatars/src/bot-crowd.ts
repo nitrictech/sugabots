@@ -1,7 +1,7 @@
 import type { BotLook } from "./bot-face.tsx";
 
 /** One face in the crowd, posed by hand. */
-export interface CrowdMember extends BotLook {
+interface CrowdMember extends BotLook {
 	/** Degrees clockwise. */
 	rotate: number;
 	/** Pixels raised above the row's centre line, at a 40px face. */

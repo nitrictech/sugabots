@@ -99,7 +99,7 @@ export interface Interface {
 }
 
 /** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
-export interface TurnSide {
+interface TurnSide {
 	readonly turnId: string;
 	readonly botId: string;
 	readonly conversationId: string;

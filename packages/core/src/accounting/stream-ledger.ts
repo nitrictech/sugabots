@@ -16,14 +16,14 @@ import { requestCost } from "./request-cost.ts";
  * `onAbort`. The SDK makes its requests one after another, so at most one is
  * open at a time.
  */
-export interface StreamLedger {
+interface StreamLedger {
 	started(): Promise<void>;
 	ended(usage: LanguageModelUsage): Promise<void>;
 	failed(): Promise<void>;
 	aborted(): Promise<void>;
 }
 
-export interface StreamLedgerOptions {
+interface StreamLedgerOptions {
 	requests: ModelRequests.Interface;
 	registry: Pick<ModelRegistry, "cost" | "version">;
 	workspaceId: string;

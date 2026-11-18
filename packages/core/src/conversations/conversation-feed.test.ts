@@ -1,8 +1,8 @@
 import {
 	type CollaborationPart,
-	conversationChannel,
+	conversationStream,
 	type ToolCallPart,
-	workspaceChannel,
+	workspaceStream,
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
@@ -16,8 +16,8 @@ import { ConversationFeed } from "./conversation-feed.ts";
 import { ConversationEvent } from "./events.ts";
 
 /**
- * The channel rule: a conversation's events go on its own channel, and the
- * workspace channel hears `conversation.changed` naming the conversation when its lists
+ * The stream rule: a conversation's events go on its own stream, and the
+ * workspace stream hears `conversation.changed` naming the conversation when its lists
  * may be out of date.
  */
 describe("the conversation feed", () => {
@@ -59,7 +59,7 @@ describe("the conversation feed", () => {
 			),
 		).toEqual([
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({
 					type: "message.completed",
 					conversationId,
@@ -69,11 +69,11 @@ describe("the conversation feed", () => {
 				}),
 			},
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({ type: "turn.completed", turnId, status: "done" }),
 			},
 			{
-				channel: workspaceChannel(workspaceId),
+				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 			},
 		]);
@@ -101,7 +101,7 @@ describe("the conversation feed", () => {
 				),
 			).toEqual([
 				{
-					channel: conversationChannel(conversationId),
+					stream: conversationStream(conversationId),
 					event: expect.objectContaining({
 						type: "message.failed",
 						conversationId,
@@ -114,7 +114,7 @@ describe("the conversation feed", () => {
 				...(listsChange
 					? [
 							{
-								channel: workspaceChannel(workspaceId),
+								stream: workspaceStream(workspaceId),
 								event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 							},
 						]
@@ -137,7 +137,7 @@ describe("the conversation feed", () => {
 			),
 		).toEqual([
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({
 					type: "message.completed",
 					messageId: "m1",
@@ -146,11 +146,11 @@ describe("the conversation feed", () => {
 				}),
 			},
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({ type: "turn.completed", turnId, status: "cancelled" }),
 			},
 			{
-				channel: workspaceChannel(workspaceId),
+				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 			},
 		]);
@@ -168,10 +168,10 @@ describe("the conversation feed", () => {
 			}),
 		);
 
-		expect(told.map(({ channel, event }) => [channel, Audience.read(event).audience])).toEqual([
-			[conversationChannel(conversationId), undefined],
-			[conversationChannel(conversationId), undefined],
-			[workspaceChannel(workspaceId), { kind: "conversation", conversationId }],
+		expect(told.map(({ stream, event }) => [stream, Audience.read(event).audience])).toEqual([
+			[conversationStream(conversationId), undefined],
+			[conversationStream(conversationId), undefined],
+			[workspaceStream(workspaceId), { kind: "conversation", conversationId }],
 		]);
 	});
 
@@ -189,11 +189,11 @@ describe("the conversation feed", () => {
 		).toEqual([
 			// Nothing waits for the turn any more.
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 			},
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({
 					type: "conversation.notice",
 					conversationId,
@@ -214,7 +214,7 @@ describe("the conversation feed", () => {
 	it("tells the reply's conversation how each tool call stands", () => {
 		const change = { conversationId, messageId: "m1", toolCall };
 		const onConversation = (type: string) => ({
-			channel: conversationChannel(conversationId),
+			stream: conversationStream(conversationId),
 			event: expect.objectContaining({ type, conversationId, messageId: "m1", toolCall }),
 		});
 
@@ -230,7 +230,7 @@ describe("the conversation feed", () => {
 			onConversation("tool_call.updated"),
 			// A decided call waits on nobody any more, which the lists show.
 			{
-				channel: workspaceChannel(workspaceId),
+				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 			},
 			onConversation("tool_call.updated"),
@@ -258,11 +258,11 @@ describe("the conversation feed", () => {
 
 		expect(posted).toEqual([
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({ type: "message.created", conversationId }),
 			},
 			{
-				channel: workspaceChannel(workspaceId),
+				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({ type: "conversation.changed", conversationId }),
 			},
 		]);
@@ -282,7 +282,7 @@ describe("the conversation feed", () => {
 			),
 		).toEqual([
 			{
-				channel: conversationChannel(conversationId),
+				stream: conversationStream(conversationId),
 				event: expect.objectContaining({
 					type: "collaboration.updated",
 					conversationId,
@@ -291,7 +291,7 @@ describe("the conversation feed", () => {
 				}),
 			},
 			{
-				channel: workspaceChannel(workspaceId),
+				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({
 					type: "conversation.changed",
 					conversationId: collaboration.conversationId,
@@ -313,11 +313,11 @@ describe("the conversation feed", () => {
 		).toEqual(
 			[conversationId, childId].flatMap((id) => [
 				{
-					channel: conversationChannel(id),
+					stream: conversationStream(id),
 					event: expect.objectContaining({ type: "conversation.changed", conversationId: id }),
 				},
 				{
-					channel: workspaceChannel(workspaceId),
+					stream: workspaceStream(workspaceId),
 					event: expect.objectContaining({ type: "conversation.changed", conversationId: id }),
 				},
 			]),

@@ -1,5 +1,5 @@
 import type { Channel, InboxItem } from "@sugabots/contracts";
-import { Link, linkOptions, useParams, useSearch } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
@@ -10,7 +10,7 @@ import {
 	useInboxFeed,
 	useMarkChatsRead,
 } from "@/lib/chats.ts";
-import { directMessageLink, inboxItemPageLink } from "@/lib/links.ts";
+import { directMessageLink, inboxItemPageLink, inboxMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import {
@@ -412,12 +412,7 @@ function linkOf(item: InboxItem) {
 	if (item.kind === "run" || item.kind === "collaboration") {
 		return inboxItemPageLink(item.rootConversationId, item.conversationId);
 	}
-	return linkOptions({
-		from: "/$workspace",
-		to: "./inbox/$conversation",
-		params: { conversation: item.rootConversationId },
-		search: { message: item.messageId },
-	});
+	return inboxMessageLink(item.rootConversationId, item.messageId);
 }
 
 /**

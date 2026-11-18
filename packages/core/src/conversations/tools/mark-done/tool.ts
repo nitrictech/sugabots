@@ -6,7 +6,7 @@ import { noInputSchema } from "../no-input.ts";
 
 export const MARK_DONE_TOOL = "mark_done";
 
-export type MarkDoneResult = { done: true } | { refused: string };
+type MarkDoneResult = { done: true } | { refused: string };
 
 /**
  * The `mark_done` tool: marks this task done for the person who asks, until

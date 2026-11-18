@@ -93,12 +93,13 @@ export function storyConversationFor(bot: Bot): Task {
 }
 
 /** `bot`'s first task as its list shows it. */
-export function storyTaskItem(bot: Bot): ChatListItem {
+function storyTaskItem(bot: Bot): ChatListItem {
 	return {
 		bot,
 		conversation: storyTaskFor(bot),
 		lastMessage: null,
 		participants: [],
+		messageCount: 1,
 		waitingOn: null,
 		unreadMessages: 0,
 		needsApproval: false,
@@ -271,10 +272,9 @@ export function storyChannelConversationDetails(
 	};
 }
 
-/** What a chat's sidebar shows: a summary, and who has written lately. */
+/** What a chat's sidebar shows: a summary. */
 export function storyChatActivity(bot: Bot, messages: Message[] = []): ConversationActivity {
 	const chat = storyTaskFor(bot);
-	const details = storyChatDetails(bot, messages);
 	return {
 		summary: {
 			content: `${bot.name} has been keeping things moving.`,
@@ -282,7 +282,6 @@ export function storyChatActivity(bot: Bot, messages: Message[] = []): Conversat
 			updatedAt: chat.updatedAt,
 		},
 		context: null,
-		recentParticipants: [...details.participants].reverse(),
 	};
 }
 
@@ -293,7 +292,7 @@ function quietStream() {
 	});
 }
 
-export interface StoryAppData {
+interface StoryAppData {
 	role?: WorkspaceRole;
 	channels?: Channel[];
 	bots?: Bot[];
@@ -573,7 +572,7 @@ function directMessageHandlers(
 }
 
 /** What a direct message holds: its messages, and the viewer and whom it is with. */
-export function storyDirectMessageDetails(
+function storyDirectMessageDetails(
 	item: DirectMessageListItem,
 	messages: Message[] = [],
 ): ConversationDetails {

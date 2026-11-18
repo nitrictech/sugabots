@@ -2,16 +2,14 @@ import type { AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
 import { Link, linkOptions } from "@tanstack/react-router";
 import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { useApprovalApp } from "@/lib/approval-app.ts";
-import { useChannels } from "@/lib/channels.ts";
+import { useApprovalApp, useAskedIn } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
 import { useReviewToolCall } from "@/lib/conversations.ts";
-import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { RequestConversationLink } from "@/screens/ApprovalPage.tsx";
 import { Answer, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { awaitsApproval } from "@/screens/tool-activity.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { ConversationLink } from "@/shell/ConversationLink.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 
 /** How many answered requests show before Show older. */
@@ -133,17 +131,10 @@ function approvalLink(request: ApprovalRequest) {
 function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { bot, call } = request;
 	const { action } = useApprovalApp(request);
-	const { data: channels } = useChannels();
-	const channel = channels?.find((candidate) => candidate.id === request.channelId);
+	const { channel, askedIn: asked } = useAskedIn(request);
 	const review = useReviewToolCall(request.conversationId);
 	// A phone answers with two wide buttons, and opens the request whole from its name.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const asked = [
-		channel && `in ${channel.name}`,
-		`at ${formatListTime(new Date(call.startedAt), new Date())}`,
-	]
-		.filter(Boolean)
-		.join(" ");
 	return (
 		<article
 			aria-label={`${bot.name}: ${action}`}
@@ -187,22 +178,12 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					</p>
 				)}
 				<span className="flex-1 max-md:hidden" />
-				{/* A channel's conversation links once the channel is known. */}
-				{request.rootConversationId && (request.channelId === null || channel) && (
-					<ConversationLink
-						channel={channel ?? null}
-						conversationId={request.rootConversationId}
-						search={
-							request.conversationId === request.rootConversationId
-								? {}
-								: { item: request.conversationId }
-						}
-						// A phone reaches the conversation from the request's own page.
-						className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
-					>
-						Open conversation
-					</ConversationLink>
-				)}
+				<RequestConversationLink
+					request={request}
+					channel={channel}
+					// A phone reaches the conversation from the request's own page.
+					className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
+				/>
 			</div>
 		</article>
 	);

@@ -14,7 +14,7 @@ Create bots, bring them into channels with your team, and run conversations that
 built-in tools and MCP connections.
 
 <p align="center">
-  <img alt="A Sugabots thread where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/one-thread-mac.webp" width="800">
+  <img alt="A Sugabots channel where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/main-chat-mac.webp" width="800">
 </p>
 
 Everything stays in your own database. Bots use the model providers you choose,

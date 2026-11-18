@@ -169,7 +169,7 @@ function channelStanding(row: schema.ChannelRow, actor: Actor, isMember: boolean
 }
 
 /** One person's standing towards one bot, from facts already in hand. */
-export function botStanding(row: schema.BotRow, actor: Actor): BotStanding {
+function botStanding(row: schema.BotRow, actor: Actor): BotStanding {
 	const facts: BotFacts = {
 		visibility: row.visibility,
 		createdById: row.createdById,
@@ -419,48 +419,39 @@ export const botStandingsFor = Effect.fn("Access.botStandingsFor")(function* (
 });
 
 /**
- * Whether a standing may decide a tool call's approval that `deciders`
- * decide. For `conversation`: `approval.decide`, and `approval.automation.decide` as
- * well for one raised while an automation runs. For `computer-managers`:
- * `computer.request.decide`, wherever it was raised.
- */
-export function mayDecideApprovals(
-	standing: {
-		may(
-			permission: "approval.decide" | "approval.automation.decide" | "computer.request.decide",
-		): boolean;
-	},
-	inAutomation: boolean,
-	deciders: ToolApprovalDeciders,
-): boolean {
-	if (deciders === "computer-managers") return standing.may("computer.request.decide");
-	const needed = inAutomation
-		? (["approval.decide", "approval.automation.decide"] as const)
-		: (["approval.decide"] as const);
-	return needed.every((permission) => standing.may(permission));
-}
-
-/**
  * Whether the caller, who reaches the conversation a tool call was raised in, may
  * decide it. A request to change a bot's computer is decided by the bot's
  * managers, or a Personal Assistant's person, wherever it was raised: `askingBot` is the caller's standing
  * towards the bot that raised the call, if they have one. Any other call is
  * decided by the conversation's people: in a channel's conversation by those holding
  * `approval.decide` there, and otherwise by those whose standing towards the
- * conversation's bot lets them, which for a collaboration is the bot of the
- * conversation it was opened from, whichever bot asked.
+ * conversation's bot holds `approval.decide`, and `approval.automation.decide`
+ * as well for a call raised while an automation runs. For a collaboration that
+ * is the bot of the conversation it was opened from, whichever bot asked.
+ *
+ * `reached` is the caller's standing towards the conversation, which a
+ * `ConversationStanding` is; undefined when they have none.
  */
 export function mayDecideToolCall(
-	reached: ConversationStanding,
+	reached: DecidingStanding | undefined,
 	askingBot: BotStanding | undefined,
 	inAutomation: boolean,
 	deciders: ToolApprovalDeciders,
 ): boolean {
 	if (deciders === "computer-managers") return askingBot?.may("computer.request.decide") ?? false;
-	if (reached.kind === "channel") return reached.standing.may("approval.decide");
-	if (reached.kind === "bot") return mayDecideApprovals(reached.standing, inAutomation, deciders);
-	return false;
+	if (reached?.kind === "channel") return reached.standing.may("approval.decide");
+	if (reached?.kind !== "bot") return false;
+	const needed = inAutomation
+		? (["approval.decide", "approval.automation.decide"] as const)
+		: (["approval.decide"] as const);
+	return needed.every((permission) => reached.standing.may(permission));
 }
+
+/** What `mayDecideToolCall` reads of a caller's standing towards a conversation. */
+export type DecidingStanding =
+	| { kind: "channel"; standing: ChannelStanding }
+	| { kind: "bot"; standing: BotStanding }
+	| { kind: "direct_message" };
 
 /**
  * SQL for "`userId` is in the channel `channelId` names", `userId` being an id or

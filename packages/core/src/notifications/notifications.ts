@@ -7,7 +7,7 @@ import {
 	type NotificationPreferences,
 	type NotificationSettings,
 	type Presence,
-	personChannel,
+	personStream,
 	streamEvent,
 } from "@sugabots/contracts";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -44,7 +44,7 @@ import {
 
 /**
  * Browser notifications, as Slack's web app shows them: what each person
- * chose to hear of, sent on their own event channel for their open tabs to
+ * chose to hear of, sent on their own event stream for their open tabs to
  * show. With no tab open, nothing reaches them. Their tabs also say there
  * which conversation each is showing, so none notifies them of what they are
  * reading.
@@ -96,7 +96,7 @@ export const make = Effect.gen(function* () {
 			addressed,
 			({ userId, notification }) =>
 				Effect.promise(() =>
-					bus.publish(personChannel(userId), streamEvent("notification", notification)),
+					bus.publish(personStream(userId), streamEvent("notification", notification)),
 				),
 			{ discard: true },
 		);
@@ -252,7 +252,7 @@ export const make = Effect.gen(function* () {
 				"reportPresence",
 				Effect.flatMap(CurrentActor.Service, ({ userId }) =>
 					Effect.promise(() =>
-						bus.publish(personChannel(userId), streamEvent("presence", reported)),
+						bus.publish(personStream(userId), streamEvent("presence", reported)),
 					),
 				),
 			),
@@ -337,7 +337,7 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	}
 });
 
-/** A channel, or one of its bots, where a person chooses in place of the level above. */
+/** A channel or a bot, where a person chooses in place of the level above. */
 export interface Place {
 	kind: NotificationPlaceKind;
 	id: string;

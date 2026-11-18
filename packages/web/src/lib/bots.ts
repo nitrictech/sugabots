@@ -7,6 +7,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
+import { useEffect } from "react";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -55,7 +56,7 @@ export function botsQuery(workspaceId: string | undefined) {
  * The handle every Personal Assistant shares, each person's own; the
  * workspace's other bots' handles are unique.
  */
-export const ASSISTANT_HANDLE = "personal-assistant";
+const ASSISTANT_HANDLE = "personal-assistant";
 
 /**
  * The bot an address names by its handle. `personal-assistant` names the
@@ -106,6 +107,19 @@ export function useEnsureAssistant() {
 		},
 		onSuccess: invalidate,
 	});
+}
+
+/**
+ * Makes the person's Personal Assistant once, while `missing`; the returned
+ * mutation says whether making it failed.
+ */
+export function useEnsuredAssistant(missing: boolean) {
+	const ensure = useEnsureAssistant();
+	const { mutate, isIdle } = ensure;
+	useEffect(() => {
+		if (missing && isIdle) mutate(undefined);
+	}, [missing, isIdle, mutate]);
+	return ensure;
 }
 
 /** Pins a bot to the person's sidebar, or unpins it. */

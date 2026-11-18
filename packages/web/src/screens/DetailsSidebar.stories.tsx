@@ -48,7 +48,6 @@ const activity: ConversationActivity = {
 		compactionLineTokens: 179_200,
 		compactedAt: null,
 	},
-	recentParticipants: people,
 };
 
 const summariser: SystemBot = {
@@ -125,7 +124,6 @@ const meta = preview.meta({
 	args: {
 		bot: growthDesk,
 		conversationId,
-		user,
 		contents: {
 			participants: people,
 			files: [
@@ -140,6 +138,7 @@ const meta = preview.meta({
 			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
 		},
 		onOpenAutomations: fn(),
+		onOpenDesktop: fn(),
 		onClose: fn(),
 	},
 	decorators: [
@@ -188,40 +187,37 @@ const meta = preview.meta({
 });
 
 /**
- * Default is a bot beside its chat: its name and model, then each section,
- * with who is in the task folded to their faces and a count.
+ * Default is a bot beside its task from a tablet up: floating cards of what
+ * it works with, the files shared in the task, and its computer.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("heading", { name: "Context" })).toBeVisible();
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
+		await expect(canvas.getByRole("heading", { name: "Computer" })).toBeVisible();
+	},
+});
+
+/** Each card folds to its title when its title is clicked, and opens again the same way. */
+export const CardFolded = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		const title = canvas.getByRole("button", { name: "Context" });
+		await userEvent.click(title);
+		await expect(title).toHaveAttribute("aria-expanded", "false");
+		await expect(canvas.queryByRole("meter", { name: "Short-term memory used" })).toBeNull();
+		await userEvent.click(title);
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
+	},
+});
+
+/** On a phone, the bot heads them, its name and model, with what the task is about under it. */
+export const OnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
-		await expect(canvas.queryByText("You")).toBeNull();
-		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: "In this conversation" })).toBeVisible();
-		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
-		await expect(canvas.queryByText("Sam Park")).toBeNull();
-	},
-});
-
-/** Expanded opens who is in the task, each folded list, and the summary. */
-export const Expanded = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: /in this conversation$/ }));
-		await expect(canvas.getByText("You")).toBeVisible();
-		for (const more of canvas.getAllByRole("button", { name: "Show more" })) {
-			await userEvent.click(more);
-		}
-		await expect(canvas.getByText("Sam Park")).toBeVisible();
-		await expect(canvas.getByText("Pipeline review")).toBeVisible();
-	},
-});
-
-/** Its own header names it and closes it, beside the chat as on a phone. */
-export const ClosedFromItsHeader = meta.story({
-	play: async ({ args, canvas, userEvent }) => {
-		await expect(canvas.getByRole("heading", { name: "Details" })).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
-		await expect(args.onClose).toHaveBeenCalled();
+		await expect(canvas.getByRole("heading", { name: "Summary" })).toBeVisible();
 	},
 });
 
@@ -236,6 +232,7 @@ export const CloseOnAPhone = meta.story({
 
 /** Before the system bots have a model there is no summary, and it says so rather than staying blank. */
 export const SystemBotsNotSetUp = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
 	parameters: { summariserHasModel: false },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(/The system bots write these/)).toBeVisible();
@@ -255,8 +252,8 @@ export const SignInExpired = meta.story({
 		),
 	},
 	play: async ({ canvas }) => {
-		const tools = canvas.getByRole("heading", { name: "Tools" }).closest("section");
-		if (!tools) throw new Error("The details have no Tools section");
+		const tools = canvas.getByRole("heading", { name: "Context" }).closest("section");
+		if (!tools) throw new Error("The details have no Context section");
 		await expect(within(tools).getByText("Sign-in expired")).toBeVisible();
 		await expect(within(tools).getByRole("button", { name: "Sign in to Linear" })).toBeVisible();
 		await expect(within(tools).getAllByText("1 tool")).toHaveLength(2);

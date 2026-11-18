@@ -100,7 +100,7 @@ function systemIn(userAgent: string): string {
 }
 
 /** What About shows and Copy debug info copies, each as the words a person reads. */
-export interface DebugDetails {
+interface DebugDetails {
 	version: string;
 	commit: string;
 	browser: string;

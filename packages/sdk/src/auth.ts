@@ -11,7 +11,7 @@ import type { TokenStore } from "./tokens.ts";
  * callers need not know which half of the API they are talking to.
  */
 
-export interface AuthClientOptions {
+interface AuthClientOptions {
 	baseUrl: string;
 	tokens?: TokenStore;
 	fetch?: typeof globalThis.fetch;

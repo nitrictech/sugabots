@@ -89,7 +89,7 @@ export const lockAutomationSettlement = (runId: string) =>
  * conversation `conversationId` belongs to, if any, as `lockAutomationSettlement` does, and
  * returns the run's id.
  */
-export const lockAutomationSettlementOf = Effect.fn("Run.lockAutomationSettlementOf")(function* (
+const lockAutomationSettlementOf = Effect.fn("Run.lockAutomationSettlementOf")(function* (
 	conversationId: string,
 ) {
 	const runId = yield* query((db) => findRunId(db, conversationId));

@@ -5,11 +5,13 @@ import { useAppBadge } from "@/lib/app-badge.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useWorkspaceEvents } from "@/lib/conversation-events.ts";
 import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
+import { SidebarHidingProvider, useSidebarHidingState } from "@/lib/sidebar-hidden.tsx";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { MobileTabBar } from "@/shell/MobileTabBar.tsx";
 import { NotificationsPrompt } from "@/shell/NotificationsPrompt.tsx";
 import { Sidebar } from "@/shell/Sidebar.tsx";
+import { SlidingSidebar } from "@/shell/SlidingSidebar.tsx";
 
 const APP_NAME = "Sugabots";
 
@@ -22,6 +24,7 @@ export function Shell() {
 	useWorkspaceEvents();
 	useNotificationsInThisBrowser();
 	useVisibleHeight();
+	const sidebarHiding = useSidebarHidingState();
 	const { unreadForYou, waitingApprovals } = useAttentionCounts();
 	const { workspace } = useWorkspace();
 	useAppBadge(
@@ -31,12 +34,23 @@ export function Shell() {
 
 	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (
-		<div className="relative flex h-visible min-w-0 flex-col overflow-hidden bg-background">
+		<div className="relative flex h-visible min-w-0 flex-col overflow-hidden bg-background md:bg-rail">
 			<NotificationsPrompt />
-			<div className="flex min-h-0 min-w-0 flex-1">
-				<Sidebar />
-				<Outlet />
-			</div>
+			<SidebarHidingProvider value={sidebarHiding}>
+				<div className="relative flex min-h-0 min-w-0 flex-1">
+					<SlidingSidebar hiding={sidebarHiding}>
+						<Sidebar
+							toggleRoom={sidebarHiding.chatShowing}
+							// Peeking over a conversation, it is only borrowed, so it keeps the width it has.
+							resizable={!(sidebarHiding.hidden && sidebarHiding.chatShowing)}
+						/>
+					</SlidingSidebar>
+					{/* From a tablet up the page is a lighter panel beside the darker sidebar, a fine line between them. */}
+					<div className="flex min-h-0 min-w-0 flex-1 md:overflow-hidden md:border-border md:border-l md:bg-background">
+						<Outlet />
+					</div>
+				</div>
+			</SidebarHidingProvider>
 			<MobileTabBar />
 		</div>
 	);

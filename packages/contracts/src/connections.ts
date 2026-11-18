@@ -19,7 +19,7 @@ import { uuidSchema } from "./uuid.ts";
  */
 
 /** A tool as the server described it when last asked. The text is the server's. */
-export const connectionToolSchema = Schema.Struct({
+const connectionToolSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	/** The server's own hints about the tool, when it gave them. */
@@ -39,10 +39,10 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
  * Sugabots' own; or an HTTP endpoint, whose tools are a request per method
  * under its address.
  */
-export const connectionKindSchema = Schema.Literals(["mcp", "github", "http"]);
+const connectionKindSchema = Schema.Literals(["mcp", "github", "http"]);
 export type ConnectionKind = typeof connectionKindSchema.Type;
 
-export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
+const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
 
 /**
@@ -53,11 +53,11 @@ export type ConnectionAuth = typeof connectionAuthSchema.Type;
  * - `off`: bots can't use the tool.
  */
 export const connectionAccesses = ["off", "ask", "allow"] as const;
-export const connectionAccessSchema = Schema.Literals(connectionAccesses);
+const connectionAccessSchema = Schema.Literals(connectionAccesses);
 export type ConnectionAccess = typeof connectionAccessSchema.Type;
 
 /** A connection's tool as the server described it, with what the bot may do with it. */
-export const connectionToolWithAccessSchema = Schema.Struct({
+const connectionToolWithAccessSchema = Schema.Struct({
 	...connectionToolSchema.fields,
 	access: connectionAccessSchema,
 });
@@ -67,13 +67,13 @@ export type ConnectionToolWithAccess = typeof connectionToolWithAccessSchema.Typ
  * A connection's tool as its settings show it: what the bot may do with
  * it, without the server's description, which can run to many kilobytes.
  */
-export const connectionToolSettingSchema = connectionToolWithAccessSchema.mapFields(
+const connectionToolSettingSchema = connectionToolWithAccessSchema.mapFields(
 	Struct.omit(["description"]),
 );
 export type ConnectionToolSetting = typeof connectionToolSettingSchema.Type;
 
 /** How many of a connection's tools are at each setting. */
-export const toolAccessCountsSchema = Schema.Struct({
+const toolAccessCountsSchema = Schema.Struct({
 	allow: Schema.Int,
 	ask: Schema.Int,
 	off: Schema.Int,
@@ -119,7 +119,7 @@ export const connectionSignInFailures = [
 	"refused",
 	"not_completed",
 ] as const;
-export const connectionSignInFailureSchema = Schema.Literals(connectionSignInFailures);
+const connectionSignInFailureSchema = Schema.Literals(connectionSignInFailures);
 export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 
 export const connectionSchema = Schema.Struct({
@@ -224,13 +224,11 @@ export const connectFromCatalogResultSchema = Schema.Struct({
 	connectionId: uuidSchema,
 	authorizationUrl: Schema.String,
 });
-export type ConnectFromCatalogResult = typeof connectFromCatalogResultSchema.Type;
 
 /** Where the browser goes to sign in, or nothing when the connection is already signed in. */
 export const connectionOauthStartSchema = Schema.Struct({
 	authorizationUrl: Schema.NullOr(Schema.String),
 });
-export type ConnectionOauthStart = typeof connectionOauthStartSchema.Type;
 
 export const connectionUpdateSchema = Schema.Struct({
 	name: Schema.optional(connectionNameSchema),

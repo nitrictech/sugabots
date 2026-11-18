@@ -20,14 +20,15 @@ export interface ChannelStanding {
 	unreadMessages: number;
 	/** Whether a conversation in it waits on the viewer. */
 	needsApproval: boolean;
-	/** How many automations failed their latest run: always none for a channel. */
-	failedAutomations: number;
 }
+
+/** How a channel stands while the sidebar's markers have nothing for it, or have not loaded. */
+export const NOTHING_NEW_IN_CHANNEL = { unreadMessages: 0, needsApproval: false };
 
 /**
  * A channel in the sidebar: its name, which folds it away or opens it, and
  * under it, while open, `children`. Under the pointer or on focus, a caret
- * takes the place of the channel's mark, and `newMenu` and its settings come
+ * takes the place of the channel's mark, and `newThread` and its settings come
  * in at the end. Folded, it says how much is new in it, and is shaded while it
  * holds the page open. Right-clicked, it offers its notifications. A private
  * channel's name carries a lock.
@@ -39,7 +40,7 @@ export function SidebarChannel({
 	onToggle,
 	settingsBack,
 	notificationSettings,
-	newMenu,
+	newThread,
 	children,
 }: {
 	standing: ChannelStanding;
@@ -51,8 +52,8 @@ export function SidebarChannel({
 	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded. */
 	notificationSettings?: NotificationSettings;
-	/** What makes something new in the channel, such as a thread. */
-	newMenu?: ReactNode;
+	/** What starts a thread in the channel. */
+	newThread?: ReactNode;
 	children: ReactNode;
 }) {
 	const { channel } = standing;
@@ -113,9 +114,8 @@ export function SidebarChannel({
 						<MutedMark settings={notificationSettings} place={notificationPlace} />
 					</button>
 					{!open && <ChannelNews standing={standing} />}
-					{/* Kept in view while its menu is open, which takes the pointer and focus away from the row. */}
-					<span className="hidden group-hover/channel:contents group-has-focus-visible/channel:contents group-has-data-popup-open/channel:contents">
-						{newMenu}
+					<span className="hidden group-hover/channel:contents group-has-focus-visible/channel:contents">
+						{newThread}
 					</span>
 					<IconButton
 						label={`${channel.name} settings`}
@@ -132,8 +132,8 @@ export function SidebarChannel({
 	);
 }
 
-function hasNews({ unreadMessages, needsApproval, failedAutomations }: ChannelStanding): boolean {
-	return needsApproval || unreadMessages + failedAutomations > 0;
+function hasNews({ unreadMessages, needsApproval }: ChannelStanding): boolean {
+	return needsApproval || unreadMessages > 0;
 }
 
 /**
@@ -142,7 +142,7 @@ function hasNews({ unreadMessages, needsApproval, failedAutomations }: ChannelSt
  * for a screen reader.
  */
 function ChannelNews({ standing }: { standing: ChannelStanding }) {
-	const { unreadMessages, needsApproval, failedAutomations } = standing;
+	const { unreadMessages, needsApproval } = standing;
 	if (needsApproval) {
 		return (
 			<Tooltip label="Waiting for your approval" side="right">
@@ -152,15 +152,15 @@ function ChannelNews({ standing }: { standing: ChannelStanding }) {
 			</Tooltip>
 		);
 	}
-	const news = [
-		...(unreadMessages > 0 ? [countOf(unreadMessages, "unread message", "unread messages")] : []),
-		...(failedAutomations > 0
-			? [countOf(failedAutomations, "failed automation", "failed automations")]
-			: []),
-	];
-	if (news.length === 0) return null;
-	return <span className="sr-only">{news.join(", ")}</span>;
+	if (unreadMessages === 0) return null;
+	return (
+		<span className="sr-only">{countOf(unreadMessages, "unread message", "unread messages")}</span>
+	);
 }
+
+type ChannelMarkSource = Pick<Channel, "name" | "color">;
+
+type ChannelInitialSize = "lg" | "md" | "sm";
 
 /** A channel as a small square holding its initial, in the channel's colour. */
 export function ChannelInitial({
@@ -176,23 +176,6 @@ export function ChannelInitial({
 	 * channel's own settings.
 	 */
 	size?: ChannelInitialSize;
-	className?: string;
-}) {
-	return <ChannelSquare channel={channel} size={size} className={className} />;
-}
-
-type ChannelMarkSource = Pick<Channel, "name" | "color">;
-
-type ChannelInitialSize = "lg" | "md" | "sm";
-
-/** The square itself. */
-function ChannelSquare({
-	channel,
-	size,
-	className,
-}: {
-	channel: ChannelMarkSource;
-	size: ChannelInitialSize;
 	className?: string;
 }) {
 	const palette = channel.color === null ? undefined : channelPalettes[channel.color];

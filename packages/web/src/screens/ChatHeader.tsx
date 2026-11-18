@@ -1,4 +1,4 @@
-import type { Bot, Channel } from "@sugabots/contracts";
+import type { Bot, Channel, PersonParticipant } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
@@ -12,13 +12,16 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/bots.ts";
-import { useAttentionCounts, useBotTasks } from "@/lib/chats.ts";
+import { useAttentionCounts } from "@/lib/chats.ts";
 import { botLink, channelLink, directMessagesLink, inboxLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { useSession } from "@/lib/session.ts";
+import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { FAILED_DOT_LABEL, FailedDot } from "@/shell/FailedDot.tsx";
+import { BotCrumb, CrumbSeparator } from "@/shell/BotCrumb.tsx";
 import { InboxNews } from "@/shell/InboxNews.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
+import { PersonAvatar } from "@/ui/avatar.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -30,7 +33,8 @@ import {
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { ChatComputer } from "./ComputerButton.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
-import { CHAT_HEADER_CONTAINER, HeaderButton } from "./HeaderButton.tsx";
+import { CHAT_HEADER_CONTAINER } from "./HeaderButton.tsx";
+import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
 /** Where a page's Back on a phone returns to: the list it covers, or for a conversation, where it lives. */
 export type BackTo =
@@ -71,37 +75,41 @@ export interface HeaderPlace {
 }
 
 /** Whether a chat's Details are open, and what opens or closes them. */
-export interface DetailsToggle {
+interface DetailsToggle {
 	open: boolean;
 	onChange: (open: boolean) => void;
 }
 
 /**
- * The bar across the top of a bot's chat: its name, the way into its
- * computer's desktop when it has one, the way into its automations, and, with
- * `details`, the way into its Details: the ⓘ, or the name, which is how a
- * phone reaches them.
+ * The bar across the top of a bot's task: a breadcrumb of the bot and the
+ * task's title, the faces of the people in it once there is more than one,
+ * Mark done, and, with `details`, the way into its Details: the cards button,
+ * or the title, which is how a phone reaches them. A phone also has the way
+ * into the bot's computer, which from a tablet up is a card in Details.
  */
 export function ChatHeader({
 	bot,
+	overChat = true,
 	title,
 	done,
+	people = [],
 	conversationId,
 	onOpenDesktop,
-	onOpenAutomations,
 	back,
 	trailing,
 	details,
 }: HeaderPlace & {
 	bot: Bot;
+	/** Over the task, which scrolls up under it, rather than a bar of its own above it. */
+	overChat?: boolean;
 	/** The task's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
 	/** Whether the task is done, and how to mark it done or reopen it. */
 	done?: DoneToggle;
+	/** The people in the task, whose faces show beside Mark done once there is more than one. */
+	people?: readonly PersonParticipant[];
 	conversationId: string;
 	onOpenDesktop: () => void;
-	/** Opens the bot's automations beside the chat. */
-	onOpenAutomations: () => void;
 }) {
 	const name = title ?? bot.name;
 	const modelName = useModelName(bot.model);
@@ -113,6 +121,7 @@ export function ChatHeader({
 	return (
 		<HeaderBar
 			back={back}
+			plain={overChat}
 			badge={
 				title === undefined ? (
 					<FaceBadge
@@ -137,44 +146,54 @@ export function ChatHeader({
 				)
 			}
 		>
-			<div className="flex min-w-0 flex-1 items-baseline gap-2 max-md:sr-only">
-				<h1 className="m-0 min-w-0 truncate font-medium text-sm text-foreground">
-					{details ? (
-						<button
-							type="button"
-							onClick={() => details.onChange(!details.open)}
-							className="focus-ring block max-w-full truncate rounded-md text-left"
-						>
-							{name}
-						</button>
-					) : (
-						name
+			{/*
+			 * A breadcrumb: the bot, which leads to its page, then the task's
+			 * title, "Growth Desk / Fernhill pricing". Whose task it is, once here
+			 * rather than over each message.
+			 */}
+			<div className="flex min-w-0 flex-1 items-center max-md:sr-only">
+				<div data-header-title className="flex min-w-0 items-center gap-1.5">
+					{title !== undefined && (
+						<>
+							<BotCrumb bot={bot} />
+							<CrumbSeparator />
+						</>
 					)}
-				</h1>
-				{modelName && (
-					<span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-						{modelName}
-					</span>
-				)}
+					<h1 className="m-0 flex min-w-0 items-center gap-1.5 font-medium text-foreground text-sm">
+						{title === undefined && <BotFace bot={bot} />}
+						{details ? (
+							<button
+								type="button"
+								onClick={() => details.onChange(!details.open)}
+								className="focus-ring block min-w-0 truncate rounded-md text-left"
+							>
+								{name}
+							</button>
+						) : (
+							<span className="min-w-0 truncate">{name}</span>
+						)}
+					</h1>
+				</div>
 			</div>
+			{/*
+			 * From a tablet up the computer is a card in Details, and automations
+			 * are in the bot's sidebar; a phone has room for one control beside a
+			 * task's title, which holds the computer and done.
+			 */}
 			{done ? (
-				<>
-					{/* A phone has room for one control beside a task's title, which holds the computer and done. */}
-					<span className="contents max-md:hidden">
-						<ChatComputer bot={bot} conversationId={conversationId} onOpen={onOpenDesktop} />
-					</span>
-					<ConversationMenu done={done} back={back} onOpenDesktop={openComputer} />
-				</>
+				<ConversationMenu done={done} back={back} onOpenDesktop={openComputer} />
 			) : (
-				<ChatComputer bot={bot} conversationId={conversationId} onOpen={openComputer} />
+				<span className="contents md:hidden">
+					<ChatComputer bot={bot} conversationId={conversationId} onOpen={openComputer} />
+				</span>
 			)}
-			<AutomationsButton bot={bot} onOpen={onOpenAutomations} />
+			{people.length > 1 && <PeopleInTask people={people} />}
 			{done && (
 				<span className="contents max-md:hidden">
 					<DoneButton {...done} />
 				</span>
 			)}
-			{details && <DetailsButton {...details} />}
+			{details && <DetailsButton {...details} cards />}
 			{trailing}
 			<Dialog open={computerOpen} onOpenChange={setComputerOpen}>
 				<ComputerSheet
@@ -260,20 +279,28 @@ export const PHONE_FACE_SIZE_PX = 32;
 function HeaderBar({
 	back,
 	parent,
+	plain = false,
 	badge,
 	children,
 }: {
 	back: BackTo;
 	parent?: StageParent;
+	/** Without the rule under it, as a bot's task has it, its messages running up to it. */
+	plain?: boolean;
 	/** What a phone shows after Back: a `FaceBadge` or a `TitleBadge`. */
 	badge: ReactNode;
 	children: ReactNode;
 }) {
+	// Clear of the button that brings the sidebar back, which sits in the corner over the chat.
+	const sidebarHidden = useSidebarHiddenBesideChat();
 	return (
 		<header
 			className={cn(
 				CHAT_HEADER_CONTAINER,
-				"relative flex h-13 shrink-0 items-center gap-3 border-border border-b pr-4 pl-6 max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
+				// Over a bot's task, which scrolls up under it: no bar of its own.
+				plain ? "md:border-b-0 md:bg-transparent" : "border-border border-b",
+				sidebarHidden ? "md:pl-14" : "md:pl-6",
+				"relative flex h-13 shrink-0 items-center gap-3 pr-4 transition-all duration-300 ease-out max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 			)}
 		>
 			{parent ? (
@@ -388,25 +415,54 @@ function TitleBadge({
 	);
 }
 
-/**
- * Opens the bot's automations beside its task, with a red dot while one of
- * them failed its latest run. A phone reaches them from the bot's Details instead.
- */
-function AutomationsButton({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
-	const failed = useBotTasks(bot.id).data?.automations.some((row) => row.automation.failed);
+/** A bot's small face beside its name in the bar. */
+function BotFace({ bot }: { bot: Bot }) {
 	return (
-		<HeaderButton
-			label="Automations"
-			icon={<RefreshCcw size={16} strokeWidth={1.75} />}
-			onClick={onOpen}
-			mark={failed ? { dot: <FailedDot labelled={false} />, label: FAILED_DOT_LABEL } : undefined}
-			className="max-md:hidden"
-		/>
+		<span aria-hidden className="flex shrink-0">
+			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={14} />
+		</span>
 	);
 }
 
-/** The ⓘ that opens a chat's Details, or closes them. */
-function DetailsButton({ open, onChange }: DetailsToggle) {
+/**
+ * The people in a bot's task with more than one in it: their faces stacked,
+ * which list them by name when clicked, the viewer among them as you.
+ */
+function PeopleInTask({ people }: { people: readonly PersonParticipant[] }) {
+	const user = useSession().user;
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<button
+						type="button"
+						aria-label={`${people.length} people in this task`}
+						className="focus-ring flex h-8 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground text-xs transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected max-md:hidden"
+					>
+						<ParticipantFaces participants={people} shown={3} size={20} />
+					</button>
+				}
+			/>
+			<DropdownMenuContent align="end" className="min-w-52">
+				{people.map((person) => (
+					<DropdownMenuItem key={person.id} closeOnClick={false}>
+						<PersonAvatar person={person} size={20} />
+						<span className="min-w-0 flex-1 truncate">
+							{person.name}
+							{person.id === user?.id && <span className="text-subtle-foreground"> (you)</span>}
+						</span>
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/**
+ * The button that opens a chat's Details, or closes them: as a column beside
+ * the chat, or, in a bot's task, as floating `cards`.
+ */
+function DetailsButton({ open, onChange, cards = false }: DetailsToggle & { cards?: boolean }) {
 	return (
 		<IconButton
 			label="Details"
@@ -415,8 +471,29 @@ function DetailsButton({ open, onChange }: DetailsToggle) {
 			onClick={() => onChange(!open)}
 			className={cn(HEADER_ICON_CLASS_NAME, "max-md:hidden")}
 		>
-			<PanelRight size={16} strokeWidth={1.75} />
+			{cards ? <CardsIcon /> : <PanelRight size={16} strokeWidth={1.75} />}
 		</IconButton>
+	);
+}
+
+/** Two rows, each a dot and a line: the stack of Details cards. */
+function CardsIcon() {
+	return (
+		<svg
+			aria-hidden
+			width="18"
+			height="18"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.75"
+			strokeLinecap="round"
+		>
+			<circle cx="7" cy="8" r="2.5" />
+			<path d="M13 8h7" />
+			<circle cx="7" cy="16" r="2.5" />
+			<path d="M13 16h7" />
+		</svg>
 	);
 }
 
@@ -433,12 +510,15 @@ export function PeopleChatHeader({
 	mark = "channel",
 	face,
 	detail,
+	crumbs,
 	back,
 	parent,
 	trailing,
 	details,
 }: HeaderPlace & {
 	title: string;
+	/** From a tablet up, where it sits, before its title as a breadcrumb: "Growth Desk / Automations". */
+	crumbs?: ReactNode;
 	/** What else can be done with it, at the end of the header. */
 	menu?: ReactNode;
 	/** Whether the task is done, and how to mark it done or reopen it; absent on a channel's conversation. */
@@ -470,6 +550,12 @@ export function PeopleChatHeader({
 				)
 			}
 		>
+			{crumbs && (
+				<span className="flex min-w-0 shrink items-center gap-1.5 max-md:hidden">
+					{crumbs}
+					<CrumbSeparator />
+				</span>
+			)}
 			<h1 className={TITLE_CLASS_NAME}>{title}</h1>
 			{detail}
 			{done && <DoneButton {...done} />}
@@ -512,7 +598,7 @@ function DoneButton({ isDone, onChange }: DoneToggle) {
  * An icon button in a chat's header, quieter until pointed at, and shaded
  * while what it opens is open. On a phone, round on glass.
  */
-export const HEADER_ICON_CLASS_NAME = cn(
+const HEADER_ICON_CLASS_NAME = cn(
 	"text-muted-foreground hover:text-foreground aria-pressed:bg-row-selected aria-pressed:text-foreground",
 	FLOATING_ON_PHONE,
 );

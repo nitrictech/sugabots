@@ -20,7 +20,7 @@ import { ConversationWorkflows } from "./workflows.ts";
  */
 const held = () => DurableDeferred.await(DurableDeferred.make("released"));
 
-export const engineForTests = ManagedRuntime.make(
+const engineForTests = ManagedRuntime.make(
 	Layer.mergeAll(
 		Layer.empty,
 		...ConversationWorkflows.definitions.map((definition) => definition.toLayer(held)),
@@ -33,7 +33,7 @@ export const lanesForTests = Lanes.make(ConversationWorkflows.definitions).pipe(
 );
 
 /** The test engine and lanes over it, as the services that start and signal workflows need them. */
-export const workflowsForTests = Layer.merge(
+const workflowsForTests = Layer.merge(
 	Layer.effect(Lanes.Service, lanesForTests),
 	Layer.succeed(WorkflowEngine.WorkflowEngine, engineForTests),
 );

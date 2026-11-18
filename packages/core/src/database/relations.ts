@@ -36,12 +36,6 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.placedConversation.id,
 			to: r.conversationCompaction.conversationId,
 		}),
-		// Every conversation opened under this one, whatever its kind: collaborations,
-		// and system bots' conversations.
-		childConversations: r.many.placedConversation({
-			from: r.placedConversation.id,
-			to: r.placedConversation.parentConversationId,
-		}),
 		bot: r.one.bot({ from: r.placedConversation.botId, to: r.bot.id }),
 		// On a conversation people open: every conversation in it, its own included.
 		rootedConversations: r.many.placedConversation({

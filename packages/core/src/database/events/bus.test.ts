@@ -9,7 +9,7 @@ import { EventStore } from "./store.ts";
  * provoke through a socket.
  */
 
-const CHANNEL = "conversation:c1";
+const STREAM = "conversation:c1";
 
 function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
 	return { ...data, v: EVENT_VERSION, type };
@@ -65,44 +65,44 @@ describe("publish and subscribe", () => {
 	it("fans out an already committed event without storing it twice", async () => {
 		const store = EventStore.inMemory();
 		const events = EventBus.inProcess({ store });
-		const live = take(events.subscribe(CHANNEL), 1);
+		const live = take(events.subscribe(STREAM), 1);
 		const event = streamEvent("bot.updated", { id: "m1" });
-		const seq = await store.append(CHANNEL, event);
+		const seq = await store.append(STREAM, event);
 
-		await events.publishCommitted([{ channel: CHANNEL, seq, event }]);
+		await events.publishCommitted([{ stream: STREAM, seq, event }]);
 
 		expect(await live).toEqual([{ seq, event }]);
-		expect(await store.replay(CHANNEL, 0, 10)).toEqual([{ seq, event }]);
+		expect(await store.replay(STREAM, 0, 10)).toEqual([{ seq, event }]);
 	});
 
 	it("delivers to every live subscriber", async () => {
 		const events = bus();
-		const first = take(events.subscribe(CHANNEL), 1);
-		const second = take(events.subscribe(CHANNEL), 1);
+		const first = take(events.subscribe(STREAM), 1);
+		const second = take(events.subscribe(STREAM), 1);
 
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m1" }));
+		await events.publish(STREAM, rawEvent("message.created", { id: "m1" }));
 
 		expect((await first)[0]?.event.id).toBe("m1");
 		expect((await second)[0]?.event.id).toBe("m1");
 	});
 
-	it("keeps channels apart", async () => {
+	it("keeps streams apart", async () => {
 		const events = bus();
-		const conversation = take(events.subscribe(CHANNEL), 1);
+		const conversation = take(events.subscribe(STREAM), 1);
 
 		await events.publish("workspace:w1", rawEvent("conversation.created"));
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.created"));
 
 		expect(types(await conversation)).toEqual(["message.created"]);
 	});
 
 	it("numbers durable events and leaves deltas unnumbered", async () => {
 		const events = bus();
-		const stream = take(events.subscribe(CHANNEL), 3);
+		const stream = take(events.subscribe(STREAM), 3);
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
-		await events.publish(CHANNEL, rawEvent("message.delta", { text: "hi" }));
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		await events.publish(STREAM, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.delta", { text: "hi" }));
+		await events.publish(STREAM, rawEvent("message.completed"));
 
 		const [created, delta, completed] = await stream;
 		expect(created?.seq).toBe(1);
@@ -111,33 +111,33 @@ describe("publish and subscribe", () => {
 		expect(completed?.seq).toBe(2);
 	});
 
-	it("holds ordering within a channel when publishes overlap", async () => {
+	it("holds ordering within a stream when publishes overlap", async () => {
 		const events = bus();
-		const stream = take(events.subscribe(CHANNEL), 5);
+		const stream = take(events.subscribe(STREAM), 5);
 
 		await Promise.all(
-			[1, 2, 3, 4, 5].map((n) => events.publish(CHANNEL, rawEvent("turn.started", { n }))),
+			[1, 2, 3, 4, 5].map((n) => events.publish(STREAM, rawEvent("turn.started", { n }))),
 		);
 
 		expect((await stream).map((delivery) => delivery.event.n)).toEqual([1, 2, 3, 4, 5]);
 	});
 
-	it("queues committed fan-out behind an in-flight publish on the same channel", async () => {
+	it("queues committed fan-out behind an in-flight publish on the same stream", async () => {
 		let releaseAppend = () => {};
 		const appendBlocked = new Promise<void>((resolve) => {
 			releaseAppend = resolve;
 		});
 		const store = EventStore.inMemory();
 		const append = store.append.bind(store);
-		store.append = async (channel, event) => {
+		store.append = async (stream, event) => {
 			await appendBlocked;
-			return append(channel, event);
+			return append(stream, event);
 		};
 		const events = EventBus.inProcess({ store });
-		const stream = take(events.subscribe(CHANNEL), 2);
-		const first = events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
+		const stream = take(events.subscribe(STREAM), 2);
+		const first = events.publish(STREAM, rawEvent("message.created", { n: 1 }));
 		const second = events.publishCommitted([
-			{ channel: CHANNEL, seq: 2, event: streamEvent("bot.updated", { n: 2 }) },
+			{ stream: STREAM, seq: 2, event: streamEvent("bot.updated", { n: 2 }) },
 		]);
 
 		releaseAppend();
@@ -149,7 +149,7 @@ describe("publish and subscribe", () => {
 	it("stops when the caller aborts", async () => {
 		const events = bus();
 		const abort = new AbortController();
-		const stream = events.subscribe(CHANNEL, { signal: abort.signal });
+		const stream = events.subscribe(STREAM, { signal: abort.signal });
 
 		const drained = (async () => {
 			const seen: EventBus.Delivery[] = [];
@@ -160,7 +160,7 @@ describe("publish and subscribe", () => {
 			return seen;
 		})();
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.created"));
 
 		expect(await drained).toHaveLength(1);
 	});
@@ -170,13 +170,13 @@ describe("resume", () => {
 	it("replays what a subscriber missed, then goes live", async () => {
 		const events = bus();
 
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m1" }));
-		await events.publish(CHANNEL, rawEvent("message.completed", { id: "m1" }));
+		await events.publish(STREAM, rawEvent("message.created", { id: "m1" }));
+		await events.publish(STREAM, rawEvent("message.completed", { id: "m1" }));
 
 		// Resuming after the first: the second is replayed from the table, the
 		// third arrives live, and there is no gap between them.
-		const resumed = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m2" }));
+		const resumed = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await events.publish(STREAM, rawEvent("message.created", { id: "m2" }));
 
 		const [replayed, live] = await resumed;
 		expect(replayed).toEqual({ seq: 2, event: { v: 1, type: "message.completed", id: "m1" } });
@@ -186,25 +186,25 @@ describe("resume", () => {
 	it("never replays a delta", async () => {
 		const events = bus();
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
-		await events.publish(CHANNEL, rawEvent("message.delta", { text: "gone" }));
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		await events.publish(STREAM, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.delta", { text: "gone" }));
+		await events.publish(STREAM, rawEvent("message.completed"));
 
-		expect(types(await take(events.subscribe(CHANNEL, { since: 1 }), 1))).toEqual([
+		expect(types(await take(events.subscribe(STREAM, { since: 1 }), 1))).toEqual([
 			"message.completed",
 		]);
 	});
 
 	it("delivers an event published during the replay exactly once", async () => {
 		const events = bus();
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
+		await events.publish(STREAM, rawEvent("message.created", { n: 1 }));
 
 		// Subscribing and publishing without yielding in between is the race
 		// the subscriber registers early to close: the new event is buffered
 		// live *and* readable from the table, and must arrive once.
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 2 }));
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 3 }));
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await events.publish(STREAM, rawEvent("message.created", { n: 2 }));
+		await events.publish(STREAM, rawEvent("message.created", { n: 3 }));
 
 		expect((await stream).map((delivery) => delivery.seq)).toEqual([2, 3]);
 	});
@@ -213,11 +213,11 @@ describe("resume", () => {
 		const store = EventStore.inMemory();
 		const events = EventBus.inProcess({ store });
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.created"));
 		await store.prune(new Date(Date.now() + 1000));
 
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await events.publish(STREAM, rawEvent("message.completed"));
 
 		const [first, second] = await stream;
 		expect(first?.event.type).toBe("reset");
@@ -226,20 +226,20 @@ describe("resume", () => {
 		expect(second?.event.type).toBe("message.completed");
 	});
 
-	it("resets an id that was never on this channel", async () => {
+	it("resets an id that was never on this stream", async () => {
 		const events = bus();
 		await events.publish("workspace:w1", rawEvent("conversation.created"));
 
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 1);
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 1);
 		expect(types(await stream)).toEqual(["reset"]);
 	});
 
 	it("starts live when there is nothing to resume from", async () => {
 		const events = bus();
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.created"));
 
-		const stream = take(events.subscribe(CHANNEL), 1);
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		const stream = take(events.subscribe(STREAM), 1);
+		await events.publish(STREAM, rawEvent("message.completed"));
 
 		expect(types(await stream)).toEqual(["message.completed"]);
 	});
@@ -248,17 +248,17 @@ describe("resume", () => {
 describe("slow subscribers", () => {
 	it("are dropped with a reset rather than buffered forever", async () => {
 		const events = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 3 });
-		const iterator = events.subscribe(CHANNEL)[Symbol.asyncIterator]();
+		const iterator = events.subscribe(STREAM)[Symbol.asyncIterator]();
 
 		// One read, so the subscriber exists and is registered. It then sits on
 		// the yield without asking for another, which is a consumer that has
 		// stopped keeping up.
 		const first = iterator.next();
-		await events.publish(CHANNEL, rawEvent("message.delta", { n: 0 }));
+		await events.publish(STREAM, rawEvent("message.delta", { n: 0 }));
 		expect((await first).value?.event.n).toBe(0);
 
 		for (const n of [1, 2, 3, 4]) {
-			await events.publish(CHANNEL, rawEvent("message.delta", { n }));
+			await events.publish(STREAM, rawEvent("message.delta", { n }));
 		}
 
 		expect((await iterator.next()).value?.event.type).toBe("reset");
@@ -274,8 +274,8 @@ describe("a resume point that cannot be trusted", () => {
 
 		// An id far beyond anything issued. The reset is the easy part; what
 		// matters is that live events, whose seq is far below it, still arrive.
-		const stream = take(events.subscribe(CHANNEL, { since: 9_999_999 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		const stream = take(events.subscribe(STREAM, { since: 9_999_999 }), 2);
+		await events.publish(STREAM, rawEvent("message.created"));
 
 		expect(types(await stream)).toEqual(["reset", "message.created"]);
 	});
@@ -285,11 +285,11 @@ describe("a long replay", () => {
 	it("is sent in full when it is worth sending", async () => {
 		const events = bus();
 		for (let n = 0; n < 600; n += 1) {
-			await events.publish(CHANNEL, rawEvent("message.created", { n }));
+			await events.publish(STREAM, rawEvent("message.created", { n }));
 		}
 
 		// Comfortably more than a handful, and well under the reset threshold.
-		const replayed = await take(events.subscribe(CHANNEL, { since: 1 }), 599);
+		const replayed = await take(events.subscribe(STREAM, { since: 1 }), 599);
 
 		expect(replayed.map((delivery) => delivery.seq)).toEqual(
 			Array.from({ length: 599 }, (_, index) => index + 2),
@@ -303,7 +303,7 @@ describe("closing the bus", () => {
 		// parked, they keep the server from closing and the process from exiting,
 		// which is a restart that never finishes.
 		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
-		const stream = bus.subscribe(CHANNEL)[Symbol.asyncIterator]();
+		const stream = bus.subscribe(STREAM)[Symbol.asyncIterator]();
 		// Parks it: nothing has been published, so it is waiting for the first event.
 		const parked = stream.next();
 

@@ -290,7 +290,7 @@ export type SetupOutcome =
 			readonly failure: GitHubSetupFailure;
 	  };
 
-export interface SetupBot {
+interface SetupBot {
 	readonly workspaceId: string;
 	readonly botId: string;
 }

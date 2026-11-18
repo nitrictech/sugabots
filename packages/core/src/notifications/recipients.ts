@@ -39,6 +39,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../database/schema.ts";
+import { conversationPath } from "../installation/web-app-paths.ts";
 
 /**
  * Who is notified of what, decided as Slack decides it: by why the person
@@ -77,7 +78,7 @@ export const DEFAULT_TURN_FAILURES = true;
 export const DEFAULT_AUTOMATION_RUNS: AutomationRunNotifications = "failures";
 
 /** Whether somebody at `level` hears of something they would care about for `reason`. */
-export function levelAdmits(level: NotificationLevel, reason: Reason): boolean {
+function levelAdmits(level: NotificationLevel, reason: Reason): boolean {
 	switch (level) {
 		case "all":
 			return true;
@@ -111,7 +112,7 @@ function minutesOfDay(time: string): number {
 }
 
 /** A finished message somebody wrote in a task, a channel or a direct message. */
-export interface WrittenMessage {
+interface WrittenMessage {
 	conversationId: string;
 	messageId: string;
 	author:
@@ -417,22 +418,6 @@ function sharedPreview(names: readonly string[]): string {
 }
 
 type Place = NonNullable<Effect.Success<ReturnType<typeof placeOf>>>;
-
-/** Where `conversationId` opens: in its channel, as a task, or in the direct messages, with `search`, such as the message to show. */
-function conversationPath(
-	place: Place,
-	conversationId: string,
-	search: Record<string, string>,
-): string {
-	if (place.kind === "direct_message") {
-		return `/${place.workspaceSlug}/dm/${conversationId}?${new URLSearchParams(search)}`;
-	}
-	const query = new URLSearchParams(search);
-	if (place.channelSlug !== null) {
-		return `/${place.workspaceSlug}/channels/${place.channelSlug}/${conversationId}?${query}`;
-	}
-	return `/${place.workspaceSlug}/tasks/${conversationId}?${query}`;
-}
 
 /** The conversation, the one it is in, and the addresses of its workspace and channel, if it has one. */
 const placeOf = Effect.fn("Notifications.placeOf")(function* (

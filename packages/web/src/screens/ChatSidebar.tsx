@@ -1,5 +1,7 @@
 import { cn } from "cn";
-import { type ReactNode, type Ref, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { createContext, type ReactNode, type Ref, use, useState } from "react";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
@@ -9,6 +11,10 @@ import { CloseButton } from "@/ui/close-button.tsx";
  * from its line. Only a wide screen has room for both side by side; on a
  * tablet it slides over the dimmed chat from the right, and on a phone it
  * covers the chat or, as a `sheet`, rises from the bottom over it.
+ *
+ * `floating` Details are instead a stack of cards over the chat's right edge,
+ * each folding to its title, with the chat showing between them; a phone
+ * still covers the chat with them.
  */
 export function ChatSidebar({
 	label,
@@ -18,6 +24,7 @@ export function ChatSidebar({
 	onClose,
 	sheet = false,
 	headerless = false,
+	floating = false,
 	actions,
 	className,
 	children,
@@ -38,6 +45,8 @@ export function ChatSidebar({
 	 * chat, the header stays for its Close.
 	 */
 	headerless?: boolean;
+	/** Cards floating beside the chat rather than a column, from a tablet up. */
+	floating?: boolean;
 	/** Buttons for what the sidebar shows, beside its Close; each an `IconButton` with `variant="bar"`. */
 	actions?: ReactNode;
 	className?: string;
@@ -55,6 +64,7 @@ export function ChatSidebar({
 				className={cn(
 					"absolute inset-0 z-30 cursor-default bg-scrim xl:hidden",
 					!sheet && "max-md:hidden",
+					floating && "hidden",
 				)}
 			/>
 			<aside
@@ -62,7 +72,10 @@ export function ChatSidebar({
 				{...keys}
 				className={cn(
 					"flex min-h-0 w-95 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
-					"md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-100 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
+					floating
+						? // Under the header's Details button, over the chat, which makes way for it; the chat stays reachable between the cards.
+							"md:pointer-events-none md:absolute md:top-13 md:right-0 md:bottom-0 md:z-20 md:w-68 md:border-l-0 md:bg-transparent md:motion-safe:animate-cards-in"
+						: "md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-100 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					sheet
 						? // Over the floating tabs, as a phone's sheet covers its tab bar.
 							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-9/11 max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
@@ -79,7 +92,7 @@ export function ChatSidebar({
 				<header
 					className={cn(
 						"flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4.5",
-						headerless && "xl:hidden",
+						headerless && (floating ? "md:hidden" : "xl:hidden"),
 						// On a phone, what it shows heads it, so its header is only the round Back.
 						headerless &&
 							"max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
@@ -120,16 +133,24 @@ export function ChatSidebar({
 						)}
 					/>
 				</header>
-				{children}
+				<FloatingCards value={floating}>{children}</FloatingCards>
 			</aside>
 		</>
 	);
 }
 
+/** Whether the sections inside are floating cards, which `ChatSidebar` says for its `floating` Details. */
+const FloatingCards = createContext(false);
+
+/** One floating Details card's surface, for what heads the cards as well as each section. */
+export const FLOATING_CARD =
+	"md:pointer-events-auto md:rounded-xl md:border md:border-glass-edge md:bg-glass md:shadow-popover md:backdrop-blur-xl";
+
 /**
  * A labelled group in a sidebar, ruled off from the one above: its name, with
  * `end` at the right, such as a figure, then what it holds. On a phone, its
  * name over a card of what it holds, as a phone's own settings group them.
+ * Among floating Details it is a card of its own, whose name folds it.
  */
 export function SidebarSection({
 	title,
@@ -142,6 +163,41 @@ export function SidebarSection({
 	children?: ReactNode;
 	className?: string;
 }) {
+	const inFloatingCards = use(FloatingCards);
+	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
+	const floating = inFloatingCards && sideBySide;
+	const [folded, setFolded] = useState(false);
+	if (floating) {
+		return (
+			<section className={cn("flex flex-col gap-2 px-3.5 py-3", FLOATING_CARD, className)}>
+				<div className="flex items-center gap-2">
+					<h3 className="m-0 flex-1">
+						<button
+							type="button"
+							aria-expanded={!folded}
+							onClick={() => setFolded(!folded)}
+							className="focus-ring flex w-full items-center gap-2 rounded-sm text-left font-semibold text-foreground text-xs"
+						>
+							<span className="flex-1">{title}</span>
+							<ChevronDown
+								aria-hidden
+								size={14}
+								strokeWidth={2}
+								className={cn(
+									"text-subtle-foreground transition-transform",
+									folded && "-rotate-90",
+								)}
+							/>
+						</button>
+					</h3>
+					{!folded && end}
+				</div>
+				{children && !folded && (
+					<div className="flex flex-col gap-1.5 empty:hidden">{children}</div>
+				)}
+			</section>
+		);
+	}
 	return (
 		<section
 			className={cn(

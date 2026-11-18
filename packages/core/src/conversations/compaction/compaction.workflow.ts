@@ -13,13 +13,13 @@ import { Lanes } from "../../workflows/lanes.ts";
  * lanes store payloads, so the conversation's and the bot's ids keep the keys
  * the first ones were stored with.
  */
-export const StoredCompaction = Schema.Struct({
+const StoredCompaction = Schema.Struct({
 	threadId: Schema.String,
 	agentId: Schema.String,
 	sourceMessageId: Schema.String,
 	readKeptFrom: Schema.NullOr(Schema.String),
 });
-export type StoredCompaction = typeof StoredCompaction.Type;
+type StoredCompaction = typeof StoredCompaction.Type;
 
 export interface CompactionRequest {
 	readonly conversationId: string;

@@ -23,7 +23,7 @@ export interface Interface {
 	 * is absent. The new task's bot works from `brief`, which the starting bot
 	 * writes as its first message.
 	 */
-	readonly start: (bot: Bot, input: NewTask) => Effect.Effect<StartedTask, Refused>;
+	readonly start: (bot: Bot, input: NewTask) => Effect.Effect<BotStartedTask, Refused>;
 	/**
 	 * Marks the task `conversationId` done. It stays done until somebody
 	 * posts in it. A channel and an automation's feed are never done.
@@ -121,9 +121,6 @@ export interface NewTask {
 	/** The handle of the bot to start it with; the starting bot itself when absent. */
 	withHandle?: string;
 }
-
-/** The task as the bot that started it is told of it. */
-export type StartedTask = BotStartedTask;
 
 /** The workspace's bot with the handle `handle`, written with or without its `@`. */
 const botWithHandle = (workspaceId: string, handle: string) =>

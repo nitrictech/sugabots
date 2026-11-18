@@ -422,7 +422,7 @@ export const layer = Layer.effect(Service, make);
 /** Stored inputs and outputs are cut at this many characters of JSON. */
 export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
-export type ToolCallOutcome = { output: unknown } | { error: UserText };
+type ToolCallOutcome = { output: unknown } | { error: UserText };
 
 /**
  * What an approved call must still match when it runs, beyond its tool and
@@ -453,7 +453,7 @@ export interface PendingToolApproval {
 }
 
 /** A started call, or why it may not start; `reason` is for the logs. */
-export type BeganExecution =
+type BeganExecution =
 	| { readonly _tag: "Running"; readonly call: ToolCallRow }
 	| { readonly _tag: "Refused"; readonly reason: string };
 

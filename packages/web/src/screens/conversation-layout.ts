@@ -108,9 +108,9 @@ export function showsNothingYet(message: Message): boolean {
 
 /**
  * The message's parts as things to draw, leaving out narration and every tool
- * call but those somebody was asked to approve. A reply still being written shows
- * only those, its collaborations, and text that something has followed: the
- * run it is still writing waits until it is finished.
+ * call but those somebody was asked to approve. A reply still being written
+ * shows its text as it comes; text a call then follows turns out to have been
+ * narration, and leaves the message for the reply's work line.
  */
 export function segmentsOf(message: Message): Segment[] {
 	const finished = message.status !== "streaming";
@@ -130,12 +130,7 @@ export function segmentsOf(message: Message): Segment[] {
 		}
 		// Attached files, and an automation result's files, are not part of the message's text.
 		if (isAttached(part)) return;
-		// Files go after all of a reply's text as they are attached, so one shared
-		// mid-reply does not mean the text before it is finished.
-		const followed =
-			part.text.trim() !== "" && message.parts.slice(index + 1).some((later) => !isAttached(later));
-		const settled = finished || followed;
-		if (settled && !isNarration(message.parts, index)) {
+		if (!isNarration(message.parts, index)) {
 			segments.push({ type: "text", key: `text@${written}`, text: part.text });
 		}
 		written += part.text.length;

@@ -2,6 +2,7 @@ import { useRender } from "@base-ui/react/use-render";
 import type {
 	Bot,
 	Connection,
+	ConversationContext,
 	ConversationSummary,
 	FilePart,
 	Participant,
@@ -10,16 +11,17 @@ import type {
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Archive, ChevronDown, FileText, Hash, Pencil, RefreshCcw } from "lucide-react";
+import { Archive, FileText, Hash, Monitor, Pencil, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { scheduleLabel } from "@/lib/automation-schedule.ts";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
 import { useModelName } from "@/lib/bots.ts";
 import { useBuiltInBots } from "@/lib/built-in-bots.ts";
+import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { useConversationActivity } from "@/lib/conversations.ts";
+import { useDesktopInUse } from "@/lib/desktop.ts";
 import { botSettingsLink } from "@/lib/links.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -31,11 +33,18 @@ import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
 import { SystemBotsNotSetUp } from "./BuiltInBotSetup.tsx";
-import { ChannelActions, type ChannelToChange } from "./ChatMenu.tsx";
+import { ChannelConversationActions, type ChannelConversationToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
+import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
-import { ParticipantFaces } from "./ParticipantFaces.tsx";
+
+/**
+ * The Details' scrolling list: a column on a phone, and from a tablet up a
+ * stack of floating cards, with room left for their shadows.
+ */
+const DETAILS_SCROLL =
+	"tab-bar-clearance no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 md:gap-2.5 md:p-2 md:pr-4";
 
 /** How many rows a list shows before Show more. */
 const FILES_SHOWN = 3;
@@ -44,26 +53,27 @@ const AUTOMATIONS_SHOWN = 2;
 const SUMMARY_FOLDED_OVER = 240;
 
 /**
- * A bot beside its chat: its face, name and model, and the way to its
- * settings, then what the chat is about, how much of the bot's short-term
- * memory it fills, the automations it runs, the apps it can reach, who is in the
- * chat and the files shared there.
+ * A bot beside its task. On a phone: its face, name and model, and the way to
+ * its settings and automations, then what the task is about. From a tablet
+ * up, floating cards: what the bot works with (its connections and how full
+ * its short-term memory is), the files shared in the task, and its computer.
  */
 export function DetailsSidebar({
 	bot,
 	conversationId,
-	user,
 	contents,
 	onOpenAutomations,
+	onOpenDesktop,
 	onClose,
 }: {
 	bot: Bot;
 	conversationId: string;
-	user: SessionUser;
 	/** Who is in the conversation, and the files shared in it. */
 	contents: ConversationContents;
 	/** Opens the bot's automations beside the chat, in place of these Details: all of them, or the one `automationId` names. */
 	onOpenAutomations: (automationId?: string) => void;
+	/** Opens the bot's computer beside the chat. */
+	onOpenDesktop: () => void;
 	onClose: () => void;
 }) {
 	const backToChat = useBackToHere("Chat");
@@ -71,10 +81,10 @@ export function DetailsSidebar({
 	const summariser = useBuiltInBots().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(bot.model);
 	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
-			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
+		<ChatSidebar label="Details" onClose={onClose} headerless floating>
+			<div className={DETAILS_SCROLL}>
 				{/* On a phone, the bot large in the middle, its name under it, then what can be done with it. */}
-				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
+				<div className="flex flex-col items-center gap-2.5 px-4 pt-1 pb-4 text-center md:hidden">
 					<BotAvatar
 						color={bot.color}
 						face={bot.face}
@@ -111,26 +121,20 @@ export function DetailsSidebar({
 						/>
 					</div>
 				</div>
-				<Summary
-					summary={activity?.summary}
-					summariserHasModel={summariser && summariser.model !== null}
-				/>
-				{activity?.context && (
-					<SidebarSection
-						title="Memory"
-						end={
-							<span className="font-mono text-muted-foreground text-xs">
-								{usedPercentOf(activity.context)}%
-							</span>
-						}
-					>
-						<ContextMeter context={activity.context} />
-					</SidebarSection>
-				)}
-				<Automations bot={bot} onOpen={onOpenAutomations} />
-				<Tools bot={bot} />
-				<InThisConversation participants={contents.participants} user={user} />
+				{/* What a phone keeps under the bot; from a tablet up, the task says it. */}
+				<div className="contents md:hidden">
+					<Summary
+						summary={activity?.summary}
+						summariserHasModel={summariser && summariser.model !== null}
+					/>
+				</div>
+				<Context bot={bot} memory={activity?.context ?? undefined} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
+				<Computer bot={bot} conversationId={conversationId} onOpen={onOpenDesktop} />
+				{/* From a tablet up, automations are in the bot's sidebar. */}
+				<div className="contents md:hidden">
+					<Automations bot={bot} onOpen={onOpenAutomations} />
+				</div>
 			</div>
 		</ChatSidebar>
 	);
@@ -184,7 +188,7 @@ export function PeopleDetails({
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
-				<InThisConversation participants={contents.participants} user={user} />
+				<People participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
@@ -200,7 +204,7 @@ export function ChannelDetails({
 	name,
 	people,
 	bots,
-	channel,
+	toChange,
 	user,
 	contents,
 	onClose,
@@ -209,8 +213,8 @@ export function ChannelDetails({
 	/** How many people and bots are in the channel, as its intro counts them. */
 	people: number;
 	bots: number;
-	/** The channel, for whoever may rename or archive it. */
-	channel?: ChannelToChange;
+	/** The channel's conversation, for whoever may rename or archive it. */
+	toChange?: ChannelConversationToChange;
 	user: SessionUser;
 	contents: ConversationContents;
 	onClose: () => void;
@@ -233,8 +237,8 @@ export function ChannelDetails({
 							{[countOf(people, "person", "people"), countOf(bots, "bot", "bots")].join(", ")}
 						</p>
 					</div>
-					{channel && (
-						<ChannelActions {...channel}>
+					{toChange && (
+						<ChannelConversationActions {...toChange}>
 							{({ rename, archive }) => (
 								<div className="flex justify-center gap-7 pt-2 md:hidden">
 									<RoundAction
@@ -251,72 +255,32 @@ export function ChannelDetails({
 									)}
 								</div>
 							)}
-						</ChannelActions>
+						</ChannelConversationActions>
 					)}
 				</div>
-				<InThisConversation participants={contents.participants} user={user} />
+				<People participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
 	);
 }
 
-/** How many faces the folded In this conversation shows before counting the rest. */
-const FACES_SHOWN = 4;
-
-/**
- * Everyone in the conversation: their faces and how many, which opens the list of
- * them, each bot, and each person, the viewer as You. A phone, with the
- * room, always lists them.
- */
-function InThisConversation({
+/** Everyone in the conversation, each bot and each person, the viewer named as you. */
+function People({
 	participants,
 	user,
 }: {
 	participants: readonly Participant[];
 	user: SessionUser;
 }) {
-	const [opened, setOpened] = useState(false);
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const open = opened || phone;
 	if (participants.length === 0) return null;
 	return (
-		<SidebarSection
-			title="In this conversation"
-			end={
-				!phone && (
-					<button
-						type="button"
-						aria-expanded={open}
-						aria-label={`${participants.length} in this conversation`}
-						onClick={() => setOpened(!opened)}
-						className="focus-ring -mr-1 flex items-center gap-2 rounded-md py-0.5 pr-1 pl-2 hover:bg-row-hover"
-					>
-						<ParticipantFaces
-							participants={participants}
-							shown={FACES_SHOWN}
-							surface="var(--aside)"
-						/>
-						<span aria-hidden className="text-muted-foreground text-xs">
-							{participants.length}
-						</span>
-						<ChevronDown
-							aria-hidden
-							size={12}
-							strokeWidth={2}
-							className={cn("text-subtle-foreground transition-transform", open && "rotate-180")}
-						/>
-					</button>
-				)
-			}
-		>
-			{open && (
-				<ul className="m-0 flex list-none flex-col p-0">
-					{participants.map((participant) => (
-						<ParticipantRow key={participant.id} participant={participant} user={user} />
-					))}
-				</ul>
-			)}
+		<SidebarSection title="People">
+			<ul className="m-0 flex list-none flex-col p-0">
+				{participants.map((participant) => (
+					<ParticipantRow key={participant.id} participant={participant} user={user} />
+				))}
+			</ul>
 		</SidebarSection>
 	);
 }
@@ -409,15 +373,16 @@ function Summary({
 
 function ParticipantRow({ participant, user }: { participant: Participant; user: SessionUser }) {
 	return (
-		<li className="flex h-8.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
+		<li className="flex h-7.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
 			<span aria-hidden className="contents">
 				<Face participant={participant} size={22} />
 			</span>
 			<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 				{participant.name}
+				{participant.id === user.id && <span className="text-subtle-foreground"> (you)</span>}
 			</span>
 			<span className="text-subtle-foreground text-xs">
-				{participant.kind === "bot" ? "Bot" : participant.id === user.id ? "You" : "Member"}
+				{participant.kind === "bot" ? "Bot" : "Member"}
 			</span>
 		</li>
 	);
@@ -494,47 +459,102 @@ function Automations({
 }
 
 /**
- * The apps the bot can reach, which are its connections, with how many of
- * their tools it may use, each opening the bot's settings. One whose
+ * What the bot works with in the task: the apps it can reach, which are its
+ * connections, with how many of their tools it may use, each opening the
+ * bot's settings, and how full its short-term memory is. A connection whose
  * sign-in expired says so instead, with a sign-in for someone who may.
  */
-export function Tools({ bot }: { bot: Bot }) {
+function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | undefined }) {
 	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(bot.id);
 	const list =
 		connections.data?.filter(
 			(connection) => connection.signInExpired || usableToolCount(connection) > 0,
 		) ?? [];
-	if (list.length === 0) return null;
+	if (list.length === 0 && !memory) return null;
 	return (
-		<SidebarSection title="Tools">
-			<ul className="m-0 flex list-none flex-col p-0">
-				{list.map((connection) => (
-					<li key={connection.id}>
-						{connection.signInExpired ? (
-							<ExpiredTool bot={bot} connection={connection} />
-						) : (
-							<Link
-								{...botSettingsLink(bot)}
-								state={backToChat}
-								className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
-							>
-								<ConnectionMark
-									presetId={connectionMarkFor(connection)}
-									name={connection.name}
-									size="md"
-								/>
-								<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
-									{connection.name}
-								</span>
-								<span className="shrink-0 text-subtle-foreground text-xs">
-									{countOf(usableToolCount(connection), "tool", "tools")}
-								</span>
-							</Link>
-						)}
-					</li>
-				))}
-			</ul>
+		<SidebarSection title="Context">
+			{list.length > 0 && (
+				<div className="flex flex-col gap-0.5">
+					<h4 className="m-0 font-normal text-subtle-foreground text-xs">Connections</h4>
+					<ul className="m-0 flex list-none flex-col p-0">
+						{list.map((connection) => (
+							<li key={connection.id}>
+								{connection.signInExpired ? (
+									<ExpiredTool bot={bot} connection={connection} />
+								) : (
+									<Link
+										{...botSettingsLink(bot)}
+										state={backToChat}
+										className="focus-ring -mx-1.5 flex h-7.5 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
+									>
+										<ConnectionMark
+											presetId={connectionMarkFor(connection)}
+											name={connection.name}
+											size="md"
+										/>
+										<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
+											{connection.name}
+										</span>
+										<span className="shrink-0 text-subtle-foreground text-xs">
+											{countOf(usableToolCount(connection), "tool", "tools")}
+										</span>
+									</Link>
+								)}
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
+			{memory && (
+				<div className="flex flex-col gap-1.5 pt-1">
+					<h4 className="m-0 flex font-normal text-subtle-foreground text-xs">
+						<span className="flex-1">Memory</span>
+						<span className="font-mono">{usedPercentOf(memory)}%</span>
+					</h4>
+					<ContextMeter context={memory} />
+				</div>
+			)}
+		</SidebarSection>
+	);
+}
+
+/**
+ * The bot's computer: its screen while the bot is using it, else whether it
+ * has one, opening the desktop beside the chat, which says how to get one
+ * when it has none.
+ */
+function Computer({
+	bot,
+	conversationId,
+	onOpen,
+}: {
+	bot: Bot;
+	conversationId: string;
+	onOpen: () => void;
+}) {
+	const computersOn = useComputerAccess().data?.enabled === true;
+	const inUse = useDesktopInUse(conversationId, bot.id);
+	const hasComputer = bot.usesComputer && computersOn;
+	return (
+		<SidebarSection title="Computer">
+			{hasComputer && inUse ? (
+				<LiveDesktopCard
+					conversationId={conversationId}
+					botId={bot.id}
+					botName={bot.name}
+					onOpen={onOpen}
+				/>
+			) : (
+				<button
+					type="button"
+					onClick={onOpen}
+					className="focus-ring flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-lg border border-border-strong text-subtle-foreground text-xs transition-colors hover:border-subtle-foreground hover:text-foreground"
+				>
+					<Monitor aria-hidden size={16} strokeWidth={1.75} />
+					{hasComputer ? "Not running" : "No computer"}
+				</button>
+			)}
 		</SidebarSection>
 	);
 }

@@ -19,7 +19,7 @@ interface MoodSpell {
 export type MoodLoop = readonly [MoodSpell, ...MoodSpell[]];
 
 /** How much shorter the resting spell is when faces should move often. */
-export const OFTEN_REST_SHARE = 0.5;
+const OFTEN_REST_SHARE = 0.5;
 
 /**
  * The mood a bot is in now, moving through `loop`. While `running` is false it

@@ -109,7 +109,7 @@ export const eventPayloadSchemas = {
 	"conversation.created": Schema.Struct({ conversationId }),
 	/**
 	 * Something about the conversation no more specific event describes. On
-	 * the conversation's stream channel it means refetch the conversation; on
+	 * the conversation's stream it means refetch the conversation; on
 	 * its workspace's, that what lists show of it may be out of date.
 	 */
 	"conversation.changed": Schema.Struct({ conversationId }),
@@ -141,9 +141,9 @@ export const eventPayloadSchemas = {
 
 type EventPayloadSchemas = typeof eventPayloadSchemas;
 
-export type KnownEventType = keyof EventPayloadSchemas;
+type KnownEventType = keyof EventPayloadSchemas;
 
-export const RESET_EVENT_TYPE = "reset" satisfies KnownEventType;
+const RESET_EVENT_TYPE = "reset" satisfies KnownEventType;
 
 /**
  * State changes. Written to the `event` table, and their `seq` is the SSE `id`,
@@ -187,14 +187,6 @@ export const ephemeralEventTypeSchema = Schema.Literals([
 	"presence",
 ] satisfies KnownEventType[]);
 
-export type EphemeralEventType = typeof ephemeralEventTypeSchema.Type;
-
-export const eventTypeSchema = Schema.Union([
-	durableEventTypeSchema,
-	ephemeralEventTypeSchema,
-	Schema.Literal(RESET_EVENT_TYPE),
-]);
-
 /**
  * `string & {}` keeps the known types in autocomplete while still accepting an
  * unknown one. A client is often older than the server, and a type it has never
@@ -224,7 +216,7 @@ export const streamEventSchema = Schema.StructWithRest(
 
 export type StreamEvent = typeof streamEventSchema.Type & { type: EventType };
 
-export type EventPayload<T extends EventType> = T extends KnownEventType
+type EventPayload<T extends EventType> = T extends KnownEventType
 	? EventPayloadSchemas[T]["Type"]
 	: Record<string, unknown>;
 
@@ -239,7 +231,7 @@ type EventPayloadArgument<T extends EventType> = T extends EventsWithOptionalPay
 		? [data: NoInfer<EventPayload<T>>]
 		: [data?: Record<string, unknown>];
 
-export type BuiltStreamEvent<T extends EventType> = StreamEvent & EventPayload<T> & { type: T };
+type BuiltStreamEvent<T extends EventType> = StreamEvent & EventPayload<T> & { type: T };
 
 /** Builds an envelope, so no caller has to remember the version field. */
 export function streamEvent<const T extends EventType>(
@@ -269,7 +261,7 @@ function withEnvelope<T extends KnownEventType, Fields extends Schema.Struct.Fie
 
 const P = eventPayloadSchemas;
 
-/** Everything a conversation's stream channel can carry. */
+/** Everything a conversation's stream can carry. */
 export const conversationUpdateEventSchema = Schema.Union([
 	withEnvelope("message.created", P["message.created"]),
 	withEnvelope("message.delta", P["message.delta"]),
@@ -292,38 +284,33 @@ export const conversationUpdateEventSchema = Schema.Union([
 	withEnvelope("reset", P.reset.schema),
 ]);
 
-export type ConversationUpdateEvent = typeof conversationUpdateEventSchema.Type;
-
-/** Everything a workspace channel can carry. */
+/** Everything a workspace's stream can carry. */
 export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("conversation.changed", P["conversation.changed"]),
 	withEnvelope("conversation.item_changed", P["conversation.item_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
-export type WorkspaceUpdateEvent = typeof workspaceUpdateEventSchema.Type;
-
-/** Everything a person's own channel can carry. */
+/** Everything a person's own stream can carry. */
 export const personUpdateEventSchema = Schema.Union([
 	withEnvelope("notification", P.notification),
 	withEnvelope("presence", P.presence),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
-export type PersonUpdateEvent = typeof personUpdateEventSchema.Type;
-
 /**
- * A stream carries exactly one channel, and there are three kinds: a
+ * The name of an event stream, which a client subscribes to and the event
+ * store keeps events under. There are three kinds: a
  * workspace, a conversation, and a person, which only that person hears. A
  * conversation's system bots work in conversations of their own but publish on
  * the one they act on, so a client watching a conversation holds one
  * connection.
  */
-export type StreamChannel = `workspace:${string}` | `conversation:${string}` | `person:${string}`;
+export type EventStream = `workspace:${string}` | `conversation:${string}` | `person:${string}`;
 
-export const workspaceChannel = (workspaceId: string): StreamChannel => `workspace:${workspaceId}`;
+export const workspaceStream = (workspaceId: string): EventStream => `workspace:${workspaceId}`;
 
-export const conversationChannel = (conversationId: string): StreamChannel =>
+export const conversationStream = (conversationId: string): EventStream =>
 	`conversation:${conversationId}`;
 
-export const personChannel = (userId: string): StreamChannel => `person:${userId}`;
+export const personStream = (userId: string): EventStream => `person:${userId}`;

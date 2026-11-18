@@ -3,7 +3,7 @@ import type { BuiltInToolKey } from "./built-in-tools.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
-export const MAX_FILE_TITLE_CHARACTERS = 200;
+const MAX_FILE_TITLE_CHARACTERS = 200;
 export const MAX_FILE_CONTENT_CHARACTERS = 500_000;
 
 /**
@@ -24,13 +24,11 @@ export const fileContentSchema = Schema.String.check(
 );
 
 /** Who wrote a version: a bot, or nobody known any more. */
-export const fileAuthorSchema = Schema.NullOr(
-	Schema.Struct({ botId: uuidSchema, name: Schema.String }),
-);
+const fileAuthorSchema = Schema.NullOr(Schema.Struct({ botId: uuidSchema, name: Schema.String }));
 export type FileAuthor = typeof fileAuthorSchema.Type;
 
 /** A file a bot wrote with its file tools, kept in versions. */
-export const writtenFileSummarySchema = Schema.Struct({
+const writtenFileSummarySchema = Schema.Struct({
 	id: uuidSchema,
 	/** The conversation it was made in. */
 	conversationId: uuidSchema,
@@ -48,7 +46,7 @@ export type WrittenFileSummary = typeof writtenFileSummarySchema.Type;
  * A file on a message: one a person uploaded and sent, or one a bot attached
  * to its reply. Its bytes are served at the conversation's file address.
  */
-export const messageFileSummarySchema = Schema.Struct({
+const messageFileSummarySchema = Schema.Struct({
 	id: uuidSchema,
 	/** The conversation it was sent in. */
 	conversationId: uuidSchema,

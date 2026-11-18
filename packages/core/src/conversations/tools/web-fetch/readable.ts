@@ -14,7 +14,7 @@ import TurndownService from "turndown";
  * Readability is used only when it says the page is probably an article;
  * otherwise the whole page is kept, less the furniture named below.
  */
-export interface ReadablePage {
+interface ReadablePage {
 	title: string | null;
 	markdown: string;
 }

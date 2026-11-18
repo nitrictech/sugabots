@@ -75,5 +75,3 @@ export const modelRequest = pgTable(
 		),
 	],
 );
-
-export type ModelRequestRow = typeof modelRequest.$inferSelect;

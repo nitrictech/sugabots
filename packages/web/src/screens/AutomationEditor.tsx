@@ -35,7 +35,7 @@ import {
 } from "./AutomationTriggers.tsx";
 
 /** A bot an automation can belong to. */
-export interface BotChoice {
+interface BotChoice {
 	bot: Bot;
 }
 

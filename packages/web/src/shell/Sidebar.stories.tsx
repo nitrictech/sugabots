@@ -54,9 +54,6 @@ const meta = preview.meta({
 		],
 		currentChannelSlug: revenue.slug,
 		view: undefined,
-		unreadForYou: 1,
-		unreadInInbox: 3,
-		waitingApprovals: 2,
 		workspace: suga,
 		workspaces: [suga],
 		user: { name: "Rowan Ellis", email: "rowan@example.com" },
@@ -92,18 +89,14 @@ const meta = preview.meta({
 });
 
 /**
- * Default: the Personal Assistant at the top, Inbox and Approvals, the
- * channels with Revenue open on its main chat, and the pinned bots.
+ * Default: the channels with Revenue open on its main chat, then the bots,
+ * the Personal Assistant first, and Settings in the foot.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: chief.name })).toBeVisible();
 		await expect(canvas.getByRole("region", { name: "Channels" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: growthDesk.name })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Settings" })).toBeVisible();
 	},
-});
-
-/** Inbox open, shaded in the sidebar. */
-export const InboxOpen = meta.story({
-	args: { view: "inbox", currentChannelSlug: undefined },
 });

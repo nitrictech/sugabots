@@ -9,6 +9,13 @@ import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-a
 import { query, serviceOperations } from "../../database/database.ts";
 import { automation, botSummary } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
+import {
+	approvalPath,
+	botAutomationsPath,
+	botPath,
+	channelPath,
+	inboxPath,
+} from "../../installation/web-app-paths.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { ChannelAdministration } from "../../workspaces/channels/channel-administration.ts";
@@ -55,7 +62,8 @@ export const make = Effect.gen(function* () {
 	const view = yield* ChatView.Service;
 	const { webAppUrl } = yield* Installation.Service;
 
-	const base = (person: Person) => `${webAppUrl}/${person.workspaceSlug}`;
+	/** `path` from the web app's root, as a link the person can follow. */
+	const linkTo = (path: string) => `${webAppUrl}${path}`;
 
 	/** Runs `work` as the person, who is talking to their assistant. */
 	const asPerson = <A, E, R>(person: Person, work: Effect.Effect<A, E, R>) =>
@@ -134,12 +142,12 @@ export const make = Effect.gen(function* () {
 						const failingOf = new Map(failing.map((row) => [row.botId, row.count]));
 						const unreadMentions = yield* view.unreadMentions(workspace, LISTED_ITEMS);
 						const approvals = yield* view.approvals(workspace);
-						const at = base(person);
+						const { workspaceSlug } = person;
 						return {
 							channels: channels.map((channel) => ({
 								name: channel.name,
 								address: channel.slug,
-								link: `${at}/channels/${channel.slug}`,
+								link: linkTo(channelPath(workspaceSlug, channel.slug)),
 								description: channel.description,
 								private: channel.visibility === "private",
 								youAreIn: channel.isMember,
@@ -147,7 +155,7 @@ export const make = Effect.gen(function* () {
 							bots: workspaceBots.map((bot) => ({
 								name: bot.name,
 								handle: `@${bot.handle}`,
-								link: `${at}/bots/${bot.handle}`,
+								link: linkTo(botPath(workspaceSlug, bot.handle)),
 								description: bot.description,
 								private: bot.visibility === "private",
 								pinned: bot.pinned,
@@ -158,7 +166,7 @@ export const make = Effect.gen(function* () {
 								approvals: approvals.waiting.slice(0, LISTED_ITEMS).map((request) => ({
 									bot: request.bot.name,
 									tool: request.call.tool,
-									link: `${at}/approvals/${request.call.id}`,
+									link: linkTo(approvalPath(workspaceSlug, request.call.id)),
 								})),
 								unreadMentions: unreadMentions.flatMap((item) =>
 									item.kind === "mention"
@@ -166,7 +174,11 @@ export const make = Effect.gen(function* () {
 												{
 													from: item.author.name,
 													preview: item.preview,
-													link: `${at}/inbox/${item.rootConversationId}?message=${item.messageId}`,
+													link: linkTo(
+														inboxPath(workspaceSlug, item.rootConversationId, {
+															message: item.messageId,
+														}),
+													),
 												},
 											]
 										: [],
@@ -174,7 +186,13 @@ export const make = Effect.gen(function* () {
 								failingAutomations: workspaceBots.flatMap((bot) => {
 									const failing = failingOf.get(bot.id) ?? 0;
 									return failing > 0
-										? [{ bot: bot.name, failing, link: `${at}/bots/${bot.handle}/automations` }]
+										? [
+												{
+													bot: bot.name,
+													failing,
+													link: linkTo(botAutomationsPath(workspaceSlug, bot.handle)),
+												},
+											]
 										: [];
 								}),
 							},
@@ -207,7 +225,7 @@ export const make = Effect.gen(function* () {
 							description: channel.description ?? null,
 							visibility: channel.private ? "private" : "public",
 						});
-						return { name: made.name, link: `${base(person)}/channels/${made.slug}` };
+						return { name: made.name, link: linkTo(channelPath(person.workspaceSlug, made.slug)) };
 					}),
 				),
 			),
@@ -220,7 +238,10 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const found = yield* channelAt(person, address);
 						const joined = yield* channelAdministration.join({ channelId: found.id });
-						return { name: joined.name, link: `${base(person)}/channels/${joined.slug}` };
+						return {
+							name: joined.name,
+							link: linkTo(channelPath(person.workspaceSlug, joined.slug)),
+						};
 					}),
 				),
 			),
@@ -234,7 +255,10 @@ export const make = Effect.gen(function* () {
 						const channel = yield* channelAt(person, target.channel);
 						const bot = yield* botWithHandle(person, target.bot);
 						yield* channelAdministration.addBot({ channelId: channel.id, botId: bot.id });
-						return { name: channel.name, link: `${base(person)}/channels/${channel.slug}` };
+						return {
+							name: channel.name,
+							link: linkTo(channelPath(person.workspaceSlug, channel.slug)),
+						};
 					}),
 				),
 			),
@@ -247,7 +271,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const bot = yield* botWithHandle(person, target.bot);
 						yield* bots.setPinned({ botId: bot.id, pinned: target.pinned });
-						return { name: bot.name, link: `${base(person)}/bots/${bot.handle}` };
+						return { name: bot.name, link: linkTo(botPath(person.workspaceSlug, bot.handle)) };
 					}),
 				),
 			),
@@ -332,10 +356,7 @@ export class NothingNamed
 	}
 }
 
-export class UnusableChannelName
-	extends Data.TaggedError("UnusableChannelName")
-	implements UserFacing
-{
+class UnusableChannelName extends Data.TaggedError("UnusableChannelName") implements UserFacing {
 	get userMessage() {
 		return userText`That name can't be a channel's address. Choose another.`;
 	}

@@ -44,7 +44,7 @@ export interface SearchRequest {
 }
 
 /** Never fails: what goes wrong is an outcome, and its details are logged. */
-export type SearchBackend = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
+type SearchBackend = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
 
 export const MAX_SEARCH_RESULTS = 10;
 const SEARCH_TIMEOUT_MS = 10_000;

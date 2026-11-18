@@ -67,10 +67,7 @@ export function channelLink(channel: ChannelRef) {
 	});
 }
 
-/** A channel's main chat, opened first when nobody has opened it yet. */
-export const mainChatLink = channelLink;
-
-/** A bot, which opens its newest task, or a new one. */
+/** A bot's own page, where a task with it starts. */
 export function botLink(bot: BotRef) {
 	return linkOptions({ from: "/$workspace", to: "./bots/$bot", params: { bot: bot.handle } });
 }
@@ -156,7 +153,7 @@ export function channelSettingsPageLink(channel: ChannelRef, page: ChannelSettin
 	});
 }
 
-/** A bot's automations, with the first open beside them where there is room. */
+/** A bot's automations, listed as a page of their own. */
 export function automationsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
@@ -165,7 +162,7 @@ export function automationsLink(bot: BotRef) {
 	});
 }
 
-/** An automation being made beside its bot's automations. */
+/** An automation being made, as a page under its bot's automations. */
 export function newAutomationLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
@@ -174,12 +171,21 @@ export function newAutomationLink(bot: BotRef) {
 	});
 }
 
-/** An automation's feed, where its runs post, beside its bot's automations; opened first when it has none yet. */
-export function automationFeedLink(bot: BotRef, automationId: string) {
+/**
+ * An automation's own page, where it is set up; its feed, where its runs post,
+ * is opened first when it has none yet. With `itemPage`, one of its runs, by
+ * the run's conversation, is the page instead.
+ */
+export function automationFeedLink(
+	bot: BotRef,
+	automationId: string,
+	search: { itemPage?: string } = {},
+) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations/$automation",
 		params: { bot: bot.handle, automation: automationId },
+		search,
 	});
 }
 
@@ -199,6 +205,16 @@ export function inboxItemPageLink(rootConversationId: string, itemConversationId
 		to: "./inbox/$conversation",
 		params: { conversation: rootConversationId },
 		search: { itemPage: itemConversationId },
+	});
+}
+
+/** A message opened from Inbox in its conversation, jumped to, beside the list. */
+export function inboxMessageLink(rootConversationId: string, messageId: string) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./inbox/$conversation",
+		params: { conversation: rootConversationId },
+		search: { message: messageId },
 	});
 }
 

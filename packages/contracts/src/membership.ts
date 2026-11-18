@@ -8,7 +8,7 @@ import { uuidSchema } from "./uuid.ts";
 import { assignableWorkspaceRoleSchema, workspaceRoleSchema } from "./workspaces.ts";
 
 /** Unique across the installation. */
-export const workspaceSlugSchema = slugSchema;
+const workspaceSlugSchema = slugSchema;
 
 export const workspaceSchema = Schema.Struct({
 	id: uuidSchema,

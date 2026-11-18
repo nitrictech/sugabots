@@ -19,7 +19,7 @@ export const GITHUB_WEBHOOK_PATH = "/hooks/connections";
  */
 export const GITHUB_SETUP_RETURN_PATH = "/connections/github/return";
 
-export const gitHubSetupFailureSchema = Schema.Literals([
+const gitHubSetupFailureSchema = Schema.Literals([
 	/** The link was old, altered, or someone else's. */
 	"expired",
 	/** GitHub refused or couldn't be reached. */
@@ -44,8 +44,6 @@ export const newGitHubAppSchema = Schema.Struct({
 		),
 	),
 });
-
-export type NewGitHubApp = typeof newGitHubAppSchema.Type;
 
 /** What the browser posts to GitHub to make the app: `manifest` as a form field, to `url`. */
 export const gitHubAppFormSchema = Schema.Struct({ url: Schema.String, manifest: Schema.String });

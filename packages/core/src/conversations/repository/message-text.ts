@@ -100,15 +100,6 @@ export function describeWrittenFile(file: WrittenFilePart): string {
 	return `[Showed the ${file.kind} file "${file.title}" as written at version ${file.version}, file ${file.fileId}; ${FILE_READ_TOOL} reads its current version]`;
 }
 
-/**
- * A file attached to a message in another conversation, as one bracketed line. The
- * conversation tools read only the bot's own conversation's files, so it is told what
- * the file is and not how to read it.
- */
-export function describeAttachmentElsewhere(file: FilePart): string {
-	return `[Attached ${file.name} (${file.contentType}, ${sizeOf(file.size)}), which can be read only in its own conversation]`;
-}
-
 /** A file's size as people write it, such as 2.1 MB. */
 function sizeOf(bytes: number): string {
 	if (bytes < 1024) return `${bytes} bytes`;

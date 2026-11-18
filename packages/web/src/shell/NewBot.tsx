@@ -13,6 +13,7 @@ import {
 	type ProviderPresetId,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
+import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
 	ArrowLeft,
@@ -38,16 +39,19 @@ import {
 	useState,
 } from "react";
 import { useBots, useCreateBot, useModels } from "@/lib/bots.ts";
+import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { botLink, conversationLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { EyesGlyph, ShapeGlyph } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
-import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
@@ -913,4 +917,31 @@ function VisibilityChoice({
 			className="w-full"
 		/>
 	);
+}
+
+/**
+ * What starts a bot, absent where the viewer may not make one, and the dialog
+ * that makes it, which must be rendered for it to open. It opens the bot once
+ * it is made, on the task in which it interviews its maker when it has one.
+ */
+export function useNewBot(): { start?: () => void; dialog: ReactNode } {
+	const [creating, setCreating] = useState(false);
+	const navigate = useNavigate();
+	const may = useWorkspacePermissions();
+	const interview = useStartInterview();
+	return {
+		start: may.createBots ? () => setCreating(true) : undefined,
+		dialog: (
+			<Dialog open={creating} onOpenChange={setCreating}>
+				<NewBotDialog
+					onCreated={async (bot) => {
+						setCreating(false);
+						const task = await interview.mutateAsync(bot.id).catch(() => null);
+						if (task) await navigate(conversationLink({ bot, conversationId: task.id }));
+						else await navigate(botLink(bot));
+					}}
+				/>
+			</Dialog>
+		),
+	};
 }

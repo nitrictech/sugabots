@@ -52,7 +52,7 @@ export function PersonAvatar({ person, className }: { person: Person; className?
 	);
 }
 
-export function AuthorAvatar({ author, className }: { author: Author; className?: string }) {
+function AuthorAvatar({ author, className }: { author: Author; className?: string }) {
 	if (author.kind === "person")
 		return <PersonAvatar person={author.person} className={className} />;
 	return <StillBotFace {...author.bot.look} className={cn("size-7", className)} />;

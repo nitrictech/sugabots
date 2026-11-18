@@ -23,7 +23,7 @@ import { bot, channelBot, pinnedBot } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { type PersonFacingBotRow, personFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
-import { findRunnableSystemBot, SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
+import { SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
 
 /**
  * The only writer of `bot` and `pinned_bot`: the bots people make, each
@@ -99,11 +99,6 @@ export interface Interface {
 		from: string,
 		to: string,
 	) => Effect.Effect<number>;
-	/** The system bot and its model, or nothing when it is not set up. */
-	readonly runnableSystemBot: (
-		workspaceId: string,
-		key: SystemBotKey,
-	) => Effect.Effect<{ id: string; model: string } | undefined>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -374,12 +369,6 @@ export const make = Effect.gen(function* () {
 						)
 						.returning({ id: bot.id }),
 				).pipe(Effect.map((rows) => rows.length)),
-			),
-
-		runnableSystemBot: (workspaceId, key) =>
-			operation(
-				"runnableSystemBot",
-				query((db) => findRunnableSystemBot(db, workspaceId, key)),
 			),
 	});
 });

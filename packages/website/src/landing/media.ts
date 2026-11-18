@@ -28,7 +28,7 @@ export interface Screenshot {
 	title: string;
 	description: string;
 	/**
-	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/one-thread.webp`.
+	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/main-chat.webp`.
 	 * `bun run capture screenshots` makes them all; Computers needs the image from `bun run build:computer`.
 	 */
 	image?: string;
@@ -38,10 +38,11 @@ export interface Screenshot {
 
 export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
-		title: "One thread",
-		description: "People and bots reply, thread and react the same way.",
-		image: "/screenshots/one-thread.webp",
-		shows: "A thread with two people and a bot",
+		title: "Channels",
+		description:
+			"Each project gets a channel, where people and bots share its main chat and threads, and reply and react the same way.",
+		image: "/screenshots/main-chat.webp",
+		shows: "A channel's main chat with two people and a bot",
 	},
 	{
 		title: "Automations",

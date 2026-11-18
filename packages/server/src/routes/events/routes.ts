@@ -1,4 +1,4 @@
-import { type StreamChannel, type StreamEvent, streamEvent } from "@sugabots/contracts";
+import { type EventStream, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { toPerson } from "@sugabots/core/conversations/repository/participants";
@@ -20,11 +20,11 @@ import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { ChannelAccess } from "./access.ts";
+import { StreamAccess } from "./access.ts";
 
 /**
- * The HTTP end of a stream: one channel, held open, until the client leaves or
- * the clock turns out. Everything about *what* is on the channel belongs to the
+ * The HTTP end of a stream: one event stream, held open, until the client leaves or
+ * the clock turns out. Everything about *what* is on the stream belongs to the
  * bus; this file is the transport and its housekeeping.
  *
  * It is a `Stream` rather than a callback with its own bookkeeping. The client
@@ -74,15 +74,15 @@ export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTi
 export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
-		const access = yield* ChannelAccess.Service;
+		const access = yield* StreamAccess.Service;
 		const timing = yield* StreamTiming;
-		const streamFor = (
+		const openStream = (
 			request: HttpServerRequest.HttpServerRequest,
-			channelFor: () => Effect.Effect<StreamChannel | undefined, never, CurrentActor.Service>,
+			resolveStream: () => Effect.Effect<EventStream | undefined, never, CurrentActor.Service>,
 		) =>
 			Effect.gen(function* () {
-				const channel = yield* channelFor();
-				if (!channel) {
+				const stream = yield* resolveStream();
+				if (!stream) {
 					return yield* new NotFound({ message: userText`No such stream` });
 				}
 				if (request.method === "HEAD") {
@@ -91,28 +91,31 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 						headers: { ...STREAM_HEADERS, "content-type": STREAM_CONTENT_TYPE },
 					});
 				}
-				return yield* streamChannel({
+				return yield* streamEvents({
 					bus,
-					channel,
+					stream,
 					since: resumeFrom(request.headers["last-event-id"]),
 					timing,
-					stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
+					stillAuthorized: Effect.map(
+						Effect.suspend(resolveStream),
+						(current) => current === stream,
+					),
 					mayHear: (audience) => access.hears(audience),
 				});
 			}).pipe(asSessionUser);
 
 		return handlers
 			.handle("workspace", ({ params, request }) =>
-				streamFor(request, () => access.workspace(params.workspace)),
+				openStream(request, () => access.workspace(params.workspace)),
 			)
 			.handle("conversation", ({ params, request }) =>
-				streamFor(request, () => access.conversation(params.conversationId)),
+				openStream(request, () => access.conversation(params.conversationId)),
 			)
-			.handle("me", ({ request }) => streamFor(request, access.me))
+			.handle("me", ({ request }) => openStream(request, access.me))
 			.handle("typing", ({ params }) =>
 				Effect.gen(function* () {
-					const channel = yield* access.conversation(params.conversationId);
-					if (!channel) {
+					const stream = yield* access.conversation(params.conversationId);
+					if (!stream) {
 						return yield* new NotFound({ message: userText`No such conversation` });
 					}
 					const user = yield* CurrentUser;
@@ -120,7 +123,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 						conversationId: params.conversationId,
 						person: toPerson(user),
 					});
-					yield* Effect.promise(() => bus.publish(channel, typing));
+					yield* Effect.promise(() => bus.publish(stream, typing));
 				}).pipe(asSessionUser),
 			);
 	}),
@@ -135,22 +138,22 @@ function frame(seq: number | undefined, event: StreamEvent): string {
 }
 
 /**
- * Streams a channel the caller's authorisation resolved to.
+ * Streams what the caller's authorisation resolved to.
  *
- * A channel the caller may not have is answered with 404 before this, rather
+ * A stream the caller may not have is answered with 404 before this, rather
  * than 403: a stream for a conversation you cannot see should not confirm the conversation
  * exists.
  */
-const streamChannel = Effect.fnUntraced(function* ({
+const streamEvents = Effect.fnUntraced(function* ({
 	bus,
-	channel,
+	stream,
 	since,
 	timing: { ping, maxAge, recheck },
 	stillAuthorized,
 	mayHear,
 }: {
 	bus: EventBus.Interface;
-	channel: StreamChannel;
+	stream: EventStream;
 	since: number | undefined;
 	timing: Timing;
 	/**
@@ -180,7 +183,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 					root: true,
 					links: Option.toArray(streamSpan).map((span) => ({ span, attributes: {} })),
 					attributes: {
-						"event.channel": channel,
+						"event.stream": stream,
 						"event.type": event.type,
 						...(seq === undefined ? {} : { "event.seq": seq }),
 					},
@@ -204,7 +207,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 				void (async () => {
 					let authorizedUntil = Number.NEGATIVE_INFINITY;
 					try {
-						for await (const delivery of bus.subscribe(channel, {
+						for await (const delivery of bus.subscribe(stream, {
 							since,
 							signal: leaving.signal,
 						})) {
@@ -215,7 +218,6 @@ const streamChannel = Effect.fnUntraced(function* ({
 							}
 							if (leaving.signal.aborted) break;
 							const heard = Audience.read(delivery.event);
-							if (heard.audience?.kind === "nobody") continue;
 							if (heard.audience && !(await runPromise(mayHear(heard.audience)))) {
 								continue;
 							}
@@ -229,7 +231,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 						}
 					} catch (failure) {
 						if (!leaving.signal.aborted) {
-							await runPromise(Effect.logError(`Streaming ${channel} failed`, failure));
+							await runPromise(Effect.logError(`Streaming ${stream} failed`, failure));
 						}
 					} finally {
 						clearTimeout(expiry);
@@ -243,7 +245,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 
 	// Merged rather than written from a timer, so a ping is its own chunk and can
 	// never land inside an event. `haltStrategy: "left"` ends the response when
-	// the events end rather than pinging an empty channel forever.
+	// the events end rather than pinging an empty stream forever.
 	const withPings = Stream.merge(
 		subscribed,
 		Stream.fromEffectRepeat(Effect.succeed(": ping\n\n")).pipe(

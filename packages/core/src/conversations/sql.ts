@@ -812,8 +812,6 @@ export const conversationCompaction = pgTable("compaction", {
 	updatedAt: updatedStamp("updated_at"),
 });
 
-export type CompactionRow = typeof conversationCompaction.$inferSelect;
-
 /**
  * How far one person has read a conversation: every message there up to
  * `readThrough` has been on their screen. No row means they never opened it.

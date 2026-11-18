@@ -18,7 +18,7 @@ export interface EyePlacement {
 }
 
 /** A head's outline, in pieces filled in the bot's colour, and where its eyes sit. */
-export interface HeadShape {
+interface HeadShape {
 	parts: readonly HeadPart[];
 	eyes: EyePlacement;
 }

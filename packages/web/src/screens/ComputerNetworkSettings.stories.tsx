@@ -30,9 +30,7 @@ const settings: ComputerNetworkSettings = {
 			addedAt: "2026-10-02T02:10:00.000Z",
 		},
 	],
-	blockedHosts: [
-		{ host: "*.pastebin.com", blockedByName: "Kim Park", blockedAt: "2026-10-03T01:00:00.000Z" },
-	],
+	blockedHosts: [{ host: "*.pastebin.com", blockedByName: "Kim Park" }],
 };
 
 const meta = preview.meta({

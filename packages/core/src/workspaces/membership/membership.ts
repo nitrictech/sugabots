@@ -162,7 +162,7 @@ export interface InWorkspace {
 	workspace: string;
 }
 
-export interface ForInvitation {
+interface ForInvitation {
 	invitationId: string;
 }
 

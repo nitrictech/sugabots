@@ -108,7 +108,7 @@ export function restingStyle(name: LayerName): LayerStyle {
 export type Path = SpringPath | KeyframesPath;
 
 /** Springs to `to`, as motion's springs do. */
-export interface SpringPath {
+interface SpringPath {
 	readonly kind: "spring";
 	readonly to: Values;
 	readonly stiffness: number;
@@ -131,15 +131,15 @@ export interface KeyframesPath {
 /** Half a device pixel: no finer move could show. */
 const STEP_PIXELS = 0.5;
 /** The shared clock's ticks, which every change falls on: a video's frame rate. */
-export const TICK_SECONDS = 1 / 30;
+const TICK_SECONDS = 1 / 30;
 /** How finely a spring is stepped through to find when it settles. */
-export const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
+const SPRING_SETTLE_STEP_MILLISECONDS = 1000 / 120;
 /** A spring is cut off by this long at the latest, wherever it has got to. */
-export const LONGEST_SPRING_MILLISECONDS = 3000;
+const LONGEST_SPRING_MILLISECONDS = 3000;
 /** How far ahead a layer's path is looked at to tell how fast it's moving. */
-export const VELOCITY_SECONDS = 1 / 240;
+const VELOCITY_SECONDS = 1 / 240;
 /** How long a repeating path takes to ease to where it starts, from wherever the layer is. */
-export const LEAD_IN_SECONDS = 0.25;
+const LEAD_IN_SECONDS = 0.25;
 
 interface Playing {
 	animation: Animation;

@@ -12,7 +12,7 @@ export const ADD_BOT_TO_CHANNEL_TOOL = "add_bot_to_channel";
 export const PIN_BOT_TOOL = "pin_bot";
 
 /** What the assistant is told of something it did for its person, or why it couldn't. */
-export type ActedResult = { done: AssistantGuide.Place } | { refused: string };
+type ActedResult = { done: AssistantGuide.Place } | { refused: string };
 
 /**
  * The `workspace_guide` tool, a Personal Assistant's view of its person's

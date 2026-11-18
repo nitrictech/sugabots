@@ -13,7 +13,7 @@ import { uuidSchema } from "./uuid.ts";
  * preset needs one, has a key.
  */
 
-export const searchProviderPresetIdSchema = Schema.Literals(["brave", "exa", "tavily", "searxng"]);
+const searchProviderPresetIdSchema = Schema.Literals(["brave", "exa", "tavily", "searxng"]);
 export type SearchProviderPresetId = typeof searchProviderPresetIdSchema.Type;
 
 /** The provider a workspace has until it chooses another. */
@@ -26,7 +26,7 @@ export const DEFAULT_SEARCH_PRESET: SearchProviderPresetId = "exa";
 export const EXA_FREE_SEARCH_URL = "https://mcp.exa.ai/mcp";
 
 /** One entry in the search catalog: data about a search service we know how to call. */
-export interface SearchProviderPreset {
+interface SearchProviderPreset {
 	id: SearchProviderPresetId;
 	name: string;
 	baseUrl: string;
@@ -134,7 +134,6 @@ export const searchProviderResponseSchema = Schema.Struct({
  * an API key for a provider that requires one.
  */
 export const webAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
-export type WebAccess = typeof webAccessSchema.Type;
 
 export const searchProviderTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,

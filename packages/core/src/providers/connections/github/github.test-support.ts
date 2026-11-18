@@ -28,7 +28,7 @@ export const WEBHOOK_SECRET = "the-webhook-secret";
 export const MANIFEST_CODE = "the-code";
 
 /** A request Sugabots sent GitHub. */
-export interface Asked {
+interface Asked {
 	readonly method: string;
 	readonly path: string;
 	readonly search: string;
@@ -126,7 +126,7 @@ export const listsRepositories: Route = ({ path, bearer }) => {
 };
 
 /** Whether `jwt` is the app's own token, signed with its private key. */
-export function signedByApp(jwt: string) {
+function signedByApp(jwt: string) {
 	const [header, payload, signature] = jwt.split(".");
 	if (!header || !payload || !signature) return false;
 	return createVerify("RSA-SHA256")

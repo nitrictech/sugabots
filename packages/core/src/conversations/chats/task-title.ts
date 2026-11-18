@@ -1,7 +1,10 @@
-import { withoutMentions } from "@sugabots/contracts";
+import { MAX_CONVERSATION_TITLE_CHARACTERS, withoutMentions } from "@sugabots/contracts";
 
-/** The longest a conversation's title is when it is made from a message, before the ellipsis. */
-const TASK_TITLE_MAX_CHARACTERS = 44;
+/**
+ * The longest a conversation's title is when it is made from a message, before
+ * the ellipsis: as long as a title may be, so a sentence is cut only when it must.
+ */
+const TASK_TITLE_MAX_CHARACTERS = MAX_CONVERSATION_TITLE_CHARACTERS - 1;
 
 /** What a conversation is called when what it was started with has no words of its own. */
 export const UNTITLED_TASK = "New conversation";

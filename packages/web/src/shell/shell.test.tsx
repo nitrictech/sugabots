@@ -41,8 +41,6 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const linearPage = `/suga/bots/${linear.handle}`;
-/** Where `linearPage` lands: the bot's newest task, at its own address. */
-const linearConversationPage = `/suga/bots/${linear.handle}/tasks/${taskWith(linear).id}`;
 
 beforeEach(() => {
 	apiAnswers();
@@ -95,7 +93,7 @@ describe("the workspace choice", () => {
 		chooseWorkspace(other.id);
 		await router.navigate({ to: "/" });
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 		setItem.mockRestore();
 	});
 
@@ -110,7 +108,7 @@ describe("the workspace choice", () => {
 		);
 		await router.navigate({ to: "/" });
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 	});
 
 	it("switches to another workspace from your menu and opens it next time", async () => {
@@ -120,7 +118,7 @@ describe("the workspace choice", () => {
 		await openWorkspaceMenu();
 		fireEvent.click(await screen.findByRole("menuitem", { name: other.name }));
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
 	});
 
@@ -240,7 +238,7 @@ describe("the workspace choice", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga(\/|$)/));
 		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
 	});
 
@@ -251,7 +249,7 @@ describe("the workspace choice", () => {
 		const router = mount("/");
 
 		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga(\/|$)/));
 	});
 
 	it("opens an unfinished workspace from the root for somebody invited part way, who has their own", async () => {
@@ -261,7 +259,7 @@ describe("the workspace choice", () => {
 		chooseWorkspace(joined.id);
 		const router = mount("/");
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 		expect(screen.queryByRole("heading", { name: "Connect a provider" })).toBeNull();
 	});
 
@@ -327,7 +325,7 @@ describe("the workspace choice", () => {
 				name: "Leave",
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
 		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
 	});
 
@@ -338,7 +336,7 @@ describe("the workspace choice", () => {
 		await startNewWorkspace(router);
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
 		expect(client.api.workspaces.create).not.toHaveBeenCalled();
 	});
 
@@ -357,7 +355,7 @@ describe("the workspace choice", () => {
 		await screen.findByRole("heading", { name: "Connect a provider" });
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(linearConversationPage));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
 		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
 		expect(localStorage.getItem("sugabots-workspace")).toBe(workspace.id);
 	});
@@ -392,7 +390,7 @@ describe("the workspace choice", () => {
 		const dialog = await screen.findByRole("dialog", { name: `Delete ${workspace.name}?` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 		expect(client.api.workspaces.delete).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 		});
@@ -480,7 +478,7 @@ describe("the workspace while the API is not answering", () => {
 });
 
 describe("the sidebar", () => {
-	it("puts your Personal Assistant first, then the channels you are in, then the bots you pinned", async () => {
+	it("lists the channels you are in, then your Personal Assistant first among the bots you pinned", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([
 				{ ...linear, pinned: true },
@@ -488,22 +486,20 @@ describe("the sidebar", () => {
 				personalAssistant,
 			]),
 		);
-		mount(linearPage);
+		mount("/suga/channels");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		expect(
-			await within(sidebar).findByRole("link", { name: personalAssistant.name }),
-		).toBeDefined();
 		const channels = within(sidebar).getByRole("region", { name: "Channels" });
+		await within(channels).findByRole("group", { name: "Sales" });
 		expect(
 			within(channels)
 				.getAllByRole("group")
 				.map((channel) => channel.getAttribute("aria-label")),
 		).toEqual(["Suga-Team", "Sales"]);
 		const bots = within(sidebar).getByRole("region", { name: "Bots" });
-		expect(within(bots).getByRole("link", { name: linear.name })).toBeDefined();
-		expect(within(bots).queryByRole("link", { name: triager.name })).toBeNull();
-		expect(within(bots).queryByRole("link", { name: personalAssistant.name })).toBeNull();
+		await within(bots).findByRole("link", { name: personalAssistant.name });
+		const listed = within(within(bots).getByRole("list")).getAllByRole("link");
+		expect(listed.map((link) => link.textContent)).toEqual([personalAssistant.name, linear.name]);
 	});
 
 	it("says what waits in the Personal Assistant's row, as a bot's row does", async () => {
@@ -516,7 +512,7 @@ describe("the sidebar", () => {
 				},
 			}),
 		);
-		mount(linearPage);
+		mount("/suga/channels");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		expect(
@@ -527,24 +523,29 @@ describe("the sidebar", () => {
 		).toBeDefined();
 	});
 
-	it("lists the open bot's tasks under it", async () => {
+	it("gives an open bot a sidebar of its own, listing its tasks", async () => {
 		onWideScreen();
 		mount(linearPage);
 
-		const bots = await screen.findByRole("region", { name: "Bots" });
-		expect(await within(bots).findByRole("link", { name: taskWith(linear).title })).toBeDefined();
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		expect(
+			await within(sidebar).findByRole("navigation", { name: `${linear.name}'s pages` }),
+		).toBeDefined();
+		const work = await within(sidebar).findByRole("list", { name: `${linear.name}'s work` });
+		expect(
+			await within(work).findByRole("link", { name: new RegExp(taskWith(linear).title) }),
+		).toBeDefined();
+		expect(within(sidebar).queryByRole("region", { name: "Channels" })).toBeNull();
 	});
 
-	it("lists a bot that is open though not pinned, while it is open", async () => {
-		client.api.bots.list.mockReturnValue(
-			Effect.succeed([{ ...linear, pinned: false }, personalAssistant]),
-		);
+	it("goes back to the channels and bots from a bot's sidebar", async () => {
+		onWideScreen();
 		const router = mount(linearPage);
 
-		const bots = await screen.findByRole("region", { name: "Bots" });
-		expect(await within(bots).findByRole("link", { name: linear.name })).toBeDefined();
-		await router.navigate({ to: "/$workspace/inbox", params: { workspace: "suga" } });
-		await waitFor(() => expect(within(bots).queryByRole("link", { name: linear.name })).toBeNull());
+		fireEvent.click(await screen.findByRole("link", { name: "All bots" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
+		expect(await screen.findByRole("region", { name: "Bots" })).toBeDefined();
 	});
 
 	it("makes your Personal Assistant when you have none", async () => {
@@ -563,13 +564,10 @@ describe("the sidebar", () => {
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/inbox"));
 		expect(within(sidebar).getByRole("group", { name: "Sales" })).toBeDefined();
-		expect(within(sidebar).getByRole("link", { name: "Inbox" }).getAttribute("aria-current")).toBe(
-			"page",
-		);
 	});
 
 	it("makes a new bot from the + beside Bots", async () => {
-		mount(linearPage);
+		mount("/suga/channels");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		fireEvent.click(await within(sidebar).findByRole("button", { name: "New bot" }));
@@ -920,14 +918,16 @@ function firstBotMade(name: string) {
 }
 
 describe("routes", () => {
-	it("lands on your Personal Assistant", async () => {
+	it("lands on your Personal Assistant's page, at the workspace's own address", async () => {
+		onWideScreen();
 		const router = mount("/");
 
-		await waitFor(() =>
-			expect(
-				router.state.location.pathname.startsWith(`/suga/bots/${personalAssistant.handle}`),
-			).toBe(true),
-		);
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		const assistant = await within(sidebar).findByRole("link", {
+			name: new RegExp(`^${personalAssistant.name}`),
+		});
+		expect(assistant.getAttribute("aria-current")).toBe("page");
 	});
 
 	it("sends somebody signed out to the login page, remembering where they were going", async () => {
@@ -955,7 +955,7 @@ describe("routes", () => {
 	it("will not return from the login page to another site", async () => {
 		const router = mount(`/login?returnTo=${encodeURIComponent("//evil.example/steal")}`);
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\/bots\//));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 	});
 
 	it("walks a new workspace from its first bot to its chat", async () => {
@@ -1250,7 +1250,7 @@ describe("routes", () => {
 		expect(client.api.workspaces.acceptInvitation).toHaveBeenCalledOnce();
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\/bots\//));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 		expect(client.api.workspaces.acceptInvitation).toHaveBeenCalledOnce();
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
@@ -1287,7 +1287,7 @@ describe("routes", () => {
 		await screen.findByText("You have been invited to Nitric.");
 		fireEvent.click(screen.getByRole("button", { name: "Accept invite" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 	});
 
 	it("leads back into the workspace from an invitation already accepted", async () => {
@@ -1297,7 +1297,7 @@ describe("routes", () => {
 		const refresh = vi.fn().mockResolvedValue(undefined);
 		const router = mount("/invite/an-invitation", sam, refresh);
 
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\/bots\//));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 		expect(client.api.workspaces.acceptInvitation).not.toHaveBeenCalled();
 		expect(refresh).toHaveBeenCalledOnce();
 	});
@@ -2594,12 +2594,12 @@ describe("the app's badge", () => {
 		client.api.chats.channelMarkers.mockReturnValue(
 			Effect.succeed({
 				channels: {
-					[channel.id]: { unreadMessages: 2, needsApproval: false, failedAutomations: 0 },
+					[channel.id]: { unreadMessages: 2, needsApproval: false },
 				},
 				bots: {},
 			}),
 		);
-		mount(linearPage);
+		mount("/suga/channels");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Suga-Team" }));
 		await within(screen.getByRole("group", { name: "Suga-Team" })).findByText(/2 unread messages/);

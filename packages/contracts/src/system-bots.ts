@@ -45,5 +45,3 @@ export type SystemBot = typeof systemBotSchema.Type;
 export const systemBotUpdateSchema = Schema.Struct({
 	model: modelIdSchema,
 });
-
-export type SystemBotUpdate = typeof systemBotUpdateSchema.Type;

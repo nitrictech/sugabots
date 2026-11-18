@@ -56,7 +56,7 @@ export const buttonStyles = cva(
 	},
 );
 
-export type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonStyles>;
+type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonStyles>;
 
 /** Button styles labelled actions. Use IconButton for icon-only actions requiring a tooltip. */
 export function Button({ className, variant, size, ...props }: ButtonProps) {

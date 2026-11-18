@@ -1,4 +1,4 @@
-import { type CollaborationPart, conversationChannel, streamEvent } from "@sugabots/contracts";
+import { type CollaborationPart, conversationStream, streamEvent } from "@sugabots/contracts";
 import { type Duration, Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
@@ -91,7 +91,7 @@ describe("collaborate tool", () => {
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		answer = "All good.";
-		await bus.publish(conversationChannel("t-root"), answered);
+		await bus.publish(conversationStream("t-root"), answered);
 
 		expect(await pending).toEqual({ status: "answered", answer: "All good." });
 		expect(collaborations.open).toHaveBeenCalledWith({
@@ -111,14 +111,14 @@ describe("collaborate tool", () => {
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		await bus.publish(
-			conversationChannel("t-child"),
+			conversationStream("t-child"),
 			streamEvent("turn.completed", {
 				conversationId: "t-child",
 				turnId: "turn-2",
 				status: "cancelled",
 			}),
 		);
-		await bus.publish(conversationChannel("t-root"), {
+		await bus.publish(conversationStream("t-root"), {
 			...answered,
 			collaboration: { ...answered.collaboration, id: "d-2" },
 		});

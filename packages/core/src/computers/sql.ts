@@ -60,7 +60,7 @@ export const computerProvider = pgTable(
 export type ComputerProviderRow = typeof computerProvider.$inferSelect;
 
 /** What Sugabots made in a provider's account, by preset. */
-export type ComputerManagedResources = {
+type ComputerManagedResources = {
 	readonly preset: "e2b";
 	/** The last build of its template that Sugabots started, by E2B's ids for it. */
 	readonly templateBuild: { readonly templateId: string; readonly buildId: string };

@@ -53,7 +53,7 @@ export type ComposerAttachments = {
 };
 
 /** The files taken to send with a message. */
-export type FilesForSending = {
+type FilesForSending = {
 	/** The files as the message will show them, which it can before the API answers. */
 	parts: FilePart[];
 	/**
@@ -66,7 +66,7 @@ export type FilesForSending = {
 };
 
 /** Whether the attached files can go with a message now, and if not, how many hold it up. */
-export type SendReadiness = { ready: true } | { ready: false; failed: number; uploading: number };
+type SendReadiness = { ready: true } | { ready: false; failed: number; uploading: number };
 
 export function sendReadiness(items: readonly ComposerAttachment[]): SendReadiness {
 	const failed = items.filter(

@@ -225,7 +225,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const makeAuthoring = Effect.gen(function* () {
+const makeAuthoring = Effect.gen(function* () {
 	const operation = yield* serviceOperations<AuthoringInterface>("Files.Authoring");
 	const blobs = yield* BlobStore.Service;
 	const ids = yield* Ids.Service;

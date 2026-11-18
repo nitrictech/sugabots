@@ -1,4 +1,9 @@
-import { type ConnectionAccess, conversationChannel, streamEvent } from "@sugabots/contracts";
+import {
+	type ConnectionAccess,
+	conversationStream,
+	START_TASK_TOOL,
+	streamEvent,
+} from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -36,7 +41,6 @@ import { MARK_DONE_TOOL } from "../tools/mark-done/tool.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
 import { READ_CONVERSATION_FILE_TOOL } from "../tools/read-conversation-file/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
-import { START_TASK_TOOL } from "../tools/start-task/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -1021,7 +1025,7 @@ function liveEventBus(): EventBus.Interface {
 
 function requestCancellation(events: EventBus.Interface) {
 	return events.publish(
-		conversationChannel(run.request.conversationId),
+		conversationStream(run.request.conversationId),
 		streamEvent("turn.cancel_requested", {
 			conversationId: run.request.conversationId,
 			turnId: prepared.turnId,

@@ -25,32 +25,48 @@ export interface Reacting {
  * The emoji people reacted to a message with, each with how many, in the order
  * they were first used. Yours are in the accent. Hovering one names who reacted
  * with it; clicking it adds yours or takes it back. After them, a button opens
- * the picker to add another. Without `reacting` they are only shown.
+ * the picker to add another, unless `filled`: then they are filled pills alone,
+ * as a bot's task has them, where another is added from the message's actions.
+ * Without `reacting` they are only shown.
  */
 export function MessageReactions({
 	message,
 	reacting,
 	addable,
+	filled = false,
+	className,
 }: {
 	message: Message;
 	reacting: Reacting | undefined;
 	/** Whether the message takes reactions yet, as one still being written or sent does not. */
 	addable: boolean;
+	filled?: boolean;
+	className?: string;
 }) {
 	const reactions = message.reactions ?? [];
 	if (reactions.length === 0) return null;
 	return (
-		<ul aria-label="Reactions" className="m-0 flex list-none flex-wrap gap-1 p-0 pt-1.5">
+		<ul
+			aria-label="Reactions"
+			className={cn("m-0 flex list-none flex-wrap gap-1 p-0", !filled && "pt-1.5", className)}
+		>
 			{reactions.map((reaction) => {
 				const mine = reacting !== undefined && isAmong(reaction, reacting.userId);
 				const who = whoReacted(reaction, reacting?.userId);
 				const label = `${reaction.emoji} ${reaction.people.length}: ${who}`;
-				const look = cn(
-					"flex h-6 items-center gap-1 rounded-full border px-2 transition-colors",
-					mine
-						? "border-primary bg-reaction-mine text-reaction-mine-foreground"
-						: "border-chip-strong bg-card text-soft-foreground",
-				);
+				const look = filled
+					? cn(
+							"flex h-6 items-center gap-1 rounded-full px-2 transition-colors",
+							mine
+								? "bg-reaction-mine text-reaction-mine-foreground"
+								: "bg-chip text-soft-foreground",
+						)
+					: cn(
+							"flex h-6 items-center gap-1 rounded-full border px-2 transition-colors",
+							mine
+								? "border-primary bg-reaction-mine text-reaction-mine-foreground"
+								: "border-chip-strong bg-card text-soft-foreground",
+						);
 				const face = (
 					<>
 						<span aria-hidden className="text-sm leading-none">
@@ -73,7 +89,8 @@ export function MessageReactions({
 									className={cn(
 										"focus-ring cursor-pointer",
 										look,
-										!mine && "hover:border-border-dashed hover:bg-chip",
+										!mine &&
+											(filled ? "hover:bg-hover" : "hover:border-border-dashed hover:bg-chip"),
 									)}
 								>
 									{face}
@@ -88,7 +105,7 @@ export function MessageReactions({
 					</li>
 				);
 			})}
-			{reacting && addable && (
+			{reacting && addable && !filled && (
 				<li className="flex">
 					<AddReactionButton
 						message={message}

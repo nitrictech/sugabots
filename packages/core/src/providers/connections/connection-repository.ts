@@ -84,8 +84,6 @@ export interface Interface {
 			repositories: readonly GitHubConnectionRepository[],
 		) => readonly GitHubConnectionRepository[],
 	) => Effect.Effect<readonly GitHubConnectionRepository[] | undefined>;
-	/** Counts a change to what a connection's tools work on as a change of configuration. */
-	readonly reconfigured: (workspaceId: string, connectionId: string) => Effect.Effect<void>;
 	readonly update: (
 		workspaceId: string,
 		botId: string,
@@ -313,17 +311,6 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		reconfigured: (workspaceId, connectionId) =>
-			operation(
-				"reconfigured",
-				query((db) =>
-					db
-						.update(connection)
-						.set({ configurationRevision: sql`${connection.configurationRevision} + 1` })
-						.where(and(eq(connection.id, connectionId), eq(connection.workspaceId, workspaceId))),
-				),
-			),
-
 		update: (workspaceId, botId, connectionId, changes) =>
 			operation(
 				"update",
@@ -538,7 +525,7 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** A bot's connections as a turn sees them. */
-export interface BotTargets {
+interface BotTargets {
 	targets: ConnectionTarget[];
 	/**
 	 * Connections that offer nothing until someone signs in again, by handle,
@@ -551,7 +538,7 @@ export interface BotTargets {
  * What a test found: the server's tools, absent for a connection whose tools
  * are Sugabots' own, or why it could not be asked.
  */
-export type TestOutcome = { tools?: ConnectionTool[] } | { error: UserText };
+type TestOutcome = { tools?: ConnectionTool[] } | { error: UserText };
 
 export class ConnectionNameTaken
 	extends Data.TaggedError("ConnectionNameTaken")
@@ -629,7 +616,7 @@ export function isSignedIn(
 }
 
 /** Whether a GitHub connection's app is installed on an account. */
-export function gitHubInstalled(settings: GitHubConnectionSettings): boolean {
+function gitHubInstalled(settings: GitHubConnectionSettings): boolean {
 	return settings.installationId !== null;
 }
 
@@ -642,7 +629,7 @@ export function signInExpired(
 }
 
 /** What the OAuth client has learnt and been issued for the connection, unsealed. */
-export function unsealOauthRecord(
+function unsealOauthRecord(
 	row: Pick<ConnectionRow, "oauthEncrypted">,
 	cipher: Credentials.Interface,
 ): OAuthRecord | undefined {

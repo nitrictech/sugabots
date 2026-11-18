@@ -7,7 +7,7 @@ import type { BotAdministration } from "../../../workspaces/bots/bot-administrat
 
 export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
 
-export type SaveInstructionsResult =
+type SaveInstructionsResult =
 	| {
 			saved: true;
 			/** The bot's settings page, where people read and change what was saved. */

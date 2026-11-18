@@ -54,7 +54,7 @@ export type TriggerDraft =
 	| { kind: "github"; repository: RepositoryDraft };
 
 /** A new trigger of `kind`, as it starts: a daily schedule, a webhook taking a bearer token, a repository to pick. */
-export function newTriggerDraft(kind: TriggerKind): TriggerDraft {
+function newTriggerDraft(kind: TriggerKind): TriggerDraft {
 	switch (kind) {
 		case "schedule":
 			return {
@@ -143,7 +143,7 @@ export function triggerInputOf(
  * The note under a schedule: when it runs, and in which time zone, the
  * schedule's own, since its times are in it.
  */
-export function scheduleNote(reading: ScheduleReading, timezone: string): string {
+function scheduleNote(reading: ScheduleReading, timezone: string): string {
 	const when =
 		reading.kind === "written" ? "on its own schedule" : scheduleSummary(reading.schedule);
 	return `Runs ${when}, ${zoneName(timezone)}.`;
@@ -171,12 +171,12 @@ function zoneName(timezone: string): string {
 const PICK_A_DAY_NOTE = "Pick at least one day for it to run on.";
 const PICK_A_REPOSITORY_NOTE = "Pick the repository it runs on.";
 
-export function localTimezone(): string {
+function localTimezone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /** One trigger as the list shows it, by a key the list's owner gives it. */
-export interface ListedTrigger {
+interface ListedTrigger {
 	readonly key: string;
 	readonly trigger: AutomationTriggerInput | AutomationTrigger;
 }

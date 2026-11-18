@@ -454,7 +454,7 @@ function toolKinds(tools: readonly ConnectionToolSetting[]): ToolKind[] {
 }
 
 /** The access most of `tools` have, leaning as the kind does when two are tied. */
-export function settingOf(tools: readonly ConnectionToolSetting[], kind: ToolKind["kind"]) {
+function settingOf(tools: readonly ConnectionToolSetting[], kind: ToolKind["kind"]) {
 	const count = (access: ConnectionAccess) => tools.filter((tool) => tool.access === access).length;
 	const leaning = KIND_LEANING[kind];
 	return (["allow", "ask", "off"] as const).reduce<ConnectionAccess>(

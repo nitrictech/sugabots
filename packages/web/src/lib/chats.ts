@@ -2,6 +2,7 @@ import {
 	type AutomationUpdate,
 	type Bot,
 	type Channel,
+	type ChatListItem,
 	type ChatMessageItem,
 	type ConversationDetails,
 	type FilePart,
@@ -23,6 +24,7 @@ import {
 	useInfiniteQuery,
 	useIsMutating,
 	useMutation,
+	useQueries,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
@@ -82,6 +84,33 @@ function botTasksQuery(workspaceId: string | undefined, botId: string | undefine
 /** The tasks and automations of the bot `botId`; nothing is asked while it is undefined. */
 export function useBotTasks(botId: string | undefined) {
 	return useQuery(botTasksQuery(useWorkspace().workspace?.id, botId));
+}
+
+/**
+ * The tasks the person has been working on most lately, newest first: those
+ * still open that they have written in, with the bots they pinned and their
+ * Personal Assistant, whose tasks the sidebar reads too.
+ */
+export function useRecentTasks(userId: string, limit: number): ChatListItem[] {
+	const workspaceId = useWorkspace().workspace?.id;
+	const bots = (useBots().bots ?? []).filter(
+		(bot) => bot.permissions.talk && bot.systemBotKey === null && (bot.pinned || bot.assistant),
+	);
+	const lists = useQueries({ queries: bots.map((bot) => botTasksQuery(workspaceId, bot.id)) });
+	return lists
+		.flatMap((list) => list.data?.tasks ?? [])
+		.filter(
+			(row) =>
+				row.conversation.doneAt === null &&
+				row.participants.some((participant) => participant.id === userId),
+		)
+		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a))
+		.slice(0, limit);
+}
+
+/** When a task last had something in it: its newest message, else when it was started. */
+function lastMovedAt(row: ChatListItem): number {
+	return Date.parse(row.lastMessage?.at ?? row.conversation.createdAt);
 }
 
 /**
@@ -258,7 +287,11 @@ const directMessageKey = (conversationId: string) => ["direct-message", conversa
  * open, as one from another of their workspaces is not shown in this one's
  * place, and `error` set only when it could not be loaded at all.
  */
-export function useDirectMessage(conversationId: string): {
+export function useDirectMessage(
+	conversationId: string,
+	/** False while it isn't known to be a direct message, so nothing is asked for one that isn't. */
+	enabled = true,
+): {
 	found: DirectPlace | undefined;
 	isPending: boolean;
 	error: unknown;
@@ -278,7 +311,7 @@ export function useDirectMessage(conversationId: string): {
 			Effect.runPromise(client.api.chats.directMessage({ params: { conversationId } }), {
 				signal,
 			}),
-		enabled: !listed,
+		enabled: enabled && !listed,
 	});
 	const missing = isApiFailure(item.error) && item.error._tag === "NotFound";
 	const loaded = listed ?? item.data;
@@ -299,7 +332,7 @@ export function useDirectMessage(conversationId: string): {
 }
 
 /** How much in the workspace is waiting for the person. */
-export type AttentionCounts = {
+type AttentionCounts = {
 	/**
 	 * Messages written to the person that they have not read: those and
 	 * automation results that mention them, and every message in their direct
@@ -346,7 +379,7 @@ function mentionsYou(item: InboxItem): boolean {
  * Records that the person has read the conversation up to its newest message, and
  * clears its dot and its count in the sidebar.
  */
-export function useMarkChatRead(conversationId: string | undefined) {
+function useMarkChatRead(conversationId: string | undefined) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
@@ -486,13 +519,13 @@ export type ConversationPlaceKind =
 	| ({ kind: "directMessage" } & DirectPeople);
 
 /** A conversation in a channel. */
-export interface ChannelPlace {
+interface ChannelPlace {
 	channel: Channel;
 	conversation: { kind: "channelConversation" };
 }
 
 /** One of a bot's tasks or automations, which is in no channel. */
-export interface BotPlace {
+interface BotPlace {
 	channel: null;
 	conversation: { kind: "botConversation"; bot: Bot };
 }
@@ -501,7 +534,7 @@ export interface BotPlace {
 export type ConversationPlace = ChannelPlace | BotPlace;
 
 /** A direct message between people, which is in no channel, and who is in it. */
-export interface DirectPlace {
+interface DirectPlace {
 	channel: null;
 	conversation: Extract<ConversationPlaceKind, { kind: "directMessage" }>;
 }
@@ -582,8 +615,9 @@ export function useAnyConversationPlace(conversationId: string): {
 	const roster = useBots();
 	const opened = useQuery(conversationQuery(conversationId));
 	const details = opened.data?.conversation;
-	const direct = useDirectMessage(conversationId);
-	if (details?.kind === "direct_message") return direct;
+	const isDirect = details?.kind === "direct_message";
+	const direct = useDirectMessage(conversationId, isDirect);
+	if (isDirect) return direct;
 	const channel = details?.channelId
 		? channels.data?.find((one) => one.id === details.channelId)
 		: undefined;
@@ -728,7 +762,7 @@ export function useChatHistory(conversationId: string | undefined) {
  * A message to send, with the whole quote it answers and the files it
  * attaches, so it shows both before the API answers.
  */
-export type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
+type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
 	replyTo?: MessageReplyTo;
 	files?: readonly FilePart[];
 };
@@ -794,7 +828,7 @@ export const TASK_NOT_STARTED = "The task was not started. Your draft is still h
  * How starting a task from a draft went: started; refused by the API; or not
  * sent, because the draft has no words to title it.
  */
-export type TaskStart =
+type TaskStart =
 	| { outcome: "started"; task: StartedTask }
 	| { outcome: "refused" }
 	| { outcome: "notSent" };

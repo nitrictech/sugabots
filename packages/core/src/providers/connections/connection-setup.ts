@@ -123,17 +123,17 @@ export interface Interface {
 	}) => Effect.Effect<SignInOutcome, ConnectionNotFound, CurrentActor.Service>;
 }
 
-export interface InBot {
+interface InBot {
 	botId: string;
 }
 
 /** One of a bot's connections. */
-export interface InConnection extends InBot {
+interface InConnection extends InBot {
 	connectionId: string;
 }
 
 /** A bot, by its workspace and its own id. */
-export interface BotLocation {
+interface BotLocation {
 	workspaceId: string;
 	botId: string;
 }
@@ -147,9 +147,7 @@ interface ConnectionLocation extends BotLocation {
  * How a sign-in ended. `bot` is there once the sign-in is known to be for a
  * bot the caller manages, so the browser can be sent back to it.
  */
-export type SignInOutcome =
-	| { bot: BotLocation }
-	| { failure: ConnectionSignInFailure; bot?: BotLocation };
+type SignInOutcome = { bot: BotLocation } | { failure: ConnectionSignInFailure; bot?: BotLocation };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConnectionSetup",

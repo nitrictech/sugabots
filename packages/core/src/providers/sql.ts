@@ -25,7 +25,7 @@ import {
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { bot, user, workspace } from "../workspaces/sql.ts";
 
-export interface EncryptedProviderHeader {
+interface EncryptedProviderHeader {
 	name: string;
 	value: string;
 }
@@ -226,7 +226,7 @@ export const connection = pgTable(
 	],
 );
 
-export type ConnectionSettings = GitHubConnectionSettings;
+type ConnectionSettings = GitHubConnectionSettings;
 
 /** A GitHub App's owner: an organization, or a person's own account. */
 export interface GitHubAppOwner {

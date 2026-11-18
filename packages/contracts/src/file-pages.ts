@@ -24,7 +24,7 @@ export const PAGE_HEIGHT_MESSAGE = "sugabots:frame-height";
  * `heightExpression`, JavaScript that reads the height, into the call that
  * sends it, wherever the page's host listens.
  */
-export function pageHeightObserver(send: (heightExpression: string) => string): string {
+function pageHeightObserver(send: (heightExpression: string) => string): string {
 	return `new ResizeObserver(() => ${send("document.documentElement.scrollHeight")}).observe(document.documentElement);`;
 }
 

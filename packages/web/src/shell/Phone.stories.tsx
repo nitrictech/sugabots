@@ -38,25 +38,19 @@ const meta = preview.meta({
 });
 
 /**
- * Home: every channel down the rail, and the one open beside it, with its
- * files and automations, then its channels and bots.
+ * Home: the channels the person is in, each with its conversations, then
+ * the bots they pinned, with Home marked among the tabs.
  */
 export const Home = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/home`} />,
 	play: async ({ canvas }) => {
-		const channels = await canvas.findByRole("navigation", {
-			name: "Direct messages and channels",
-		});
-		await expect(within(channels).getByRole("link", { name: revenue.name })).toHaveAttribute(
-			"aria-current",
-			"page",
-		);
+		await expect(await canvas.findByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+		const channels = canvas.getByRole("region", { name: "Channels" });
+		await expect(within(channels).getByRole("link", { name: revenue.name })).toBeVisible();
 		await expect(within(channels).getByRole("link", { name: engineering.name })).toBeVisible();
-		await expect(within(channels).getByRole("link", { name: "Personal, Only you" })).toBeVisible();
-		await expect(canvas.getByRole("heading", { level: 1, name: revenue.name })).toBeVisible();
-		await expect(canvas.queryByText("Only you can see into this channel.")).toBeNull();
-		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
-		await expect(await canvas.findByRole("link", { name: "Growth Desk" })).toBeVisible();
+		await expect(within(channels).getByRole("link", { name: "Browse channels" })).toBeVisible();
+		const bots = canvas.getByRole("region", { name: "Bots" });
+		await expect(within(bots).getByRole("link", { name: "Browse bots" })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
 		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
 			"aria-current",
@@ -176,10 +170,7 @@ export const Approvals = meta.story({
 	},
 });
 
-/**
- * The You tab's Settings: you on a card that opens your own settings, the
- * workspace's sections, then each channel, which opens a page of its own.
- */
+/** The You tab's Settings: you on a card that opens your own settings, then the workspace's sections. */
 export const You = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you`} />,
 	play: async ({ canvas }) => {
@@ -190,10 +181,6 @@ export const You = meta.story({
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/computers`,
-		);
-		await expect(canvas.getByRole("link", { name: new RegExp(revenue.name) })).toHaveAttribute(
-			"href",
-			`/${storyWorkspace.slug}/you/channels/${revenue.slug}`,
 		);
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeVisible();
 	},
@@ -207,26 +194,6 @@ export const Profile = meta.story({
 		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/notifications`,
-		);
-	},
-});
-
-/** A channel opened from Settings: its General, Connections, People and Bots, and Back to Settings. */
-export const YouChannel = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/you/channels/${revenue.slug}`} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Back to Settings" })).toHaveAttribute(
-			"href",
-			`/${storyWorkspace.slug}/you`,
-		);
-		await expect(canvas.getByRole("link", { name: /^Connections/ })).toHaveAttribute(
-			"href",
-			`/${storyWorkspace.slug}/settings/channels/${revenue.slug}/connections`,
-		);
-		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
-		await expect(within(tabs).getByRole("link", { name: /You$/ })).toHaveAttribute(
-			"aria-current",
-			"page",
 		);
 	},
 });
@@ -284,14 +251,13 @@ export const OpenFile = meta.story({
 });
 
 /**
- * A bot's channel, opened from Home: Back and the bot's face float over the
- * chat, and the tabs stay, with Home marked, until the composer is typed in.
+ * A bot's chat, opened from Home: the tabs stay, with Home marked, until the
+ * composer is typed in.
  */
 export const Opened = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/growth-desk`} />,
 	play: async ({ canvas, userEvent }) => {
 		const composer = await canvas.findByRole("textbox");
-		await expect(canvas.getByRole("link", { name: `Back to ${revenue.name}` })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
 		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
 			"aria-current",
@@ -345,12 +311,12 @@ export const Task = meta.story({
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${longTask.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/tasks/${longTask.id}`} />
 	),
 	play: async ({ canvas, userEvent }) => {
 		const more = await canvas.findByRole("button", { name: "More for this task" });
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-		// Back returns to the bot's chat the task is with, not the channel's Home.
+		// Back returns to the bot the task is with.
 		await expect(canvas.getByRole("link", { name: `Back to ${growthDesk.name}` })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/bots/${growthDesk.handle}`,

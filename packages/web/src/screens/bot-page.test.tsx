@@ -12,6 +12,7 @@ import {
 	MODELS,
 	mount,
 	onWideScreen,
+	open,
 	pendingAnswer,
 	personalAssistant,
 	serveConnections,
@@ -67,8 +68,10 @@ function rosterAnswers(change: Partial<typeof linear>): void {
 	);
 }
 
-async function openSlide(name: "Model" | "Instructions") {
-	fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
+/** Opens the menu of models the bot can be moved to, from its Model row. */
+async function openModels() {
+	open(await screen.findByRole("button", { name: /^Model: / }));
+	return screen.findByRole("menu");
 }
 
 function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
@@ -192,7 +195,7 @@ describe("your Personal Assistant", () => {
 		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
 		expect(screen.getByRole("region", { name: "Connections" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
-		expect(screen.queryByRole("button", { name: /^Instructions/ })).toBeNull();
+		expect(screen.queryByRole("textbox", { name: "Instructions" })).toBeNull();
 		expect(screen.queryByRole("region", { name: "Built-in tools" })).toBeNull();
 		expect(screen.queryByRole("link", { name: /^Automations/ })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
@@ -218,11 +221,10 @@ describe("a viewer", () => {
 		mount(page);
 
 		expect(await screen.findByText(MODELS[0] as string)).toBeDefined();
-		await openSlide("Instructions");
-		const instructions = await screen.findByLabelText("Instructions");
+		expect(screen.getByRole("button", { name: /^Model: / })).toHaveProperty("disabled", true);
+		const instructions = await screen.findByRole("textbox", { name: "Instructions" });
 		expect(instructions.hasAttribute("readonly")).toBe(true);
 		expect((instructions as HTMLTextAreaElement).value).toBe("Be brief.");
-		expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 	});
 
 	it("is offered no way to rename, restyle or delete the bot", async () => {
@@ -251,8 +253,7 @@ describe("an admin", () => {
 
 	it("discards the previous bot's draft instructions when another bot is opened", async () => {
 		const router = mount(page);
-		await openSlide("Instructions");
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
+		fireEvent.change(await screen.findByRole("textbox", { name: "Instructions" }), {
 			target: { value: "Private draft" },
 		});
 
@@ -261,7 +262,7 @@ describe("an admin", () => {
 			params: { workspace: "suga", bot: triager.handle },
 		});
 
-		await waitFor(() => expect(screen.queryByLabelText("Instructions")).toBeNull());
+		await waitFor(() => expect(screen.queryByDisplayValue("Private draft")).toBeNull());
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 	});
 
@@ -349,7 +350,9 @@ describe("an admin", () => {
 			}),
 		);
 		expect(client.api.bots.update).toHaveBeenCalledOnce();
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog", { name: `${linear.name}'s look` })).toBeNull(),
+		);
 	});
 
 	it("drops the look's picks when it is closed without saving", async () => {
@@ -358,7 +361,9 @@ describe("an admin", () => {
 		let look = await openLook();
 		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
 		fireEvent.click(within(look).getByRole("button", { name: "Cancel" }));
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog", { name: `${linear.name}'s look` })).toBeNull(),
+		);
 
 		look = await openLook();
 		const color = within(look).getByRole("radio", { name: linear.color });
@@ -382,30 +387,28 @@ describe("an admin", () => {
 		);
 	});
 
-	it("cannot save instructions that have not changed", async () => {
+	it("leaves instructions that have not changed unsaved", async () => {
 		mount(page);
-		await openSlide("Instructions");
 
-		const save = await screen.findByRole("button", { name: "Save" });
-		expect((save as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.blur(await screen.findByRole("textbox", { name: "Instructions" }));
+
+		expect(client.api.bots.update).not.toHaveBeenCalled();
 	});
 
 	it("counts the instructions against their limit", async () => {
 		mount(page);
-		await openSlide("Instructions");
 
 		expect(await screen.findByText(/9 of 20,000 characters/)).toBeDefined();
 	});
 
-	it("saves the instructions", async () => {
+	it("saves the instructions once the box is left", async () => {
 		mount(page);
-		await openSlide("Instructions");
 
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Be terse." },
-		});
+		const instructions = await screen.findByRole("textbox", { name: "Instructions" });
+		fireEvent.change(instructions, { target: { value: "Be terse." } });
 		rosterAnswers({ prompt: "Be terse." });
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		expect(client.api.bots.update).not.toHaveBeenCalled();
+		fireEvent.blur(instructions);
 
 		await waitFor(() => {
 			expect(client.api.bots.update).toHaveBeenCalledWith({
@@ -415,31 +418,36 @@ describe("an admin", () => {
 		});
 	});
 
-	it("keeps rejected instructions open with their draft", async () => {
+	it("puts rejected instructions back and says why", async () => {
 		client.api.bots.update.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
-		await openSlide("Instructions");
 
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Keep this." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const instructions = await screen.findByRole("textbox", { name: "Instructions" });
+		fireEvent.change(instructions, { target: { value: "Keep this." } });
+		fireEvent.blur(instructions);
 
 		expect(await screen.findByRole("alert")).toBeDefined();
-		expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toBe("Keep this.");
+		await waitFor(() =>
+			expect(
+				(screen.getByRole("textbox", { name: "Instructions" }) as HTMLTextAreaElement).value,
+			).toBe("Be brief."),
+		);
 	});
 
-	it("chooses a model from those switched on, grouped by provider", async () => {
+	it("chooses a model from those switched on, each with its provider", async () => {
 		client.api.bots.update.mockReturnValue(Effect.succeed({ ...linear, model: MODELS[1] }));
 		mount(page);
-		await openSlide("Model");
+		const models = await openModels();
 
-		expect(await screen.findByRole("heading", { name: "Anthropic" })).toBeDefined();
-		// The one in use is pressed.
-		expect(screen.getByRole("button", { name: MODELS[0], pressed: true })).toBeDefined();
-		fireEvent.click(await screen.findByRole("button", { name: MODELS[1] }));
+		// The one in use is checked.
+		expect(
+			within(models).getByRole("menuitemradio", { name: new RegExp(`^${MODELS[0]}`) }),
+		).toHaveProperty("ariaChecked", "true");
+		fireEvent.click(
+			within(models).getByRole("menuitemradio", { name: new RegExp(`^${MODELS[1]}`) }),
+		);
 
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
@@ -454,16 +462,14 @@ describe("an admin", () => {
 			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
-		await openSlide("Model");
+		const models = await openModels();
 
-		fireEvent.click(await screen.findByRole("button", { name: MODELS[1] }));
+		fireEvent.click(
+			within(models).getByRole("menuitemradio", { name: new RegExp(`^${MODELS[1]}`) }),
+		);
 
 		expect(await screen.findByRole("alert")).toBeDefined();
-		// The save was undone, so the model in use is still the pressed one.
-		await waitFor(() =>
-			expect(screen.getByRole("button", { name: MODELS[0], pressed: true })).toBeDefined(),
-		);
-		expect(screen.getByRole("button", { name: MODELS[1], pressed: false })).toBeDefined();
+		expect(screen.getByRole("button", { name: `Model: ${MODELS[0]}` })).toBeDefined();
 	});
 
 	it("switches web search off for the bot, reading pages with it, and back on", async () => {

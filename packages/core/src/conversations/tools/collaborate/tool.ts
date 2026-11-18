@@ -1,7 +1,7 @@
 import {
 	BOT_NAME_MAX_LENGTH,
 	type CollaborationPart,
-	conversationChannel,
+	conversationStream,
 	conversationUpdateEventSchema,
 	MESSAGE_MAX_LENGTH,
 } from "@sugabots/contracts";
@@ -37,7 +37,7 @@ export interface CollaborateToolOptions {
 	wait?: Duration.Input;
 }
 
-export type CollaborateResult =
+type CollaborateResult =
 	| { status: "answered"; answer: string }
 	| { status: "pending"; conversationId: string; note: string }
 	| { status: "failed"; conversationId: string; note: string }
@@ -47,7 +47,7 @@ export type CollaborateResult =
  * The `collaborate` tool, bound to one turn.
  *
  * Opening the collaboration is one transaction. Waiting for the answer is
- * not: it watches the asking conversation's channel for the collaboration to be
+ * not: it watches the asking conversation's stream for the collaboration to be
  * answered, up to `wait`, then takes the answer if there is one, reports a
  * collaboration that failed, or records that the asking bot moved on so the
  * answer resumes it later.
@@ -131,7 +131,7 @@ async function waitUntilSettled(
 	const onAbort = () => giveUp.abort();
 	signal.addEventListener("abort", onAbort, { once: true });
 	try {
-		for await (const { event } of bus.subscribe(conversationChannel(conversationId), {
+		for await (const { event } of bus.subscribe(conversationStream(conversationId), {
 			signal: giveUp.signal,
 		})) {
 			const update = Option.getOrUndefined(readConversationUpdate(event));

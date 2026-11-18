@@ -41,7 +41,7 @@ const settleTo = (layer: HopLayer): Path => ({
 });
 
 /** A full hop: the paths each layer it moves plays, one after another. */
-export const FULL_HOP: Readonly<Record<HopLayer, readonly Path[]>> = {
+const FULL_HOP: Readonly<Record<HopLayer, readonly Path[]>> = {
 	hopRise: [
 		hopKeyframes(
 			HOP.rise.map((height) => [viewboxPercentage(height)]),

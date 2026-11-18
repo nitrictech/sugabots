@@ -99,7 +99,7 @@ function isLatestChange(messageId: string, change: number): boolean {
 }
 
 /** Whether the person is among those who reacted to the message with `emoji`. */
-export function hasReacted(message: Message, emoji: string, userId: string): boolean {
+function hasReacted(message: Message, emoji: string, userId: string): boolean {
 	return (
 		message.reactions?.some(
 			(reaction) =>

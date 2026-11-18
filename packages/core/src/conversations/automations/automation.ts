@@ -69,7 +69,7 @@ export function toAutomation(
 	};
 }
 
-export function toTrigger(row: schema.AutomationTriggerRow): AutomationTrigger {
+function toTrigger(row: schema.AutomationTriggerRow): AutomationTrigger {
 	const { settings } = row;
 	return settings.kind === "schedule"
 		? { id: row.id, ...settings, nextScheduledAt: row.nextScheduledAt?.toISOString() ?? null }

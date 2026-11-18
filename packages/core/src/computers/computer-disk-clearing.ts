@@ -18,7 +18,7 @@ export const BOT_CACHES = [".cache", ".npm", ".bun/install/cache"] as const;
 type BotCache = (typeof BOT_CACHES)[number];
 
 /** Something in a computer's workspace that may be cleared, and why. */
-export type Clearable =
+type Clearable =
 	| {
 			readonly reason: "conversation_deleted" | "automation_run_ended" | "conversation_done";
 			readonly conversationId: string;
@@ -35,7 +35,7 @@ export interface Clearing {
 }
 
 /** Ids of the conversation folders and bot homes in a computer. */
-export interface WorkspaceFolders {
+interface WorkspaceFolders {
 	readonly conversationIds: readonly string[];
 	readonly botIds: readonly string[];
 }

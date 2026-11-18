@@ -101,7 +101,7 @@ export interface StreamRequest extends Prompt {
 }
 
 /** A whole answer, given up on if it runs past either limit. */
-export interface AnswerRequest extends Prompt {
+interface AnswerRequest extends Prompt {
 	/** What the request is for, which the ledger records as whose spend it is and the logs name it by. */
 	activity: ModelRequests.Activity;
 	maxCharacters: number;

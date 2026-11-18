@@ -283,57 +283,43 @@ const meta = preview.meta({
 });
 
 /**
- * An automation chosen: its bot's automations down the left, under the bot's name,
- * this one's latest run failed, and beside them its feed, run by run: one that
- * said what it did, one whose result was talked over, then one that failed.
- * Beside the feed, the automation, set up in place: its switch, its
- * instructions, its triggers, where its result goes, and Run now.
+ * An automation's own page, under "Growth Desk / Automations": its switch and
+ * Run now at the top, then its instructions, written straight into, and its
+ * triggers. The bot's sidebar marks its Automations, one of whose last runs failed.
  */
 export const Default = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		const list = await canvas.findByRole("region", { name: "Automations" });
-		const chosen = await within(list).findByRole("link", { name: /^Overnight outbound/ });
-		await expect(chosen).toHaveAttribute("aria-current", "page");
-		await expect(await within(chosen).findByText("Failed")).toBeVisible();
-		// Only its bot's automations: another bot's are on that bot's page.
-		await expect(within(list).queryByRole("link", { name: /^Renewal reminders/ })).toBeNull();
+	play: async ({ canvas }) => {
+		const page = await canvas.findByRole("region", { name: "Automation" });
 		await expect(
-			within(list).getByRole("heading", { name: "Growth Desk's automations" }),
+			await within(page).findByRole("heading", { name: "Overnight outbound" }),
 		).toBeVisible();
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		await expect(await canvas.findByRole("button", { name: "Run now" })).toBeVisible();
-		const log = await canvas.findByRole("log", { name: "Chat messages" });
-		const quiet = await within(log).findByRole("article", { name: /: Nothing to report$/ });
-		await expect(quiet).toHaveTextContent("Nothing to report");
-		await expect(within(log).getByRole("article", { name: /: Failed$/ })).toHaveTextContent(
-			"Gmail refused the connection",
+		await expect(within(page).getByRole("link", { name: "Automations" })).toBeVisible();
+		await expect(within(page).getByRole("button", { name: "Run now" })).toBeVisible();
+		await expect(within(page).getByRole("switch", { name: "Automation on" })).toBeChecked();
+		await expect(within(page).getByRole("textbox", { name: "Instructions" })).toHaveValue(
+			outboundAutomation.instructions,
 		);
-		await expect(canvas.getByRole("switch", { name: "Automation on" })).toBeChecked();
-		const revenueChannel = canvas.getByRole("group", { name: "Revenue" });
-		// Automations are reached from the bot, so the sidebar has no row of its own for them.
-		await expect(within(revenueChannel).queryByRole("link", { name: /^Automations/ })).toBeNull();
+		const sidebar = canvas.getByRole("navigation", { name: `${growthDesk.name}'s pages` });
+		await expect(within(sidebar).getByRole("link", { name: /^Automations/ })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
 	},
 });
 
-/** The automation's instructions, opened from the panel to change them in a dialog with room to write. */
+/** The automation's instructions, written straight into on its page and saved once the box is left. */
 export const EditingInstructions = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		await userEvent.click(await canvas.findByRole("button", { name: "Edit instructions" }));
-		const dialog = await within(document.body).findByRole("dialog", { name: "Instructions" });
-		const field = within(dialog).getByRole("textbox", { name: "Instructions" });
+		const field = await canvas.findByRole("textbox", { name: "Instructions" });
 		await expect(field).toHaveValue(outboundAutomation.instructions);
-		// Nothing to save until the instructions change.
-		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
 		await userEvent.type(field, " Skip weekends.");
-		await expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled();
+		await expect(field).toHaveValue(`${outboundAutomation.instructions} Skip weekends.`);
 	},
 });
 
-/** Add trigger, under the automation's schedule in the panel, starts by choosing the kind. */
+/** Add trigger, under the automation's schedule, starts by choosing the kind. */
 export const AddingTrigger = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
 		const triggers = await canvas.findByRole("region", { name: "Triggers" });
 		await expect(within(triggers).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
@@ -351,43 +337,14 @@ export const Phone = meta.story({
 	},
 });
 
-/** A bot with no automations: the page says how one is made, as an empty Files page does. */
-export const Empty = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			http.get(`${API}/bots/:botId/tasks`, () =>
-				HttpResponse.json({ ...chatList, automations: [] }),
-			),
-		);
-	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations`} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(`No automations for ${growthDesk.name} yet`),
-		).toBeVisible();
-	},
-});
-
 const botWithNonePath = `/${storyWorkspace.slug}/bots/${leadResearcher.handle}/automations`;
 
-/**
- * A bot that runs no automations yet: its list stays, with the + in its
- * header, and the space beside it offers New automation, or asking the bot.
- */
+/** A bot that runs no automations yet goes straight to making one, for someone who may. */
 export const BotWithNone = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByText(`No automations for ${leadResearcher.name} yet`),
-		).toBeVisible();
-		await expect(
-			canvas.getByRole("heading", { name: `${leadResearcher.name}'s automations` }),
-		).toBeVisible();
-		const making = canvas.getByText("New automation", { selector: "a" });
-		await expect(making).toHaveAttribute(
-			"href",
-			expect.stringContaining(`/bots/${leadResearcher.handle}/automations/new`),
-		);
+		await expect(await canvas.findByRole("heading", { name: "New automation" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Create automation" })).toBeVisible();
 	},
 });
 
@@ -403,25 +360,9 @@ export const BotWithNoneAsAMember = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(
-				`Ask someone who manages ${revenue.name}'s automations to set one up.`,
-			),
+			await canvas.findByText(`No automations for ${leadResearcher.name} yet`),
 		).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: "New automation" })).toBeNull();
-	},
-});
-
-/** On a phone, with no space beside the list, the list itself offers New automation. */
-export const BotWithNoneOnPhone = meta.story({
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={botWithNonePath} />,
-	play: async ({ canvas }) => {
-		const list = await canvas.findByRole("region", { name: "Automations" });
-		await expect(
-			await within(list).findByText(`No automations for ${leadResearcher.name} yet`),
-		).toBeVisible();
-		await expect(within(list).getAllByRole("link", { name: "New automation" })).toHaveLength(2);
-		await expect(within(list).getByText(/to set one up\.$/)).toBeVisible();
 	},
 });
 

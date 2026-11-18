@@ -10,7 +10,16 @@ import {
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
 import { ArrowUp, AtSign, Paperclip, Plus, Send, Smile, X } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+	type KeyboardEvent,
+	type ReactNode,
+	type RefObject,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import {
 	type ComposerAttachment,
 	type ComposerAttachments,
@@ -21,11 +30,112 @@ import { useAvailableEmoji } from "@/lib/emoji.ts";
 import { rememberEmoji } from "@/lib/recent-emoji.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { EmojiPicker } from "@/ui/emoji-picker.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
 import { MentionChip, type MentionTarget, mentionTargetKey } from "./mentions.tsx";
+
+/**
+ * Whether the one-line composer's draft has run past a line, so it takes the
+ * whole width over its buttons. Both ways it is the same test, the words'
+ * width against the room the draft has beside the buttons, so it wraps and
+ * unwraps at the same letter. A line break always wraps it.
+ */
+function useDraftWrapped(
+	box: RefObject<HTMLDivElement | null>,
+	pill: boolean,
+	value: string,
+): boolean {
+	const [wrapped, setWrapped] = useState(false);
+	// Measured while it is beside the buttons, as it is wider once wrapped.
+	const roomBeside = useRef<number>(undefined);
+	useLayoutEffect(() => {
+		const element = box.current;
+		if (!pill || !element) return;
+		const draft = element.querySelector("[contenteditable]");
+		if (!wrapped && draft) roomBeside.current = draft.clientWidth;
+		const room = roomBeside.current;
+		const runsOver =
+			value.includes("\n") ||
+			(value !== "" && room !== undefined && textWidthIn(element, value) > room);
+		setWrapped(runsOver);
+	}, [box, pill, value, wrapped]);
+	return wrapped;
+}
+
+/** How the composer moves between one line and a wrapped draft. */
+const RELAYOUT = { duration: 200, easing: "cubic-bezier(0.2, 0.6, 0.2, 1)" } as const;
+
+/**
+ * Moves the composer between one line and a wrapped draft rather than jumping:
+ * its height eases to the new one, so it grows up from its foot, where + and
+ * Send stay put, and the draft glides to where it now starts. A switch made
+ * before the last has finished takes over from it, rather than adding to it.
+ */
+function useAnimatedRelayout(
+	box: RefObject<HTMLDivElement | null>,
+	draft: RefObject<HTMLDivElement | null>,
+	wrapped: boolean,
+) {
+	// Measured from layout alone (offsets ignore a glide in progress), so switches can't add up.
+	const before = useRef<{ height: number; draftLeft: number }>(undefined);
+	const running = useRef<Animation[]>([]);
+	// Declared first, so it reads where things were before this render's layout is recorded below.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: runs when the layout changes, not as each letter is typed; the refs are read as they stand then.
+	useLayoutEffect(() => {
+		const element = box.current;
+		const draftElement = draft.current;
+		const was = before.current;
+		if (!element || !draftElement || !was) return;
+		// Midway through the last switch, this one starts from where things are on screen.
+		const midway = running.current.some((animation) => animation.playState === "running");
+		const shownHeight = element.getBoundingClientRect().height;
+		const shownDraftLeft = draftElement.getBoundingClientRect().left;
+		for (const animation of running.current) animation.cancel();
+		running.current = [];
+		// Still under reduced motion, and where nothing animates, as in a test's DOM.
+		const still =
+			typeof element.animate !== "function" ||
+			window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		if (still) return;
+		const fromHeight = midway ? shownHeight : was.height;
+		const shift = midway
+			? shownDraftLeft - draftElement.getBoundingClientRect().left
+			: was.draftLeft - draftElement.offsetLeft;
+		running.current = [
+			element.animate(
+				[{ height: `${fromHeight}px` }, { height: `${element.offsetHeight}px` }],
+				RELAYOUT,
+			),
+			draftElement.animate(
+				[{ transform: `translateX(${shift}px)` }, { transform: "none" }],
+				RELAYOUT,
+			),
+		];
+	}, [wrapped]);
+	useLayoutEffect(() => {
+		const element = box.current;
+		const draftElement = draft.current;
+		if (!element || !draftElement) return;
+		before.current = { height: element.offsetHeight, draftLeft: draftElement.offsetLeft };
+	});
+}
+
+/** How wide `text` is on one line in the font of the draft inside `box`. */
+function textWidthIn(box: HTMLElement, text: string): number {
+	const draft = box.querySelector("[contenteditable]") ?? box;
+	const context = document.createElement("canvas").getContext("2d");
+	if (!context) return Number.POSITIVE_INFINITY;
+	context.font = getComputedStyle(draft).font;
+	return context.measureText(text).width;
+}
 
 /** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
 const toolButtonClassName =
@@ -54,6 +164,8 @@ export function ChatComposer({
 	label,
 	placeholder,
 	model,
+	pill = false,
+	tall = false,
 	value,
 	onValueChange,
 	onSubmit,
@@ -73,8 +185,16 @@ export function ChatComposer({
 	label: string;
 	/** What the empty box says, when that is not its name. */
 	placeholder?: string;
-	/** The model of the bot the message goes to, named beside Send while nothing holds the message back. */
+	/** The model of the bot the message goes to, named by Send while nothing holds the message back. */
 	model?: string;
+	/**
+	 * One rounded line, as a bot's task has it, with the model under it. Without
+	 * it, a tablet up has the draft over a row of tools, as direct messages and
+	 * channels do; a phone always has the line.
+	 */
+	pill?: boolean;
+	/** As a page's one box to start from, as a bot's page has it: the draft over its buttons, a few lines tall. */
+	tall?: boolean;
 	value: string;
 	onValueChange: (value: string) => void;
 	onSubmit: () => void | Promise<void>;
@@ -107,6 +227,11 @@ export function ChatComposer({
 	const id = useId();
 	const menuId = `${id}-suggestions`;
 	const editor = useRef<MentionEditorHandle>(null);
+	const draftBox = useRef<HTMLDivElement>(null);
+	// Tall, the draft always has the width over its buttons, with room for a few lines.
+	const wrapped = useDraftWrapped(draftBox, pill, value) || (pill && tall);
+	const composerBox = useRef<HTMLDivElement>(null);
+	useAnimatedRelayout(composerBox, draftBox, wrapped);
 	const form = useRef<HTMLFormElement>(null);
 	const [cursor, setCursor] = useState(value.length);
 	const [activeSuggestion, setActiveSuggestion] = useState(0);
@@ -254,21 +379,34 @@ export function ChatComposer({
 				</SuggestionList>
 			)}
 			{/*
-			 * On a phone, one rounded line as a messaging app's is: attach, the
-			 * draft, and Send, with what it replies to or carries above them.
-			 * Mentions are typed, and the model is left to the bot's details.
-			 * A tap anywhere on it but a control lands in the draft.
+			 * On a phone, and as a `pill`, one rounded line as a messaging app's
+			 * is: attach, the draft, and Send, with what it replies to or carries
+			 * above them. On a phone mentions and emoji are typed, and the model
+			 * is left to the bot's details. A tap anywhere on it but a control
+			 * lands in the draft.
 			 */}
 			{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: only widens where a pointer reaches the draft, which the keyboard reaches directly. */}
 			<div
+				ref={composerBox}
 				onClick={(event) => {
 					if (!(event.target as Element).closest("button, a, input, [contenteditable]")) {
 						editor.current?.focus();
 					}
 				}}
-				className="focus-ring-within flex cursor-text flex-col rounded-xl border border-border-strong bg-panel transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-3xl max-md:p-1"
+				className={cn(
+					"focus-ring-within flex cursor-text border border-border-strong transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-3xl max-md:p-1",
+					pill
+						? // Its lines sit at its foot, so as it grows up + and Send stay put and the draft is uncovered above them.
+							"flex-row flex-wrap content-end items-end gap-x-1 overflow-hidden rounded-composer bg-zinc-50 p-1.5 dark:bg-zinc-800"
+						: "flex-col rounded-xl bg-panel",
+				)}
 			>
-				<div className="flex flex-col max-md:w-full max-md:empty:hidden">
+				<div
+					className={cn(
+						"flex flex-col empty:hidden max-md:-mx-1 max-md:-mt-1 max-md:mb-1 max-md:grow max-md:basis-full",
+						pill && "-mx-1.5 -mt-1.5 mb-1 grow basis-full",
+					)}
+				>
 					{notice}
 					{replyingTo && (
 						<ReplyingToStrip message={replyingTo.message} onCancel={replyingTo.onCancel} />
@@ -284,7 +422,18 @@ export function ChatComposer({
 					/>
 					<LeftOutNote count={attachments.leftOut} />
 				</div>
-				<div className="flex items-start gap-2.5 pt-2.5 pr-3 pb-1 pl-3 max-md:order-2 max-md:min-w-0 max-md:flex-1 max-md:px-1 max-md:py-1">
+				<div
+					ref={draftBox}
+					className={cn(
+						"flex items-start max-md:order-2 max-md:min-w-0 max-md:flex-1 max-md:px-1 max-md:py-1",
+						pill ? "order-2 min-w-0 flex-1 px-1 py-px" : "gap-2.5 pt-2.5 pr-3 pb-1 pl-3",
+						// Once it runs past a line, the draft has the whole width, over + and Send.
+						pill &&
+							wrapped &&
+							"order-0 basis-full px-1.5 pt-1 pb-1.5 max-md:order-0 max-md:flex-none max-md:basis-full",
+						pill && tall && "min-h-20 px-2.5 pt-2",
+					)}
+				>
 					<MentionEditor
 						ref={editor}
 						id={id}
@@ -315,56 +464,98 @@ export function ChatComposer({
 						aria-activedescendant={menu ? `${menuId}-${selectedSuggestion}` : undefined}
 					/>
 				</div>
-				<div className="flex items-center gap-0.5 px-1.5 pt-1 pb-1.5 max-md:contents">
+				<div
+					className={cn(
+						pill ? "contents" : "flex items-center gap-0.5 px-1.5 pt-1 pb-1.5 max-md:contents",
+					)}
+				>
 					<AttachButton
+						pill={pill}
 						full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
 						onAttach={attachments.attach}
+						onMention={startMention}
 					/>
-					<Tooltip label="Mention a bot or person" side="top">
-						<button
-							type="button"
-							aria-label="Mention a bot or person"
-							onClick={startMention}
-							className={cn(toolButtonClassName, "max-md:hidden")}
-						>
-							<AtSign size={16} strokeWidth={2} />
-						</button>
-					</Tooltip>
-					{/* A phone's own keyboard has emoji. */}
-					<span className="contents max-md:hidden">
-						<EmojiButton onChoose={insertEmoji} />
-					</span>
-					<span className="flex-1 max-md:hidden" />
-					{/* Beside Send: what holds the message back, else the model that answers, else how to send it. */}
-					{filesNote(attachments.items) === undefined && model ? (
-						<span className="min-w-0 truncate pr-2 text-subtle-foreground text-xs max-md:hidden">
-							{model}
-						</span>
-					) : (
-						<span className="pr-2 text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
-							{filesNote(attachments.items) ?? "Enter to send"}
-						</span>
+					{/* The one-line composer leaves mentions and emoji to typing, as a phone does. */}
+					{!pill && (
+						<>
+							<Tooltip label="Mention a bot or person" side="top">
+								<button
+									type="button"
+									aria-label="Mention a bot or person"
+									onClick={startMention}
+									className={cn(toolButtonClassName, "max-md:hidden")}
+								>
+									<AtSign size={16} strokeWidth={2} />
+								</button>
+							</Tooltip>
+							{/* A phone's own keyboard has emoji. */}
+							<span className="contents max-md:hidden">
+								<EmojiButton onChoose={insertEmoji} />
+							</span>
+							<span className="flex-1 max-md:hidden" />
+							<SendNote className="pr-2">
+								{filesNote(attachments.items) ?? model ?? "Enter to send"}
+							</SendNote>
+						</>
 					)}
-					<button
-						type="submit"
-						aria-label={submitLabel}
-						disabled={
-							sending ||
-							!hasRecipients ||
-							!canSend(value, attachments.items) ||
-							(needsText && value.trim() === "")
-						}
-						className="focus-ring grid size-7.5 place-items-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full"
-					>
-						<Send size={15} strokeWidth={2.2} className="max-md:hidden" />
-						<ArrowUp size={18} strokeWidth={2.25} className="md:hidden" />
-					</button>
+					{/* In the one-line composer, Send shows once there is something to send. */}
+					{(!pill || value.trim() !== "" || attachments.items.length > 0) && (
+						<button
+							type="submit"
+							aria-label={submitLabel}
+							disabled={
+								sending ||
+								!hasRecipients ||
+								!canSend(value, attachments.items) ||
+								(needsText && value.trim() === "")
+							}
+							className={cn(
+								"focus-ring grid size-7.5 shrink-0 place-items-center bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full",
+								pill
+									? "order-4 ml-auto rounded-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90"
+									: "rounded-md",
+							)}
+						>
+							{pill ? (
+								<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-4.5" />
+							) : (
+								<>
+									<Send size={15} strokeWidth={2.2} className="max-md:hidden" />
+									<ArrowUp size={18} strokeWidth={2.25} className="md:hidden" />
+								</>
+							)}
+						</button>
+					)}
 				</div>
 			</div>
-			<div aria-live="polite" className="pt-1.5 pl-3 text-destructive-text text-xs empty:hidden">
-				{error}
+			<div className="flex items-start gap-3 px-1 pt-1.5 text-xs empty:hidden">
+				<div aria-live="polite" className="min-w-0 flex-1 text-destructive-text empty:hidden">
+					{error}
+				</div>
+				{pill && (
+					<SendNote className="ml-auto">
+						{filesNote(attachments.items) ?? model ?? "Enter to send"}
+					</SendNote>
+				)}
 			</div>
 		</form>
+	);
+}
+
+/**
+ * By Send: what holds the message back, else the model that answers, else how
+ * to send it. A phone, with its own Send key, has none.
+ */
+function SendNote({ className, children }: { className: string; children: ReactNode }) {
+	return (
+		<span
+			className={cn(
+				"min-w-0 truncate text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden",
+				className,
+			)}
+		>
+			{children}
+		</span>
 	);
 }
 
@@ -428,7 +619,7 @@ function RemovableChip({
 			>
 				<MentionChip
 					target={target}
-					className="mx-0 items-center group-hover/chip:bg-hover"
+					className="mx-0 items-center group-hover/chip:brightness-125"
 					after={
 						<X
 							aria-hidden
@@ -445,31 +636,87 @@ function RemovableChip({
 /**
  * The paperclip, which opens the system's file picker. Off until the chat
  * exists, and once the message has as many files as one can carry, saying so
- * when pointed at.
+ * when pointed at. In the one-line composer it is a + opening a menu of what
+ * can be added: files, or a mention.
  */
 function AttachButton({
+	pill,
 	full,
 	onAttach,
+	onMention,
 }: {
+	/** In the one-line composer, where it is a + at the start. */
+	pill: boolean;
 	full: boolean;
 	onAttach: ((files: File[]) => void) | undefined;
+	/** Starts a mention in the draft, from the + menu. */
+	onMention: () => void;
 }) {
 	const picker = useRef<HTMLInputElement>(null);
 	const unavailable = full || onAttach === undefined;
+	// Run once the menu has closed, as closing gives focus back to the + and would take it from the draft.
+	const afterClose = useRef<() => void>(undefined);
+	const input = (
+		<input
+			ref={picker}
+			type="file"
+			multiple
+			hidden
+			onChange={(event) => {
+				const files = [...(event.currentTarget.files ?? [])];
+				// Cleared, so choosing the same file again still counts as a change.
+				event.currentTarget.value = "";
+				if (files.length > 0) onAttach?.(files);
+			}}
+		/>
+	);
+	if (pill) {
+		return (
+			<>
+				{input}
+				<DropdownMenu
+					onOpenChangeComplete={(open) => {
+						if (open) return;
+						afterClose.current?.();
+						afterClose.current = undefined;
+					}}
+				>
+					<DropdownMenuTrigger
+						render={
+							<button
+								type="button"
+								aria-label="Add"
+								className="focus-ring order-1 grid size-7.5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9"
+							>
+								<Plus aria-hidden size={18} strokeWidth={2} className="max-md:size-5" />
+							</button>
+						}
+					/>
+					<DropdownMenuContent side="top" align="start" className="min-w-56">
+						<DropdownMenuItem
+							disabled={unavailable}
+							// Straight from the click, as a browser opens its file picker only in answer to one.
+							onClick={() => picker.current?.click()}
+						>
+							<Paperclip aria-hidden size={16} />
+							{full ? `${MAX_ATTACHMENTS_PER_MESSAGE} files is the most` : "Upload files"}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
+								afterClose.current = onMention;
+							}}
+						>
+							<AtSign aria-hidden size={16} />
+							Mention a bot or person
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</>
+		);
+	}
 	return (
 		<>
-			<input
-				ref={picker}
-				type="file"
-				multiple
-				hidden
-				onChange={(event) => {
-					const files = [...(event.currentTarget.files ?? [])];
-					// Cleared, so choosing the same file again still counts as a change.
-					event.currentTarget.value = "";
-					if (files.length > 0) onAttach?.(files);
-				}}
-			/>
+			{input}
 			<Tooltip
 				label={
 					full ? `${MAX_ATTACHMENTS_PER_MESSAGE} files is the most for one message` : "Attach files"

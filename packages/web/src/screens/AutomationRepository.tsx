@@ -15,7 +15,7 @@ import { Toggle } from "@/ui/toggle.tsx";
  */
 
 /** What a repository automation runs on until somebody chooses. */
-export const DEFAULT_REPOSITORY_EVENTS: readonly RepositoryEvent[] = ["pull_request_opened"];
+const DEFAULT_REPOSITORY_EVENTS: readonly RepositoryEvent[] = ["pull_request_opened"];
 
 /** A repository trigger as written, before its repository is chosen. */
 export interface RepositoryDraft {

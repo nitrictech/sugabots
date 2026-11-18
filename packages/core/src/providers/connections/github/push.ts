@@ -99,7 +99,7 @@ function git(cwd: string, args: readonly string[], env: Record<string, string> =
 }
 
 /** Git couldn't push. `reason` is git's last line, which names refs and the remote's refusal. */
-export class PushFailed
+class PushFailed
 	extends Schema.TaggedError<PushFailed>()("PushFailed", { reason: Schema.String })
 	implements DomainError
 {

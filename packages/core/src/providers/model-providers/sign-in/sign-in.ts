@@ -32,7 +32,7 @@ export const OAuthTokens = Schema.Struct({
 export type OAuthTokens = typeof OAuthTokens.Type;
 
 /** A device code waiting for the person to enter it at `verificationUrl`. */
-export interface DeviceCode {
+interface DeviceCode {
 	/** The service's secret for this sign-in, which it asks for back when the code is redeemed. */
 	deviceCode: string;
 	userCode: string;

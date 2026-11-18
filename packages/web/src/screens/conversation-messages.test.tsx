@@ -358,7 +358,7 @@ describe("a reply that wrote nothing but used tools", () => {
 describe("a reply still being written", () => {
 	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
 
-	it("shows none of it until it is finished, only that the bot is typing and what it is using", async () => {
+	it("shows its words as they come, and moves them to what it is using once a call follows them", async () => {
 		const search = toolCall("sentry__search_issues", {
 			status: "running",
 			output: null,
@@ -367,10 +367,11 @@ describe("a reply still being written", () => {
 		const { update } = show([
 			reply([{ type: "text", text: "Let me look" }], { status: "streaming" }),
 		]);
-		expect(screen.queryByRole("article")).toBeNull();
+		expect(screen.getByRole("article").textContent).toContain("Let me look");
 		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
 
-		update([reply([search], { status: "streaming" })]);
+		update([reply([{ type: "text", text: "Let me look" }, search], { status: "streaming" })]);
+		expect(screen.getByRole("article").textContent).not.toContain("Let me look");
 		expect(await screen.findByRole("button", { name: /Using Sentry/ })).toBeDefined();
 
 		update([reply([{ ...search, status: "completed", finishedAt: search.startedAt }, answer])]);
@@ -378,7 +379,7 @@ describe("a reply still being written", () => {
 		expect(screen.getByRole("article").textContent).toContain("Here are the 2 issues in Cycle 33.");
 	});
 
-	it("keeps back the text a reply is still writing after it shares a file", () => {
+	it("shows the text a reply is still writing after it shares a file", () => {
 		const chart: MessagePart = {
 			type: "file",
 			id: "0199a3a0-0000-7000-8000-0000000000f1",
@@ -388,7 +389,7 @@ describe("a reply still being written", () => {
 		};
 		show([reply([{ type: "text", text: "Here is the cha" }, chart], { status: "streaming" })]);
 
-		expect(screen.queryByText(/Here is the cha/)).toBeNull();
+		expect(screen.getByText(/Here is the cha/)).toBeDefined();
 	});
 
 	it("says the bot is typing between one call and the next", () => {

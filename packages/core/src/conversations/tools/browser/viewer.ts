@@ -168,7 +168,7 @@ export const layer = layerNoDeps.pipe(
 );
 
 /** How often an open desktop checks its person may still see it. */
-export const ACCESS_CHECK_INTERVAL = Duration.seconds(10);
+const ACCESS_CHECK_INTERVAL = Duration.seconds(10);
 
 const NOT_IN_THIS_CONVERSATION = userText`This bot has no desktop in this conversation.`;
 const NO_COMPUTER = userText`This bot doesn't use a computer, so it has no desktop.`;

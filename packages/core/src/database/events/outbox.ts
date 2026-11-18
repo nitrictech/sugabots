@@ -1,6 +1,6 @@
 export * as EventOutbox from "./outbox.ts";
 
-import type { DurableEventType, StreamChannel, StreamEvent } from "@sugabots/contracts";
+import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -45,7 +45,7 @@ export const make = Effect.map(EventBus.Service, (bus) => {
 export const layer = Layer.effect(Service, make);
 
 export interface PendingEvent {
-	channel: StreamChannel;
+	stream: EventStream;
 	event: StreamEvent & { type: DurableEventType };
 }
 
@@ -55,21 +55,21 @@ export interface CommittedEvent extends PendingEvent {
 }
 
 /**
- * Inserts the rows, holding a lock per channel until the transaction ends.
+ * Inserts the rows, holding a lock per stream until the transaction ends.
  *
- * The lock is what gives a channel's events one order: without it two
+ * The lock is what gives a stream's events one order: without it two
  * transactions could take sequence numbers in one order and commit in the
  * other, and a client resuming from the lower id would miss the higher one.
- * Every event of a transaction comes through here at once, and its channels
- * are locked in sorted order, so two transactions touching the same channels
+ * Every event of a transaction comes through here at once, and its streams
+ * are locked in sorted order, so two transactions touching the same streams
  * cannot deadlock.
  */
 const appendEvents = Effect.fn("EventOutbox.appendEvents")(function* (
 	db: Executor,
 	pending: readonly PendingEvent[],
 ) {
-	for (const channel of [...new Set(pending.map(({ channel }) => channel))].sort()) {
-		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${channel}, 0))`);
+	for (const stream of [...new Set(pending.map(({ stream }) => stream))].sort()) {
+		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${stream}, 0))`);
 	}
 
 	if (pending.length === 0) return [];
@@ -78,7 +78,7 @@ const appendEvents = Effect.fn("EventOutbox.appendEvents")(function* (
 		.insert(event)
 		.values(
 			pending.map((pendingEvent) => ({
-				channel: pendingEvent.channel,
+				stream: pendingEvent.stream,
 				type: pendingEvent.event.type,
 				payload: pendingEvent.event,
 			})),

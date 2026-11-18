@@ -1,0 +1,111 @@
+import type { ChatMessageItem, Message } from "@sugabots/contracts";
+import { chatItemCreatedAt } from "@/lib/chats.ts";
+import { startsNewDay } from "./conversation-layout.ts";
+
+type ChatActivityItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
+
+/** A message in a chat, as its items carry it. */
+export type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message"];
+
+/** A stretch of a chat as it is drawn; see `chatGroupsOf`. */
+export type ChatGroup = { key: string; at: string; separated: boolean } & (
+	| { kind: "messages"; messages: ChatMessage[] }
+	| { kind: "activity"; item: ChatActivityItem }
+);
+
+/**
+ * A chat's items in the order they happened: the pages loaded, those sent
+ * from here and not yet heard back, and those the conversation's live state
+ * holds, each once.
+ */
+export function mergeChatItems(
+	pageItems: readonly ChatMessageItem[],
+	optimistic: readonly ChatMessageItem[],
+	liveMessages: readonly Message[],
+): ChatMessageItem[] {
+	const items = new Map<string, ChatMessageItem>();
+	for (const item of [...pageItems, ...optimistic]) {
+		items.set(chatItemId(item), item);
+	}
+	for (const message of liveMessages)
+		items.set(`message:${message.id}`, { kind: "message", message });
+	return [...items.values()].sort((left, right) =>
+		chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right)),
+	);
+}
+
+/** The messages shown as sent that the API has not yet been heard to have. */
+export function sendingIds(
+	optimistic: readonly ChatMessageItem[],
+	pageItems: readonly ChatMessageItem[],
+	liveMessages: readonly Message[],
+): ReadonlySet<string> {
+	const saved = new Set([
+		...pageItems.flatMap((item) => (item.kind === "message" ? [item.message.id] : [])),
+		...liveMessages.map(({ id }) => id),
+	]);
+	return new Set(
+		optimistic.flatMap((item) =>
+			item.kind === "message" && !saved.has(item.message.id) ? [item.message.id] : [],
+		),
+	);
+}
+
+/** The messages among `items`, leaving out automation runs and pauses. */
+export function messagesIn(items: readonly ChatMessageItem[]): ChatMessage[] {
+	return items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+}
+
+function chatItemId(item: ChatMessageItem): string {
+	return item.kind === "message" ? `message:${item.message.id}` : `${item.kind}:${item.id}`;
+}
+
+/** What changes whenever `item`, the newest, does: a new item, or the same message streamed further. */
+export function chatItemRevision(item: ChatMessageItem | undefined): string {
+	if (!item) return "";
+	if (item.kind !== "message") return `${item.kind}:${item.id}`;
+	return `${item.message.id}:${item.message.status}:${item.message.content}:${JSON.stringify(item.message.parts)}`;
+}
+
+/**
+ * The chat's items as they are drawn: runs of messages together, so one
+ * author's messages in a row read as a run, and each collaboration or automation
+ * row on its own. A new day starts a new group behind a separator.
+ */
+export function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGroup[] {
+	const groups: ChatGroup[] = [];
+	let previousAt: string | undefined;
+	for (const item of items) {
+		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
+		// An automation's feed is marked where each run starts; any other, where each day does.
+		const separated = byRun ? startsAutomationRun(item) : startsNewDay(previousAt, at);
+		previousAt = at;
+		const last = groups.at(-1);
+		if (item.kind === "message") {
+			if (last?.kind === "messages" && !separated) {
+				last.messages.push(item.message);
+				continue;
+			}
+			groups.push({
+				kind: "messages",
+				key: item.message.id,
+				at,
+				separated,
+				messages: [item.message],
+			});
+			continue;
+		}
+		groups.push({ kind: "activity", key: item.id, at, separated, item });
+	}
+	return groups;
+}
+
+/** Whether `item` is where a run starts in an automation's feed: its result, or the run itself when it posted none. */
+function startsAutomationRun(item: ChatMessageItem): boolean {
+	return item.kind === "run" || (item.kind === "message" && !!item.message.automationResultOf);
+}
+
+/** The newest automation run in `items`, which is the one that can be tried again. */
+export function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
+	return items.findLast((item) => item.kind === "run")?.id;
+}

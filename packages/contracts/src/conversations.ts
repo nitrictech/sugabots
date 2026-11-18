@@ -128,7 +128,7 @@ export const participantSchema = Schema.Union([personParticipantSchema, botParti
 
 export type Participant = typeof participantSchema.Type;
 
-export const messageAuthorSchema = Schema.Union([
+const messageAuthorSchema = Schema.Union([
 	personParticipantSchema,
 	botParticipantSchema,
 	automationTriggerAuthorSchema,
@@ -141,7 +141,7 @@ export function messageAuthorName(author: MessageAuthor): string {
 	return author.kind === "automation_trigger" ? author.automationName : author.name;
 }
 
-export const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
+const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
 
 /**
  * What may not come just before a mention's `@`: a word character, so an email
@@ -265,7 +265,7 @@ export type CollaborationPart = typeof collaborationPartSchema.Type;
  * How a tool call stands. `running` while the tool executes; `completed` with
  * its output, or `failed` with the error the model was shown, once it returns.
  */
-export const toolCallStatusSchema = Schema.Literals([
+const toolCallStatusSchema = Schema.Literals([
 	"awaiting_approval",
 	"running",
 	"completed",
@@ -274,12 +274,7 @@ export const toolCallStatusSchema = Schema.Literals([
 
 export type ToolCallStatus = typeof toolCallStatusSchema.Type;
 
-export const toolApprovalStatusSchema = Schema.Literals([
-	"pending",
-	"allowed",
-	"denied",
-	"automatic",
-]);
+const toolApprovalStatusSchema = Schema.Literals(["pending", "allowed", "denied", "automatic"]);
 
 export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 
@@ -289,7 +284,7 @@ export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
  * who decide what the bot's computer may reach and has installed, for a bot's
  * request to change that.
  */
-export const toolApprovalDecidersSchema = Schema.Literals(["conversation", "computer-managers"]);
+const toolApprovalDecidersSchema = Schema.Literals(["conversation", "computer-managers"]);
 
 export type ToolApprovalDeciders = typeof toolApprovalDecidersSchema.Type;
 
@@ -388,7 +383,7 @@ const { status: _, ...writtenFileFields } = fileWrittenSchema.fields;
  * the run left it at. The result carries it because the calls that wrote it
  * stay in the run's own conversation.
  */
-export const writtenFilePartSchema = Schema.Struct({
+const writtenFilePartSchema = Schema.Struct({
 	type: Schema.Literal("written_file"),
 	...writtenFileFields,
 });
@@ -414,7 +409,7 @@ export function filesWrittenBy(
 	return [...latest.values()];
 }
 
-export const messagePartSchema = Schema.Union([
+const messagePartSchema = Schema.Union([
 	textPartSchema,
 	collaborationPartSchema,
 	toolCallPartSchema,
@@ -480,7 +475,7 @@ export function textWithoutNarration<Part extends { type: string; text?: string 
 export type PlacedPart = Extract<MessagePart, { atOffset: number }>;
 
 /** A part attached to a message after its text rather than placed in it: a file, or an automation result's file. */
-export type AttachedPart = Extract<MessagePart, { type: "file" | "written_file" }>;
+type AttachedPart = Extract<MessagePart, { type: "file" | "written_file" }>;
 
 export function isAttached(part: MessagePart): part is AttachedPart {
 	return part.type === "file" || part.type === "written_file";
@@ -587,7 +582,7 @@ export const reactionEmojiSchema = Schema.String.pipe(
 );
 
 /** One emoji on a message, with the people who reacted with it, earliest first. */
-export const messageReactionSchema = Schema.Struct({
+const messageReactionSchema = Schema.Struct({
 	emoji: reactionEmojiSchema,
 	people: Schema.mutable(
 		Schema.Array(Schema.Struct({ id: uuidSchema, name: Schema.String, at: isoTimestampSchema })),
@@ -615,6 +610,8 @@ export const messageSchema = Schema.Struct({
 	/** People's reactions, in the order each emoji was first used. Absent when there are none. */
 	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
+	/** When the bot's turn that wrote this reply ended. Absent on people's messages and replies still being written. */
+	finishedAt: Schema.optional(isoTimestampSchema),
 })
 	.check(
 		Schema.makeFilter(({ content, parts }) =>
@@ -637,8 +634,6 @@ export const botSummarySchema = Schema.Struct({
 	content: Schema.String,
 	updatedAt: isoTimestampSchema,
 });
-
-export type BotSummary = typeof botSummarySchema.Type;
 
 export const conversationSummarySchema = Schema.Struct({
 	content: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SUMMARY_CHARACTERS)),
@@ -710,7 +705,7 @@ export const conversationDetailsSchema = Schema.Struct({
 export type ConversationDetails = typeof conversationDetailsSchema.Type;
 
 /** How much of a bot's context window the conversation fills, and where compaction starts. */
-export const conversationContextSchema = Schema.Struct({
+const conversationContextSchema = Schema.Struct({
 	/** How many tokens the latest reply's prompt took, as its provider counted them. */
 	usedTokens: Schema.Int,
 	/** When that reply was measured. A compaction since then makes the count out of date. */
@@ -729,11 +724,6 @@ export const conversationActivitySchema = Schema.Struct({
 	summary: Schema.NullOr(conversationSummarySchema),
 	/** Null until a reply in the conversation has been measured. */
 	context: Schema.NullOr(conversationContextSchema),
-	/**
-	 * Who has written in the conversation in the last week, or in its last 100
-	 * messages when that reaches further back, most recently active first.
-	 */
-	recentParticipants: Schema.mutable(Schema.Array(participantSchema)),
 });
 
 export type ConversationActivity = typeof conversationActivitySchema.Type;

@@ -1,6 +1,6 @@
 import type { BotLook } from "@sugabots/avatars";
 import { cn } from "cn";
-import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react";
+import { CheckIcon, XIcon } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -19,7 +19,7 @@ export type ChatAuthor =
 	| { kind: "bot"; name: string; look: BotLook }
 	| { kind: "person"; name: string; initials: string };
 
-export function ChatAvatar({
+function ChatAvatar({
 	author,
 	size,
 }: {
@@ -82,27 +82,6 @@ export function ChatText({ className, ...props }: ComponentProps<"p">) {
 export function ChatToolLine({ className, ...props }: ComponentProps<"p">) {
 	return (
 		<p className={cn("pb-1 text-sm font-medium text-muted-foreground", className)} {...props} />
-	);
-}
-
-/** Under an automation's result: the automation it came from. */
-export function ChatAutomationNote({ automation }: { automation: string }) {
-	return (
-		<p className="flex items-center gap-0.5 pt-1 text-xs font-medium text-muted-foreground">
-			From {automation}
-			<ChevronRightIcon aria-hidden className="size-3" strokeWidth={2.4} />
-		</p>
-	);
-}
-
-/** Where the conversation moves on to a new day: a rule either side of "Today" or the date. */
-export function ChatDay({ children }: { children: ReactNode }) {
-	return (
-		<div className="flex items-center gap-3">
-			<span aria-hidden className="h-px flex-1 bg-border" />
-			<span className="text-xs font-semibold text-muted-foreground">{children}</span>
-			<span aria-hidden className="h-px flex-1 bg-border" />
-		</div>
 	);
 }
 

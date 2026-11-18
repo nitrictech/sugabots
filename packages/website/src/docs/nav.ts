@@ -2,7 +2,7 @@ import type { BotLook } from "@sugabots/avatars";
 import type { AccentTone } from "@/components/accent";
 
 /** A page's place in the docs: its file in `packages/docs/content/`, and the bot that hosts it. */
-export interface DocLink {
+interface DocLink {
 	slug: string;
 	bot: BotLook;
 }

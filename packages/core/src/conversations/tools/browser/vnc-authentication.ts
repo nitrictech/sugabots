@@ -2,7 +2,7 @@
 import des from "des.js";
 
 /** How many bytes of a password VNC authentication uses; the rest are ignored. */
-export const PASSWORD_BYTES = 8;
+const PASSWORD_BYTES = 8;
 
 /** The size of the challenge a VNC server sends, and of the answer. */
 export const CHALLENGE_BYTES = 16;

@@ -16,8 +16,8 @@ import { onPostgresAs } from "@sugabots/core/workspaces/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import { closedChannelAccess } from "./access.test-support.ts";
-import { ChannelAccess } from "./access.ts";
+import { closedStreamAccess } from "./access.test-support.ts";
+import { StreamAccess } from "./access.ts";
 
 /**
  * Who may listen to what. The workspace half is a membership query, so it needs
@@ -25,7 +25,7 @@ import { ChannelAccess } from "./access.ts";
  */
 
 /** The access with its answers run as `userId`, with nothing else to reach. */
-function asSomebody(access: ChannelAccess.Interface, userId: string) {
+function asSomebody(access: StreamAccess.Interface, userId: string) {
 	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId));
 	return {
 		workspace: (id: string) => Effect.runPromise(access.workspace(id).pipe(asThem)),
@@ -34,7 +34,7 @@ function asSomebody(access: ChannelAccess.Interface, userId: string) {
 }
 
 it("denies event access when no access dependency is configured", async () => {
-	const { workspace, conversation } = asSomebody(closedChannelAccess, crypto.randomUUID());
+	const { workspace, conversation } = asSomebody(closedStreamAccess, crypto.randomUUID());
 
 	expect(await workspace("w1")).toBeUndefined();
 	expect(await conversation("c1")).toBeUndefined();
@@ -246,12 +246,10 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
-		const channels = await runOnPostgres(
-			Effect.provide(ChannelAccess.Service, ChannelAccess.layer),
-		);
+		const streams = await runOnPostgres(Effect.provide(StreamAccess.Service, StreamAccess.layer));
 		return {
-			/** The channels `userId` is given. */
-			access: (userId: string) => onPostgresAs(userId)(channels),
+			/** The streams `userId` is given. */
+			access: (userId: string) => onPostgresAs(userId)(streams),
 			member,
 			administrator,
 			outsider,
@@ -266,13 +264,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		};
 	}
 
-	it("gives a member the workspace channel", async () => {
+	it("gives a member the workspace stream", async () => {
 		const { access, member, space } = await fixture();
 
 		expect(await access(member.id).workspace(space.id)).toBe(`workspace:${space.id}`);
 	});
 
-	it("gives a member the same channel when the workspace is named by its slug", async () => {
+	it("gives a member the same stream when the workspace is named by its slug", async () => {
 		const { access, member, space } = await fixture();
 
 		expect(await access(member.id).workspace(space.slug)).toBe(`workspace:${space.id}`);
@@ -297,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).workspace("not-a-uuid")).toBeUndefined();
 	});
 
-	it("gives a member a public bot's task's channel", async () => {
+	it("gives a member a public bot's task's stream", async () => {
 		const { access, elsewhere, conversation } = await fixture();
 
 		expect(await access(elsewhere.id).conversation(conversation.id)).toBe(

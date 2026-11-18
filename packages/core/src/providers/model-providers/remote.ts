@@ -25,7 +25,7 @@ const MAX_MODEL_RESPONSE_BYTES = 5_000_000;
 const INSPECT_CONCURRENCY = 4;
 
 /** The provider has no API key or sign-in yet. */
-export class DiscoveryCredentialsMissing
+class DiscoveryCredentialsMissing
 	extends Schema.TaggedError<DiscoveryCredentialsMissing>()("DiscoveryCredentialsMissing", {})
 	implements DomainError
 {
@@ -58,7 +58,7 @@ export class DiscoveryCredentialsRejected
 }
 
 /** The subscription sign-in couldn't give a live token. */
-export class DiscoverySignInLapsed
+class DiscoverySignInLapsed
 	extends Schema.TaggedError<DiscoverySignInLapsed>()("DiscoverySignInLapsed", {
 		cause: Schema.instanceOf(ProviderSignInFailed),
 	})

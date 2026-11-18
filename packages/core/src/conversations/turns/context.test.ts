@@ -1,7 +1,7 @@
+import { START_TASK_TOOL } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { describeToolCall } from "../repository/message-text.ts";
-import { START_TASK_TOOL } from "../tools/start-task/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";

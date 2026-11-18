@@ -11,7 +11,7 @@ export interface ThemedColor {
  * and the tint behind anything the bot says, with the text and inline mono
  * that sit on that tint.
  */
-export interface BotPalette {
+interface BotPalette {
 	face: string;
 	eyes: string;
 	tint: ThemedColor;

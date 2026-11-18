@@ -2,26 +2,26 @@ import { useRender } from "@base-ui/react/use-render";
 import type { Automation, Bot, ListedAutomation } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, RefreshCcw } from "lucide-react";
+import { CircleAlert, Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { scheduleLabel } from "@/lib/automation-schedule.ts";
-import { useAutomations, useRecentRuns, useWorkspaceAutomations } from "@/lib/automations.ts";
+import { useAutomations, useRecentRuns, useWorkspaceAutomationsById } from "@/lib/automations.ts";
 import { useBotTasks } from "@/lib/chats.ts";
-import { automationFeedLink, botLink, newAutomationLink } from "@/lib/links.ts";
+import { automationFeedLink, newAutomationLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
 import { outcomeOf, type RunOutcome, RunStatus } from "@/screens/AutomationRun.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
+import { BotCrumb } from "@/shell/BotCrumb.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
- * A bot's automations down the left, each with how it stands, and the one
- * chosen beside them as `children`: its feed, where its runs post. On a
- * phone the list is the page until one is chosen. With no automations, the
- * page says how one is made.
+ * A bot's automations as a page, each with how it stands. One chosen, or one
+ * being made, takes the page's place as `children`, its breadcrumb the way
+ * back. With no automations, the page says how one is made.
  */
 export function AutomationsPage({
 	bot,
@@ -31,101 +31,65 @@ export function AutomationsPage({
 }: {
 	bot: Bot;
 	selectedAutomationId: string | undefined;
-	/** Whether an automation is being made beside the list, which on a phone covers it as an open one does. */
+	/** Whether an automation is being made, which takes the list's place as an open one does. */
 	making?: boolean;
 	children: ReactNode;
 }) {
 	const list = useListedAutomations(bot);
-	const { workspace } = useWorkspace();
-	const full = useWorkspaceAutomations(workspace?.id);
-	const automationById = new Map(
-		full.data?.items.map((item) => [item.automation.id, item.automation]),
-	);
+	const automationById = useWorkspaceAutomationsById();
 	const automations = list.automations ?? [];
-	const title = `${bot.name}'s automations`;
+	// One bot's, "Growth Desk / Automations" from a tablet up; a phone, with no room for the breadcrumb, names the bot.
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const title = phone ? `${bot.name}'s automations` : "Automations";
 	const chosen = selectedAutomationId !== undefined || making;
 	const newAutomation = bot.permissions.manageAutomations && (
 		<IconButton
 			label="New automation"
 			variant="bar"
-			// A link, so it says it is the page open rather than pressed.
-			aria-current={making ? "page" : undefined}
 			render={<Link {...newAutomationLink(bot)} />}
-			className={cn(
-				"aria-[current=page]:bg-chip aria-[current=page]:text-foreground",
-				FLOATING_ON_PHONE,
-			)}
+			className={FLOATING_ON_PHONE}
 		>
 			<Plus size={16} strokeWidth={1.75} />
 		</IconButton>
 	);
-	// With none yet, the list stays, with its + where it always is, and the space beside it says how one is made.
 	const none = list.automations?.length === 0;
-	// A phone has no space beside the list, so the list's own says so.
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const noneYet = (
-		<div className="flex h-full pb-20">
-			<NoAutomations
-				title={`No automations for ${bot.name} yet`}
-				owner={bot.name}
-				create={
-					bot.permissions.manageAutomations
-						? {
-								newAutomation: <Link {...newAutomationLink(bot)} />,
-								whoToAsk: (
-									<Link {...botLink(bot)} className="focus-ring rounded-sm text-link underline">
-										{bot.name}
-									</Link>
-								),
-							}
-						: undefined
-				}
-			/>
-		</div>
-	);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<section
 				aria-label="Automations"
-				className={cn(
-					// `min-w-0`: a long bot's name in the title is cut short rather than widening the page.
-					"flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-70 md:shrink-0",
-					chosen && "max-md:hidden",
-				)}
+				className={cn("flex min-h-0 min-w-0 flex-1 flex-col", chosen && "hidden")}
 			>
-				<PageHeader title={title} place={{ kind: "bot", bot }} actions={newAutomation} />
-				{none && phone && !chosen && <div className="flex min-h-0 flex-1 flex-col">{noneYet}</div>}
-				<ul
-					className={cn(
-						"tab-bar-clearance m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2",
-						none && phone && "hidden",
-					)}
-				>
-					{list.isError && (
-						<li className="px-2.5 py-2 text-xs text-muted-foreground">
-							Automations could not be loaded.
-						</li>
-					)}
-					{none && !phone && (
-						// Quiet and in the middle, as Inbox's empty list is; the way to make one is in the space beside it.
-						<li className="m-auto px-6 py-16 text-center text-xs text-muted-foreground">
-							No automations yet
-						</li>
-					)}
-					{automations.map((row) => (
-						<li key={row.automation.id}>
-							<AutomationRow
-								row={row}
-								automation={automationById.get(row.automation.id)}
-								selected={row.automation.id === selectedAutomationId}
-							/>
-						</li>
-					))}
-				</ul>
+				<PageHeader
+					title={title}
+					parent={<BotCrumb bot={bot} />}
+					place={{ kind: "bot", bot }}
+					actions={newAutomation}
+				/>
+				{none ? (
+					// Someone who may make one is taken to the form instead; anyone else is told who can.
+					<div className="flex min-h-0 flex-1 flex-col pb-20">
+						<NoAutomations title={`No automations for ${bot.name} yet`} owner={bot.name} />
+					</div>
+				) : (
+					<ul className="tab-bar-clearance m-0 flex min-h-0 w-full flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 md:mx-auto md:max-w-180 md:pt-4">
+						{list.isError && (
+							<li className="px-2.5 py-2 text-xs text-muted-foreground">
+								Automations could not be loaded.
+							</li>
+						)}
+						{automations.map((row) => (
+							<li key={row.automation.id}>
+								<AutomationRow
+									row={row}
+									automation={automationById.get(row.automation.id)}
+									selected={row.automation.id === selectedAutomationId}
+								/>
+							</li>
+						))}
+					</ul>
+				)}
 			</section>
-			<div className={cn("flex min-w-0 flex-1 flex-col", !chosen && "max-md:hidden")}>
-				{none && !chosen && !phone ? noneYet : children}
-			</div>
+			<div className={cn("flex min-w-0 flex-1 flex-col", !chosen && "hidden")}>{children}</div>
 		</div>
 	);
 }
@@ -233,6 +197,14 @@ export function AutomationRow({
 			: "paused"
 		: lastRun && outcomeOf(lastRun.state, lastRun.posted);
 	const schedule = automation && scheduleLabel(automation);
+	// Gone wrong: its last run failed, or it paused itself after failing again.
+	const problem =
+		status === "failed"
+			? "Its last run failed"
+			: status === "pausedAfterFailures"
+				? "Paused after its runs kept failing"
+				: undefined;
+	const why = problem && lastRun?.state === "failed" ? lastRun.error : null;
 	return useRender({
 		render: render ?? <Link {...automationFeedLink(row.bot, row.automation.id)} />,
 		props: {
@@ -267,6 +239,17 @@ export function AutomationRow({
 								{row.mentionsYou && <span className="sr-only">, mentions you</span>}
 							</span>
 							{lastRun && <ListTime at={lastRun.acceptedAt} />}
+							{problem && (
+								<Tooltip label={problem} side="top">
+									<CircleAlert
+										aria-label={problem}
+										role="img"
+										size={14}
+										strokeWidth={2}
+										className="shrink-0 self-center text-destructive-text"
+									/>
+								</Tooltip>
+							)}
 						</span>
 						<span className="flex min-w-0 items-center gap-3 text-xs">
 							{status && <RunStatus outcome={status} />}
@@ -276,6 +259,8 @@ export function AutomationRow({
 								</span>
 							)}
 						</span>
+						{/* Why, in its own words, so what to do about it is on the list. */}
+						{why && <span className="line-clamp-2 text-destructive-text text-xs">{why}</span>}
 					</span>
 				</>
 			),

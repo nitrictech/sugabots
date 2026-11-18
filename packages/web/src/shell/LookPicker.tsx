@@ -1,4 +1,4 @@
-import { type BotLook, botPalettes, faceMarks, headShape, StillBotFace } from "@sugabots/avatars";
+import { botPalettes, faceMarks, headShape } from "@sugabots/avatars";
 import {
 	type BotColor,
 	type BotFace,
@@ -10,7 +10,7 @@ import {
 	channelColors,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { type ReactNode, useId } from "react";
+import { useId } from "react";
 import { channelPalettes } from "@/shell/ChannelTile.tsx";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
@@ -57,111 +57,6 @@ export function LookPicker({
 				<EyesPicker value={face} onChange={onFaceChange} />
 			</SettingsControlRow>
 		</>
-	);
-}
-
-/**
- * The same choices stacked under their own labels, for the Look dialog, with
- * each shape and each pair of eyes drawn on the bot as it is, so a choice
- * shows what it will look like.
- */
-export function LookSections({
-	color,
-	shape,
-	face,
-	onColorChange,
-	onShapeChange,
-	onFaceChange,
-}: {
-	color: BotColor;
-	shape: BotShape;
-	face: BotFace;
-	onColorChange: (color: BotColor) => void;
-	onShapeChange: (shape: BotShape) => void;
-	onFaceChange: (face: BotFace) => void;
-}) {
-	return (
-		<div className="flex flex-col gap-4">
-			<LookSection label="Colour">
-				<Swatches
-					colors={botColors}
-					swatch={(one) => botPalettes[one].face}
-					value={color}
-					onChange={onColorChange}
-					columns={8}
-				/>
-			</LookSection>
-			<LookSection label="Shape">
-				<FaceChoices
-					legend="Shape"
-					options={botShapes}
-					value={shape}
-					onChange={onShapeChange}
-					look={(one) => ({ color, shape: one, face })}
-					columns="grid-cols-7"
-				/>
-			</LookSection>
-			<LookSection label="Eyes">
-				<FaceChoices
-					legend="Eyes"
-					options={botFaces}
-					value={face}
-					onChange={onFaceChange}
-					look={(one) => ({ color, shape, face: one })}
-					columns="grid-cols-7"
-				/>
-			</LookSection>
-		</div>
-	);
-}
-
-function LookSection({ label, children }: { label: string; children: ReactNode }) {
-	return (
-		<div className="flex flex-col gap-2">
-			<span className="text-xs text-muted-foreground">{label}</span>
-			{children}
-		</div>
-	);
-}
-
-/** One choice of a bot's look per chip, each drawn as the bot would look with it. */
-function FaceChoices<Option extends string>({
-	legend,
-	options,
-	value,
-	onChange,
-	look,
-	columns,
-}: {
-	legend: string;
-	options: readonly Option[];
-	value: Option;
-	onChange: (option: Option) => void;
-	look: (option: Option) => BotLook;
-	columns: string;
-}) {
-	const name = useId();
-	return (
-		<fieldset className={cn("m-0 grid gap-1.5 border-0 p-0", columns)}>
-			<legend className="sr-only">{legend}</legend>
-			{options.map((option) => (
-				<label
-					key={option}
-					className="grid aspect-square cursor-pointer place-items-center rounded-lg border border-transparent bg-chip transition-colors hover:bg-hover has-checked:border-ring has-checked:bg-person-avatar has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-2"
-				>
-					<input
-						type="radio"
-						name={name}
-						value={option}
-						aria-label={option}
-						checked={value === option}
-						onChange={() => onChange(option)}
-						className="sr-only"
-					/>
-					<StillBotFace {...look(option)} className="size-7" />
-				</label>
-			))}
-		</fieldset>
 	);
 }
 
@@ -277,7 +172,6 @@ function ShapePicker({
 	);
 }
 
-/** A head's outline without its eyes, in the text colour. */
 /** A head shape alone, without eyes, in the current colour, `size` pixels square. */
 export function ShapeGlyph({ shape, size = 20 }: { shape: BotShape; size?: number }) {
 	return (
@@ -319,7 +213,6 @@ function EyesPicker({ value, onChange }: { value: BotFace; onChange: (face: BotF
 	);
 }
 
-/** A face's eyes without the face, in the text colour, cropped to the band they sit in. */
 /** A pair of eyes alone, without a head, in the current colour, `width` pixels across. */
 export function EyesGlyph({ face, width = 34 }: { face: BotFace; width?: number }) {
 	return (

@@ -474,7 +474,7 @@ const maxFileBytesConfig = Config.schema(
 	"THREAD_FILE_MAX_BYTES",
 );
 
-export interface FileDescription {
+interface FileDescription {
 	id: string;
 	contentType: string;
 	/** In bytes. */
@@ -494,7 +494,7 @@ declare const storedReplyFile: unique symbol;
  * A file for a bot's reply whose blob `withReplyFile` has written, for
  * `attachToReply` to attach. Only `withReplyFile` makes one.
  */
-export interface StoredReplyFile extends FileDescription {
+interface StoredReplyFile extends FileDescription {
 	readonly [storedReplyFile]: true;
 	readonly conversationId: string;
 	readonly messageId: string;
@@ -591,8 +591,9 @@ function sizeForPeople(bytes: number): { amount: number; unit: "MB" | "KB" } {
 }
 
 /**
- * Under the thread's folder, `threads/<conversationId>`, which the
- * `conversation_blob_deletion` trigger queues for deletion with the conversation.
+ * Under the conversation's folder, `threads/<conversationId>` (the name stored
+ * blobs keep), which the `conversation_blob_deletion` trigger queues for
+ * deletion with the conversation.
  */
 function fileKey(conversationId: string, fileId: string): BlobStore.Key {
 	return BlobStore.key("threads", conversationId, "files", fileId);

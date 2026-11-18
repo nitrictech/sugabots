@@ -51,7 +51,7 @@ import { webAppLayer } from "./http/mount.ts";
 import { listeningLayer, nodeServerLayer } from "./http/serve.ts";
 import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
-import { ChannelAccess } from "./routes/events/access.ts";
+import { StreamAccess } from "./routes/events/access.ts";
 import { Workflows } from "./workflows.ts";
 
 /**
@@ -142,7 +142,7 @@ const Http = listeningLayer.pipe(
 	Layer.provideMerge(
 		HttpRouter.serve(Layer.merge(apiLayer, webAppLayer), { disableListenLog: true }),
 	),
-	Layer.provide([Authentication.layer, ChannelAccess.layer, requestSpanNames]),
+	Layer.provide([Authentication.layer, StreamAccess.layer, requestSpanNames]),
 	Layer.provide(nodeServerLayer),
 );
 

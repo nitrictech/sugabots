@@ -30,7 +30,7 @@ type BotParticipant = Extract<Participant, { kind: "bot" }>;
  * a phone's Back to the list it covers and something at its header's right,
  * such as the way to the chat itself.
  */
-export type ItemFrame =
+type ItemFrame =
 	| { kind: "sidebar"; onClose: () => void }
 	| { kind: "page"; back: BackTo; trailing: ReactNode };
 

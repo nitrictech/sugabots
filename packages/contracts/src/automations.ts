@@ -15,15 +15,15 @@ export const MAX_EVERY_DAYS = 30;
 export const MAX_EVERY_WEEKS = 12;
 export const MAX_EVERY_MONTHS = 12;
 const MINUTES_PER_DAY = 24 * 60;
-export const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
-export const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
+const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
+const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
 export const MAX_WEBHOOK_FILTER_CONDITIONS = 10;
 export const MAX_WEBHOOK_FILTER_VALUES = 20;
 export const MAX_WEBHOOK_FILTER_TEXT_CHARACTERS = 200;
 export const MIN_WEBHOOK_SECRET_CHARACTERS = 16;
-export const MAX_WEBHOOK_SECRET_CHARACTERS = 500;
+const MAX_WEBHOOK_SECRET_CHARACTERS = 500;
 export const DEFAULT_RUN_PAGE_LIMIT = 20;
-export const MAX_RUN_PAGE_LIMIT = 100;
+const MAX_RUN_PAGE_LIMIT = 100;
 
 const automationNameSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
@@ -48,7 +48,7 @@ const timezoneSchema = Schema.Trim.check(
 export const automationStateSchema = Schema.Literals(["enabled", "paused"]);
 export type AutomationState = typeof automationStateSchema.Type;
 
-export const automationTriggerKindSchema = Schema.Literals(["schedule", "webhook", "github"]);
+const automationTriggerKindSchema = Schema.Literals(["schedule", "webhook", "github"]);
 export type AutomationTriggerKind = typeof automationTriggerKindSchema.Type;
 
 const webhookHeaderSchema = Schema.Trim.check(
@@ -73,10 +73,10 @@ const webhookUsernameSchema = Schema.Trim.check(
 export const WEBHOOK_SOURCES = ["github", "stripe", "slack", "linear"] as const;
 export type WebhookSource = (typeof WEBHOOK_SOURCES)[number];
 
-export const webhookHmacAlgorithmSchema = Schema.Literals(["sha1", "sha256", "sha512"]);
+const webhookHmacAlgorithmSchema = Schema.Literals(["sha1", "sha256", "sha512"]);
 export type WebhookHmacAlgorithm = typeof webhookHmacAlgorithmSchema.Type;
 
-export const webhookSignatureEncodingSchema = Schema.Literals(["hex", "base64"]);
+const webhookSignatureEncodingSchema = Schema.Literals(["hex", "base64"]);
 export type WebhookSignatureEncoding = typeof webhookSignatureEncodingSchema.Type;
 
 /**
@@ -86,7 +86,7 @@ export type WebhookSignatureEncoding = typeof webhookSignatureEncodingSchema.Typ
  * digest in `header`, written in `encoding`, optionally after the
  * algorithm's name (`sha256=`). The others send the secret itself.
  */
-export const webhookAuthSchema = Schema.Union([
+const webhookAuthSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literals(WEBHOOK_SOURCES) }),
 	Schema.Struct({
 		kind: Schema.Literal("hmac"),
@@ -155,7 +155,7 @@ export const WEBHOOK_SECRET_PREFIXES: Record<WebhookAuthKind, string> = {
  * or Stripe makes for a webhook pointed at the automation. How long it must be
  * depends on its auth: see `webhookSecretLongEnough`.
  */
-export const webhookSecretSchema = Schema.Trim.check(
+const webhookSecretSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_WEBHOOK_SECRET_CHARACTERS),
 );
@@ -183,7 +183,7 @@ const scheduleTimesSchema = Schema.Array(minutesPastMidnightSchema).check(
 	}),
 );
 
-export const weekdaySchema = Schema.Literals(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+const weekdaySchema = Schema.Literals(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 export type Weekday = typeof weekdaySchema.Type;
 
 /** A calendar date that exists, as `YYYY-MM-DD`. */
@@ -204,7 +204,7 @@ const everySchema = (maximum: number) =>
  * expression kept as it was written, for automations made before schedules were
  * picked this way.
  */
-export const automationScheduleSchema = Schema.Union([
+const automationScheduleSchema = Schema.Union([
 	Schema.Struct({
 		repeat: Schema.Literal("daily"),
 		every: everySchema(MAX_EVERY_DAYS),
@@ -252,7 +252,7 @@ const gitHubTriggerFields = {
 };
 
 /** One of the things that start an automation; an automation may have several, of any kinds. */
-export const automationTriggerSchema = Schema.Union([
+const automationTriggerSchema = Schema.Union([
 	Schema.Struct({
 		id: uuidSchema,
 		kind: Schema.Literal("schedule"),
@@ -296,7 +296,7 @@ export const automationSchema = Schema.Struct({
 export type Automation = typeof automationSchema.Type;
 
 /** An automation in the workspace list, with the bot it belongs to. */
-export const workspaceAutomationSchema = Schema.Struct({
+const workspaceAutomationSchema = Schema.Struct({
 	automation: automationSchema,
 	bot: botSchema,
 });
@@ -307,8 +307,6 @@ export type WorkspaceAutomation = typeof workspaceAutomationSchema.Type;
 export const workspaceAutomationListSchema = Schema.Struct({
 	items: Schema.mutable(Schema.Array(workspaceAutomationSchema)),
 });
-
-export type WorkspaceAutomationList = typeof workspaceAutomationListSchema.Type;
 
 /**
  * A webhook trigger as written. Without `auth`, a new one takes a bearer
@@ -482,7 +480,6 @@ export const runSummarySchema = Schema.Struct({
 	triggerKind: runTriggerKindSchema,
 	triggeredAt: isoTimestampSchema,
 });
-export type RunSummary = typeof runSummarySchema.Type;
 
 export const runPageQuerySchema = Schema.Struct({
 	cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
@@ -523,7 +520,6 @@ export const automationResultOfSchema = Schema.Struct({
 export type AutomationResultOf = typeof automationResultOfSchema.Type;
 
 export const manualAutomationRunSchema = Schema.Struct({ requestId: uuidSchema });
-export type ManualAutomationRun = typeof manualAutomationRunSchema.Type;
 
 export const acceptedRunSchema = Schema.Struct({
 	runId: uuidSchema,
@@ -535,7 +531,6 @@ export type AcceptedRun = typeof acceptedRunSchema.Type;
 
 /** A webhook trigger's new secret, or null when it was left without one. */
 export const automationSecretSchema = Schema.Struct({ secret: Schema.NullOr(Schema.String) });
-export type AutomationSecret = typeof automationSecretSchema.Type;
 
 /**
  * A webhook trigger's current secret, for somebody who manages it. One with
@@ -556,18 +551,15 @@ export type AutomationCurrentSecret = typeof automationCurrentSecretSchema.Type;
 export const automationSecretReplacementSchema = Schema.Struct({
 	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 });
-export type AutomationSecretReplacement = typeof automationSecretReplacementSchema.Type;
 
 /** What a webhook's caller is answered: `executionId` is the run's id, a name callers are documented to read. */
 export const acceptedAutomationWebhookSchema = Schema.Struct({
 	executionId: uuidSchema,
 	duplicate: Schema.Boolean,
 });
-export type AcceptedAutomationWebhook = typeof acceptedAutomationWebhookSchema.Type;
 
 /** The answer to a call the trigger's filter turned away: no run was started. */
 export const ignoredAutomationWebhookSchema = Schema.Struct({ ignored: Schema.Literal(true) });
-export type IgnoredAutomationWebhook = typeof ignoredAutomationWebhookSchema.Type;
 
 /** The answer to Slack's check that it may send events to the automation's address. */
 export const automationWebhookChallengeSchema = Schema.Struct({ challenge: Schema.String });
@@ -584,7 +576,5 @@ export const automationSchedulePreviewSchema = Schema.Struct({
 	schedule: automationScheduleSchema,
 	timezone: timezoneSchema,
 });
-export type AutomationSchedulePreview = typeof automationSchedulePreviewSchema.Type;
 
 export const automationScheduleOccurrencesSchema = Schema.Array(isoTimestampSchema);
-export type AutomationScheduleOccurrences = typeof automationScheduleOccurrencesSchema.Type;

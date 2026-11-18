@@ -1,4 +1,4 @@
-import { type CollaborationPart, FILE_WRITING_TOOLS } from "@sugabots/contracts";
+import { type CollaborationPart, FILE_WRITING_TOOLS, START_TASK_TOOL } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
@@ -7,6 +7,7 @@ import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { ConversationFiles } from "../../files/conversation-files.ts";
 import type { Files } from "../../files/files.ts";
+import { botSettingsPath } from "../../installation/web-app-paths.ts";
 import type { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import type { AssistantGuide } from "../assistant/assistant-guide.ts";
 import type { BotAutomations } from "../automations/bot-automations.ts";
@@ -38,7 +39,7 @@ import {
 import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { START_TASK_TOOL, startTaskTool } from "../tools/start-task/tool.ts";
+import { startTaskTool } from "../tools/start-task/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
@@ -68,7 +69,7 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * cache.
  */
 
-export interface ToolDependencies {
+interface ToolDependencies {
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	authoring: Files.AuthoringInterface;
 	/** Where a built-in tool's calls are written down. */
@@ -141,7 +142,7 @@ const readDocs = readDocsTool(docPages);
 const RERUNNABLE_COMPUTER_TOOLS: ReadonlySet<string> = new Set([READ_FILE_TOOL, SHARE_FILE_TOOL]);
 
 /** The tools sent with the turn's requests, and the catalog `tool_search` finds the rest in. */
-export interface TurnTools {
+interface TurnTools {
 	tools: ToolSet;
 	catalog: CatalogEntry[];
 }
@@ -339,7 +340,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 				botId: prepared.context.bot.id,
 				askedBy: prepared.context.askedBy,
 				bots: deps.bots,
-				settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.bot.handle}`,
+				settingsUrl: `${deps.webAppUrl}${botSettingsPath(prepared.context.workspaceSlug, prepared.context.bot.handle)}`,
 				run: deps.run,
 			}),
 			{ ...recording, mutating: true },

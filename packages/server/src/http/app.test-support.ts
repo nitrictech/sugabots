@@ -35,8 +35,8 @@ import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
-import { closedChannelAccess } from "../routes/events/access.test-support.ts";
-import { ChannelAccess } from "../routes/events/access.ts";
+import { closedStreamAccess } from "../routes/events/access.test-support.ts";
+import { StreamAccess } from "../routes/events/access.ts";
 import { apiLayer } from "./app.ts";
 import type { HttpServices } from "./services.ts";
 
@@ -103,7 +103,7 @@ export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Install
 
 /**
  * Services whose every method dies naming itself, nobody signed in, no
- * channel open to listen on, and a bus in memory, so a case supplies exactly
+ * event stream open to listen on, and a bus in memory, so a case supplies exactly
  * what it is about.
  */
 const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
@@ -137,7 +137,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Automations.Service),
 	unimplemented(Automations.Webhooks),
 	unimplemented(Automations.ConnectionEvents),
-	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
+	Layer.succeed(StreamAccess.Service, closedStreamAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),

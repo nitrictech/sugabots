@@ -629,13 +629,6 @@ export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnecti
 );
 
 export { InvalidRunCursor } from "./automation-view.ts";
-export {
-	latestRunFailed,
-	latestRunFailedUnseen,
-	resultPosted,
-	runIdOf,
-	toRun,
-} from "./execution.ts";
 /** Accepts the runs of scheduled automations as they fall due. */
 export { layer as schedulerLayer } from "./scheduler.ts";
 /** The automation workflow's steps. */
@@ -648,7 +641,7 @@ export interface Defined {
 }
 
 /** One of an automation's triggers, by the automation and its own id. */
-export interface OnTrigger extends OnBot {
+interface OnTrigger extends OnBot {
 	triggerId: string;
 }
 

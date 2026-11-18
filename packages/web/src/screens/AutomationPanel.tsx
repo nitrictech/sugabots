@@ -15,6 +15,8 @@ import { useAutomationControls } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { automationFeedLink, automationsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
+import { PageHeader } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -48,8 +50,9 @@ type PanelDialog =
  * renames, duplicates or deletes it. Somebody who may not manage its bot's
  * automations sees it without being able to change it.
  *
- * Without `onClose` it is a page of its own rather than beside a feed, for
- * somebody who manages the automation without reaching its bot or its feed.
+ * Without `onClose` it is the automation's own page rather than beside its
+ * feed: under its breadcrumb, with whether it runs, Run now and its ⋯ at the
+ * top, and its instructions written straight into.
  */
 export function AutomationPanel({
 	bot,
@@ -122,54 +125,78 @@ export function AutomationPanel({
 	// On a phone, across from Back at the top, as a phone's page has its actions; else beside the name.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 
-	// A page of its own keeps its ⋯ beside the name, as it has no sidebar's bar to put it in.
-	const moreInBar = phone && onClose !== undefined;
+	const asPage = onClose === undefined;
+	const moreInBar = phone && !asPage;
 	const settings = (
 		<>
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="flex h-13 shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
-					<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-sm text-foreground">
-						{automation?.name ?? "Automation"}
-					</h3>
-					{!moreInBar && more}
-				</div>
-				<div className="flex flex-col gap-3 px-4 pt-1 pb-6">
+				{!asPage && (
+					<div className="flex h-13 shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
+						<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-sm text-foreground">
+							{automation?.name ?? "Automation"}
+						</h3>
+						{!moreInBar && more}
+					</div>
+				)}
+				<div
+					className={cn(
+						"flex flex-col gap-3 px-4 pt-1 pb-6",
+						asPage && "mx-auto w-full max-w-180 pt-6",
+					)}
+				>
 					{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 					{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
 					{controlFailure !== undefined && <Alert>{failureMessage(controlFailure)}</Alert>}
-					<PanelCard className="flex h-12 items-center gap-2.5 px-3.5">
-						<span
-							aria-hidden
-							className={cn(
-								"size-1.5 shrink-0 rounded-full",
-								active
-									? "bg-success"
+					{!asPage && (
+						<PanelCard className="flex h-12 items-center gap-2.5 px-3.5">
+							<span
+								aria-hidden
+								className={cn(
+									"size-1.5 shrink-0 rounded-full",
+									active
+										? "bg-success"
+										: standing.pausedAfterFailures
+											? "bg-destructive-text"
+											: "bg-disabled-foreground",
+								)}
+							/>
+							<span className="flex-1 text-xs text-foreground">
+								{active
+									? "Active"
 									: standing.pausedAfterFailures
-										? "bg-destructive-text"
-										: "bg-disabled-foreground",
-							)}
-						/>
-						<span className="flex-1 text-xs text-foreground">
-							{active
-								? "Active"
-								: standing.pausedAfterFailures
-									? "Paused after two failures"
-									: "Paused"}
-						</span>
-						<Toggle
-							label="Automation on"
-							tooltip={active ? "Pause automation" : "Resume automation"}
-							checked={active}
-							disabled={!mayManage || controls.pending}
-							onChange={(on) => void control(() => controls.setPaused(!on))}
-						/>
-					</PanelCard>
+										? "Paused after two failures"
+										: "Paused"}
+							</span>
+							<Toggle
+								label="Automation on"
+								tooltip={active ? "Pause automation" : "Resume automation"}
+								checked={active}
+								disabled={!mayManage || controls.pending}
+								onChange={(on) => void control(() => controls.setPaused(!on))}
+							/>
+						</PanelCard>
+					)}
 					{automation && (
 						<>
-							<Instructions
-								instructions={automation.instructions}
-								onEdit={mayManage ? () => setDialog({ kind: "instructions" }) : undefined}
-							/>
+							{asPage ? (
+								<InlineInstructions
+									key={automation.instructions}
+									instructions={automation.instructions}
+									editable={mayManage}
+									onSave={(instructions) =>
+										actions.update.mutateAsync({
+											botId: bot.id,
+											automationId: automation.id,
+											json: { instructions },
+										})
+									}
+								/>
+							) : (
+								<Instructions
+									instructions={automation.instructions}
+									onEdit={mayManage ? () => setDialog({ kind: "instructions" }) : undefined}
+								/>
+							)}
 							<Triggers
 								automation={automation}
 								editable={mayManage}
@@ -177,7 +204,7 @@ export function AutomationPanel({
 							/>
 						</>
 					)}
-					{bot.permissions.runAutomations && (
+					{!asPage && bot.permissions.runAutomations && (
 						<Button
 							variant="outline"
 							disabled={controls.pending}
@@ -240,7 +267,51 @@ export function AutomationPanel({
 			)}
 		</>
 	);
-	if (!onClose) return settings;
+	if (asPage) {
+		return (
+			<section aria-label="Automation" className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<PageHeader
+					title={automation?.name ?? "Automation"}
+					parent={<AutomationsCrumb bot={bot} />}
+					place={{ kind: "bot", bot }}
+					actions={
+						<span className="flex shrink-0 items-center gap-2">
+							{/* Whether it runs, and running it now, at the top as a page's own actions. */}
+							<span className="flex items-center gap-2 text-muted-foreground text-xs">
+								<span className="max-md:sr-only">
+									{active
+										? "On"
+										: standing.pausedAfterFailures
+											? "Paused after failures"
+											: "Paused"}
+								</span>
+								<Toggle
+									label="Automation on"
+									tooltip={active ? "Pause automation" : "Resume automation"}
+									checked={active}
+									disabled={!mayManage || controls.pending}
+									onChange={(on) => void control(() => controls.setPaused(!on))}
+								/>
+							</span>
+							{bot.permissions.runAutomations && (
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={controls.pending}
+									onClick={() => void control(() => controls.runAgain())}
+								>
+									<Play aria-hidden size={12} strokeWidth={2} fill="currentColor" />
+									Run now
+								</Button>
+							)}
+							{more}
+						</span>
+					}
+				/>
+				{settings}
+			</section>
+		);
+	}
 	return (
 		<ChatSidebar
 			label="Automation"
@@ -333,6 +404,49 @@ function Instructions({
 					{open ? "Show less" : "Show more"}
 				</button>
 			)}
+		</PanelCard>
+	);
+}
+
+/**
+ * The automation's instructions, written straight into on its own page and
+ * saved when you leave the box. A save that fails puts them back. Somebody who
+ * may not change them reads them.
+ */
+function InlineInstructions({
+	instructions,
+	editable,
+	onSave,
+}: {
+	instructions: string;
+	editable: boolean;
+	onSave: (instructions: string) => Promise<unknown>;
+}) {
+	const [draft, setDraft] = useState(instructions);
+	const id = useId();
+	function commit() {
+		const next = draft.trim();
+		if (next === instructions || next === "") {
+			setDraft(instructions);
+			return;
+		}
+		void onSave(next).catch(() => setDraft(instructions));
+	}
+	return (
+		<PanelCard className="flex flex-col gap-1 p-1">
+			<label htmlFor={id} className="px-2.5 pt-2 text-muted-foreground text-xs">
+				Instructions
+			</label>
+			<textarea
+				id={id}
+				value={draft}
+				onChange={(event) => setDraft(event.target.value)}
+				onBlur={commit}
+				readOnly={!editable}
+				maxLength={MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS}
+				placeholder="What it should do each time it runs."
+				className="block min-h-48 w-full resize-y rounded-lg bg-transparent px-2.5 pb-2.5 text-soft-foreground text-sm leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+			/>
 		</PanelCard>
 	);
 }
