@@ -245,20 +245,24 @@ function serversChanged() {
 }
 
 /**
- * Every workspace on every saved server, under who that server is signed in
- * as, then adding an account and removing the open one. A server with no workspace, such as
- * one signed out, is an entry of its own. With only one place to go, the list
- * is left out.
+ * Every workspace of every saved account, by name, each account's between
+ * separators, then adding an account and removing the open one. A name two
+ * workspaces share also says which server and account each is on. An account
+ * with no workspace, such as one signed out, is an entry of its own. With only
+ * one place to go, the list is left out.
  *
  * The entries are checkboxes, not radio items, because Electron checks the
  * first of a radio group with none checked, as when the page is in no workspace.
  */
 function workspaceMenuItems(): MenuItemConstructorOptions[] {
 	const shown = serverById(saved, appWindow?.serverId ?? saved.current);
+	const servers = serversGroupedByOrigin(saved);
+	const names = servers.flatMap((server) => (server.workspaces ?? []).map(({ name }) => name));
+	const sharedNames = new Set(names.filter((name, index) => names.indexOf(name) !== index));
 	let shortcuts = 0;
 	const nextShortcut = () =>
 		++shortcuts <= WORKSPACE_SHORTCUT_COUNT ? `CommandOrControl+${shortcuts}` : undefined;
-	const places = serversGroupedByOrigin(saved).flatMap((server): MenuItemConstructorOptions[] => {
+	const groups = servers.map((server): MenuItemConstructorOptions[] => {
 		const workspaces = server.workspaces ?? [];
 		if (workspaces.length === 0) {
 			return [
@@ -274,25 +278,24 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 			];
 		}
 		const open = server === shown ? shownWorkspace(server) : undefined;
-		return [
-			{ label: serverLabel(saved, server), enabled: false },
-			...workspaces.map(
-				(workspace): MenuItemConstructorOptions => ({
-					label: workspace.name,
-					type: "checkbox",
-					checked: workspace.slug === open?.slug,
-					accelerator: nextShortcut(),
-					click: () => void openWorkspace(server, workspace),
-				}),
-			),
-		];
+		return workspaces.map(
+			(workspace): MenuItemConstructorOptions => ({
+				label: sharedNames.has(workspace.name)
+					? `${workspace.name} (${serverLabel(saved, server)})`
+					: workspace.name,
+				type: "checkbox",
+				checked: workspace.slug === open?.slug,
+				accelerator: nextShortcut(),
+				click: () => void openWorkspace(server, workspace),
+			}),
+		);
 	});
 	const removeShown: MenuItemConstructorOptions[] = shown
 		? [{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) }]
 		: [];
-	const placeCount = places.filter((item) => item.type === "checkbox").length;
+	const places = groups.flatMap((group) => [...group, { type: "separator" } as const]);
 	return [
-		...(placeCount > 1 ? [...places, { type: "separator" } as const] : []),
+		...(groups.flat().length > 1 ? places : []),
 		{ label: "Add another account…", click: () => openSetup(shown?.origin) },
 		...removeShown,
 	];

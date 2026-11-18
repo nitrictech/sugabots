@@ -6,8 +6,9 @@ address of a Sugabots server, checks that `/api/health` answers as one, saves
 it, and opens that server's web app in a window.
 
 The Workspace menu, in the window and the tray, lists the workspaces of every
-account added, under its server and who it's signed in as, and opens any of
-them, with Ctrl/⌘+1 to 9 for the first nine. An account with no workspace, such
+account added by name, each account's between separators, and opens any of
+them, with Ctrl/⌘+1 to 9 for the first nine. A name two workspaces share also
+says which server and account each is on. An account with no workspace, such
 as one signed out, is listed as itself. With only one place to go, the menu
 lists none. Each account keeps its own session, so switching back finds you
 still signed in. Add another account… asks for a server's address, filled in
